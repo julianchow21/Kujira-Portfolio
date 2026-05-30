@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor / tooling
+*.swp
+*~
+.idea/
+.vscode/
+
+# Local preview / scratch
+node_modules/
+_*.tmp
+_consolidation_result.txt

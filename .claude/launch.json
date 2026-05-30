@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "investment-tracker",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-l", "3801", "."],
+      "port": 3801
+    }
+  ]
+}

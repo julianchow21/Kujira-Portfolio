@@ -1,0 +1,3792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Content Security Policy: lock down what this page can load and connect to.
+     If a future XSS slipped past kjrEscape, the attacker still cannot exfil
+     data to a third-party domain — connect-src restricts fetches to Apps Script
+     only. 'unsafe-inline' is still required for inline event handlers + styles;
+     future hardening could move to script hashes for stricter CSP. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://script.google.com https://*.googleusercontent.com https://script.googleusercontent.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none';">
+<title>Kujira Investments</title>
+<!-- Subresource Integrity: jsdelivr serves Chart.js with this exact hash.
+     If the CDN is ever compromised and serves modified JS, the browser refuses
+     to execute it. The pin is to a specific version (4.4.1) for the same reason. -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+        integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4"
+        crossorigin="anonymous"
+        referrerpolicy="no-referrer"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f0f0f;--bg2:#161616;--bg3:#1e1e1e;--bg4:#252525;
+  --border:#2a2a2a;--border2:#333;
+  --text:#e8e8e8;--text2:#999;--text3:#666;
+  --red:#e24b4a;--red2:#c03333;--red-soft:#2a1515;--red-border:#3a2525;
+  --green:#4CAF50;--green-soft:#1a2a1a;--green-border:#2a3a2a;
+  --blue:#4a9eff;--blue-soft:#0d1f33;--blue-border:#1a2f43;
+  --amber:#f59e0b;--amber-soft:#2a1f0a;--amber-border:#3a2f1a;
+  --purple:#a78bfa;
+  --accent:#2dd4bf;--accent2:#14b8a6;--accent-soft:#0d2420;--accent-border:#1a3530;
+  --radius:8px;--radius-lg:12px;
+}
+html.light{
+  --bg:#f0f2f5;--bg2:#ffffff;--bg3:#f5f6f8;--bg4:#eaecef;
+  --border:#e0e2e6;--border2:#d0d3d8;
+  --text:#111318;--text2:#555b66;--text3:#9099a6;
+  --red:#d63b3a;--red2:#b52e2d;--red-soft:#fde8e8;--red-border:#fca5a5;
+  --green:#2e8b3e;--green-soft:#e6f4e8;--green-border:#a5d6a7;
+  --blue:#1a6fd4;--blue-soft:#e0ecfb;--blue-border:#93c5fd;
+  --amber:#b87000;--amber-soft:#fef3dc;--amber-border:#fcd34d;
+  --accent:#0d9488;--accent2:#0f766e;--accent-soft:#ccfbf1;--accent-border:#5eead4;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;transition:background 0.2s,color 0.2s}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* TOPBAR */
+.topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:0;height:56px;position:sticky;top:0;z-index:100}
+.logo{font-weight:800;font-size:16px;letter-spacing:0.2px;margin-right:32px;display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);cursor:pointer}
+.logo-mark{width:32px;height:32px;flex-shrink:0;border-radius:8px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900;color:#0f0f0f}
+.logo-name{display:flex;flex-direction:column;line-height:1.1}
+.logo-name span:first-child{font-size:14px;font-weight:800;letter-spacing:0.5px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.logo-name span:last-child{font-size:9px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--text3);-webkit-text-fill-color:var(--text3)}
+.nav{display:flex;gap:2px;flex:1;overflow-x:auto;scrollbar-width:none}
+.nav::-webkit-scrollbar{display:none}
+.nav-btn{padding:8px 14px;border-radius:var(--radius);border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--text2);transition:all 0.15s;font-family:inherit;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.nav-btn:hover{background:var(--bg3);color:var(--text)}
+.nav-btn.active{background:var(--bg3);color:var(--text);font-weight:500}
+.nav-btn svg{width:15px;height:15px;flex-shrink:0}
+.topbar-actions{display:flex;align-items:center;gap:8px;margin-left:12px;flex-shrink:0}
+.icon-btn{width:32px;height:32px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--bg3);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text2);transition:all 0.15s;flex-shrink:0}
+.icon-btn:hover{background:var(--bg4);color:var(--text)}
+.icon-btn svg{width:15px;height:15px}
+
+/* SYNC PILL */
+.sync-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;border:1px solid var(--border2);background:var(--bg3);font-size:11px;font-weight:600;color:var(--text2);font-family:inherit;cursor:pointer;transition:all 0.15s;white-space:nowrap}
+.sync-pill:hover{background:var(--bg4);color:var(--text)}
+.sync-pill::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.sync-pill.s-local::before{background:var(--text3)}
+.sync-pill.s-syncing::before{background:var(--amber);animation:pulse 1.2s ease-in-out infinite}
+.sync-pill.s-synced::before{background:var(--green)}
+.sync-pill.s-failed::before{background:var(--red)}
+.sync-pill.s-syncing{color:var(--amber)}
+.sync-pill.s-synced{color:var(--green);border-color:var(--green-border)}
+.sync-pill.s-failed{color:var(--red);border-color:var(--red-border)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+
+/* MAIN */
+.main{padding:24px;max-width:1400px;margin:0 auto;padding-bottom:80px}
+.page{display:none}.page.active{display:block}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.page-title{font-size:20px;font-weight:700;letter-spacing:-0.3px}
+.page-sub{font-size:12px;color:var(--text3);margin-top:2px}
+
+/* CARDS */
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:16px}
+.card-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px}
+.card-head h3{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.card-body{padding:18px}
+
+/* METRICS */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
+.metric{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;text-align:center}
+.metric-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px}
+.metric-value{font-size:24px;font-weight:700;letter-spacing:-0.5px;font-variant-numeric:tabular-nums}
+.metric-sub{font-size:12px;color:var(--text2);margin-top:3px;display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap}
+.pos{color:var(--green)}.neg{color:var(--red)}
+
+/* STAT BOX (alt to metric) */
+.stat-box{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
+.stat-box.g{border-left:3px solid var(--green)}
+.stat-box.y{border-left:3px solid var(--amber)}
+.stat-box.r{border-left:3px solid var(--red)}
+.stat-box.b{border-left:3px solid var(--blue)}
+
+/* TABLES */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 12px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.4px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--bg2);position:sticky;top:0}
+td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--bg3)}
+.num{font-variant-numeric:tabular-nums;font-family:'SF Mono','Fira Code',monospace;font-size:12px;text-align:right}
+.num-cell{text-align:right}
+
+/* BUTTONS */
+.btn{padding:7px 14px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--bg3);cursor:pointer;font-size:13px;color:var(--text);transition:all 0.15s;display:inline-flex;align-items:center;gap:6px;font-family:inherit;white-space:nowrap}
+.btn:hover{background:var(--bg4)}
+.btn:disabled{opacity:0.5;cursor:not-allowed}
+.btn-primary{background:var(--accent);color:#0f0f0f;border-color:var(--accent);font-weight:600}
+.btn-primary:hover{background:var(--accent2);border-color:var(--accent2);color:#fff}
+.btn-danger{background:var(--red-soft);color:var(--red);border-color:var(--red-border)}
+.btn-danger:hover{background:var(--red);color:#fff}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn-ghost{background:transparent;border-color:transparent}
+.btn-ghost:hover{background:var(--bg3);border-color:var(--border)}
+
+/* FORMS */
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.form-group{display:flex;flex-direction:column;gap:5px}
+.form-group.full{grid-column:1/-1}
+label.lbl{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.4px;font-weight:500}
+input.fi,select.fi,textarea.fi{padding:8px 11px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg3);color:var(--text);font-size:13px;font-family:inherit;width:100%}
+input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(45,212,191,0.15)}
+textarea.fi{resize:vertical;min-height:70px}
+.hint{font-size:11px;color:var(--text3);line-height:1.5}
+
+/* EMPTY STATE */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:64px 20px;text-align:center;color:var(--text3)}
+.empty-icon{width:48px;height:48px;border-radius:12px;background:var(--bg3);display:flex;align-items:center;justify-content:center;margin-bottom:14px;font-size:22px}
+.empty-title{font-size:14px;font-weight:600;color:var(--text2);margin-bottom:4px}
+.empty-sub{font-size:12px;max-width:340px;line-height:1.6}
+
+/* MODAL */
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
+.overlay.open{display:flex}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);width:100%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,0.5)}
+.modal-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-head h3{font-size:15px;font-weight:600}
+.modal-body{padding:20px}
+.modal-foot{padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+
+/* TOAST */
+#toast-host{position:fixed;bottom:24px;right:24px;display:flex;flex-direction:column;gap:8px;z-index:300;pointer-events:none}
+.toast{background:var(--bg2);border:1px solid var(--border2);color:var(--text);padding:10px 14px;border-radius:var(--radius);font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,0.4);max-width:340px;animation:tin 0.2s ease-out;pointer-events:auto}
+.toast.error{border-color:var(--red-border);background:var(--red-soft);color:var(--red)}
+.toast.success{border-color:var(--green-border);background:var(--green-soft);color:var(--green)}
+@keyframes tin{from{transform:translateY(8px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* PHASE CHIP */
+.phase-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;background:var(--accent-soft);border:1px solid var(--accent-border);color:var(--accent);font-size:10px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase}
+.phase-chip-mini{display:inline-block;padding:1px 5px;border-radius:6px;background:var(--accent-soft);border:1px solid var(--accent-border);color:var(--accent);font-size:9px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase;margin-left:4px;line-height:1.2}
+.ccy-toggle{display:inline-flex;border:1px solid var(--border2);border-radius:999px;overflow:hidden;background:var(--bg3)}
+.ccy-toggle button{padding:5px 11px;border:none;background:transparent;color:var(--text3);font-size:11px;font-weight:700;letter-spacing:0.3px;cursor:pointer;font-family:inherit;transition:all 0.15s}
+.ccy-toggle button:hover{color:var(--text)}
+.ccy-toggle button.active{background:var(--accent);color:#fff}
+.page.phase2-locked > *:not(.phase2-card){display:none}
+
+/* SETUP WIZARD */
+.sw-dot{flex:1;height:4px;border-radius:2px;background:var(--border)}
+.sw-dot.active{background:var(--accent)}
+.sw-dot.done{background:var(--accent2)}
+.sw-step{line-height:1.6}
+.sw-step h4{font-size:15px;font-weight:600;margin-bottom:10px}
+.sw-step p{margin-bottom:10px;color:var(--text2);font-size:13px}
+.sw-step ol{margin-left:20px;margin-bottom:10px}
+.sw-step li{margin-bottom:6px;font-size:13px;color:var(--text2)}
+.sw-step code{font-family:'SF Mono','Fira Code',monospace;background:var(--bg3);padding:1px 6px;border-radius:4px;font-size:12px;color:var(--text)}
+.sw-step pre{font-family:'SF Mono','Fira Code',monospace;background:var(--bg3);padding:10px;border-radius:6px;font-size:11px;max-height:160px;overflow:auto;color:var(--text);border:1px solid var(--border)}
+.sw-step .actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.sw-step input.fi{margin-top:8px}
+
+/* HOLDINGS TOOLBAR */
+.h-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.h-toolbar .grow{flex:1}
+.freshness{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text3);padding:5px 10px;border-radius:999px;border:1px solid var(--border);background:var(--bg2)}
+.freshness.stale{color:var(--amber);border-color:var(--amber-border);background:var(--amber-soft)}
+.freshness.fresh{color:var(--green);border-color:var(--green-border);background:var(--green-soft)}
+.freshness::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;opacity:0.85}
+
+/* SUMMARY ROW (above table) */
+.h-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:14px;padding:14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg)}
+.h-summary-item{display:flex;flex-direction:column;gap:3px;padding:4px 10px;border-left:3px solid var(--border2)}
+.h-summary-item.accent{border-left-color:var(--accent)}
+.h-summary-item.pos{border-left-color:var(--green)}
+.h-summary-item.neg{border-left-color:var(--red)}
+.h-summary-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;font-weight:600}
+.h-summary-value{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.3px}
+.h-summary-sub{font-size:11px;color:var(--text2);font-variant-numeric:tabular-nums}
+
+/* MARKET / ACCOUNT TAG */
+.tag{display:inline-flex;align-items:center;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:0.5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2)}
+.tag.sgx{color:var(--blue);border-color:var(--blue-border);background:var(--blue-soft)}
+.tag.us{color:var(--accent);border-color:var(--accent-border);background:var(--accent-soft)}
+.tag.crypto{color:var(--amber);border-color:var(--amber-border);background:var(--amber-soft)}
+.tag.pos{color:var(--green);border-color:var(--green-border);background:var(--green-soft)}
+.tag.neg{color:var(--red);border-color:var(--red-border);background:var(--red-soft)}
+.integrity-bar{margin-top:14px;border-radius:var(--radius-lg);padding:12px 16px;font-size:13px;border:1px solid var(--border)}
+.integrity-bar.ok{background:var(--green-soft);border-color:var(--green-border);color:var(--green);font-weight:600}
+.integrity-bar.bad{background:var(--amber-soft);border-color:var(--amber-border)}
+.integrity-title{font-weight:700;color:var(--amber);margin-bottom:6px}
+.integrity-list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.integrity-list li{color:var(--text2);line-height:1.5}
+.integrity-list li.error{color:var(--red)}
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+@media (max-width:840px){.dash-grid{grid-template-columns:1fr}}
+.dash-chart-wrap{position:relative;height:260px}
+.dash-hero{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px 24px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+.dash-hero-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
+.dash-hero-value{font-size:40px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums;line-height:1}
+.dash-hero-sub{font-size:12px;color:var(--text2)}
+.px-ext{font-size:10px;color:var(--text3);margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.px-ext-tag{display:inline-block;padding:0 4px;border-radius:3px;background:var(--bg4);border:1px solid var(--border2);color:var(--text2);font-weight:700;font-size:9px;letter-spacing:0.3px;text-transform:uppercase}
+
+/* ROW ACTION ICONS */
+.row-actions{display:inline-flex;gap:4px;justify-content:flex-end}
+.row-actions .btn-sm{padding:3px 8px}
+
+/* TABLE TWEAKS */
+table.holdings{font-size:13px;min-width:760px}
+table.holdings th{text-align:right}
+table.holdings th:first-child,table.holdings td:first-child,table.holdings th.tl,table.holdings td.tl{text-align:left}
+table.holdings td{font-variant-numeric:tabular-nums}
+table.holdings td.cell-sym{font-weight:600}
+table.holdings td.muted{color:var(--text3)}
+table.holdings .price-stale{color:var(--text3);font-style:italic}
+
+/* FORM TWEAKS */
+.form-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:12px}
+.form-row.tight{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.field-error{font-size:11px;color:var(--red);margin-top:4px;min-height:14px}
+
+/* PRICE CHIP — small inline market price + change */
+.px-chip{display:inline-flex;align-items:baseline;gap:4px;font-variant-numeric:tabular-nums}
+.px-chip .px-chg{font-size:11px}
+.px-chip.up .px-chg{color:var(--green)}
+.px-chip.dn .px-chg{color:var(--red)}
+
+/* MOBILE BOTTOM TABS */
+.bottom-tab-bar{display:none}
+@media (max-width: 768px){
+  .topbar{padding:0 12px}
+  .logo-name{display:none}
+  .nav{display:none}
+  .topbar-actions{margin-left:auto}
+  .main{padding:14px;padding-bottom:88px}
+  .bottom-tab-bar{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--bg2);border-top:1px solid var(--border);padding:6px 4px;justify-content:space-around;z-index:90;overflow-x:auto;scrollbar-width:none}
+  .bottom-tab-bar::-webkit-scrollbar{display:none}
+  .bottom-tab-bar .nav-btn{flex-direction:column;gap:2px;font-size:10px;padding:6px 8px;min-width:60px}
+  .bottom-tab-bar .nav-btn svg{width:18px;height:18px}
+}
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<header class="topbar">
+  <a class="logo" onclick="showPage('dashboard')">
+    <span class="logo-mark">投</span>
+    <span class="logo-name"><span>KUJIRA INVESTMENTS</span><span>PORTFOLIO TRACKER</span></span>
+  </a>
+  <nav class="nav" id="nav-host">
+    <!-- nav buttons injected by JS -->
+  </nav>
+  <div class="topbar-actions">
+    <div class="ccy-toggle" role="group" aria-label="Display currency">
+      <button type="button" data-ccy="SGD" onclick="setDisplayCcy('SGD')">SGD</button>
+      <button type="button" data-ccy="USD" onclick="setDisplayCcy('USD')">USD</button>
+    </div>
+    <button id="sync-pill" class="sync-pill s-local" onclick="manualSync()" title="Click to sync now">Local only</button>
+    <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    </button>
+    <button class="icon-btn" onclick="showPage('settings')" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- MAIN -->
+<main class="main">
+
+  <!-- DASHBOARD -->
+  <section class="page" id="page-dashboard">
+    <div class="page-head"><div><div class="page-title">Dashboard</div><div class="page-sub">Net worth at a glance.</div></div></div>
+    <div id="dash-networth"></div>
+    <div id="dash-integrity"></div>
+    <div id="dash-assets"></div>
+    <div class="dash-grid">
+      <div class="card">
+        <div class="card-head"><h3>Allocation</h3><span class="hint" id="dash-alloc-meta"></span></div>
+        <div class="card-body"><div class="dash-chart-wrap"><canvas id="dash-alloc-chart"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Cashflow</h3><span class="hint" id="dash-cf-meta"></span></div>
+        <div class="card-body"><div class="dash-chart-wrap"><canvas id="dash-cf-chart"></canvas></div></div>
+      </div>
+    </div>
+    <div id="dash-cpf"></div>
+  </section>
+
+  <!-- STOCKS -->
+  <section class="page" id="page-stocks">
+    <div class="page-head">
+      <div><div class="page-title">Stocks</div><div class="page-sub">SGX and US equities, live prices via Yahoo Finance.</div></div>
+      <div class="h-toolbar">
+        <button class="btn btn-primary" onclick="openEntityModal('stocks')">＋ Add stock</button>
+        <button class="btn" onclick="refreshStockPrices()" id="btn-refresh-stocks">↻ Refresh prices</button>
+        <span class="freshness" id="freshness-stocks">No prices yet</span>
+      </div>
+    </div>
+    <div id="stocks-summary"></div>
+    <div id="stocks-body"></div>
+    <div id="stocks-ledger"></div>
+  </section>
+
+  <!-- CRYPTO -->
+  <section class="page" id="page-crypto">
+    <div class="page-head">
+      <div><div class="page-title">Crypto</div><div class="page-sub">Coin holdings priced in SGD via CoinGecko.</div></div>
+      <div class="h-toolbar">
+        <button class="btn btn-primary" onclick="openEntityModal('crypto')">＋ Add coin</button>
+        <button class="btn" onclick="refreshCryptoPrices()" id="btn-refresh-crypto">↻ Refresh prices</button>
+        <span class="freshness" id="freshness-crypto">No prices yet</span>
+      </div>
+    </div>
+    <div id="crypto-summary"></div>
+    <div id="crypto-body"></div>
+  </section>
+
+  <!-- REAL ESTATE -->
+  <section class="page" id="page-realestate">
+    <div class="page-head">
+      <div><div class="page-title">Real Estate</div><div class="page-sub">Lump values, manual updates.</div></div>
+      <div class="h-toolbar">
+        <button class="btn btn-primary" onclick="openEntityModal('realestate')">＋ Add property</button>
+      </div>
+    </div>
+    <div id="realestate-summary"></div>
+    <div id="realestate-body"></div>
+  </section>
+
+  <!-- CASH -->
+  <section class="page" id="page-cash">
+    <div class="page-head">
+      <div><div class="page-title">Cash</div><div class="page-sub">Bank accounts, fixed deposits, foreign currency.</div></div>
+      <div class="h-toolbar">
+        <button class="btn btn-primary" onclick="openEntityModal('cash')">＋ Add account</button>
+        <button class="btn" onclick="refreshFx()" id="btn-refresh-fx">↻ Refresh FX</button>
+        <span class="freshness" id="freshness-fx">No FX yet</span>
+      </div>
+    </div>
+    <div id="cash-summary"></div>
+    <div id="cash-body"></div>
+    <div id="cash-ledger"></div>
+  </section>
+
+  <!-- CPF -->
+  <section class="page" id="page-cpf">
+    <div class="page-head">
+      <div><div class="page-title">CPF</div><div class="page-sub">OA, SA, MA, RA balances with full transaction history.</div></div>
+    </div>
+    <div id="cpf-balances"></div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Balances</h3>
+        <span class="hint" id="cpf-balances-meta"></span>
+      </div>
+      <div class="card-body">
+        <div class="form-row tight">
+          <div class="form-group"><label class="lbl">OA</label><input type="number" step="0.01" id="cpf-bal-OA" class="fi"></div>
+          <div class="form-group"><label class="lbl">SA</label><input type="number" step="0.01" id="cpf-bal-SA" class="fi"></div>
+          <div class="form-group"><label class="lbl">MA</label><input type="number" step="0.01" id="cpf-bal-MA" class="fi"></div>
+          <div class="form-group"><label class="lbl">RA</label><input type="number" step="0.01" id="cpf-bal-RA" class="fi"></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="saveCpfBalancesFromForm()">Save balances</button>
+          <button class="btn" onclick="recomputeCpfFromHistory()">Recompute from history</button>
+          <div class="hint" style="flex:1;align-self:center">Enter the latest figures from your CPF statement, or recompute from history if you've been logging every line item.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Transaction history</h3>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select class="filter-sel fi" id="cpf-filter-year" style="padding:5px 9px;font-size:12px;width:auto;min-width:90px" onchange="renderCpf()"></select>
+          <select class="filter-sel fi" id="cpf-filter-type" style="padding:5px 9px;font-size:12px;width:auto;min-width:120px" onchange="renderCpf()">
+            <option value="">All types</option>
+            <option value="contribution">Contribution</option>
+            <option value="interest">Interest</option>
+            <option value="transfer">Transfer</option>
+            <option value="withdrawal">Withdrawal</option>
+            <option value="adjustment">Adjustment</option>
+          </select>
+          <select class="filter-sel fi" id="cpf-filter-account" style="padding:5px 9px;font-size:12px;width:auto;min-width:90px" onchange="renderCpf()">
+            <option value="">All accounts</option>
+            <option value="OA">OA</option><option value="SA">SA</option><option value="MA">MA</option><option value="RA">RA</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="openEntityModal('cpfHistory')">＋ Add entry</button>
+        </div>
+      </div>
+      <div class="card-body" id="cpf-history-body"></div>
+    </div>
+  </section>
+
+  <!-- CASHFLOW -->
+  <section class="page" id="page-cashflow">
+    <div class="page-head">
+      <div><div class="page-title">P&amp;L</div><div class="page-sub">Monthly income, per-transaction expenses, savings rate.</div></div>
+      <div class="h-toolbar">
+        <select class="filter-sel fi" id="cf-filter-year" style="padding:5px 9px;font-size:12px;width:auto;min-width:90px" onchange="renderCashflow()"></select>
+        <button class="btn btn-primary" onclick="openEntityModal('income')">＋ Add income</button>
+        <button class="btn btn-primary" onclick="openEntityModal('expenses')">＋ Add expense</button>
+      </div>
+    </div>
+
+    <div id="cf-summary"></div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Monthly roll-up</h3>
+        <span class="hint" id="cf-rollup-meta"></span>
+      </div>
+      <div id="cf-rollup-body" class="card-body"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Income</h3>
+        <span class="hint" id="cf-income-meta"></span>
+      </div>
+      <div id="cf-income-body" class="card-body"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Expenses</h3>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select class="filter-sel fi" id="cf-filter-category" style="padding:5px 9px;font-size:12px;width:auto;min-width:120px" onchange="renderCashflow()">
+            <option value="">All categories</option>
+          </select>
+          <span class="hint" id="cf-expense-meta"></span>
+        </div>
+      </div>
+      <div id="cf-expense-body" class="card-body"></div>
+    </div>
+  </section>
+
+  <!-- PROJECTIONS -->
+  <section class="page" id="page-projections">
+    <div class="page-head"><div><div class="page-title">Projections <span class="phase-chip">Phase 6</span></div><div class="page-sub">FIRE number, retirement readiness, CPF growth.</div></div></div>
+    <div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🎯</div><div class="empty-title">Projections arrive in Phase 6</div><div class="empty-sub">Hand-tuned CPF rate engine plus configurable return and inflation assumptions.</div></div></div></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="page" id="page-settings">
+    <div class="page-head"><div><div class="page-title">Settings</div><div class="page-sub">Sync, assumptions, theme.</div></div></div>
+
+    <div class="card">
+      <div class="card-head"><h3>Sync</h3><span id="sync-status-detail" class="hint"></span></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="form-group full">
+            <label class="lbl">Apps Script Web App URL</label>
+            <div style="display:flex;gap:6px;align-items:stretch">
+              <input type="password" id="cfg-sync-url" class="fi" placeholder="https://script.google.com/macros/s/.../exec" spellcheck="false" autocomplete="off" style="flex:1">
+              <button type="button" class="btn" id="btn-toggle-url" onclick="toggleSyncUrlReveal()" title="Show/hide URL" style="min-width:88px">Show</button>
+            </div>
+            <div class="hint">Paste the deployed Web App URL. Treat this like a password — anyone with this URL can read and write your sheet. See README for setup steps.</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="saveSyncUrlFromForm()">Save URL</button>
+          <button class="btn" onclick="manualPull()">Pull from cloud</button>
+          <button class="btn" onclick="manualPush()">Push to cloud</button>
+          <button class="btn btn-danger" onclick="resetLocalConfirm()">Reset local data</button>
+        </div>
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px">
+          <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="cfg-auto-refresh" onchange="setAutoRefreshEnabled(this.checked)">
+            <span style="font-size:13px">Auto-refresh prices every 60 seconds when tab is active</span>
+            <span class="hint" style="margin-left:auto" id="auto-refresh-meta"></span>
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="cfg-strict-conflicts" onchange="setStrictConflicts(this.checked)">
+            <span style="font-size:13px">Strict sync conflicts (show modal on every divergence)</span>
+            <span class="hint" style="margin-left:6px">Single-user: leave off. Multi-device: turn on to be asked before overwriting.</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Base currency &amp; FX</h3></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="lbl">Base currency</label>
+            <select id="cfg-base-currency" class="fi">
+              <option value="SGD">SGD — Singapore Dollar</option>
+              <option value="USD">USD — US Dollar</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="lbl">USD → SGD manual override</label>
+            <input type="number" step="0.0001" id="cfg-fx-usdsgd" class="fi" placeholder="e.g. 1.3520">
+            <div class="hint">Leave blank to auto-fetch via Yahoo Finance.</div>
+          </div>
+        </div>
+        <div style="margin-top:14px"><button class="btn btn-primary" onclick="saveSettingsFromForm()">Save</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Retirement &amp; FIRE assumptions</h3></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="lbl">Birth year</label>
+            <input type="number" id="cfg-birth-year" class="fi" placeholder="1990" min="1900" max="2099">
+          </div>
+          <div class="form-group">
+            <label class="lbl">Target retirement age</label>
+            <input type="number" id="cfg-retirement-age" class="fi" placeholder="65" min="40" max="100">
+          </div>
+          <div class="form-group">
+            <label class="lbl">Expected return % p.a.</label>
+            <input type="number" step="0.01" id="cfg-expected-return" class="fi" placeholder="6.00">
+          </div>
+          <div class="form-group">
+            <label class="lbl">Inflation % p.a.</label>
+            <input type="number" step="0.01" id="cfg-inflation" class="fi" placeholder="3.00">
+          </div>
+          <div class="form-group">
+            <label class="lbl">FIRE multiple (× annual expenses)</label>
+            <input type="number" step="0.5" id="cfg-fire-multiple" class="fi" placeholder="25">
+          </div>
+          <div class="form-group">
+            <label class="lbl">FIRE target SGD (overrides multiple)</label>
+            <input type="number" step="1000" id="cfg-fire-target" class="fi" placeholder="2000000">
+          </div>
+        </div>
+        <div style="margin-top:14px"><button class="btn btn-primary" onclick="saveSettingsFromForm()">Save</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Salary</h3><span class="hint">Drives auto income + CPF entries each payday.</span></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="form-group full">
+            <label class="lbl">Employer</label>
+            <input type="text" id="cfg-salary-employer" class="fi" placeholder="e.g. Acme Pte Ltd" maxlength="80">
+          </div>
+          <div class="form-group">
+            <label class="lbl">Gross monthly SGD</label>
+            <input type="number" step="0.01" id="cfg-salary-gross" class="fi" placeholder="8000">
+            <div class="hint">Before CPF. Take-home and CPF split are derived automatically.</div>
+          </div>
+          <div class="form-group">
+            <label class="lbl">Start date</label>
+            <input type="date" id="cfg-salary-start" class="fi">
+          </div>
+          <div class="form-group">
+            <label class="lbl">End date (optional)</label>
+            <input type="date" id="cfg-salary-end" class="fi">
+            <div class="hint">Leave blank if still employed.</div>
+          </div>
+          <div class="form-group">
+            <label class="lbl">Annual bonus SGD (optional)</label>
+            <input type="number" step="0.01" id="cfg-salary-bonus" class="fi" placeholder="e.g. one month AWS">
+          </div>
+          <div class="form-group">
+            <label class="lbl">Bonus month</label>
+            <select id="cfg-salary-bonus-month" class="fi">
+              <option value="">None</option>
+              <option value="1">January</option>
+              <option value="2">February</option>
+              <option value="3">March</option>
+              <option value="4">April</option>
+              <option value="5">May</option>
+              <option value="6">June</option>
+              <option value="7">July</option>
+              <option value="8">August</option>
+              <option value="9">September</option>
+              <option value="10">October</option>
+              <option value="11">November</option>
+              <option value="12">December</option>
+            </select>
+            <div class="hint">Bonus auto-entry arrives in a later step. Stored for now.</div>
+          </div>
+        </div>
+        <div style="margin-top:14px"><button class="btn btn-primary" onclick="saveSettingsFromForm()">Save</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>CPF interest rates</h3><span class="hint">Defaults follow the official board rates.</span></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="form-group"><label class="lbl">OA % p.a.</label><input type="number" step="0.01" id="cfg-cpf-oa" class="fi"></div>
+          <div class="form-group"><label class="lbl">SA % p.a.</label><input type="number" step="0.01" id="cfg-cpf-sa" class="fi"></div>
+          <div class="form-group"><label class="lbl">MA % p.a.</label><input type="number" step="0.01" id="cfg-cpf-ma" class="fi"></div>
+          <div class="form-group"><label class="lbl">RA % p.a.</label><input type="number" step="0.01" id="cfg-cpf-ra" class="fi"></div>
+          <div class="form-group"><label class="lbl">Extra interest on first S$60k</label><input type="number" step="0.01" id="cfg-cpf-extra60" class="fi"></div>
+          <div class="form-group"><label class="lbl">Extra +1% on first S$30k (age 55+)</label><input type="number" step="0.01" id="cfg-cpf-extra30" class="fi"></div>
+        </div>
+        <div style="margin-top:14px"><button class="btn btn-primary" onclick="saveSettingsFromForm()">Save</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Privacy</h3></div>
+      <div class="card-body">
+        <div class="hint" style="line-height:1.7;font-size:13px">
+          <p style="margin-bottom:10px"><strong>Your data lives in two places, and only two places:</strong></p>
+          <ol style="margin-left:18px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px">
+            <li>This browser's local storage on the device you're using right now.</li>
+            <li>The Google Sheet you created and own. No one else has access to it unless you share it.</li>
+          </ol>
+          <p style="margin-bottom:10px"><strong>What we do not store:</strong> nothing on any server we run. There is no central database. This app is static HTML hosted on GitHub Pages, and the only thing it can do is talk to <em>your own</em> Apps Script.</p>
+          <p style="margin-bottom:10px"><strong>What you are responsible for:</strong> keeping your Apps Script URL secret (treat it like a password), and securing the device this app runs on (browser lock, device passcode).</p>
+          <p><strong>To delete your data:</strong> click <em>Reset local data</em> above to wipe the browser cache, then delete your Google Sheet to wipe the cloud copy. We have nothing to delete on our end.</p>
+        </div>
+        <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" onclick="openSetupWizard()">Open setup wizard</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Diagnostics</h3></div>
+      <div class="card-body">
+        <div id="diag-output" class="hint" style="font-family:'SF Mono',monospace;line-height:1.7;white-space:pre-wrap"></div>
+        <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" onclick="renderDiagnostics()">Refresh diagnostics</button>
+          <button class="btn" onclick="testPriceFetch()">Test price fetch</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- MOBILE BOTTOM TAB BAR -->
+<nav class="bottom-tab-bar" id="bottom-nav"></nav>
+
+<!-- ENTITY MODAL (shared across Stocks/Crypto/RealEstate/Cash) -->
+<div class="overlay" id="entity-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="em-title">Add</h3>
+      <button class="btn-ghost btn btn-sm" onclick="closeEntityModal()" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="em-body"></div>
+    <div class="modal-foot">
+      <button class="btn btn-danger" id="em-delete" onclick="entityModalDelete()" style="margin-right:auto;display:none">Delete</button>
+      <button class="btn btn-ghost" onclick="closeEntityModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="entityModalSave()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- SETUP WIZARD — 4-step onboarding for first-time users -->
+<div class="overlay" id="setup-wizard">
+  <div class="modal" style="max-width:620px">
+    <div class="modal-head">
+      <h3>Welcome — let's get you set up</h3>
+      <button class="btn-ghost btn btn-sm" onclick="closeSetupWizard()" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="sw-steps" style="display:flex;gap:6px;margin-bottom:18px">
+        <div class="sw-dot active" data-step="1"></div>
+        <div class="sw-dot" data-step="2"></div>
+        <div class="sw-dot" data-step="3"></div>
+        <div class="sw-dot" data-step="4"></div>
+      </div>
+      <div id="sw-body"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeSetupWizard()" style="margin-right:auto">Skip — I'll do it later</button>
+      <button class="btn" id="sw-back" onclick="setupWizardBack()" style="display:none">Back</button>
+      <button class="btn btn-primary" id="sw-next" onclick="setupWizardNext()">Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST HOST -->
+<div id="toast-host"></div>
+
+<!-- CONFLICT MODAL (built on demand) -->
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   KUJIRA INVESTMENTS — Portfolio Tracker
+   Phase 1: skeleton, sync handshake, settings.
+   Architecture mirrors Kujira Collectibles + Send Ops conventions.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const APP_VERSION = '0.9.0-reconciliation';
+const SCHEMA = 'kujira-portfolio';
+
+/* Local storage keys */
+const LK_DB        = 'kjr-pf-db-v1';
+const LK_SYNC_URL  = 'kjr-pf-sync-url-v1';
+const LK_SYNC_TS   = 'kjr-pf-sync-ts-v1';
+const LK_LAST_PULL = 'kjr-pf-last-pull-v1';
+const LK_LAST_PULL_SRC = 'kjr-pf-last-pull-src-v1';  // 'server' if from doGet._savedAt or doPost.savedAt, else 'client'
+const LK_THEME     = 'kjr-pf-theme-v1';
+
+/* Sync constants */
+const SYNC_DEBOUNCE_MS = 800;
+const PAYLOAD_WARN_AT  = 40000;
+const PAYLOAD_HARD_CAP = 49500;
+
+/* Auto-refresh: poll prices every 60s while the tab is visible.
+   Crypto runs every tick (trades 24/7). Stocks only run Monday-Friday SGT
+   (covers SGX local hours + US pre/regular/post hours). FX runs alongside
+   stocks since it's the same underlying provider. */
+const AUTO_REFRESH_INTERVAL_MS = 60 * 1000;
+const LK_AUTO_REFRESH = 'kjr-pf-auto-refresh-v1';   // user can disable in Settings
+
+/* CPF default rates (% p.a.) — Board rates as of 2026 */
+const CPF_DEFAULTS = {
+  OA: 2.5, SA: 4.08, MA: 4.08, RA: 4.08,
+  extraFirst60k: 1.0,       // +1% on first S$60k of combined balances
+  extraFirst30kAge55: 1.0   // additional +1% on first S$30k from age 55
+};
+
+/* Singapore public holidays. 2026 follows the MOM gazette. 2027 covers the
+   fixed-date holidays only — the lunar/Islamic/Hindu dates are not gazetted
+   yet at time of writing. Top up each December. Observed-Monday dates (when a
+   holiday falls on a Sunday) are the entries that matter for payday. */
+const SG_HOLIDAYS = new Set([
+  // 2026
+  '2026-01-01', // New Year's Day
+  '2026-02-17', // Chinese New Year
+  '2026-02-18', // Chinese New Year
+  '2026-03-20', // Hari Raya Puasa
+  '2026-04-03', // Good Friday
+  '2026-05-01', // Labour Day
+  '2026-05-27', // Hari Raya Haji
+  '2026-06-01', // Vesak Day (observed, falls Sun 31 May)
+  '2026-08-10', // National Day (observed, falls Sun 9 Aug)
+  '2026-11-09', // Deepavali (observed, falls Sun 8 Nov)
+  '2026-12-25', // Christmas Day
+  // 2027 — fixed-date only, verify and complete in Dec 2026
+  '2027-01-01', // New Year's Day
+  '2027-03-26', // Good Friday
+  '2027-05-01', // Labour Day
+  '2027-08-09', // National Day
+  '2027-12-25'  // Christmas Day
+]);
+
+function _isoDate(d){
+  return d.getFullYear() + '-'
+    + String(d.getMonth() + 1).padStart(2, '0') + '-'
+    + String(d.getDate()).padStart(2, '0');
+}
+
+/* Last working day of a month. month is 1-12. Starts at the last calendar
+   day and walks backwards past Saturdays, Sundays and SG public holidays.
+   This is how most SG employers pay end-of-month salary. */
+function getPayday(year, month){
+  const d = new Date(year, month, 0); // day 0 of next month = last day of this month
+  while (true) {
+    const dow = d.getDay(); // 0=Sun, 6=Sat
+    if (dow !== 0 && dow !== 6 && !SG_HOLIDAYS.has(_isoDate(d))) break;
+    d.setDate(d.getDate() - 1);
+  }
+  return _isoDate(d);
+}
+
+/* ─── CPF contribution engine (2026) ───────────────────────────────────
+   Drives both the auto-salary income entry (employee/employer split, net)
+   and the auto-CPF account contributions. Rates are CPF Board figures.
+   - Age ≤55 band is high-confidence.
+   - Senior bands (55+) reflect the scheduled increases; verify before relying.
+   - OW (Ordinary Wage) monthly ceiling for 2026 is S$8,000.
+   - Auto-CPF allocation is only generated for ages ≤55 (SA still open). For
+     55+ the OA/MA/RA split is not automated yet — income still generates,
+     CPF is skipped with a note. */
+const CPF_OW_CEILING_2026 = 8000;
+
+function cpfContribRatesForAge(age){
+  if (age == null || age <= 55) return { employer:17.0, employee:20.0 };
+  if (age <= 60) return { employer:15.5, employee:17.0 };
+  if (age <= 65) return { employer:12.0, employee:11.5 };
+  if (age <= 70) return { employer:9.0,  employee:7.5 };
+  return { employer:7.5, employee:5.0 };
+}
+
+/* OA/SA/MA as % of wage, under 55 (2026 allocation). Returns null for 55+
+   so callers know to skip auto-CPF rather than guess the OA/MA/RA split. */
+function cpfAllocationForAge(age){
+  if (age == null || age <= 35) return { OA:23.0, SA:6.0,  MA:8.0  };
+  if (age <= 45)                return { OA:21.0, SA:7.0,  MA:9.0  };
+  if (age <= 50)                return { OA:19.0, SA:8.0,  MA:10.0 };
+  if (age <= 55)                return { OA:15.0, SA:11.5, MA:10.5 };
+  return null; // 55+ not automated
+}
+
+const _round2 = n => Math.round((Number(n) || 0) * 100) / 100;
+
+/* Pure calc. Given gross monthly SGD and age, returns the CPF split.
+   alloc is null (and byAccount empty) for ages above 55. */
+function computeCpfContribution(grossMonthly, age){
+  const gross = Number(grossMonthly) || 0;
+  const wage  = Math.min(gross, CPF_OW_CEILING_2026);
+  const rates = cpfContribRatesForAge(age);
+  const employerCPF = _round2(rates.employer / 100 * wage);
+  const employeeCPF = _round2(rates.employee / 100 * wage);
+  const total       = _round2(employerCPF + employeeCPF);
+  const net         = _round2(gross - employeeCPF);
+
+  const alloc = cpfAllocationForAge(age);
+  let byAccount = {};
+  if (alloc){
+    byAccount = { OA: _round2(alloc.OA/100*wage), SA: _round2(alloc.SA/100*wage), MA: _round2(alloc.MA/100*wage) };
+    // Absorb rounding remainder into OA so the split equals the total.
+    const splitSum = _round2(byAccount.OA + byAccount.SA + byAccount.MA);
+    byAccount.OA = _round2(byAccount.OA + (total - splitSum));
+  }
+  return { wage, employerCPF, employeeCPF, total, net, byAccount, allocated: !!alloc };
+}
+
+/* Age (whole years) on a given ISO date, from birthYear. Coarse: uses the
+   year difference only, since we store birth year not full DOB. */
+function _ageOnYear(year){
+  const by = DB.settings && DB.settings.birthYear;
+  if (!by) return null;
+  return Number(year) - Number(by);
+}
+
+/* Inclusive list of 'YYYY-MM' between two 'YYYY-MM' bounds. */
+function _monthsBetween(startYM, endYM){
+  const out = [];
+  let [y, m] = startYM.split('-').map(Number);
+  const [ey, em] = endYM.split('-').map(Number);
+  while (y < ey || (y === ey && m <= em)){
+    out.push(y + '-' + String(m).padStart(2, '0'));
+    m++; if (m > 12){ m = 1; y++; }
+  }
+  return out;
+}
+
+/* The set of pay-months to generate for, bounded by the salary start, an
+   optional end date, and today (never future). Returns [] when salary is
+   not configured. */
+function _salaryPayMonths(){
+  const sal = DB.settings && DB.settings.salary;
+  if (!sal || !sal.grossMonthly || !sal.startDate) return { sal:null, months:[] };
+  const todayYM = _isoDate(new Date()).slice(0, 7);
+  const startYM = sal.startDate.slice(0, 7);
+  let endYM = sal.endDate ? sal.endDate.slice(0, 7) : todayYM;
+  if (endYM > todayYM) endYM = todayYM;
+  if (startYM > endYM) return { sal, months:[] };
+  return { sal, months: _monthsBetween(startYM, endYM) };
+}
+
+/* ─── Auto-salary income entries ───────────────────────────────────────
+   One income row per payday from salary start to today. Idempotent: keyed
+   by (auto:'salary', period). Re-runs refresh amounts if the salary config
+   changed, but never clobber an entry the user has edited (manualOverride). */
+function generateAutoSalaryEntries(){
+  const { sal, months } = _salaryPayMonths();
+  if (!sal) return 0;
+  if (!Array.isArray(DB.income)) DB.income = [];
+
+  const byPeriod = {};
+  DB.income.forEach(e => { if (e.auto === 'salary' && e.period) byPeriod[e.period] = e; });
+
+  const today = _isoDate(new Date());
+  let changed = 0;
+  months.forEach(ym => {
+    const [y, m] = ym.split('-').map(Number);
+    const payday = getPayday(y, m);
+    if (payday > today) return; // payday not reached
+    const prev = byPeriod[ym];
+    if (prev && prev.manualOverride) return; // user owns this row now
+
+    const c = computeCpfContribution(sal.grossMonthly, _ageOnYear(y));
+    const fields = {
+      date:        payday,
+      gross:       _round2(sal.grossMonthly),
+      net:         c.net,
+      employerCPF: c.employerCPF,
+      employeeCPF: c.employeeCPF,
+      source:      sal.employer || 'Salary',
+      notes:       'Auto-generated from Settings',
+      auto:        'salary',
+      period:      ym
+    };
+    if (prev){
+      const before = JSON.stringify(prev);
+      Object.assign(prev, fields);
+      if (JSON.stringify(prev) !== before) changed++;
+    } else {
+      DB.income.push(Object.assign({ id: uid('income') }, fields));
+      changed++;
+    }
+  });
+  return changed;
+}
+
+/* ─── Auto-CPF contribution entries ────────────────────────────────────
+   For each salary payday, one cpfHistory contribution per account (OA/SA/MA)
+   that receives a share. Idempotent: keyed by (auto:'cpf', period, account).
+   Only runs for ages ≤55 (SA still open); skips 55+ until the OA/MA/RA split
+   is automated. Respects manualOverride on individual rows. */
+function generateAutoCpfEntries(){
+  const { sal, months } = _salaryPayMonths();
+  if (!sal) return { changed:0, skippedSenior:false };
+  if (!Array.isArray(DB.cpfHistory)) DB.cpfHistory = [];
+
+  const byKey = {};
+  DB.cpfHistory.forEach(e => { if (e.auto === 'cpf' && e.period && e.account) byKey[e.period + '|' + e.account] = e; });
+
+  const today = _isoDate(new Date());
+  let changed = 0, skippedSenior = false;
+  months.forEach(ym => {
+    const [y, m] = ym.split('-').map(Number);
+    const payday = getPayday(y, m);
+    if (payday > today) return;
+
+    const c = computeCpfContribution(sal.grossMonthly, _ageOnYear(y));
+    if (!c.allocated){ skippedSenior = true; return; }
+
+    ['OA', 'SA', 'MA'].forEach(acct => {
+      const amt = _round2(c.byAccount[acct] || 0);
+      const key = ym + '|' + acct;
+      const prev = byKey[key];
+      if (prev && prev.manualOverride) return;
+      if (amt <= 0){
+        // No contribution for this account this month; nothing to create.
+        return;
+      }
+      const fields = {
+        date:    payday,
+        type:    'contribution',
+        account: acct,
+        amount:  amt,
+        source:  (sal.employer ? sal.employer + ' · ' : '') + _ymLabel(ym),
+        notes:   'Auto-generated from salary',
+        auto:    'cpf',
+        period:  ym
+      };
+      if (prev){
+        const before = JSON.stringify(prev);
+        Object.assign(prev, fields);
+        if (JSON.stringify(prev) !== before) changed++;
+      } else {
+        DB.cpfHistory.push(Object.assign({ id: uid('cpfHistory') }, fields));
+        changed++;
+      }
+    });
+  });
+  return { changed, skippedSenior };
+}
+
+/* Run both generators, persist if anything changed, and surface a note if
+   55+ CPF was skipped. Safe to call on boot and after a salary save. */
+let _seniorCpfNoticeShown = false;
+function runSalaryEngine(opts){
+  opts = opts || {};
+  const incomeChanged = generateAutoSalaryEntries();
+  const cpf = generateAutoCpfEntries();
+  if (incomeChanged || cpf.changed){
+    saveData();
+    if (opts.rerender) renderAll();
+  }
+  if (cpf.skippedSenior && opts.notify && !_seniorCpfNoticeShown){
+    _seniorCpfNoticeShown = true;
+    showToast('Salary income generated. Auto-CPF skipped for age 55+ (OA/MA/RA split not automated yet).', 'info');
+  }
+  return { incomeChanged, cpfChanged: cpf.changed };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   NAV — tab definitions in display order
+   ═══════════════════════════════════════════════════════════════════════ */
+const TABS = [
+  { key:'dashboard',   label:'Dashboard',   icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>' },
+  { key:'stocks',      label:'Stocks',      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>' },
+  { key:'crypto',      label:'Crypto',      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 8h4a2 2 0 1 1 0 4H9zm0 4h4.5a2 2 0 1 1 0 4H9zM10 6v2M10 16v2M13 6v2M13 16v2"/></svg>' },
+  { key:'realestate',  label:'Real Estate', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>' },
+  { key:'cash',        label:'Cash',        icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 10v4M18 10v4"/></svg>' },
+  { key:'cpf',         label:'CPF',         icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6z"/><path d="M9 12l2 2 4-4"/></svg>' },
+  { key:'cashflow',    label:'P&L',         icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h13l-3-3M21 17H8l3 3"/></svg>' },
+  { key:'projections', label:'Projections', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>' },
+  { key:'settings',    label:'Settings',    icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' }
+];
+
+/* Phase 2 lock — tabs whose UI and renderers are parked while Phase 1 ships.
+   Real markup stays in the DOM (preserved underneath), just hidden by the
+   .phase2-locked class. To unblock a tab, remove it from this set. */
+const PHASE_2_TABS = new Set(['crypto', 'projections']);
+
+function _phase2LabelFor(key){
+  const tab = TABS.find(t => t.key === key);
+  return tab ? tab.label : key;
+}
+
+function ensurePhase2Card(section, key){
+  if (section.querySelector('.phase2-card')) return;
+  const label = _phase2LabelFor(key);
+  const card = document.createElement('div');
+  card.className = 'phase2-card';
+  card.innerHTML =
+    '<div class="page-head"><div>'
+    + '<div class="page-title">' + kjrEscape(label) + ' <span class="phase-chip">Phase 2</span></div>'
+    + '<div class="page-sub">Parked while Phase 1 ships.</div>'
+    + '</div></div>'
+    + '<div class="card"><div class="card-body"><div class="empty">'
+    + '<div class="empty-icon">🚧</div>'
+    + '<div class="empty-title">Coming in Phase 2</div>'
+    + '<div class="empty-sub">Phase 1 focus is Stocks, Real Estate, Cash, CPF, P&amp;L, and Settings. The ' + kjrEscape(label) + ' code is preserved underneath and will return in Phase 2.</div>'
+    + '</div></div></div>';
+  section.insertBefore(card, section.firstChild);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DB — single source of truth, mirrors Kujira's pattern
+   ═══════════════════════════════════════════════════════════════════════ */
+function freshDB(){
+  return {
+    stocks:       [],
+    stockTxns:    [],
+    crypto:       [],
+    realestate:   [],
+    cash:         [],
+    cashTxns:     [],
+    cpfBalances:  { OA:0, SA:0, MA:0, RA:0, updatedAt:null },
+    cpfHistory:   [],
+    income:       [],
+    expenses:     [],
+    snapshots:    [],
+    categories:   {
+      income:  ['Salary', 'Bonus', 'Dividends', 'Rental', 'Side income', 'Refund', 'Other'],
+      expense: ['Housing', 'Food', 'Transport', 'Utilities', 'Insurance', 'Healthcare', 'Entertainment', 'Shopping', 'Travel', 'Education', 'Personal', 'Tax', 'Other']
+    },
+    settings:     {
+      baseCurrency: 'SGD',
+      tabCurrency:  {},   // per-tab display overrides; defaults: stocks=USD, rest=SGD
+      fxRates:      { USDSGD: null, lastUpdated: null },
+      fxOverrides:  { USDSGD: null },
+      birthYear:    null,
+      retirementAge: 65,
+      expectedReturn: 6.0,
+      inflationRate:  3.0,
+      fireMultiple:   25,
+      fireTarget:     null,
+      cpfRates:       Object.assign({}, CPF_DEFAULTS),
+      salary:         {
+        employer:     '',
+        grossMonthly: null,   // SGD, gross before CPF
+        startDate:    null,   // 'YYYY-MM-DD'
+        endDate:      null,   // 'YYYY-MM-DD' or null = ongoing
+        annualBonus:  null,   // SGD lump (config only for now)
+        bonusMonth:   null    // 1-12 (config only for now)
+      }
+    },
+    _priceCache:  {},
+    changelog:    [],
+    _meta:        { createdAt: new Date().toISOString(), appVersion: APP_VERSION }
+  };
+}
+
+let DB = freshDB();
+
+/* ═══════════════════════════════════════════════════════════════════════
+   UTILITIES
+   ═══════════════════════════════════════════════════════════════════════ */
+function uid(prefix){ return (prefix || 'id') + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8); }
+
+function kjrEscape(s){
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* ─── Sanitisation: defence-in-depth at every boundary ──────────────────
+   ids: alnum + underscore + hyphen, 1-64 chars. Anything else is rejected.
+   strings: trimmed, control chars stripped, length capped (default 500).
+   numbers: coerced to finite float; non-finite returns null.
+   These run in three places: on every form save (entityModalSave), on
+   every read from the cloud (mergeDefaults), and before any data is
+   interpolated into a JS context. Keeps a corrupted sheet from breaking
+   the app, and stops an attacker who somehow writes to the sheet from
+   landing an XSS via crafted ids or notes. */
+const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+function kjrSafeId(s){
+  if (s == null) return null;
+  const v = String(s);
+  return SAFE_ID_RE.test(v) ? v : null;
+}
+function kjrSafeString(s, maxLen){
+  if (s == null) return '';
+  const cap = maxLen || 500;
+  let v = String(s);
+  // Strip ASCII control chars (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F).
+  // Preserve tab/newline/CR so multi-line notes survive.
+  v = v.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  if (v.length > cap) v = v.slice(0, cap);
+  return v;
+}
+
+function kjrSafeNumber(n, opts){
+  opts = opts || {};
+  if (n === '' || n == null) return opts.fallback != null ? opts.fallback : null;
+  const v = Number(n);
+  if (!isFinite(v)) return opts.fallback != null ? opts.fallback : null;
+  if (opts.min != null && v < opts.min) return opts.fallback != null ? opts.fallback : null;
+  if (opts.max != null && v > opts.max) return opts.fallback != null ? opts.fallback : null;
+  return v;
+}
+
+/* Money formatter and the single currency-conversion point for the app.
+   Values are stored and computed in SGD; fmt converts to the active display
+   currency (the SGD/USD toggle) and labels accordingly. Pass opts.noConvert
+   for a figure that is already in the display currency, or opts.currency to
+   force a specific label without conversion. */
+function fmt(n, opts){
+  opts = opts || {};
+  let v = Number(n);
+  if (!isFinite(v)) return '—';
+  let cur;
+  if (opts.currency){
+    cur = opts.currency;            // explicit label, value already in that ccy
+  } else if (opts.noConvert){
+    cur = displayCcy();
+  } else {
+    v = toDisplay(v, 'SGD');        // SGD figure → active display currency
+    cur = displayCcy();
+  }
+  try {
+    return new Intl.NumberFormat('en-SG', {
+      style: 'currency', currency: cur,
+      minimumFractionDigits: opts.dp != null ? opts.dp : 2,
+      maximumFractionDigits: opts.dp != null ? opts.dp : 2
+    }).format(v);
+  } catch(_){ return (cur + ' ' + v.toFixed(2)); }
+}
+
+function fmtPct(n, dp){
+  const v = Number(n);
+  if (!isFinite(v)) return '—';
+  return (v >= 0 ? '+' : '') + v.toFixed(dp != null ? dp : 2) + '%';
+}
+
+function fmtDateSG(d){
+  // DD/MM/YYYY per Singapore convention
+  if (!d) return '';
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if (isNaN(dt.getTime())) return String(d);
+  const dd = String(dt.getDate()).padStart(2,'0');
+  const mm = String(dt.getMonth()+1).padStart(2,'0');
+  return dd + '/' + mm + '/' + dt.getFullYear();
+}
+
+function relTime(d){
+  if (!d) return 'never';
+  const t = (d instanceof Date) ? d : new Date(d);
+  if (isNaN(t.getTime())) return 'never';
+  const s = Math.round((Date.now() - t.getTime()) / 1000);
+  if (s < 5)   return 'just now';
+  if (s < 60)  return s + 's ago';
+  if (s < 3600) return Math.round(s/60) + 'm ago';
+  if (s < 86400) return Math.round(s/3600) + 'h ago';
+  return Math.round(s/86400) + 'd ago';
+}
+
+function showToast(msg, kind){
+  const host = document.getElementById('toast-host');
+  if (!host) return;
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind ? ' ' + kind : '');
+  el.textContent = msg;
+  host.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; }, 3000);
+  setTimeout(() => el.remove(), 3400);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PERSISTENCE — local storage immediate, cloud debounced
+   ═══════════════════════════════════════════════════════════════════════ */
+function saveLocal(){
+  try { localStorage.setItem(LK_DB, JSON.stringify(DB)); }
+  catch (e) { console.error('localStorage write failed', e); showToast('Local save failed: ' + e.message, 'error'); }
+}
+
+function loadLocal(){
+  try {
+    const raw = localStorage.getItem(LK_DB);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    DB = mergeDefaults(obj);
+    return true;
+  } catch (e) {
+    console.error('localStorage read failed', e);
+    return false;
+  }
+}
+
+/* Defensive merge so old payloads pick up new top-level keys when we ship features.
+   Also re-validates ids on every list-typed table — a corrupted sheet or hostile
+   payload cannot land an id like "x'); evil(); //" that would break event-delegation
+   downstream. Items with invalid ids get a fresh uid() so they're still recoverable. */
+const _LIST_TABLES = ['stocks','stockTxns','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash'];
+
+function _sanitiseList(arr, table){
+  if (!Array.isArray(arr)) return [];
+  return arr.map(item => {
+    if (!item || typeof item !== 'object') return null;
+    const safe = Object.assign({}, item);
+    if (!kjrSafeId(safe.id)) safe.id = uid(table);
+    return safe;
+  }).filter(Boolean);
+}
+
+function mergeDefaults(loaded){
+  const base = freshDB();
+  const safe = (loaded && typeof loaded === 'object') ? loaded : {};
+  const out  = Object.assign({}, base, safe);
+  out.settings   = Object.assign({}, base.settings, safe.settings || {});
+  out.settings.cpfRates    = Object.assign({}, base.settings.cpfRates,    (safe.settings && safe.settings.cpfRates) || {});
+  out.settings.fxRates     = Object.assign({}, base.settings.fxRates,     (safe.settings && safe.settings.fxRates)  || {});
+  out.settings.fxOverrides = Object.assign({}, base.settings.fxOverrides, (safe.settings && safe.settings.fxOverrides) || {});
+  out.settings.salary      = Object.assign({}, base.settings.salary,      (safe.settings && safe.settings.salary)      || {});
+  out.settings.tabCurrency = Object.assign({}, base.settings.tabCurrency, (safe.settings && safe.settings.tabCurrency) || {});
+  out.categories = Object.assign({}, base.categories, safe.categories || {});
+  out.cpfBalances = Object.assign({}, base.cpfBalances, safe.cpfBalances || {});
+  _LIST_TABLES.forEach(t => { out[t] = _sanitiseList(out[t], t); });
+  if (!out._priceCache || typeof out._priceCache !== 'object') out._priceCache = {};
+  return out;
+}
+
+/* Single entry point for "I changed something, persist + sync".
+   Mirrors Kujira's saveData() debounce pattern. */
+let _syncTimer = null;
+function saveData(){
+  saveLocal();
+  if (_syncTimer) clearTimeout(_syncTimer);
+  if (!getSyncUrl()) { setSyncStatus('local'); return; }
+  _syncTimer = setTimeout(pushToRemote, SYNC_DEBOUNCE_MS);
+  setSyncStatus('syncing'); // visual feedback before debounce fires
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SYNC — Apps Script JSON blob, optimistic concurrency
+   Pattern lifted from Send Ops, schema identifier swapped.
+   ═══════════════════════════════════════════════════════════════════════ */
+function getSyncUrl(){ return (localStorage.getItem(LK_SYNC_URL) || '').trim(); }
+function setSyncUrl(u){
+  if (u) localStorage.setItem(LK_SYNC_URL, u.trim());
+  else   localStorage.removeItem(LK_SYNC_URL);
+  updateSyncStatusPill();
+}
+
+function syncPayload(){
+  return Object.assign({}, DB, {
+    schema: SCHEMA,
+    version: 1,
+    appVersion: APP_VERSION,
+    updatedAt: new Date().toISOString(),
+    lastSeenRemoteAt: localStorage.getItem(LK_LAST_PULL) || null
+  });
+}
+
+let _bloatWarned = false;
+let _activeSyncController = null;
+
+/* Tracks whether the stored LK_LAST_PULL came from the server (data._savedAt
+   on pull, or data.savedAt on push) or from the client's own updatedAt
+   (which is the case when the user is running an outdated backend). When
+   the source is 'client', the next push is guaranteed to conflict because
+   client timestamps never match server's C1. We auto-resolve in that case
+   with a force-push instead of nagging the user.
+   Persisted to localStorage so it survives reloads — without persistence
+   the flag resets to its default on every page open and we wrongly assume
+   the stamp is from the client. */
+function lastPullSource(){ return localStorage.getItem(LK_LAST_PULL_SRC) || 'client'; }
+function setLastPull(stamp, source){
+  if (stamp != null) localStorage.setItem(LK_LAST_PULL, stamp);
+  localStorage.setItem(LK_LAST_PULL_SRC, source === 'server' ? 'server' : 'client');
+}
+
+/* In single-user BYOB mode, every "conflict" is benign — there's no second
+   user to actually diverge from. The mismatch is clock drift, Sheets
+   cell-format round-trip, or a race between an auto-refresh tick and a
+   user edit. We auto-recover every time, with one retry on transient
+   network errors (Apps Script's redirect chain to googleusercontent.com
+   occasionally returns 404+HTML, especially from file:// origins).
+   The legacy modal is hidden behind an opt-in setting for power users who
+   actually sync from multiple devices. */
+let _conflictResolvingNow = false;  // prevents recursive recovery loops
+let _resyncToastShown = false;      // toast suggestion shown once per session
+
+/* Safely parse a fetch response as JSON. Returns { ok, data, status, text }.
+   Apps Script's redirect chain can return HTML (404, login pages, error
+   pages) — we surface that as ok:false instead of throwing. */
+async function safeJson(resp){
+  const status = resp.status;
+  const text = await resp.text();
+  try {
+    return { ok: true, status, data: JSON.parse(text), text };
+  } catch (_) {
+    return { ok: false, status, data: null, text };
+  }
+}
+
+function strictConflictsEnabled(){
+  return localStorage.getItem('kjr-pf-strict-conflicts-v1') === '1';
+}
+
+function setStrictConflicts(on){
+  localStorage.setItem('kjr-pf-strict-conflicts-v1', on ? '1' : '0');
+  showToast(on ? 'Strict conflict modal enabled' : 'Silent auto-recovery enabled', 'success');
+}
+
+async function pushToRemote(){
+  const url = getSyncUrl();
+  if (!url) { setSyncStatus('local'); return; }
+
+  if (_activeSyncController) { try { _activeSyncController.abort(); } catch(_){} }
+  const controller = new AbortController();
+  _activeSyncController = controller;
+
+  setSyncStatus('syncing');
+  try {
+    const body = JSON.stringify(syncPayload());
+
+    if (body.length > PAYLOAD_WARN_AT && !_bloatWarned) {
+      _bloatWarned = true;
+      const pct = Math.round((body.length / 50000) * 100);
+      showToast('Data size at ' + pct + '% of sync limit. Consider trimming changelog.', 'error');
+    }
+    if (body.length > PAYLOAD_HARD_CAP) {
+      setSyncStatus('failed', 'Payload exceeds 50KB sync limit.');
+      return;
+    }
+
+    const resp = await fetch(url, {
+      method: 'POST', mode: 'cors', redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body, signal: controller.signal
+    });
+    const parsed = await safeJson(resp);
+    if (!parsed.ok) {
+      // Apps Script returned HTML (404 from googleusercontent redirect, login
+      // page, error page, etc.). Don't crash — log and set failed status.
+      console.warn('[sync] non-JSON push response, status', parsed.status, 'body starts:', parsed.text.slice(0, 100));
+      setSyncStatus('failed', 'Backend returned non-JSON (status ' + parsed.status + ')');
+      return;
+    }
+    const data = parsed.data;
+    if (data.error) throw new Error(data.error);
+    if (data.conflict) {
+      console.info('[sync] conflict — source:', lastPullSource(), 'strict:', strictConflictsEnabled());
+      // Single-user mode default: silently force-push to recover. The
+      // mismatch is almost certainly clock drift / Sheets cell-format quirk
+      // / race condition — never a real divergence on a personal sheet.
+      // Power users can flip "Strict sync conflicts" on in Settings to
+      // restore the modal for multi-device usage.
+      if (strictConflictsEnabled()) {
+        showConflictModal({ remoteAt: data.remoteAt, lastSeenRemoteAt: data.lastSeenRemoteAt, stashedBody: body });
+        return;
+      }
+      // Auto-recovery with one retry. The first attempt sometimes 404s on
+      // Apps Script's redirect target (file:// origin + googleusercontent
+      // redirect chain). 500 ms backoff usually clears it.
+      const recover = async () => {
+        const obj = JSON.parse(body);
+        delete obj.lastSeenRemoteAt;
+        const r = await fetch(url, {
+          method:'POST', mode:'cors', redirect:'follow',
+          headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+          body: JSON.stringify(obj)
+        });
+        return safeJson(r);
+      };
+      _conflictResolvingNow = true;
+      try {
+        let r = await recover();
+        if (!r.ok || (r.data && (r.data.error || r.data.conflict))) {
+          console.warn('[sync] auto-recovery attempt 1 failed, retrying in 500ms', r);
+          await new Promise(res => setTimeout(res, 500));
+          r = await recover();
+        }
+        if (r.ok && !r.data.error && !r.data.conflict) {
+          const stamp2 = r.data.savedAt || new Date().toISOString();
+          localStorage.setItem(LK_SYNC_TS, stamp2);
+          setLastPull(stamp2, 'server');
+          setSyncStatus('synced');
+          if (!_resyncToastShown) {
+            _resyncToastShown = true;
+            showToast('Sync resynchronised', 'success');
+          }
+          return;
+        }
+        console.warn('[sync] auto-recovery exhausted retries', r);
+        setSyncStatus('failed', 'Auto-recovery failed — try Pull from cloud');
+        showToast('Sync failed — Settings → Pull from cloud to recover', 'error');
+      } catch (recoverErr) {
+        console.warn('[sync] auto-recovery threw:', recoverErr.message);
+        setSyncStatus('failed', recoverErr.message);
+      } finally {
+        _conflictResolvingNow = false;
+      }
+      return;
+    }
+    const stamp = data.savedAt || new Date().toISOString();
+    localStorage.setItem(LK_SYNC_TS, stamp);
+    setLastPull(stamp, 'server');  // push response gives us the real server stamp
+    setSyncStatus('synced');
+  } catch (err) {
+    if (err.name === 'AbortError') return; // superseded
+    setSyncStatus('failed', err.message);
+  } finally {
+    if (_activeSyncController === controller) _activeSyncController = null;
+  }
+}
+
+async function pullFromRemote(opts){
+  const url = getSyncUrl();
+  if (!url) { setSyncStatus('local'); return false; }
+  setSyncStatus('syncing');
+  try {
+    const resp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    if (data.schema !== SCHEMA){
+      // Empty sheet — seed it from local on first run
+      if (opts && opts.allowSeed){
+        await pushToRemote();
+        return true;
+      }
+      throw new Error('Sheet has no ' + SCHEMA + ' data yet. Push first.');
+    }
+    DB = mergeDefaults(data);
+    saveLocal();
+    // Prefer the server's C1 timestamp (data._savedAt) — that's what doPost
+    // compares lastSeenRemoteAt against. Falling back to data.updatedAt
+    // (the client's own timestamp) causes false-positive conflicts after
+    // every reload, because C1 always differs slightly from the client's
+    // updatedAt. We persist the source flag so the push path can detect
+    // a stale client-side stamp and auto-recover even after a reload.
+    const hasServerStamp = !!data._savedAt;
+    const stamp = data._savedAt || data.updatedAt || new Date().toISOString();
+    if (!hasServerStamp) {
+      console.warn('[sync] pull response missing _savedAt — backend out of date');
+      showToast('Backend out of date — redeploy Apps Script (see README) to stop sync conflicts.', 'error');
+    }
+    localStorage.setItem(LK_SYNC_TS, stamp);
+    setLastPull(stamp, hasServerStamp ? 'server' : 'client');
+    setSyncStatus('synced');
+    renderAll();
+    return true;
+  } catch (err) {
+    setSyncStatus('failed', err.message);
+    return false;
+  }
+}
+
+/* Best-effort flush on tab close. fetch+keepalive instead of sendBeacon
+   to allow larger bodies. Send Ops uses the same pattern. */
+window.addEventListener('beforeunload', () => {
+  if (!_syncTimer) return;
+  clearTimeout(_syncTimer); _syncTimer = null;
+  const url = getSyncUrl();
+  if (!url) return;
+  const payload = JSON.stringify(syncPayload());
+  try {
+    fetch(url, { method:'POST', body:payload, keepalive:true, headers:{ 'Content-Type':'text/plain;charset=utf-8' } });
+  } catch (_) {
+    try { navigator.sendBeacon(url, new Blob([payload], { type: 'text/plain' })); } catch (__) {}
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CONFLICT MODAL
+   ═══════════════════════════════════════════════════════════════════════ */
+function showConflictModal(opts){
+  document.getElementById('conflict-modal')?.remove();
+  const remoteAgo = opts.remoteAt ? relTime(opts.remoteAt) : 'just now';
+  const wrap = document.createElement('div');
+  wrap.id = 'conflict-modal';
+  wrap.className = 'overlay open';
+  wrap.innerHTML = `
+    <div class="modal" style="max-width:520px">
+      <div class="modal-head"><h3>⚠ Sync conflict</h3></div>
+      <div class="modal-body">
+        <div style="color:var(--text2);line-height:1.6">Someone (or another tab) updated the cloud sheet ${kjrEscape(remoteAgo)}. Your local edits haven't been saved yet.</div>
+        <div class="stat-box y" style="margin-top:14px;font-family:'SF Mono',monospace;font-size:11px;color:var(--text2);line-height:1.7">
+          local: ${DB.stocks.length} stocks · ${DB.crypto.length} crypto · ${DB.cash.length} cash · ${DB.cpfHistory.length} CPF entries · ${DB.income.length} income · ${DB.expenses.length} expenses
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" onclick="document.getElementById('conflict-modal').remove(); setSyncStatus('failed','Conflict unresolved')">Keep editing</button>
+        <button class="btn" id="cf-pull">Discard local, pull cloud</button>
+        <button class="btn btn-danger" id="cf-force">Overwrite cloud with local</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  document.getElementById('cf-pull').onclick = async () => { wrap.remove(); await pullFromRemote(); };
+  document.getElementById('cf-force').onclick = async () => {
+    wrap.remove();
+    // Cancel any pending or in-flight push so force-push has the cloud to
+    // itself. Otherwise a debounced push from the auto-refresh tick could
+    // land right after, with the OLD stamp, and re-trigger the conflict.
+    if (_syncTimer) { clearTimeout(_syncTimer); _syncTimer = null; }
+    if (_activeSyncController) { try { _activeSyncController.abort(); } catch(_){} _activeSyncController = null; }
+    try {
+      const obj = JSON.parse(opts.stashedBody);
+      delete obj.lastSeenRemoteAt;
+      setSyncStatus('syncing');
+      const resp = await fetch(getSyncUrl(), {
+        method:'POST', mode:'cors', redirect:'follow',
+        headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+        body: JSON.stringify(obj)
+      });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      const stamp = data.savedAt || new Date().toISOString();
+      localStorage.setItem(LK_SYNC_TS, stamp);
+      setLastPull(stamp, 'server');
+      _firstConflictHandled = true;  // any future conflict is real, not drift
+      setSyncStatus('synced');
+      showToast('Cloud overwritten with local version', 'success');
+    } catch (err) {
+      setSyncStatus('failed', err.message);
+    }
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SYNC PILL — visual state
+   ═══════════════════════════════════════════════════════════════════════ */
+function setSyncStatus(state, detail){
+  const pill = document.getElementById('sync-pill');
+  if (!pill) return;
+  pill.classList.remove('s-local','s-syncing','s-synced','s-failed');
+  const ts = localStorage.getItem(LK_SYNC_TS);
+  const tsLabel = ts ? ' · ' + relTime(ts) : '';
+  switch (state) {
+    case 'local':   pill.classList.add('s-local');   pill.textContent = 'Local only'; break;
+    case 'syncing': pill.classList.add('s-syncing'); pill.textContent = 'Syncing…'; break;
+    case 'synced':  pill.classList.add('s-synced');  pill.textContent = 'Synced' + tsLabel; break;
+    case 'failed':  pill.classList.add('s-failed');  pill.textContent = 'Sync failed'; break;
+  }
+  pill.title = detail || (state === 'synced' ? 'All changes pushed to the cloud' : (state === 'local' ? 'No Apps Script URL set' : ''));
+  const det = document.getElementById('sync-status-detail');
+  if (det) det.textContent = detail || (ts ? 'Last sync ' + relTime(ts) : 'No sync yet');
+}
+
+function updateSyncStatusPill(){
+  if (!getSyncUrl()) setSyncStatus('local');
+  else if (localStorage.getItem(LK_SYNC_TS)) setSyncStatus('synced');
+  else setSyncStatus('local', 'URL saved, run a pull or push to sync');
+}
+
+async function manualSync(){
+  if (!getSyncUrl()) { showPage('settings'); showToast('Set the Apps Script URL first'); return; }
+  await pushToRemote();
+}
+
+async function manualPull(){
+  if (!getSyncUrl()) { showToast('Set the Apps Script URL first', 'error'); return; }
+  const ok = await pullFromRemote({ allowSeed: true });
+  if (ok) showToast('Pulled from cloud', 'success');
+}
+
+async function manualPush(){
+  if (!getSyncUrl()) { showToast('Set the Apps Script URL first', 'error'); return; }
+  await pushToRemote();
+  if (document.getElementById('sync-pill').classList.contains('s-synced')) showToast('Pushed to cloud', 'success');
+}
+
+function saveSyncUrlFromForm(){
+  const v = document.getElementById('cfg-sync-url').value.trim();
+  // Validate the URL is the Apps Script form, not something random pasted in
+  if (v && !/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec(\?.*)?$/.test(v)){
+    if (!confirm('That URL does not look like a Google Apps Script Web App URL. Save anyway?')) return;
+  }
+  setSyncUrl(v);
+  showToast(v ? 'URL saved' : 'URL cleared', 'success');
+  renderDiagnostics();
+}
+
+/* ─── Setup wizard ──────────────────────────────────────────────────────
+   Four-step onboarding for first-time users. Steps:
+     1. Create a Google Sheet
+     2. Open Apps Script editor and paste the code
+     3. Deploy as Web app and copy the URL
+     4. Paste the URL into the app
+   We auto-open on first launch (no DB + no URL set). User can dismiss with
+   "Skip" — we set a localStorage flag so we don't pester them every reload. */
+const LK_WIZARD_DISMISSED = 'kjr-pf-wizard-dismissed-v1';
+let _swStep = 1;
+
+function openSetupWizard(){
+  _swStep = 1;
+  document.getElementById('setup-wizard').classList.add('open');
+  renderSetupWizardStep();
+}
+
+function closeSetupWizard(){
+  document.getElementById('setup-wizard').classList.remove('open');
+  localStorage.setItem(LK_WIZARD_DISMISSED, '1');
+}
+
+function setupWizardNext(){
+  if (_swStep === 4){
+    // Final step: try to save the URL the user pasted in the wizard
+    const v = (document.getElementById('sw-url-input')?.value || '').trim();
+    if (v){
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec(\?.*)?$/.test(v)){
+        if (!confirm('That URL does not look like a Google Apps Script Web App URL. Save anyway?')) return;
+      }
+      setSyncUrl(v);
+      showToast('Connected — pulling your data', 'success');
+      closeSetupWizard();
+      pullFromRemote({ allowSeed: true });
+      return;
+    }
+    closeSetupWizard();
+    return;
+  }
+  _swStep++;
+  renderSetupWizardStep();
+}
+
+function setupWizardBack(){
+  if (_swStep > 1) _swStep--;
+  renderSetupWizardStep();
+}
+
+function renderSetupWizardStep(){
+  const body = document.getElementById('sw-body');
+  const back = document.getElementById('sw-back');
+  const next = document.getElementById('sw-next');
+  if (!body) return;
+
+  document.querySelectorAll('#sw-steps .sw-dot').forEach(d => {
+    const n = Number(d.dataset.step);
+    d.classList.toggle('active', n === _swStep);
+    d.classList.toggle('done',   n <  _swStep);
+  });
+
+  back.style.display = _swStep > 1 ? '' : 'none';
+  next.textContent   = _swStep === 4 ? 'Save URL & finish' : 'Next';
+
+  if (_swStep === 1){
+    body.innerHTML = `<div class="sw-step">
+      <h4>Step 1 — Create a Google Sheet</h4>
+      <p>You'll need an empty Google Sheet to hold your data. Only you will have access to it. We never see it.</p>
+      <ol>
+        <li>Click the button below to open Google Sheets in a new tab.</li>
+        <li>Click <strong>+ Blank</strong> to create a new sheet.</li>
+        <li>Give it a name like <em>My Investment Tracker</em>.</li>
+        <li>Leave the tab open — you'll come back to it.</li>
+      </ol>
+      <div class="actions">
+        <a class="btn btn-primary" href="https://sheets.new" target="_blank" rel="noopener noreferrer">Open Google Sheets</a>
+      </div>
+    </div>`;
+  } else if (_swStep === 2){
+    body.innerHTML = `<div class="sw-step">
+      <h4>Step 2 — Paste the Apps Script code</h4>
+      <p>In your new Google Sheet:</p>
+      <ol>
+        <li>Click <strong>Extensions → Apps Script</strong> in the menu.</li>
+        <li>Delete whatever code is already there.</li>
+        <li>Open the backend code from this project's GitHub and paste it in.</li>
+        <li>Click <strong>Save</strong> (disk icon).</li>
+        <li>Click the function dropdown, pick <code>initOnce</code>, then <strong>▶ Run</strong>. Grant the permissions Google asks for — it needs to read/write your sheet and call Yahoo Finance / CoinGecko.</li>
+      </ol>
+      <div class="actions">
+        <a class="btn btn-primary" href="https://github.com/" target="_blank" rel="noopener noreferrer">Open the .txt file</a>
+        <span class="hint" style="align-self:center">(Update this link to your published backend file after deploy)</span>
+      </div>
+    </div>`;
+  } else if (_swStep === 3){
+    body.innerHTML = `<div class="sw-step">
+      <h4>Step 3 — Deploy as a Web App</h4>
+      <p>Still in the Apps Script editor:</p>
+      <ol>
+        <li>Click <strong>Deploy → New deployment</strong>.</li>
+        <li>Click the gear icon next to <em>Select type</em>, pick <strong>Web app</strong>.</li>
+        <li>Description: <em>My Investment Tracker</em>.</li>
+        <li>Execute as: <strong>Me</strong>.</li>
+        <li>Who has access: <strong>Anyone</strong>.</li>
+        <li>Click <strong>Deploy</strong> and copy the Web app URL (ends in <code>/exec</code>).</li>
+      </ol>
+      <p style="background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);padding:10px;border-radius:8px;font-size:12px">
+        ⚠ The URL is your credential. Treat it like a password. Anyone with the URL can read and write your sheet. Don't share it.
+      </p>
+    </div>`;
+  } else if (_swStep === 4){
+    body.innerHTML = `<div class="sw-step">
+      <h4>Step 4 — Paste the URL here</h4>
+      <p>Paste the URL you copied from the deploy dialog. We'll save it locally and pull your data.</p>
+      <input type="url" id="sw-url-input" class="fi" placeholder="https://script.google.com/macros/s/.../exec" spellcheck="false" autocomplete="off">
+      <p style="margin-top:14px;font-size:12px;color:var(--text3)">The URL is stored only in this browser. We never transmit it anywhere except to your own Apps Script.</p>
+    </div>`;
+    setTimeout(() => document.getElementById('sw-url-input')?.focus(), 100);
+  }
+}
+
+function maybeShowWizardOnBoot(){
+  // First-launch: no sync URL set AND no dismissed flag AND DB looks empty
+  if (getSyncUrl()) return;
+  if (localStorage.getItem(LK_WIZARD_DISMISSED)) return;
+  if (DB.stocks.length || DB.crypto.length || DB.cash.length || DB.realestate.length || DB.cpfHistory.length) return;
+  openSetupWizard();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SETTINGS FORM
+   ═══════════════════════════════════════════════════════════════════════ */
+function loadSettingsForm(){
+  const s = DB.settings;
+  const setV = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v == null ? '' : v); };
+  setV('cfg-sync-url',         getSyncUrl());
+  const arCheckbox = document.getElementById('cfg-auto-refresh');
+  if (arCheckbox) arCheckbox.checked = autoRefreshEnabled();
+  const arMeta = document.getElementById('auto-refresh-meta');
+  if (arMeta) {
+    const onMarketDay = isStockMarketDaySGT();
+    arMeta.textContent = autoRefreshEnabled()
+      ? (onMarketDay ? 'Active · stocks+crypto every 60s' : 'Active · crypto only (weekend SGT)')
+      : 'Paused';
+  }
+  const scCheckbox = document.getElementById('cfg-strict-conflicts');
+  if (scCheckbox) scCheckbox.checked = strictConflictsEnabled();
+  setV('cfg-base-currency',    s.baseCurrency || 'SGD');
+  setV('cfg-fx-usdsgd',        s.fxOverrides && s.fxOverrides.USDSGD);
+  setV('cfg-birth-year',       s.birthYear);
+  setV('cfg-retirement-age',   s.retirementAge);
+  setV('cfg-expected-return',  s.expectedReturn);
+  setV('cfg-inflation',        s.inflationRate);
+  setV('cfg-fire-multiple',    s.fireMultiple);
+  setV('cfg-fire-target',      s.fireTarget);
+  setV('cfg-cpf-oa',           s.cpfRates.OA);
+  setV('cfg-cpf-sa',           s.cpfRates.SA);
+  setV('cfg-cpf-ma',           s.cpfRates.MA);
+  setV('cfg-cpf-ra',           s.cpfRates.RA);
+  setV('cfg-cpf-extra60',      s.cpfRates.extraFirst60k);
+  setV('cfg-cpf-extra30',      s.cpfRates.extraFirst30kAge55);
+  const sal = s.salary || {};
+  setV('cfg-salary-employer',  sal.employer);
+  setV('cfg-salary-gross',     sal.grossMonthly);
+  setV('cfg-salary-start',     sal.startDate);
+  setV('cfg-salary-end',       sal.endDate);
+  setV('cfg-salary-bonus',     sal.annualBonus);
+  setV('cfg-salary-bonus-month', sal.bonusMonth);
+}
+
+function saveSettingsFromForm(){
+  const numOrNull = (id) => {
+    const v = document.getElementById(id).value;
+    if (v === '' || v == null) return null;
+    const n = Number(v); return isNaN(n) ? null : n;
+  };
+  const s = DB.settings;
+  s.baseCurrency               = document.getElementById('cfg-base-currency').value || 'SGD';
+  s.fxOverrides.USDSGD         = numOrNull('cfg-fx-usdsgd');
+  s.birthYear                  = numOrNull('cfg-birth-year');
+  s.retirementAge              = numOrNull('cfg-retirement-age')  || 65;
+  s.expectedReturn             = numOrNull('cfg-expected-return') ?? 6.0;
+  s.inflationRate              = numOrNull('cfg-inflation')       ?? 3.0;
+  s.fireMultiple               = numOrNull('cfg-fire-multiple')   || 25;
+  s.fireTarget                 = numOrNull('cfg-fire-target');
+  s.cpfRates.OA                = numOrNull('cfg-cpf-oa')          ?? CPF_DEFAULTS.OA;
+  s.cpfRates.SA                = numOrNull('cfg-cpf-sa')          ?? CPF_DEFAULTS.SA;
+  s.cpfRates.MA                = numOrNull('cfg-cpf-ma')          ?? CPF_DEFAULTS.MA;
+  s.cpfRates.RA                = numOrNull('cfg-cpf-ra')          ?? CPF_DEFAULTS.RA;
+  s.cpfRates.extraFirst60k     = numOrNull('cfg-cpf-extra60')     ?? CPF_DEFAULTS.extraFirst60k;
+  s.cpfRates.extraFirst30kAge55 = numOrNull('cfg-cpf-extra30')    ?? CPF_DEFAULTS.extraFirst30kAge55;
+  const strOrEmpty = (id) => { const el = document.getElementById(id); return el ? (el.value || '').trim().slice(0, 80) : ''; };
+  const dateOrNull = (id) => { const el = document.getElementById(id); const v = el ? el.value : ''; return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null; };
+  if (!s.salary) s.salary = {};
+  s.salary.employer     = strOrEmpty('cfg-salary-employer');
+  s.salary.grossMonthly = numOrNull('cfg-salary-gross');
+  s.salary.startDate    = dateOrNull('cfg-salary-start');
+  s.salary.endDate      = dateOrNull('cfg-salary-end');
+  s.salary.annualBonus  = numOrNull('cfg-salary-bonus');
+  s.salary.bonusMonth   = numOrNull('cfg-salary-bonus-month');
+  saveData();
+  runSalaryEngine({ rerender: true, notify: true }); // backfill/refresh auto entries
+  renderAll(); // base-currency change reconverts every tab + syncs the toggle
+  showToast('Settings saved', 'success');
+  renderDiagnostics();
+}
+
+function resetLocalConfirm(){
+  if (!confirm('Reset local data? This wipes the browser cache but keeps your cloud sheet intact. You can pull from cloud to restore.')) return;
+  localStorage.removeItem(LK_DB);
+  localStorage.removeItem(LK_SYNC_TS);
+  localStorage.removeItem(LK_LAST_PULL);
+  localStorage.removeItem(LK_LAST_PULL_SRC);
+  DB = freshDB();
+  loadSettingsForm();
+  renderAll();
+  showToast('Local data reset. Pull from cloud to restore.', 'success');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DIAGNOSTICS — handy for verification
+   ═══════════════════════════════════════════════════════════════════════ */
+/* Diagnostics is intentionally terse and never prints the URL or its length.
+   Knowing the URL length narrows brute-force guessing slightly; some screen-
+   recording tutorial videos have leaked this kind of metadata. */
+function renderDiagnostics(){
+  const out = document.getElementById('diag-output');
+  if (!out) return;
+  const ts   = localStorage.getItem(LK_SYNC_TS);
+  const last = localStorage.getItem(LK_LAST_PULL);
+  out.textContent = [
+    'App version    : ' + APP_VERSION,
+    'Schema         : ' + SCHEMA,
+    'Apps Script URL: ' + (getSyncUrl() ? '✓ set' : '✗ not set'),
+    'Last sync (TS) : ' + (ts ? ts + ' (' + relTime(ts) + ')' : '—'),
+    'Last pull seen : ' + (last || '—'),
+    'Theme          : ' + (document.documentElement.classList.contains('light') ? 'light' : 'dark'),
+    'Local rows     : ' +
+      'stocks=' + DB.stocks.length +
+      ' crypto=' + DB.crypto.length +
+      ' realestate=' + DB.realestate.length +
+      ' cash=' + DB.cash.length +
+      ' cpfHistory=' + DB.cpfHistory.length +
+      ' income=' + DB.income.length +
+      ' expenses=' + DB.expenses.length,
+    'Settings       : base=' + DB.settings.baseCurrency +
+      ' birthYear=' + (DB.settings.birthYear || '—') +
+      ' retireAge=' + (DB.settings.retirementAge || '—') +
+      ' return=' + DB.settings.expectedReturn + '%' +
+      ' inflation=' + DB.settings.inflationRate + '%'
+  ].join('\n');
+}
+
+/* Reveal/hide the Apps Script URL. Default state is hidden (type=password).
+   When revealed, ask for explicit confirmation since the URL is a credential. */
+function toggleSyncUrlReveal(){
+  const input = document.getElementById('cfg-sync-url');
+  const btn   = document.getElementById('btn-toggle-url');
+  if (!input || !btn) return;
+  if (input.type === 'password'){
+    if (!confirm('Reveal the Apps Script URL? Anyone who sees it can read and write your sheet. Make sure no one is looking over your shoulder or screen-sharing.')) return;
+    input.type = 'text';
+    btn.textContent = 'Hide';
+  } else {
+    input.type = 'password';
+    btn.textContent = 'Show';
+  }
+}
+
+/* Scrub URLs from any string before printing — Apps Script URLs follow a
+   predictable pattern, so this redacts any /macros/s/<id>/exec sub-paths. */
+function redactUrls(s){
+  return String(s).replace(/https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec/g, 'https://script.google.com/macros/s/<REDACTED>/exec')
+                  .replace(/https:\/\/script\.googleusercontent\.com\/[^\s"']+/g, 'https://script.googleusercontent.com/<REDACTED>');
+}
+
+async function testPriceFetch(){
+  if (!getSyncUrl()) { showToast('Set the Apps Script URL first', 'error'); return; }
+  showToast('Fetching test prices…');
+  try {
+    const url = getSyncUrl() + (getSyncUrl().includes('?') ? '&' : '?') + 'action=prices&symbols=AAPL,D05.SI';
+    const resp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
+    const data = await resp.json();
+    const out = document.getElementById('diag-output');
+    if (out) out.textContent += '\n\nPrice test:\n' + redactUrls(JSON.stringify(data, null, 2));
+    showToast(data.error ? ('Price test failed: ' + redactUrls(data.error)) : 'Price test OK', data.error ? 'error' : 'success');
+  } catch (err) {
+    showToast('Price test failed: ' + redactUrls(err.message), 'error');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   NAV / ROUTING
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderNav(){
+  const host  = document.getElementById('nav-host');
+  const bhost = document.getElementById('bottom-nav');
+  if (host)  host.innerHTML  = '';
+  if (bhost) bhost.innerHTML = '';
+  TABS.forEach(t => {
+    if (t.key === 'settings') return; // Settings shown via the cog icon
+    const btn = document.createElement('button');
+    btn.className = 'nav-btn'; btn.dataset.tab = t.key;
+    const chip = PHASE_2_TABS.has(t.key) ? '<span class="phase-chip-mini">P2</span>' : '';
+    btn.innerHTML = t.icon + '<span>' + t.label + chip + '</span>';
+    btn.onclick = () => showPage(t.key);
+    if (host) host.appendChild(btn);
+    if (bhost) {
+      const b2 = btn.cloneNode(true);
+      b2.onclick = () => showPage(t.key);
+      bhost.appendChild(b2);
+    }
+  });
+}
+
+function showPage(key){
+  _currentTab = key;
+  document.querySelectorAll('.page').forEach(p => {
+    p.classList.remove('active');
+    p.classList.remove('phase2-locked');
+  });
+  const target = document.getElementById('page-' + key);
+  if (target) {
+    target.classList.add('active');
+    if (PHASE_2_TABS.has(key)) {
+      ensurePhase2Card(target, key);
+      target.classList.add('phase2-locked');
+    }
+  }
+  document.querySelectorAll('.nav-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === key);
+  });
+  updateCcyToggleUI(); // reflect the new tab's currency
+  if (key === 'dashboard') renderDashboard(); // (re)draw charts now the canvas is sized
+  if (key === 'settings') { loadSettingsForm(); renderDiagnostics(); }
+  if (window.scrollTo) window.scrollTo({ top: 0, behavior: 'instant' });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   THEME
+   ═══════════════════════════════════════════════════════════════════════ */
+function applyTheme(t){
+  document.documentElement.classList.toggle('light', t === 'light');
+}
+function toggleTheme(){
+  const next = document.documentElement.classList.contains('light') ? 'dark' : 'light';
+  localStorage.setItem(LK_THEME, next);
+  applyTheme(next);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   COIN LOOKUP — symbol → CoinGecko id, for the most common coins.
+   User can override per-entry; this is just a convenience.
+   ═══════════════════════════════════════════════════════════════════════ */
+const COIN_LOOKUP = {
+  BTC:'bitcoin', ETH:'ethereum', USDT:'tether', USDC:'usd-coin', BNB:'binancecoin',
+  SOL:'solana', XRP:'ripple', ADA:'cardano', DOGE:'dogecoin', TRX:'tron',
+  TON:'the-open-network', AVAX:'avalanche-2', DOT:'polkadot', MATIC:'matic-network',
+  LINK:'chainlink', LTC:'litecoin', BCH:'bitcoin-cash', SHIB:'shiba-inu',
+  UNI:'uniswap', DAI:'dai', WBTC:'wrapped-bitcoin', ICP:'internet-computer',
+  XLM:'stellar', ATOM:'cosmos', XMR:'monero', APT:'aptos', NEAR:'near',
+  ARB:'arbitrum', OP:'optimism', AAVE:'aave', FIL:'filecoin', ETC:'ethereum-classic',
+  MKR:'maker', VET:'vechain', ALGO:'algorand', HBAR:'hedera-hashgraph',
+  GRT:'the-graph', SUI:'sui', INJ:'injective-protocol', PEPE:'pepe',
+  RUNE:'thorchain', IMX:'immutable-x', TAO:'bittensor', RNDR:'render-token',
+  KAS:'kaspa', FTM:'fantom', WLD:'worldcoin-wld'
+};
+function coinIdFor(symbolOrId){
+  if (!symbolOrId) return null;
+  const v = String(symbolOrId).trim();
+  if (!v) return null;
+  if (COIN_LOOKUP[v.toUpperCase()]) return COIN_LOOKUP[v.toUpperCase()];
+  return v.toLowerCase(); // assume user entered the CoinGecko id directly
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FX — convert anything to base currency (SGD by default)
+   ═══════════════════════════════════════════════════════════════════════ */
+function getFx(from, to){
+  from = (from || '').toUpperCase();
+  to   = (to   || '').toUpperCase();
+  if (!from || !to || from === to) return 1;
+
+  // Manual override wins
+  if (from === 'USD' && to === 'SGD' && DB.settings.fxOverrides.USDSGD)
+    return Number(DB.settings.fxOverrides.USDSGD);
+  if (from === 'SGD' && to === 'USD' && DB.settings.fxOverrides.USDSGD)
+    return 1 / Number(DB.settings.fxOverrides.USDSGD);
+
+  // Cached fetched rate
+  if (from === 'USD' && to === 'SGD' && DB.settings.fxRates.USDSGD)
+    return Number(DB.settings.fxRates.USDSGD);
+  if (from === 'SGD' && to === 'USD' && DB.settings.fxRates.USDSGD)
+    return 1 / Number(DB.settings.fxRates.USDSGD);
+
+  return null; // unknown pair
+}
+
+function toSGD(amount, currency){
+  const n = Number(amount);
+  if (!isFinite(n)) return 0;
+  if (!currency || currency === 'SGD') return n;
+  const r = getFx(currency, 'SGD');
+  if (r == null) return n; // best-effort; UI flags missing FX
+  return n * r;
+}
+
+/* ─── Per-tab display currency ─────────────────────────────────────────
+   Each tab shows values in its own currency: Stocks defaults to USD (most
+   holdings are US-priced), everything else defaults to SGD (CPF, salary,
+   property are SGD by nature). The header toggle controls the active tab's
+   currency and stores a per-tab override.
+
+   `_renderCcy` is the currency for the render pass in flight. Every render
+   function sets it via setRenderCcy() at its top, so fmt() converts to the
+   right currency even when renderAll() paints every tab in one go. */
+let _currentTab = 'stocks';
+let _renderCcy  = 'SGD';
+
+function tabDefaultCcy(tab){ return tab === 'stocks' ? 'USD' : (DB.settings.baseCurrency || 'SGD'); }
+function tabDisplayCcy(tab){
+  const o = DB.settings.tabCurrency || {};
+  return o[tab] || tabDefaultCcy(tab);
+}
+function setRenderCcy(tab){ _renderCcy = tabDisplayCcy(tab); }
+
+/* Active render currency — what fmt() and the dynamic labels convert to. */
+function displayCcy(){ return _renderCcy; }
+
+/* Convert a native amount into the active render currency. */
+function toDisplay(amount, currency){
+  const n = Number(amount);
+  if (!isFinite(n)) return 0;
+  const to = displayCcy();
+  const from = currency || 'SGD';
+  if (from === to) return n;
+  const r = getFx(from, to);
+  if (r == null) return n; // best-effort; UI flags missing FX
+  return n * r;
+}
+
+/* True when converting `currency` to the active render currency is not
+   possible (no FX rate). Drives the "FX missing" hints. */
+function fxMissingFor(currency){
+  const from = currency || 'SGD';
+  if (from === displayCcy()) return false;
+  return getFx(from, displayCcy()) == null;
+}
+
+/* Header toggle writes a per-tab override for whichever tab is showing. */
+function setDisplayCcy(ccy){
+  if (ccy !== 'SGD' && ccy !== 'USD') return;
+  if (!DB.settings.tabCurrency) DB.settings.tabCurrency = {};
+  DB.settings.tabCurrency[_currentTab] = ccy;
+  saveData();
+  renderAll();
+  updateCcyToggleUI();
+}
+
+function updateCcyToggleUI(){
+  const cur = tabDisplayCcy(_currentTab);
+  document.querySelectorAll('.ccy-toggle [data-ccy]').forEach(b => {
+    b.classList.toggle('active', b.dataset.ccy === cur);
+  });
+}
+
+/* opts.silent suppresses the success toast (auto-refresh path). Failures
+   still toast only on the manual path. A single in-flight guard collapses
+   the auto-tick + refreshStockPrices double-call into one network hit. */
+let _fxInFlight = null;
+async function refreshFx(opts){
+  opts = opts || {};
+  if (_fxInFlight) return _fxInFlight;          // dedupe concurrent calls
+  if (!getSyncUrl()) { if (!opts.silent) showToast('Set the Apps Script URL first', 'error'); return; }
+  const btn = document.getElementById('btn-refresh-fx');
+  if (btn) btn.disabled = true;
+  _fxInFlight = (async () => {
+    try {
+      const url = getSyncUrl() + (getSyncUrl().includes('?') ? '&' : '?') + 'action=fx&pairs=USDSGD';
+      const resp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      const usdsgd = data.rates && data.rates.USDSGD && data.rates.USDSGD.rate;
+      if (!usdsgd) throw new Error('USDSGD missing in response');
+      DB.settings.fxRates.USDSGD = usdsgd;
+      DB.settings.fxRates.lastUpdated = new Date().toISOString();
+      saveData();
+      renderAll();
+      if (!opts.silent) showToast('FX refreshed', 'success');
+    } catch (err) {
+      if (!opts.silent) showToast('FX refresh failed: ' + err.message, 'error');
+      else console.warn('[fx]', err.message);
+    } finally {
+      if (btn) btn.disabled = false;
+      _fxInFlight = null;
+    }
+  })();
+  return _fxInFlight;
+}
+
+function fxFreshnessText(){
+  const ts = DB.settings.fxRates.lastUpdated;
+  if (!ts) return DB.settings.fxOverrides.USDSGD ? 'Manual override' : 'No FX yet';
+  return 'FX ' + relTime(ts);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   AUTO-REFRESH — poll prices on a timer, only when useful
+   - Tab visible (Page Visibility API)
+   - Backend configured
+   - User hasn't disabled the toggle in Settings
+   - Stocks/FX: Mon-Fri SGT only (covers SGX local hours + US pre/regular/post)
+   - Crypto: every tick, 24/7
+   - One in-flight refresh at a time per resource (guards inside refresh fns)
+   - Pauses when tab hidden, resumes on focus
+   ═══════════════════════════════════════════════════════════════════════ */
+let _autoRefreshTimer = null;
+let _autoTickInFlight = false;
+
+function autoRefreshEnabled(){
+  // Default ON. User can disable via Settings → "Auto-refresh prices" toggle.
+  return localStorage.getItem(LK_AUTO_REFRESH) !== '0';
+}
+
+function setAutoRefreshEnabled(on){
+  localStorage.setItem(LK_AUTO_REFRESH, on ? '1' : '0');
+  if (on) startAutoRefresh(); else stopAutoRefresh();
+}
+
+/* Is it Mon-Fri in Singapore time? Used to gate stock/FX refresh.
+   We use SGT because SGX is local, and US market hours converted to SGT
+   land on the same weekday (US Friday afternoon = SGT Saturday morning,
+   which is outside any meaningful window for retail). */
+function isStockMarketDaySGT(){
+  try {
+    const wd = new Intl.DateTimeFormat('en-SG', {
+      timeZone: 'Asia/Singapore', weekday: 'short'
+    }).format(new Date());
+    return wd !== 'Sat' && wd !== 'Sun';
+  } catch (_) {
+    // Fallback to local time if Intl fails
+    const d = new Date().getDay();
+    return d >= 1 && d <= 5;
+  }
+}
+
+async function autoRefreshTick(){
+  if (!autoRefreshEnabled()) return;
+  if (document.hidden) return;
+  if (!getSyncUrl()) return;
+  if (_autoTickInFlight) return;
+  _autoTickInFlight = true;
+  try {
+    const promises = [];
+    if ((DB.crypto || []).length) {
+      promises.push(refreshCryptoPrices().catch(err => console.warn('[auto] crypto', err.message)));
+    }
+    if (isStockMarketDaySGT()) {
+      if ((DB.stocks || []).length) {
+        promises.push(refreshStockPrices().catch(err => console.warn('[auto] stocks', err.message)));
+      }
+      // FX refresh only if we have any non-SGD position (cash, stocks priced USD, etc.)
+      const needFx = (DB.stocks || []).some(s => (s.currency || (s.market === 'US' ? 'USD' : 'SGD')) !== 'SGD')
+                  || (DB.cash   || []).some(c => (c.currency || 'SGD') !== 'SGD')
+                  || (DB.crypto || []).some(c => (c.currency || 'USD') !== 'SGD');
+      if (needFx && !DB.settings.fxOverrides.USDSGD) {
+        promises.push(refreshFx({ silent: true }).catch(err => console.warn('[auto] fx', err.message)));
+      }
+    }
+    await Promise.allSettled(promises);
+  } finally {
+    _autoTickInFlight = false;
+  }
+}
+
+function startAutoRefresh(){
+  stopAutoRefresh();
+  if (!autoRefreshEnabled()) return;
+  // Tick immediately, then on interval. Don't await — let it run async.
+  autoRefreshTick();
+  _autoRefreshTimer = setInterval(autoRefreshTick, AUTO_REFRESH_INTERVAL_MS);
+}
+
+function stopAutoRefresh(){
+  if (_autoRefreshTimer) { clearInterval(_autoRefreshTimer); _autoRefreshTimer = null; }
+}
+
+/* Visibility handler: pause when tab hidden, run a fresh tick when it
+   becomes visible. Page Visibility API is universally supported. */
+function installAutoRefreshVisibility(){
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopAutoRefresh();
+    } else {
+      startAutoRefresh();
+    }
+  });
+  // Browsers also fire 'focus' when window regains focus from another window
+  window.addEventListener('focus', () => {
+    if (!document.hidden) autoRefreshTick();
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PRICE FETCH — Yahoo for stocks/FX, CoinGecko for crypto
+   ═══════════════════════════════════════════════════════════════════════ */
+function yahooSymbol(stock){
+  const s = (stock.symbol || '').trim().toUpperCase();
+  if (!s) return '';
+  if (s.includes('.')) return s; // user already supplied exchange suffix
+  if (stock.market === 'SGX') return s + '.SI';
+  return s;
+}
+
+function isStale(fetchedAt, hours){
+  if (!fetchedAt) return true;
+  const t = new Date(fetchedAt).getTime();
+  if (!isFinite(t)) return true;
+  return (Date.now() - t) > (hours || 24) * 3600 * 1000;
+}
+
+function priceFreshnessText(table){
+  const items = DB[table] || [];
+  if (!items.length) return 'No holdings yet';
+  let oldest = null;
+  for (const it of items){
+    const px = priceFor(table, it);
+    if (px && px.fetchedAt) {
+      const t = new Date(px.fetchedAt).getTime();
+      if (oldest == null || t < oldest) oldest = t;
+    }
+  }
+  return oldest ? 'Prices ' + relTime(new Date(oldest)) : 'No prices yet';
+}
+
+function priceFor(table, item){
+  if (table === 'stocks') return DB._priceCache[yahooSymbol(item)] || null;
+  if (table === 'crypto') return DB._priceCache[coinIdFor(item.coingeckoId || item.symbol)] || null;
+  return null;
+}
+
+async function refreshStockPrices(){
+  if (!DB.stocks.length){ showToast('No stocks to refresh'); return; }
+  if (!getSyncUrl()){ showToast('Set the Apps Script URL first', 'error'); return; }
+  const btn = document.getElementById('btn-refresh-stocks');
+  if (btn) btn.disabled = true;
+  try {
+    const symbols = Array.from(new Set(DB.stocks.map(yahooSymbol).filter(Boolean)));
+    if (!symbols.length){ showToast('No valid symbols', 'error'); return; }
+    const url = getSyncUrl() + (getSyncUrl().includes('?') ? '&' : '?') +
+                'action=prices&symbols=' + encodeURIComponent(symbols.join(','));
+    const resp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
+    const data = await resp.json();
+    if (data.error && !data.quotes) throw new Error(data.error);
+    let ok = 0, fail = 0;
+    Object.entries(data.quotes || {}).forEach(([sym, q]) => {
+      if (q.error){ fail++; return; }
+      DB._priceCache[sym] = q;
+      ok++;
+    });
+    // Auto-refresh FX too if we have any USD-denominated positions
+    if (DB.stocks.some(s => (s.currency || (s.market === 'US' ? 'USD' : 'SGD')) === 'USD') && !DB.settings.fxOverrides.USDSGD){
+      refreshFx({ silent: true }).catch(()=>{});
+    }
+    saveData();
+    renderStocks();
+    showToast('Prices: ' + ok + ' refreshed' + (fail ? ', ' + fail + ' failed' : ''), fail ? 'error' : 'success');
+  } catch (err) {
+    showToast('Price refresh failed: ' + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function refreshCryptoPrices(){
+  if (!DB.crypto.length){ showToast('No coins to refresh'); return; }
+  if (!getSyncUrl()){ showToast('Set the Apps Script URL first', 'error'); return; }
+  const btn = document.getElementById('btn-refresh-crypto');
+  if (btn) btn.disabled = true;
+  try {
+    const ids = Array.from(new Set(DB.crypto.map(c => coinIdFor(c.coingeckoId || c.symbol)).filter(Boolean)));
+    if (!ids.length){ showToast('No valid coin ids', 'error'); return; }
+    const url = getSyncUrl() + (getSyncUrl().includes('?') ? '&' : '?') +
+                'action=crypto&ids=' + encodeURIComponent(ids.join(',')) + '&vs=sgd,usd';
+    const resp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    const stamp = data.fetchedAt || new Date().toISOString();
+    let ok = 0;
+    Object.entries(data.prices || {}).forEach(([id, p]) => {
+      DB._priceCache[id] = {
+        sgd: p.sgd, usd: p.usd, change24h: p.sgd_24h_change || p.usd_24h_change,
+        fetchedAt: stamp, source: 'coingecko'
+      };
+      ok++;
+    });
+    saveData();
+    renderCrypto();
+    showToast('Crypto: ' + ok + ' refreshed', 'success');
+  } catch (err) {
+    showToast('Crypto refresh failed: ' + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SOFT DELETE — Kujira convention: never hard-delete, push to trash.
+   Trash UI lives under Settings (Phase 2+).
+   ═══════════════════════════════════════════════════════════════════════ */
+function sendToTrash(table, id){
+  if (!DB[table]) return false;
+  const idx = DB[table].findIndex(x => x.id === id);
+  if (idx < 0) return false;
+  const item = DB[table][idx];
+  DB[table].splice(idx, 1);
+  if (!DB.trash) DB.trash = [];
+  DB.trash.push({ id: uid('tr'), table, ts: new Date().toISOString(), data: item });
+  saveData();
+  return true;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ENTITY MODAL — shared CRUD form for the four holdings tables
+   ═══════════════════════════════════════════════════════════════════════ */
+let _modalState = null; // { table, item, isNew }
+
+const ENTITY_SCHEMAS = {
+  stocks: {
+    title: 'stock holding',
+    fields: [
+      { key:'symbol',  label:'Symbol',  type:'text',   required:true, placeholder:'AAPL or D05', hint:'Yahoo ticker. For SGX, omit the .SI — we add it.' },
+      { key:'market',  label:'Market',  type:'select', required:true, options:[['SGX','SGX (Singapore)'],['US','US (NYSE/NASDAQ)']], default:'US' },
+      { key:'shares',  label:'Shares',  type:'number', required:true, step:'0.0001', placeholder:'100' },
+      { key:'avgCost', label:'Avg cost per share', type:'number', required:true, step:'0.0001', placeholder:'150.00' },
+      { key:'currency', label:'Cost currency', type:'select', options:[['USD','USD'],['SGD','SGD']], default:'USD', hint:'Currency the avg cost is stated in. Defaults match the market.' },
+      { key:'notes',   label:'Notes', type:'textarea' }
+    ],
+    defaults: { market:'US', currency:'USD' },
+    afterRead: (item) => {
+      // Coerce currency when market changes if user hasn't set one
+      if (!item.currency) item.currency = item.market === 'SGX' ? 'SGD' : 'USD';
+      item.symbol = (item.symbol || '').trim().toUpperCase();
+    }
+  },
+  stockTxns: {
+    title: 'trade',
+    fields: [
+      { key:'stockId', label:'Stock', type:'select', required:true,
+        optionsFn: () => (DB.stocks || []).map(s => [s.id, (s.symbol || '?') + ' · ' + (s.market || '')]),
+        hint:'Add the stock under positions first.' },
+      { key:'date',    label:'Trade date', type:'date', required:true },
+      { key:'side',    label:'Side', type:'select', required:true, options:[['buy','Buy'],['sell','Sell']], default:'buy' },
+      { key:'shares',  label:'Shares', type:'number', required:true, step:'0.0001', placeholder:'10' },
+      { key:'price',   label:'Price per share', type:'number', required:true, step:'0.0001', placeholder:'150.00', hint:'In the stock\'s own currency.' },
+      { key:'fees',    label:'Fees / commission', type:'number', step:'0.01', placeholder:'0.00' },
+      { key:'cashAccountId', label:'Funded from (cash account)', type:'select',
+        optionsFn: () => [['', '— Not linked —']].concat((DB.cash || []).map(c => [c.id, (c.name || '?') + ' · ' + (c.currency || 'SGD')])),
+        hint:'Buys debit this account, sells credit it. Use a same-currency account.' },
+      { key:'notes',   label:'Notes', type:'textarea' }
+    ],
+    defaults: { date: new Date().toISOString().slice(0,10), side:'buy', fees:0, cashAccountId:'' }
+  },
+  crypto: {
+    title: 'crypto holding',
+    fields: [
+      { key:'symbol',       label:'Symbol', type:'text', required:true, placeholder:'BTC', hint:'Common ticker. Mapped to CoinGecko id automatically for known coins.' },
+      { key:'coingeckoId',  label:'CoinGecko ID (override)', type:'text', placeholder:'bitcoin', hint:'Leave blank if symbol is in the common list.' },
+      { key:'amount',       label:'Amount', type:'number', required:true, step:'0.00000001', placeholder:'0.5' },
+      { key:'avgCost',      label:'Avg cost per coin', type:'number', step:'0.0001', placeholder:'45000' },
+      { key:'currency',     label:'Cost currency', type:'select', options:[['USD','USD'],['SGD','SGD']], default:'USD' },
+      { key:'notes',        label:'Notes', type:'textarea' }
+    ],
+    defaults: { currency:'USD' },
+    afterRead: (item) => {
+      item.symbol = (item.symbol || '').trim().toUpperCase();
+      if (item.coingeckoId) item.coingeckoId = item.coingeckoId.trim().toLowerCase();
+    }
+  },
+  realestate: {
+    title: 'property',
+    fields: [
+      { key:'name',     label:'Name / address', type:'text', required:true, placeholder:'HDB, Punggol' },
+      { key:'value',    label:'Current value (SGD)', type:'number', required:true, step:'1', placeholder:'500000' },
+      { key:'notes',    label:'Notes', type:'textarea' }
+    ],
+    defaults: {},
+    afterRead: (item) => { item.currency = 'SGD'; item.updatedAt = new Date().toISOString(); }
+  },
+  cash: {
+    title: 'cash account',
+    fields: [
+      { key:'name',     label:'Account name', type:'text', required:true, placeholder:'DBS Multiplier' },
+      { key:'account',  label:'Account type', type:'select', options:[['Savings','Savings'],['Current','Current'],['FD','Fixed deposit'],['MMF','Money market'],['Brokerage','Brokerage cash'],['Foreign','Foreign currency'],['Other','Other']], default:'Savings' },
+      { key:'amount',   label:'Balance', type:'number', step:'0.01', placeholder:'10000', hint:'For Brokerage accounts the balance is calculated from movements + linked trades below — leave blank.' },
+      { key:'currency', label:'Currency', type:'select', options:[['SGD','SGD'],['USD','USD'],['EUR','EUR'],['GBP','GBP'],['HKD','HKD'],['JPY','JPY'],['AUD','AUD'],['MYR','MYR'],['Other','Other']], default:'SGD' },
+      { key:'notes',    label:'Notes', type:'textarea' }
+    ],
+    defaults: { account:'Savings', currency:'SGD' }
+  },
+  cashTxns: {
+    title: 'cash movement',
+    fields: [
+      { key:'type',   label:'Type', type:'select', required:true,
+        options:[['deposit','Deposit'],['withdrawal','Withdrawal'],['transfer','Transfer between accounts'],['dividend','Dividend'],['interest','Interest'],['fee','Fee'],['adjustment','Adjustment (+/-)']], default:'deposit',
+        hint:'Deposit/dividend/interest add; withdrawal/fee subtract; transfer moves between two accounts; adjustment uses the sign you enter.' },
+      { key:'cashAccountId', label:'Account (or "to" for a transfer)', type:'select', required:true,
+        optionsFn: () => (DB.cash || []).map(c => [c.id, (c.name || '?') + ' · ' + (c.currency || 'SGD')]),
+        hint:'For a transfer, this is the destination account.' },
+      { key:'fromAccountId', label:'From account (transfers only)', type:'select',
+        optionsFn: () => [['', '— n/a —']].concat((DB.cash || []).map(c => [c.id, (c.name || '?') + ' · ' + (c.currency || 'SGD')])),
+        hint:'Source account. Leave as n/a unless this is a transfer.' },
+      { key:'date',   label:'Date', type:'date', required:true },
+      { key:'amount', label:'Amount', type:'number', required:true, step:'0.01', placeholder:'1000.00', hint:'Amount leaving the source, in its currency.' },
+      { key:'amountIn', label:'Amount received (cross-currency transfers)', type:'number', step:'0.01', placeholder:'auto',
+        hint:'Only for transfers where the two accounts use different currencies. Leave blank if same currency.' },
+      { key:'notes',  label:'Notes', type:'textarea' }
+    ],
+    defaults: { date: new Date().toISOString().slice(0,10), type:'deposit', fromAccountId:'' }
+  },
+  cpfHistory: {
+    title: 'CPF entry',
+    fields: [
+      { key:'date',     label:'Date',    type:'date',   required:true },
+      { key:'type',     label:'Type',    type:'select', required:true,
+        options:[['contribution','Contribution'],['interest','Interest credit'],['transfer','Transfer'],['withdrawal','Withdrawal'],['adjustment','Adjustment']], default:'contribution',
+        hint:'Use negative amount for outflows (withdrawals or transfer-out).' },
+      { key:'account',  label:'Account', type:'select', required:true,
+        options:[['OA','OA'],['SA','SA'],['MA','MA'],['RA','RA']], default:'OA' },
+      { key:'amount',   label:'Amount (SGD)', type:'number', required:true, step:'0.01', placeholder:'850.00' },
+      { key:'source',   label:'Source / reference', type:'text', placeholder:'March salary, year-end interest, etc.' },
+      { key:'notes',    label:'Notes', type:'textarea' }
+    ],
+    defaults: { type:'contribution', account:'OA', date: new Date().toISOString().slice(0,10) }
+  },
+  income: {
+    title: 'income entry',
+    fields: [
+      { key:'date',         label:'Pay date',    type:'date',   required:true },
+      { key:'gross',        label:'Gross (SGD)', type:'number', required:true, step:'0.01', placeholder:'8000.00',
+        hint:'Total before deductions.' },
+      { key:'net',          label:'Take-home (SGD)', type:'number', step:'0.01', placeholder:'6500.00',
+        hint:'Cash that hit your bank. Leave blank to default to gross minus employee CPF.' },
+      { key:'employerCPF',  label:'Employer CPF', type:'number', step:'0.01', placeholder:'1360.00' },
+      { key:'employeeCPF',  label:'Employee CPF', type:'number', step:'0.01', placeholder:'1600.00' },
+      { key:'source',       label:'Source / employer', type:'text', placeholder:'ACME Corp' },
+      { key:'notes',        label:'Notes', type:'textarea' }
+    ],
+    defaults: { date: new Date().toISOString().slice(0,10) }
+  },
+  expenses: {
+    title: 'expense',
+    fields: [
+      { key:'date',        label:'Date',        type:'date',   required:true },
+      { key:'amount',      label:'Amount',      type:'number', required:true, step:'0.01', placeholder:'45.50' },
+      { key:'currency',    label:'Currency',    type:'select', options:[['SGD','SGD'],['USD','USD'],['EUR','EUR'],['GBP','GBP'],['HKD','HKD'],['JPY','JPY'],['AUD','AUD'],['MYR','MYR']], default:'SGD' },
+      { key:'category',    label:'Category',    type:'select', required:true,
+        optionsFn: () => (DB.categories && DB.categories.expense || []).map(c => [c, c]),
+        default: 'Other' },
+      { key:'subcategory', label:'Sub-category', type:'text',  placeholder:'Optional, e.g. groceries' },
+      { key:'merchant',    label:'Merchant',     type:'text',  placeholder:'NTUC FairPrice' },
+      { key:'notes',       label:'Notes',        type:'textarea' }
+    ],
+    defaults: { date: new Date().toISOString().slice(0,10), currency:'SGD', category:'Other' }
+  }
+};
+
+function openEntityModal(table, existingId){
+  const schema = ENTITY_SCHEMAS[table];
+  if (!schema) return;
+  const list = DB[table] || [];
+  const existing = existingId ? list.find(x => x.id === existingId) : null;
+  const item = existing ? Object.assign({}, existing) : Object.assign({ id: uid(table) }, schema.defaults);
+  _modalState = { table, item, isNew: !existing };
+
+  document.getElementById('em-title').textContent = (existing ? 'Edit ' : 'Add ') + schema.title;
+  const body = document.getElementById('em-body');
+  body.innerHTML = '<div class="form-row">' + schema.fields.map(f => renderField(f, item[f.key])).join('') + '</div>';
+
+  // Wire up market → currency coercion for stocks (nice UX)
+  if (table === 'stocks'){
+    const marketSel = body.querySelector('[data-fkey="market"]');
+    const currSel   = body.querySelector('[data-fkey="currency"]');
+    if (marketSel && currSel){
+      marketSel.addEventListener('change', () => {
+        currSel.value = marketSel.value === 'SGX' ? 'SGD' : 'USD';
+      });
+    }
+  }
+
+  document.getElementById('em-delete').style.display = existing ? '' : 'none';
+  document.getElementById('entity-modal').classList.add('open');
+  setTimeout(() => { const first = body.querySelector('input,select,textarea'); if (first) first.focus(); }, 50);
+}
+
+function renderField(f, value){
+  const v = value == null ? (f.default == null ? '' : f.default) : value;
+  const safeV = kjrEscape(v);
+  const required = f.required ? ' required' : '';
+  const hint = f.hint ? `<div class="hint">${kjrEscape(f.hint)}</div>` : '';
+  const full = (f.type === 'textarea') ? ' style="grid-column:1/-1"' : '';
+  let input = '';
+  if (f.type === 'select'){
+    // optionsFn lets schemas defer choices to render time (e.g. categories pulled from DB)
+    const optList = f.optionsFn ? (f.optionsFn() || []) : (f.options || []);
+    const opts = optList.map(o => {
+      const [val,lbl] = Array.isArray(o) ? o : [o,o];
+      return `<option value="${kjrEscape(val)}"${String(val) === String(v) ? ' selected' : ''}>${kjrEscape(lbl)}</option>`;
+    }).join('');
+    input = `<select class="fi" data-fkey="${f.key}"${required}>${opts}</select>`;
+  } else if (f.type === 'textarea'){
+    input = `<textarea class="fi" data-fkey="${f.key}" placeholder="${kjrEscape(f.placeholder||'')}">${safeV}</textarea>`;
+  } else {
+    const step = f.step ? ` step="${kjrEscape(f.step)}"` : '';
+    const inputType = f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text');
+    input = `<input class="fi" type="${inputType}" data-fkey="${f.key}"${step} value="${safeV}" placeholder="${kjrEscape(f.placeholder||'')}"${required}>`;
+  }
+  return `<div class="form-group"${full}><label class="lbl">${kjrEscape(f.label)}${f.required ? ' *' : ''}</label>${input}${hint}</div>`;
+}
+
+function closeEntityModal(){
+  document.getElementById('entity-modal').classList.remove('open');
+  _modalState = null;
+}
+
+function entityModalSave(){
+  if (!_modalState) return;
+  const { table, item, isNew } = _modalState;
+  const schema = ENTITY_SCHEMAS[table];
+
+  // Read fields through the right sanitiser for each type. Strings get
+  // control-char stripping + length cap (500 default, 5000 for textareas).
+  // Numbers get isFinite checks; non-finite becomes null and trips required.
+  const body = document.getElementById('em-body');
+  for (const f of schema.fields){
+    const el = body.querySelector(`[data-fkey="${f.key}"]`);
+    if (!el) continue;
+    const raw = el.value;
+    if (f.type === 'number') {
+      item[f.key] = kjrSafeNumber(raw);
+    } else if (f.type === 'select' || f.type === 'date') {
+      // Selects: must be one of the declared options. Date: ISO yyyy-mm-dd format.
+      if (f.type === 'select') {
+        const optList = f.optionsFn ? (f.optionsFn() || []) : (f.options || []);
+        const allowed = optList.map(o => String(Array.isArray(o) ? o[0] : o));
+        item[f.key] = allowed.includes(String(raw)) ? String(raw) : (f.default || allowed[0] || '');
+      } else if (f.type === 'date') {
+        item[f.key] = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '';
+      } else {
+        item[f.key] = kjrSafeString(raw, 80);
+      }
+    } else if (f.type === 'textarea') {
+      item[f.key] = kjrSafeString(String(raw).trim(), 5000);
+    } else {
+      item[f.key] = kjrSafeString(String(raw).trim(), 120);
+    }
+  }
+
+  // Validate required
+  for (const f of schema.fields){
+    if (!f.required) continue;
+    const val = item[f.key];
+    if (val == null || val === '' || (f.type === 'number' && !isFinite(val))){
+      showToast('Required: ' + f.label, 'error'); return;
+    }
+  }
+
+  if (schema.afterRead) schema.afterRead(item);
+
+  // Over-sell guard: warn (but allow) if a sell exceeds shares held as of its
+  // date. Out-of-order or correcting entries are legitimate, so this confirms
+  // rather than blocks.
+  if (table === 'stockTxns' && item.side === 'sell'){
+    const held = sharesHeldAsOf(item.stockId, item.date, item.id);
+    const qty  = Math.abs(Number(item.shares) || 0);
+    if (qty > held + 1e-9){
+      const sym = (DB.stocks.find(s => s.id === item.stockId) || {}).symbol || 'this stock';
+      if (!confirm('This sells ' + qty + ' shares of ' + sym + ' but only ' + (held > 0 ? held : 0) + ' were held as of ' + fmtDateSG(item.date) + '.\n\nSave anyway?')) return;
+    }
+  }
+
+  // Transfer validation: needs a distinct source; cross-currency needs the
+  // received amount or the two sides won't reconcile.
+  if (table === 'cashTxns' && item.type === 'transfer'){
+    if (!item.fromAccountId){ showToast('Transfer needs a "From account"', 'error'); return; }
+    if (item.fromAccountId === item.cashAccountId){ showToast('Transfer source and destination must differ', 'error'); return; }
+    const fromAcct = (DB.cash || []).find(c => c.id === item.fromAccountId);
+    const toAcct   = (DB.cash || []).find(c => c.id === item.cashAccountId);
+    const fromCcy = fromAcct ? (fromAcct.currency || 'SGD') : 'SGD';
+    const toCcy   = toAcct ? (toAcct.currency || 'SGD') : 'SGD';
+    const hasIn = item.amountIn != null && isFinite(item.amountIn);
+    if (fromCcy !== toCcy && !hasIn){
+      if (!confirm(fromCcy + ' → ' + toCcy + ' transfer with no received amount. Both sides will use ' + fmt(toSGD(Number(item.amount)||0, fromCcy)) + ', which is wrong across currencies.\n\nEnter "Amount received" for an exact figure, or save anyway?')) return;
+    }
+  }
+
+  // Trade funded from a cash account in a different currency: flag, since we
+  // do not auto-convert the cash leg. Same-currency keeps the math exact.
+  if (table === 'stockTxns' && item.cashAccountId){
+    const stock = DB.stocks.find(s => s.id === item.stockId);
+    const acct  = (DB.cash || []).find(c => c.id === item.cashAccountId);
+    if (stock && acct){
+      const stockCcy = stock.currency || (stock.market === 'SGX' ? 'SGD' : 'USD');
+      const acctCcy  = acct.currency || 'SGD';
+      if (stockCcy !== acctCcy){
+        if (!confirm('This trade is in ' + stockCcy + ' but ' + (acct.name || 'the cash account') + ' holds ' + acctCcy + '. The cash leg will not be currency-converted, so the balance may be off.\n\nLink anyway?')) return;
+      }
+    }
+  }
+
+  // Defence-in-depth: ids must match the safe regex. Regenerate if not.
+  if (!kjrSafeId(item.id)) item.id = uid(table);
+
+  item.updatedAt = new Date().toISOString();
+  if (isNew) item.createdAt = item.updatedAt;
+
+  if (isNew){
+    if (!DB[table]) DB[table] = [];
+    DB[table].push(item);
+  } else {
+    const idx = DB[table].findIndex(x => x.id === item.id);
+    if (idx >= 0) DB[table][idx] = item;
+  }
+  saveData();
+  closeEntityModal();
+  renderAll();
+  showToast(isNew ? 'Added' : 'Saved', 'success');
+}
+
+function entityModalDelete(){
+  if (!_modalState || _modalState.isNew) return;
+  const { table, item } = _modalState;
+
+  // Referential-integrity guard: warn if deleting this would orphan movements
+  // or trades that point at it, which would unbalance the books.
+  let refWarning = '';
+  if (table === 'cash'){
+    const moves = (DB.cashTxns || []).filter(t => t.cashAccountId === item.id || t.fromAccountId === item.id).length;
+    const trades = (DB.stockTxns || []).filter(t => t.cashAccountId === item.id).length;
+    if (moves || trades){
+      const parts = [];
+      if (moves) parts.push(moves + ' cash movement' + (moves > 1 ? 's' : ''));
+      if (trades) parts.push(trades + ' linked trade' + (trades > 1 ? 's' : ''));
+      refWarning = 'This account is referenced by ' + parts.join(' and ') + '. Deleting it will leave those entries pointing at a missing account and unbalance the books.\n\n';
+    }
+  } else if (table === 'stocks'){
+    const trades = (DB.stockTxns || []).filter(t => t.stockId === item.id).length;
+    if (trades) refWarning = 'This stock has ' + trades + ' trade' + (trades > 1 ? 's' : '') + ' in the ledger that will be left orphaned.\n\n';
+  }
+
+  const prompt = refWarning + 'Move this entry to trash? You can restore it from Settings → Recently deleted.';
+  if (!confirm(prompt)) return;
+  sendToTrash(table, item.id);
+  closeEntityModal();
+  renderAll();
+  showToast('Moved to trash', 'success');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STOCK TRADE LEDGER — derive position from transactions
+   ═══════════════════════════════════════════════════════════════════════ */
+/* Average-cost method. Returns null when a stock has no logged trades, so
+   the caller falls back to the manually-entered shares/avgCost. Values are
+   in the stock's own currency (price/fees are entered in that currency). */
+function deriveStockPosition(stockId){
+  const txns = (DB.stockTxns || [])
+    .filter(t => t.stockId === stockId)
+    .sort((a,b) => String(a.date||'').localeCompare(String(b.date||'')));
+  if (!txns.length) return null;
+  let shares = 0, costBasis = 0, realisedPL = 0;
+  for (const t of txns){
+    const qty  = Math.abs(Number(t.shares) || 0);
+    const px   = Number(t.price) || 0;
+    const fees = Number(t.fees)  || 0;
+    if (t.side === 'sell'){
+      const avg = shares > 0 ? costBasis / shares : 0;
+      const sellQty = Math.min(qty, shares);
+      realisedPL += (px * sellQty - fees) - avg * sellQty;
+      costBasis  -= avg * sellQty;
+      shares     -= sellQty;
+    } else {
+      costBasis += px * qty + fees;
+      shares    += qty;
+    }
+  }
+  const avgCost = shares > 0 ? costBasis / shares : 0;
+  return { shares, avgCost, costBasis, realisedPL, txnCount: txns.length };
+}
+
+/* Shares held for a stock as of a date, ignoring one transaction (the one
+   being edited). Used to warn when a sell would exceed the holding. */
+function sharesHeldAsOf(stockId, asOfDate, excludeTxnId){
+  return (DB.stockTxns || [])
+    .filter(t => t.stockId === stockId && t.id !== excludeTxnId && String(t.date || '') <= String(asOfDate || ''))
+    .reduce((sh, t) => sh + (t.side === 'sell' ? -1 : 1) * Math.abs(Number(t.shares) || 0), 0);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STOCKS — render
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderStocks(){
+  setRenderCcy('stocks');
+  const list = DB.stocks || [];
+  const bodyEl = document.getElementById('stocks-body');
+  const sumEl  = document.getElementById('stocks-summary');
+  const fresh  = document.getElementById('freshness-stocks');
+  if (!bodyEl) return;
+
+  // Empty state
+  if (!list.length){
+    sumEl.innerHTML = '';
+    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">📈</div><div class="empty-title">No stocks yet</div><div class="empty-sub">Click <b>Add stock</b> to record your first position. SGX tickers are auto-suffixed with .SI for Yahoo Finance.</div></div></div></div>`;
+    if (fresh) fresh.textContent = 'No prices yet';
+    return;
+  }
+
+  // Compute rows. When a stock has logged trades, shares + avg cost are
+  // derived from the ledger; otherwise the manual entry is used.
+  let totCost = 0, totMv = 0, totRealised = 0, anyPriceMissing = false, anyFxMissing = false, anyPriced = false, anyDerived = false;
+  const rows = list.map(s => {
+    const ysym  = yahooSymbol(s);
+    const px    = DB._priceCache[ysym] || null;
+    const ccy   = s.currency || (s.market === 'SGX' ? 'SGD' : 'USD');
+    if (fxMissingFor(ccy)) anyFxMissing = true;
+    const derived = deriveStockPosition(s.id);
+    const shares  = derived ? derived.shares  : (s.shares  || 0);
+    const avgCost = derived ? derived.avgCost : (s.avgCost || 0);
+    if (derived){ anyDerived = true; totRealised += toSGD(derived.realisedPL, ccy); }
+    const cost  = toSGD(shares * avgCost, ccy);
+    let priceSgd = null, mv = null, pl = null, plPct = null, stale = true, priceCcy = null;
+    if (px && px.price != null){
+      anyPriced = true;
+      const pxCcy = px.currency || ccy;
+      if (fxMissingFor(pxCcy)) anyFxMissing = true;
+      priceSgd = toSGD(px.price, pxCcy);
+      mv  = priceSgd * shares;
+      pl  = mv - cost;
+      plPct = cost > 0 ? (pl/cost*100) : null;
+      stale = isStale(px.fetchedAt, 24);
+      priceCcy = pxCcy;
+    } else { anyPriceMissing = true; }
+    totCost += cost;
+    if (mv != null) totMv += mv;
+    return { s, ysym, px, ccy, cost, mv, pl, plPct, stale, priceCcy, priceSgd, shares, avgCost, derived };
+  });
+
+  const showPl = anyPriced && !anyPriceMissing;
+  const totPl = totMv - totCost;
+  const totPlPct = totCost > 0 ? (totPl/totCost*100) : null;
+  const mvSub = anyFxMissing ? 'FX missing — set rate in Settings'
+              : anyPriceMissing && anyPriced ? 'some prices missing — refresh'
+              : anyPriceMissing ? 'click Refresh prices to populate'
+              : '';
+
+  const summaryItems = [
+    { label:'Holdings',     value: String(list.length), accent:'accent' },
+    { label:'Total cost',   value: fmt(totCost), sub: anyFxMissing ? 'approximate (FX missing)' : '' },
+    { label:'Market value', value: anyPriced ? fmt(totMv) : '—', accent:'accent', sub: mvSub },
+    { label:'Unrealised P&L', value: showPl ? fmt(totPl) : '—',
+      sub: showPl && totPlPct != null ? fmtPct(totPlPct) : (anyPriceMissing ? 'refresh prices to compute' : ''),
+      accent: showPl ? (totPl >= 0 ? 'pos' : 'neg') : '' }
+  ];
+  const anySell = (DB.stockTxns || []).some(t => t.side === 'sell');
+  if (anyDerived && anySell){
+    summaryItems.push({ label:'Realised P&L', value: fmt(totRealised), sub:'from closed trades',
+      accent: totRealised >= 0 ? 'pos' : 'neg' });
+  }
+  sumEl.innerHTML = renderSummary(summaryItems);
+
+  const dc = displayCcy();
+  bodyEl.innerHTML = `
+    <div class="card"><div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <th class="tl">Symbol</th><th class="tl">Market</th><th>Shares</th><th>Avg cost</th>
+      <th>Price</th><th>Market value (${dc})</th><th>P&L (${dc})</th><th>P&L %</th><th>Updated</th><th></th>
+    </tr></thead><tbody>
+      ${rows.map(r => {
+        const plClass = r.pl == null ? '' : (r.pl >= 0 ? 'pos' : 'neg');
+        let extLine = '';
+        if (r.px && r.px.extendedKind && r.px.extendedPrice != null){
+          const extCls = (r.px.extendedChange || 0) >= 0 ? 'pos' : 'neg';
+          const label  = r.px.extendedKind === 'pre' ? 'Pre' : 'Post';
+          const pctTxt = r.px.extendedChangePct != null ? ' ' + fmtPct(r.px.extendedChangePct) : '';
+          extLine = `<div class="px-ext"><span class="px-ext-tag">${label}</span> ${fmt(toSGD(r.px.extendedPrice, r.priceCcy))}<span class="${extCls}">${pctTxt}</span></div>`;
+        }
+        const priceTxt = r.priceSgd != null
+          ? `${fmt(r.priceSgd)}${r.stale ? ' <span class="hint">(stale)</span>' : ''}${extLine}`
+          : '<span class="price-stale">—</span>';
+        const sharesTxt = r.derived
+          ? `${r.shares}<span class="hint" title="Derived from ${r.derived.txnCount} trade${r.derived.txnCount===1?'':'s'}"> ◆</span>`
+          : `${r.shares}`;
+        return `<tr>
+          <td class="tl cell-sym">${kjrEscape(r.s.symbol)}</td>
+          <td class="tl"><span class="tag ${r.s.market === 'SGX' ? 'sgx' : 'us'}">${kjrEscape(r.s.market)}</span></td>
+          <td class="num">${sharesTxt}</td>
+          <td class="num">${fmt(toSGD(r.avgCost, r.ccy))}</td>
+          <td class="num">${priceTxt}</td>
+          <td class="num">${r.mv != null ? fmt(r.mv) : '—'}</td>
+          <td class="num ${plClass}">${r.pl != null ? fmt(r.pl) : '—'}</td>
+          <td class="num ${plClass}">${r.plPct != null ? fmtPct(r.plPct) : '—'}</td>
+          <td class="num muted">${r.px && r.px.fetchedAt ? relTime(r.px.fetchedAt) : '—'}</td>
+          <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="stocks" data-edit-id="${kjrEscape(r.s.id)}">Edit</button></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div></div>
+  `;
+
+  // Freshness chip
+  if (fresh){
+    const txt = priceFreshnessText('stocks');
+    fresh.className = 'freshness' + (anyPriceMissing ? ' stale' : ' fresh');
+    fresh.textContent = txt;
+  }
+
+  renderStockTxns();
+}
+
+/* Trade ledger card — sits below the positions table. Lists every buy/sell
+   across all stocks; positions derive their shares + avg cost from these. */
+function renderStockTxns(){
+  setRenderCcy('stocks');
+  const el = document.getElementById('stocks-ledger');
+  if (!el) return;
+  const stocks = DB.stocks || [];
+  if (!stocks.length){ el.innerHTML = ''; return; } // no stocks → no ledger yet
+
+  const symbolOf = id => { const s = stocks.find(x => x.id === id); return s ? s.symbol : '—'; };
+  const ccyOf    = id => { const s = stocks.find(x => x.id === id); return s ? (s.currency || (s.market === 'SGX' ? 'SGD' : 'USD')) : 'SGD'; };
+  const txns = (DB.stockTxns || []).slice()
+    .sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
+
+  const head = `
+    <div class="card">
+      <div class="card-head">
+        <h3>Trade history</h3>
+        <button class="btn btn-primary btn-sm" onclick="openEntityModal('stockTxns')">＋ Add trade</button>
+      </div>`;
+
+  if (!txns.length){
+    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">🧾</div><div class="empty-title">No trades logged</div><div class="empty-sub">Log buys and sells here and the position above will track shares, average cost, and realised P&amp;L automatically. Without trades, the position uses the figures you typed in.</div></div></div></div>`;
+    return;
+  }
+
+  el.innerHTML = head + `
+    <div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <th class="tl">Date</th><th class="tl">Stock</th><th class="tl">Side</th><th>Shares</th><th>Price</th><th>Fees</th><th>Value</th><th class="tl">Notes</th><th></th>
+    </tr></thead><tbody>
+      ${txns.map(t => {
+        const ccy = ccyOf(t.stockId);
+        const qty = Number(t.shares) || 0;
+        const px  = Number(t.price) || 0;
+        const fees = Number(t.fees) || 0;
+        const gross = px * qty;
+        const value = t.side === 'sell' ? gross - fees : gross + fees;
+        const sideCls = t.side === 'sell' ? 'neg' : 'pos';
+        return `<tr>
+          <td class="tl">${fmtDateSG(t.date)}</td>
+          <td class="tl cell-sym">${kjrEscape(symbolOf(t.stockId))}</td>
+          <td class="tl"><span class="tag ${sideCls}">${t.side === 'sell' ? 'SELL' : 'BUY'}</span></td>
+          <td class="num">${qty}</td>
+          <td class="num">${fmt(toSGD(px, ccy))}</td>
+          <td class="num muted">${fees ? fmt(toSGD(fees, ccy)) : '—'}</td>
+          <td class="num">${fmt(toSGD(value, ccy))}</td>
+          <td class="tl muted">${kjrEscape(t.notes || '')}</td>
+          <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="stockTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div></div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CRYPTO — render
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderCrypto(){
+  setRenderCcy('crypto');
+  const list = DB.crypto || [];
+  const bodyEl = document.getElementById('crypto-body');
+  const sumEl  = document.getElementById('crypto-summary');
+  const fresh  = document.getElementById('freshness-crypto');
+  if (!bodyEl) return;
+
+  if (!list.length){
+    sumEl.innerHTML = '';
+    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">₿</div><div class="empty-title">No coins yet</div><div class="empty-sub">Click <b>Add coin</b> and enter a common ticker like BTC, ETH, SOL. Custom coins can use the CoinGecko id override.</div></div></div></div>`;
+    if (fresh) fresh.textContent = 'No prices yet';
+    return;
+  }
+
+  let totCost = 0, totMv = 0, anyPriceMissing = false, anyFxMissing = false, anyPriced = false;
+  const rows = list.map(c => {
+    const cid = coinIdFor(c.coingeckoId || c.symbol);
+    const px  = DB._priceCache[cid] || null;
+    const ccy = c.currency || 'USD';
+    if (fxMissingFor(ccy)) anyFxMissing = true;
+    const cost = toSGD((c.amount||0) * (c.avgCost||0), ccy);
+    let mv = null, pl = null, plPct = null, stale = true, priceSgd = null;
+    if (px && px.sgd != null){
+      anyPriced = true;
+      priceSgd = px.sgd; // CoinGecko prices come in SGD
+      mv = priceSgd * (c.amount || 0);
+      pl = mv - cost;
+      plPct = cost > 0 ? (pl/cost*100) : null;
+      stale = isStale(px.fetchedAt, 24);
+    } else { anyPriceMissing = true; }
+    totCost += cost;
+    if (mv != null) totMv += mv;
+    return { c, cid, px, ccy, cost, mv, pl, plPct, stale, priceSgd };
+  });
+
+  const showPl = anyPriced && !anyPriceMissing;
+  const totPl = totMv - totCost;
+  const totPlPct = totCost > 0 ? (totPl/totCost*100) : null;
+  const mvSub = anyFxMissing ? 'FX missing for cost basis'
+              : anyPriceMissing && anyPriced ? 'some prices missing — refresh'
+              : anyPriceMissing ? 'click Refresh prices to populate'
+              : '';
+
+  sumEl.innerHTML = renderSummary([
+    { label:'Coins',        value: String(list.length), accent:'accent' },
+    { label:'Total cost',   value: fmt(totCost), sub: anyFxMissing ? 'approximate (FX missing)' : '' },
+    { label:'Market value', value: anyPriced ? fmt(totMv) : '—', accent:'accent', sub: mvSub },
+    { label:'P&L',          value: showPl ? fmt(totPl) : '—',
+      sub: showPl && totPlPct != null ? fmtPct(totPlPct) : (anyPriceMissing ? 'refresh prices to compute' : ''),
+      accent: showPl ? (totPl >= 0 ? 'pos' : 'neg') : '' }
+  ]);
+
+  const dc = displayCcy();
+  bodyEl.innerHTML = `
+    <div class="card"><div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <th class="tl">Symbol</th><th class="tl">CoinGecko ID</th><th>Amount</th><th>Avg cost</th>
+      <th>Price (${dc})</th><th>24h</th><th>Market value (${dc})</th><th>P&L (${dc})</th><th>P&L %</th><th>Updated</th><th></th>
+    </tr></thead><tbody>
+      ${rows.map(r => {
+        const plClass = r.pl == null ? '' : (r.pl >= 0 ? 'pos' : 'neg');
+        const px = r.px;
+        const chg = px && px.change24h != null ? (px.change24h >= 0 ? 'pos' : 'neg') : '';
+        const priceTxt = r.priceSgd != null
+          ? `${fmt(r.priceSgd)}${r.stale ? ' <span class="hint">(stale)</span>' : ''}`
+          : '<span class="price-stale">—</span>';
+        return `<tr>
+          <td class="tl cell-sym"><span class="tag crypto">${kjrEscape(r.c.symbol)}</span></td>
+          <td class="tl muted">${kjrEscape(r.cid || '—')}</td>
+          <td class="num">${r.c.amount || 0}</td>
+          <td class="num">${r.c.avgCost ? fmt(toSGD(r.c.avgCost, r.ccy)) : '—'}</td>
+          <td class="num">${priceTxt}</td>
+          <td class="num ${chg}">${px && px.change24h != null ? fmtPct(px.change24h) : '—'}</td>
+          <td class="num">${r.mv != null ? fmt(r.mv) : '—'}</td>
+          <td class="num ${plClass}">${r.pl != null ? fmt(r.pl) : '—'}</td>
+          <td class="num ${plClass}">${r.plPct != null ? fmtPct(r.plPct) : '—'}</td>
+          <td class="num muted">${px && px.fetchedAt ? relTime(px.fetchedAt) : '—'}</td>
+          <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="crypto" data-edit-id="${kjrEscape(r.c.id)}">Edit</button></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div></div>
+  `;
+
+  if (fresh){
+    fresh.className = 'freshness' + (anyPriceMissing ? ' stale' : ' fresh');
+    fresh.textContent = priceFreshnessText('crypto');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   REAL ESTATE — render
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderRealestate(){
+  setRenderCcy('realestate');
+  const list = DB.realestate || [];
+  const bodyEl = document.getElementById('realestate-body');
+  const sumEl  = document.getElementById('realestate-summary');
+  if (!bodyEl) return;
+
+  if (!list.length){
+    sumEl.innerHTML = '';
+    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🏠</div><div class="empty-title">No properties yet</div><div class="empty-sub">Click <b>Add property</b> to record a current estimated value. Mortgage and rental cashflow come later.</div></div></div></div>`;
+    return;
+  }
+
+  const total = list.reduce((s,x) => s + Number(x.value || 0), 0);
+  sumEl.innerHTML = renderSummary([
+    { label:'Properties',  value: String(list.length), accent:'accent' },
+    { label:'Total value', value: fmt(total), accent:'accent' }
+  ]);
+
+  bodyEl.innerHTML = `
+    <div class="card"><div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <th class="tl">Name / address</th><th>Value (${displayCcy()})</th><th>Updated</th><th class="tl">Notes</th><th></th>
+    </tr></thead><tbody>
+      ${list.map(r => `<tr>
+        <td class="tl cell-sym">${kjrEscape(r.name)}</td>
+        <td class="num">${fmt(r.value)}</td>
+        <td class="num muted">${r.updatedAt ? fmtDateSG(r.updatedAt) : '—'}</td>
+        <td class="tl muted">${kjrEscape(r.notes || '')}</td>
+        <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="realestate" data-edit-id="${kjrEscape(r.id)}">Edit</button></td>
+      </tr>`).join('')}
+    </tbody></table></div></div>
+  `;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CASH — derived balances for brokerage accounts
+   ═══════════════════════════════════════════════════════════════════════ */
+function isBrokerageAcct(acct){ return acct && acct.account === 'Brokerage'; }
+
+/* Signed effect of a cash movement on the balance, in the account currency. */
+function cashMovementDelta(t){
+  const amt = Number(t.amount) || 0;
+  if (t.type === 'adjustment') return amt;                 // signed as entered
+  if (t.type === 'withdrawal' || t.type === 'fee') return -Math.abs(amt);
+  return Math.abs(amt);                                    // deposit/dividend/interest
+}
+
+/* Net cash effect of a linked stock trade on its funding account, in the
+   trade currency. Buys debit (incl. fees), sells credit (net of fees). */
+function cashTradeFlow(t){
+  const qty = Math.abs(Number(t.shares) || 0);
+  const px  = Number(t.price) || 0;
+  const fees = Number(t.fees) || 0;
+  return t.side === 'sell' ? (px * qty - fees) : -(px * qty + fees);
+}
+
+/* Amount credited to a transfer's destination account, in the destination
+   currency. Uses amountIn when given (cross-currency), else the out amount. */
+function transferInAmount(t){
+  const ai = (t.amountIn != null && t.amountIn !== '') ? Number(t.amountIn) : NaN;
+  return isFinite(ai) ? Math.abs(ai) : Math.abs(Number(t.amount) || 0);
+}
+
+/* Live balance of any cash account, in its own currency:
+   typed balance (opening) + movements + transfers in/out + linked trade
+   flows. A pure manual account with no activity just shows its typed amount. */
+function deriveCashBalance(acct){
+  let bal = Number(acct.amount) || 0;
+  (DB.cashTxns || []).forEach(t => {
+    if (t.type === 'transfer'){
+      if (t.fromAccountId === acct.id) bal -= Math.abs(Number(t.amount) || 0);
+      if (t.cashAccountId === acct.id) bal += transferInAmount(t);
+    } else if (t.cashAccountId === acct.id){
+      bal += cashMovementDelta(t);
+    }
+  });
+  (DB.stockTxns || []).forEach(t => { if (t.cashAccountId === acct.id) bal += cashTradeFlow(t); });
+  return bal;
+}
+
+/* Whether an account has any linked movements or trades (drives the ◆ mark). */
+function hasCashActivity(acct){
+  return (DB.cashTxns || []).some(t => t.cashAccountId === acct.id || t.fromAccountId === acct.id)
+      || (DB.stockTxns || []).some(t => t.cashAccountId === acct.id);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CASH — render
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderCash(){
+  setRenderCcy('cash');
+  const list = DB.cash || [];
+  const bodyEl = document.getElementById('cash-body');
+  const sumEl  = document.getElementById('cash-summary');
+  const fresh  = document.getElementById('freshness-fx');
+  if (!bodyEl) return;
+
+  if (fresh){
+    const hasUsd = list.some(c => (c.currency || 'SGD') !== 'SGD');
+    const hasOverride = !!DB.settings.fxOverrides.USDSGD;
+    const hasRate = !!DB.settings.fxRates.USDSGD;
+    fresh.className = 'freshness' + (hasUsd && !hasRate && !hasOverride ? ' stale' : (hasRate || hasOverride ? ' fresh' : ''));
+    fresh.textContent = fxFreshnessText();
+  }
+
+  if (!list.length){
+    sumEl.innerHTML = '';
+    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">💵</div><div class="empty-title">No cash accounts yet</div><div class="empty-sub">Click <b>Add account</b> to log a bank balance, fixed deposit, or foreign currency holding. Foreign balances convert to SGD using FX from Settings.</div></div></div></div>`;
+    return;
+  }
+
+  let totSgd = 0, fxMissing = false;
+  const rows = list.map(c => {
+    const ccy = c.currency || 'SGD';
+    const bal = deriveCashBalance(c);          // native-currency balance
+    const sgd = toSGD(bal, ccy);
+    if (fxMissingFor(ccy)) fxMissing = true;
+    totSgd += sgd;
+    return { c, ccy, sgd, bal, derived: hasCashActivity(c) };
+  });
+
+  // Currency breakdown
+  const byCcy = {};
+  rows.forEach(r => { byCcy[r.ccy] = (byCcy[r.ccy] || 0) + r.bal; });
+  const ccyChips = Object.entries(byCcy).map(([k,v]) => `<span class="tag" style="margin-right:6px">${kjrEscape(k)} ${v.toLocaleString('en-SG', {maximumFractionDigits:2})}</span>`).join('');
+
+  sumEl.innerHTML = renderSummary([
+    { label:'Accounts',     value: String(list.length), accent:'accent' },
+    { label:'Total (' + displayCcy() + ')',  value: fmt(totSgd), accent:'accent', sub: fxMissing ? 'FX missing for some — set in Settings or refresh' : '' },
+    { label:'By currency',  value: '', sub: ccyChips || '—' }
+  ]);
+
+  bodyEl.innerHTML = `
+    <div class="card"><div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <th class="tl">Account</th><th class="tl">Type</th><th>Balance</th><th>Currency</th><th>${displayCcy()} value</th><th class="tl">Notes</th><th></th>
+    </tr></thead><tbody>
+      ${rows.map(r => `<tr>
+        <td class="tl cell-sym">${kjrEscape(r.c.name)}</td>
+        <td class="tl"><span class="tag">${kjrEscape(r.c.account || '—')}</span></td>
+        <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${r.bal.toLocaleString('en-SG', {maximumFractionDigits:2})}${r.derived ? '<span class="hint" title="Calculated from movements + linked trades"> ◆</span>' : ''}</td>
+        <td class="num">${kjrEscape(r.ccy)}</td>
+        <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${fmt(r.sgd)}</td>
+        <td class="tl muted">${kjrEscape(r.c.notes || '')}</td>
+        <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cash" data-edit-id="${kjrEscape(r.c.id)}">Edit</button></td>
+      </tr>`).join('')}
+    </tbody></table></div></div>
+  `;
+
+  renderCashTxns();
+}
+
+/* Cash movements ledger — deposits, withdrawals, dividends, interest, fees.
+   Sits below the cash table. Brokerage balances derive from these plus any
+   linked stock trades. */
+function renderCashTxns(){
+  setRenderCcy('cash');
+  const el = document.getElementById('cash-ledger');
+  if (!el) return;
+  const accts = DB.cash || [];
+  if (!accts.length){ el.innerHTML = ''; return; }
+
+  const nameOf = id => { const a = accts.find(x => x.id === id); return a ? a.name : '—'; };
+  const ccyOf  = id => { const a = accts.find(x => x.id === id); return a ? (a.currency || 'SGD') : 'SGD'; };
+  const txns = (DB.cashTxns || []).slice().sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
+
+  const head = `<div class="card">
+      <div class="card-head"><h3>Cash movements</h3>
+        <button class="btn btn-primary btn-sm" onclick="openEntityModal('cashTxns')">＋ Add movement</button>
+      </div>`;
+
+  const TYPE_LABEL = { deposit:'Deposit', withdrawal:'Withdrawal', transfer:'Transfer', dividend:'Dividend', interest:'Interest', fee:'Fee', adjustment:'Adjustment' };
+
+  if (!txns.length){
+    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">🧾</div><div class="empty-title">No cash movements</div><div class="empty-sub">Log deposits, withdrawals, transfers, dividends, and interest here. Account balances are calculated from these plus any trades funded from them.</div></div></div></div>`;
+    return;
+  }
+
+  el.innerHTML = head + `
+    <div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <th class="tl">Date</th><th class="tl">Account</th><th class="tl">Type</th><th>Amount</th><th class="tl">Notes</th><th></th>
+    </tr></thead><tbody>
+      ${txns.map(t => {
+        if (t.type === 'transfer'){
+          const outCcy = ccyOf(t.fromAccountId), inCcy = ccyOf(t.cashAccountId);
+          const outAmt = Math.abs(Number(t.amount) || 0), inAmt = transferInAmount(t);
+          const sameCcy = outCcy === inCcy && outAmt === inAmt;
+          // Transfers show native amounts (not the display currency) so the
+          // FX leg is visible, e.g. S$27,000 → US$20,000.
+          const amtTxt = sameCcy
+            ? fmt(outAmt, { currency: outCcy })
+            : `${fmt(outAmt, { currency: outCcy })} → ${fmt(inAmt, { currency: inCcy })}`;
+          return `<tr>
+            <td class="tl">${fmtDateSG(t.date)}</td>
+            <td class="tl cell-sym">${kjrEscape(nameOf(t.fromAccountId))} → ${kjrEscape(nameOf(t.cashAccountId))}</td>
+            <td class="tl"><span class="tag">Transfer</span></td>
+            <td class="num">${amtTxt}</td>
+            <td class="tl muted">${kjrEscape(t.notes || '')}</td>
+            <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cashTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
+          </tr>`;
+        }
+        const ccy = ccyOf(t.cashAccountId);
+        const delta = cashMovementDelta(t);
+        const cls = delta >= 0 ? 'pos' : 'neg';
+        return `<tr>
+          <td class="tl">${fmtDateSG(t.date)}</td>
+          <td class="tl cell-sym">${kjrEscape(nameOf(t.cashAccountId))}</td>
+          <td class="tl"><span class="tag ${delta >= 0 ? 'pos' : 'neg'}">${kjrEscape(TYPE_LABEL[t.type] || t.type)}</span></td>
+          <td class="num ${cls}">${fmt(toSGD(delta, ccy))}</td>
+          <td class="tl muted">${kjrEscape(t.notes || '')}</td>
+          <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cashTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div></div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CPF — balances editor + transaction history
+   ═══════════════════════════════════════════════════════════════════════ */
+const CPF_ACCOUNTS = ['OA','SA','MA','RA'];
+
+function cpfComputedFromHistory(){
+  const out = { OA:0, SA:0, MA:0, RA:0 };
+  (DB.cpfHistory || []).forEach(h => {
+    const a = h.account;
+    if (out[a] != null) out[a] += Number(h.amount) || 0;
+  });
+  return out;
+}
+
+function saveCpfBalancesFromForm(){
+  const numOrNull = (id) => {
+    const v = document.getElementById(id).value;
+    if (v === '' || v == null) return null;
+    const n = Number(v); return isNaN(n) ? null : n;
+  };
+  DB.cpfBalances.OA = numOrNull('cpf-bal-OA') ?? 0;
+  DB.cpfBalances.SA = numOrNull('cpf-bal-SA') ?? 0;
+  DB.cpfBalances.MA = numOrNull('cpf-bal-MA') ?? 0;
+  DB.cpfBalances.RA = numOrNull('cpf-bal-RA') ?? 0;
+  DB.cpfBalances.updatedAt = new Date().toISOString();
+  saveData();
+  renderCpf();
+  showToast('Balances saved', 'success');
+}
+
+function recomputeCpfFromHistory(){
+  if (!DB.cpfHistory || !DB.cpfHistory.length){
+    showToast('No history to recompute from', 'error');
+    return;
+  }
+  setRenderCcy('cpf');
+  const computed = cpfComputedFromHistory();
+  if (!confirm('Overwrite current balances with totals computed from history?\n\nOA: ' + fmt(computed.OA) + '\nSA: ' + fmt(computed.SA) + '\nMA: ' + fmt(computed.MA) + '\nRA: ' + fmt(computed.RA))) return;
+  Object.assign(DB.cpfBalances, computed, { updatedAt: new Date().toISOString() });
+  saveData();
+  renderCpf();
+  showToast('Balances recomputed from history', 'success');
+}
+
+function loadCpfBalancesForm(){
+  const b = DB.cpfBalances || {};
+  CPF_ACCOUNTS.forEach(a => {
+    const el = document.getElementById('cpf-bal-' + a);
+    if (el) el.value = b[a] != null ? b[a] : '';
+  });
+}
+
+function renderCpf(){
+  setRenderCcy('cpf');
+  const balsEl = document.getElementById('cpf-balances');
+  const histEl = document.getElementById('cpf-history-body');
+  const metaEl = document.getElementById('cpf-balances-meta');
+  if (!balsEl || !histEl) return;
+
+  const bals = DB.cpfBalances || { OA:0, SA:0, MA:0, RA:0 };
+  const total = (bals.OA||0) + (bals.SA||0) + (bals.MA||0) + (bals.RA||0);
+  const computed = cpfComputedFromHistory();
+  const computedTotal = computed.OA + computed.SA + computed.MA + computed.RA;
+  const drift = Math.abs(total - computedTotal);
+  const hasHistory = (DB.cpfHistory || []).length > 0;
+
+  // KPI row
+  balsEl.innerHTML = `<div class="metrics">
+    <div class="metric"><div class="metric-label">Total CPF</div><div class="metric-value">${fmt(total)}</div>${hasHistory ? `<div class="metric-sub${drift > 1 ? ' neg' : ''}">${drift > 1 ? '⚠ History total: ' + fmt(computedTotal) : 'History reconciles ✓'}</div>` : ''}</div>
+    <div class="metric"><div class="metric-label">OA · ${DB.settings.cpfRates.OA}%</div><div class="metric-value">${fmt(bals.OA||0)}</div></div>
+    <div class="metric"><div class="metric-label">SA · ${DB.settings.cpfRates.SA}%</div><div class="metric-value">${fmt(bals.SA||0)}</div></div>
+    <div class="metric"><div class="metric-label">MA · ${DB.settings.cpfRates.MA}%</div><div class="metric-value">${fmt(bals.MA||0)}</div></div>
+    <div class="metric"><div class="metric-label">RA · ${DB.settings.cpfRates.RA}%</div><div class="metric-value">${fmt(bals.RA||0)}</div></div>
+  </div>`;
+
+  if (metaEl) metaEl.textContent = bals.updatedAt ? 'Last updated ' + relTime(bals.updatedAt) : 'Not set yet';
+
+  loadCpfBalancesForm();
+
+  // History
+  const all = (DB.cpfHistory || []).slice();
+  // Year dropdown — derive from data, default to current year if available
+  const years = Array.from(new Set(all.map(h => String(h.date || '').slice(0,4)).filter(Boolean))).sort().reverse();
+  const yrSel = document.getElementById('cpf-filter-year');
+  if (yrSel){
+    const prev = yrSel.value;
+    yrSel.innerHTML = '<option value="">All years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
+    if (prev && years.includes(prev)) yrSel.value = prev;
+  }
+  const fYear = (yrSel && yrSel.value) || '';
+  const fType = document.getElementById('cpf-filter-type')?.value || '';
+  const fAcc  = document.getElementById('cpf-filter-account')?.value || '';
+  const filtered = all.filter(h => {
+    if (fYear && String(h.date || '').slice(0,4) !== fYear) return false;
+    if (fType && h.type !== fType) return false;
+    if (fAcc  && h.account !== fAcc) return false;
+    return true;
+  }).sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
+
+  if (!all.length){
+    histEl.innerHTML = `<div class="empty"><div class="empty-icon">📜</div><div class="empty-title">No history yet</div><div class="empty-sub">Click <b>Add entry</b> to log contributions and interest credits from your CPF statement. Use negative amounts for withdrawals.</div></div>`;
+    return;
+  }
+  if (!filtered.length){
+    histEl.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">No entries match the filters</div><div class="empty-sub">Adjust the year, type, or account filters above.</div></div>`;
+    return;
+  }
+
+  // Subtotals on filtered set
+  const subBy = { OA:0, SA:0, MA:0, RA:0 };
+  filtered.forEach(h => { if (subBy[h.account] != null) subBy[h.account] += Number(h.amount) || 0; });
+  const subTotal = subBy.OA + subBy.SA + subBy.MA + subBy.RA;
+
+  histEl.innerHTML = `
+    <div class="h-summary" style="margin-bottom:14px">
+      <div class="h-summary-item accent"><div class="h-summary-label">Entries</div><div class="h-summary-value">${filtered.length}</div></div>
+      <div class="h-summary-item ${subTotal >= 0 ? 'pos':'neg'}"><div class="h-summary-label">Filtered net</div><div class="h-summary-value">${fmt(subTotal)}</div></div>
+      <div class="h-summary-item"><div class="h-summary-label">OA</div><div class="h-summary-value">${fmt(subBy.OA)}</div></div>
+      <div class="h-summary-item"><div class="h-summary-label">SA</div><div class="h-summary-value">${fmt(subBy.SA)}</div></div>
+      <div class="h-summary-item"><div class="h-summary-label">MA</div><div class="h-summary-value">${fmt(subBy.MA)}</div></div>
+      <div class="h-summary-item"><div class="h-summary-label">RA</div><div class="h-summary-value">${fmt(subBy.RA)}</div></div>
+    </div>
+    <div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <th class="tl">Date</th><th class="tl">Type</th><th class="tl">Account</th><th>Amount</th><th class="tl">Source</th><th class="tl">Notes</th><th></th>
+    </tr></thead><tbody>
+      ${filtered.map(h => {
+        const cls = (Number(h.amount) || 0) >= 0 ? 'pos' : 'neg';
+        return `<tr>
+          <td class="tl">${fmtDateSG(h.date)}</td>
+          <td class="tl"><span class="tag ${cpfTypeColour(h.type)}">${kjrEscape(h.type)}</span></td>
+          <td class="tl"><span class="tag">${kjrEscape(h.account)}</span></td>
+          <td class="num ${cls}">${fmt(Number(h.amount) || 0)}</td>
+          <td class="tl muted">${kjrEscape(h.source || '')}</td>
+          <td class="tl muted">${kjrEscape(h.notes || '')}</td>
+          <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cpfHistory" data-edit-id="${kjrEscape(h.id)}">Edit</button></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div>
+  `;
+}
+
+function cpfTypeColour(t){
+  if (t === 'contribution') return 'us';      // accent (teal)
+  if (t === 'interest')     return 'crypto';  // amber
+  if (t === 'transfer')     return 'sgx';     // blue
+  if (t === 'withdrawal')   return '';        // neutral
+  return '';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CASHFLOW — income + expenses + monthly roll-up
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function _ymOf(date){ return String(date || '').slice(0, 7); }   // YYYY-MM
+function _ymLabel(ym){
+  // "2026-03" → "Mar 2026" (en-SG)
+  if (!/^\d{4}-\d{2}$/.test(ym)) return ym;
+  const [y,m] = ym.split('-');
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return monthNames[Number(m)-1] + ' ' + y;
+}
+
+function expenseAmountSgd(x){
+  return toSGD(Number(x.amount) || 0, x.currency || 'SGD');
+}
+
+function renderCashflow(){
+  setRenderCcy('cashflow');
+  const rollupEl  = document.getElementById('cf-rollup-body');
+  const incomeEl  = document.getElementById('cf-income-body');
+  const expenseEl = document.getElementById('cf-expense-body');
+  if (!rollupEl || !incomeEl || !expenseEl) return;
+
+  const allIncome   = DB.income   || [];
+  const allExpenses = DB.expenses || [];
+
+  // Year filter — derived from union of incomes + expenses, defaults to all
+  const yrSel = document.getElementById('cf-filter-year');
+  const years = Array.from(new Set([...allIncome, ...allExpenses].map(r => String(r.date || '').slice(0,4)).filter(Boolean))).sort().reverse();
+  if (yrSel){
+    const prev = yrSel.value;
+    yrSel.innerHTML = '<option value="">All years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
+    if (prev && years.includes(prev)) yrSel.value = prev;
+  }
+  const fYear = yrSel?.value || '';
+
+  // Category filter — derived from DB.categories.expense + values actually used
+  const catSel = document.getElementById('cf-filter-category');
+  if (catSel){
+    const prev = catSel.value;
+    const usedCats = Array.from(new Set([
+      ...(DB.categories?.expense || []),
+      ...allExpenses.map(x => x.category).filter(Boolean)
+    ]));
+    catSel.innerHTML = '<option value="">All categories</option>' + usedCats.map(c => `<option value="${kjrEscape(c)}">${kjrEscape(c)}</option>`).join('');
+    if (prev && usedCats.includes(prev)) catSel.value = prev;
+  }
+  const fCat = catSel?.value || '';
+
+  const income   = allIncome.filter(r => !fYear || String(r.date || '').startsWith(fYear));
+  const expenses = allExpenses.filter(r => (!fYear || String(r.date || '').startsWith(fYear)) && (!fCat || r.category === fCat));
+
+  // ─── KPI summary (top of page) ──────────────────────────────────────
+  const totGross = income.reduce((s,i) => s + (Number(i.gross) || 0), 0);
+  const totNet   = income.reduce((s,i) => s + (Number(i.net) || Number(i.gross) || 0), 0);
+  const totExp   = expenses.reduce((s,x) => s + expenseAmountSgd(x), 0);
+  const savings  = totNet - totExp;
+  const savingsRate = totNet > 0 ? (savings / totNet * 100) : null;
+  const sumEl = document.getElementById('cf-summary');
+  if (sumEl){
+    sumEl.innerHTML = renderSummary([
+      { label: fYear ? 'Income ' + fYear : 'Income (all years)',  value: fmt(totNet),  accent:'pos', sub: 'gross ' + fmt(totGross) },
+      { label: fYear ? 'Expenses ' + fYear : 'Expenses (all years)', value: fmt(totExp), accent:'neg', sub: expenses.length + ' txns' },
+      { label: 'Net savings', value: fmt(savings), accent: savings >= 0 ? 'pos' : 'neg' },
+      { label: 'Savings rate', value: savingsRate != null ? fmtPct(savingsRate) : '—', accent: savingsRate != null && savingsRate >= 0 ? 'pos' : 'neg', sub: 'of take-home' }
+    ]);
+  }
+
+  // ─── Monthly roll-up table ──────────────────────────────────────────
+  const ymSet = new Set();
+  income.forEach(i => { const ym = _ymOf(i.date); if (ym) ymSet.add(ym); });
+  expenses.forEach(x => { const ym = _ymOf(x.date); if (ym) ymSet.add(ym); });
+  const months = Array.from(ymSet).sort().reverse();
+
+  if (!months.length){
+    rollupEl.innerHTML = `<div class="empty"><div class="empty-icon">📅</div><div class="empty-title">No P&L data yet</div><div class="empty-sub">Add an income entry and a few expenses to see your monthly net and savings rate.</div></div>`;
+  } else {
+    rollupEl.innerHTML = `<div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <th class="tl">Month</th><th>Income (net)</th><th>Income (gross)</th><th>Expenses</th><th>Net</th><th>Savings rate</th><th>Txns</th>
+    </tr></thead><tbody>${months.map(ym => {
+      const mIn = income.filter(i => _ymOf(i.date) === ym);
+      const mEx = expenses.filter(x => _ymOf(x.date) === ym);
+      const gross = mIn.reduce((s,i) => s + (Number(i.gross) || 0), 0);
+      const net   = mIn.reduce((s,i) => s + (Number(i.net) || Number(i.gross) || 0), 0);
+      const exp   = mEx.reduce((s,x) => s + expenseAmountSgd(x), 0);
+      const ne    = net - exp;
+      const rate  = net > 0 ? (ne / net * 100) : null;
+      const cls   = ne >= 0 ? 'pos' : 'neg';
+      return `<tr>
+        <td class="tl cell-sym">${_ymLabel(ym)}</td>
+        <td class="num">${fmt(net)}</td>
+        <td class="num muted">${fmt(gross)}</td>
+        <td class="num">${fmt(exp)}</td>
+        <td class="num ${cls}">${fmt(ne)}</td>
+        <td class="num ${cls}">${rate != null ? fmtPct(rate) : '—'}</td>
+        <td class="num muted">${mEx.length}</td>
+      </tr>`;
+    }).join('')}</tbody></table></div>`;
+  }
+
+  const rollupMeta = document.getElementById('cf-rollup-meta');
+  if (rollupMeta) rollupMeta.textContent = months.length + ' month' + (months.length === 1 ? '' : 's');
+
+  // ─── Income table ───────────────────────────────────────────────────
+  const incomeMeta = document.getElementById('cf-income-meta');
+  if (incomeMeta) incomeMeta.textContent = income.length + ' entr' + (income.length === 1 ? 'y' : 'ies') + ' · ' + fmt(totNet) + ' take-home';
+  if (!income.length){
+    incomeEl.innerHTML = `<div class="empty"><div class="empty-icon">💰</div><div class="empty-title">No income yet</div><div class="empty-sub">Click <b>＋ Add income</b> to log a salary, bonus, or other inflow.</div></div>`;
+  } else {
+    const sortedIn = income.slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
+    incomeEl.innerHTML = `<div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <th class="tl">Date</th><th>Gross</th><th>Take-home</th><th>Employer CPF</th><th>Employee CPF</th><th class="tl">Source</th><th class="tl">Notes</th><th></th>
+    </tr></thead><tbody>${sortedIn.map(i => `<tr>
+      <td class="tl">${fmtDateSG(i.date)}</td>
+      <td class="num">${fmt(Number(i.gross) || 0)}</td>
+      <td class="num pos">${fmt(Number(i.net) || Number(i.gross) || 0)}</td>
+      <td class="num muted">${i.employerCPF ? fmt(Number(i.employerCPF)) : '—'}</td>
+      <td class="num muted">${i.employeeCPF ? fmt(Number(i.employeeCPF)) : '—'}</td>
+      <td class="tl">${kjrEscape(i.source || '')}</td>
+      <td class="tl muted">${kjrEscape(i.notes || '')}</td>
+      <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="income" data-edit-id="${kjrEscape(i.id)}">Edit</button></td>
+    </tr>`).join('')}</tbody></table></div>`;
+  }
+
+  // ─── Expense table ──────────────────────────────────────────────────
+  const expenseMeta = document.getElementById('cf-expense-meta');
+  if (expenseMeta) expenseMeta.textContent = expenses.length + ' txn' + (expenses.length === 1 ? '' : 's') + ' · ' + fmt(totExp);
+  if (!expenses.length){
+    expenseEl.innerHTML = `<div class="empty"><div class="empty-icon">🧾</div><div class="empty-title">No expenses yet</div><div class="empty-sub">Click <b>＋ Add expense</b> to log a transaction.</div></div>`;
+  } else {
+    const sortedEx = expenses.slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
+    expenseEl.innerHTML = `<div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <th class="tl">Date</th><th>Amount</th><th>Currency</th><th>SGD</th><th class="tl">Category</th><th class="tl">Sub-category</th><th class="tl">Merchant</th><th class="tl">Notes</th><th></th>
+    </tr></thead><tbody>${sortedEx.map(x => `<tr>
+      <td class="tl">${fmtDateSG(x.date)}</td>
+      <td class="num">${Number(x.amount || 0).toLocaleString('en-SG', {maximumFractionDigits:2})}</td>
+      <td class="num">${kjrEscape(x.currency || 'SGD')}</td>
+      <td class="num neg">${fmt(expenseAmountSgd(x))}</td>
+      <td class="tl"><span class="tag">${kjrEscape(x.category || 'Other')}</span></td>
+      <td class="tl muted">${kjrEscape(x.subcategory || '')}</td>
+      <td class="tl muted">${kjrEscape(x.merchant || '')}</td>
+      <td class="tl muted">${kjrEscape(x.notes || '')}</td>
+      <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="expenses" data-edit-id="${kjrEscape(x.id)}">Edit</button></td>
+    </tr>`).join('')}</tbody></table></div>`;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SUMMARY ROW helper
+   ═══════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════
+   DASHBOARD — net worth, allocation, cashflow. All computed in SGD, then
+   fmt() converts to the dashboard tab's display currency.
+   ═══════════════════════════════════════════════════════════════════════ */
+function _stockMvSGD(){
+  let mv = 0;
+  (DB.stocks || []).forEach(s => {
+    const ccy = s.currency || (s.market === 'SGX' ? 'SGD' : 'USD');
+    const derived = deriveStockPosition(s.id);
+    const shares  = derived ? derived.shares  : (s.shares  || 0);
+    const avgCost = derived ? derived.avgCost : (s.avgCost || 0);
+    const px = DB._priceCache[yahooSymbol(s)];
+    if (px && px.price != null) mv += toSGD(px.price * shares, px.currency || ccy);
+    else mv += toSGD(shares * avgCost, ccy); // fall back to cost basis
+  });
+  return mv;
+}
+function _cashSGD(){ return (DB.cash || []).reduce((s,c) => s + toSGD(Number(c.amount)||0, c.currency || 'SGD'), 0); }
+function _cpfSGD(){
+  const b = DB.cpfBalances || {};
+  const sum = (Number(b.OA)||0)+(Number(b.SA)||0)+(Number(b.MA)||0)+(Number(b.RA)||0);
+  if (sum > 0) return sum;
+  const c = cpfComputedFromHistory(); return c.OA + c.SA + c.MA + c.RA;
+}
+function _realestateSGD(){ return (DB.realestate || []).reduce((s,r) => s + (Number(r.value)||0), 0); }
+function _cryptoSGD(){
+  let mv = 0;
+  (DB.crypto || []).forEach(c => {
+    const px = DB._priceCache[coinIdFor(c.coingeckoId || c.symbol)];
+    if (px && px.sgd != null) mv += px.sgd * (Number(c.amount)||0);
+    else mv += toSGD((Number(c.amount)||0) * (Number(c.avgCost)||0), c.currency || 'USD');
+  });
+  return mv;
+}
+
+function _cssVar(name){ return (getComputedStyle(document.documentElement).getPropertyValue(name) || '').trim() || '#888'; }
+
+/* ─── Money integrity / reconciliation ─────────────────────────────────
+   Surfaces places where double-entry is incomplete so no money silently
+   appears or disappears: trades not funded from cash, negative balances
+   (a missing deposit/transfer), and orphaned references to deleted records. */
+function runReconciliation(){
+  const issues = [];
+  const cashIds  = new Set((DB.cash   || []).map(c => c.id));
+  const stockIds = new Set((DB.stocks || []).map(s => s.id));
+
+  const unlinked = (DB.stockTxns || []).filter(t => !t.cashAccountId);
+  if (unlinked.length) issues.push({ level:'warn',
+    msg: unlinked.length + ' stock trade' + (unlinked.length > 1 ? 's are' : ' is') + ' not funded from a cash account, so the matching cash movement is not tracked.' });
+
+  let orphanCash = 0;
+  (DB.cashTxns || []).forEach(t => {
+    if (t.cashAccountId && !cashIds.has(t.cashAccountId)) orphanCash++;
+    else if (t.type === 'transfer' && t.fromAccountId && !cashIds.has(t.fromAccountId)) orphanCash++;
+  });
+  if (orphanCash) issues.push({ level:'error',
+    msg: orphanCash + ' cash movement' + (orphanCash > 1 ? 's reference' : ' references') + ' a deleted account.' });
+
+  let orphanTrade = 0;
+  (DB.stockTxns || []).forEach(t => {
+    if (t.stockId && !stockIds.has(t.stockId)) orphanTrade++;
+    else if (t.cashAccountId && !cashIds.has(t.cashAccountId)) orphanTrade++;
+  });
+  if (orphanTrade) issues.push({ level:'error',
+    msg: orphanTrade + ' trade' + (orphanTrade > 1 ? 's reference' : ' references') + ' a deleted stock or cash account.' });
+
+  (DB.cash || []).forEach(c => {
+    const bal = deriveCashBalance(c);
+    if (bal < -0.005) issues.push({ level:'warn',
+      msg: (c.name || 'A cash account') + ' is negative (' + fmt(toSGD(bal, c.currency || 'SGD')) + '), so a deposit or transfer in is probably missing.' });
+  });
+
+  return { ok: issues.length === 0, issues };
+}
+
+/* Last n 'YYYY-MM' months ending with the current month. */
+function _recentMonths(n){
+  const out = [];
+  const d = new Date();
+  for (let i = n - 1; i >= 0; i--){
+    const dd = new Date(d.getFullYear(), d.getMonth() - i, 1);
+    out.push(dd.getFullYear() + '-' + String(dd.getMonth() + 1).padStart(2, '0'));
+  }
+  return out;
+}
+
+let _allocChart = null, _cfChart = null;
+
+function renderDashboard(){
+  setRenderCcy('dashboard');
+  const nwEl = document.getElementById('dash-networth');
+  if (!nwEl) return;
+
+  const classes = [
+    { key:'Stocks',      val:_stockMvSGD(),     color:'--accent' },
+    { key:'Cash',        val:_cashSGD(),        color:'--blue'   },
+    { key:'CPF',         val:_cpfSGD(),         color:'--green'  },
+    { key:'Real Estate', val:_realestateSGD(),  color:'--amber'  }
+  ];
+  const crypto = _cryptoSGD();
+  if (crypto > 0) classes.push({ key:'Crypto', val:crypto, color:'--accent2' });
+  const net = classes.reduce((s,c) => s + c.val, 0);
+
+  // Net worth hero
+  nwEl.innerHTML = `<div class="dash-hero">
+    <div><div class="dash-hero-label">Total net worth</div><div class="dash-hero-value">${fmt(net)}</div></div>
+    <div class="dash-hero-sub">${classes.filter(c => c.val > 0).length} asset class${classes.filter(c => c.val > 0).length === 1 ? '' : 'es'} · as of ${fmtDateSG(new Date())}</div>
+  </div>`;
+
+  // Data integrity / reconciliation
+  const intEl = document.getElementById('dash-integrity');
+  if (intEl){
+    const rec = runReconciliation();
+    if (rec.ok){
+      intEl.innerHTML = `<div class="integrity-bar ok">✓ Books balanced — every movement is accounted for.</div>`;
+    } else {
+      intEl.innerHTML = `<div class="integrity-bar bad">
+        <div class="integrity-title">⚠ ${rec.issues.length} thing${rec.issues.length > 1 ? 's' : ''} to check</div>
+        <ul class="integrity-list">${rec.issues.map(i => `<li class="${i.level}">${kjrEscape(i.msg)}</li>`).join('')}</ul>
+      </div>`;
+    }
+  }
+
+  // Asset-class KPI row
+  const assetsEl = document.getElementById('dash-assets');
+  if (assetsEl){
+    if (net <= 0){
+      assetsEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">📊</div><div class="empty-title">No holdings yet</div><div class="empty-sub">Add stocks, cash, CPF, or property and your net worth and allocation appear here.</div></div></div></div>`;
+    } else {
+      assetsEl.innerHTML = renderSummary(classes.map(c => ({
+        label: c.key,
+        value: fmt(c.val),
+        sub: net > 0 ? (c.val / net * 100).toFixed(1) + '% of net worth' : '',
+        accent: c.val > 0 ? 'accent' : ''
+      })));
+    }
+  }
+
+  // CPF breakdown
+  const cpfEl = document.getElementById('dash-cpf');
+  if (cpfEl){
+    const b = DB.cpfBalances || {};
+    const fromHist = ((Number(b.OA)||0)+(Number(b.SA)||0)+(Number(b.MA)||0)+(Number(b.RA)||0)) <= 0;
+    const bal = fromHist ? cpfComputedFromHistory() : b;
+    const cpfTotal = (Number(bal.OA)||0)+(Number(bal.SA)||0)+(Number(bal.MA)||0)+(Number(bal.RA)||0);
+    if (cpfTotal > 0){
+      cpfEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head"><h3>CPF breakdown</h3><span class="hint">${fromHist ? 'computed from history' : 'from saved balances'}</span></div><div class="card-body">` +
+        renderSummary([
+          { label:'OA', value: fmt(Number(bal.OA)||0), accent:'accent' },
+          { label:'SA', value: fmt(Number(bal.SA)||0) },
+          { label:'MA', value: fmt(Number(bal.MA)||0) },
+          { label:'RA', value: fmt(Number(bal.RA)||0) }
+        ]) + `</div></div>`;
+    } else {
+      cpfEl.innerHTML = '';
+    }
+  }
+
+  // Charts only when the tab is visible (Chart.js needs a sized canvas).
+  const visible = document.getElementById('page-dashboard').classList.contains('active');
+  if (visible && typeof Chart !== 'undefined'){
+    drawAllocationChart(classes.filter(c => c.val > 0), net);
+    drawCashflowChart();
+  }
+}
+
+function drawAllocationChart(classes, net){
+  const ctx = document.getElementById('dash-alloc-chart');
+  const meta = document.getElementById('dash-alloc-meta');
+  if (!ctx) return;
+  if (_allocChart){ _allocChart.destroy(); _allocChart = null; }
+  if (!classes.length){ if (meta) meta.textContent = 'no data'; return; }
+  if (meta) meta.textContent = '';
+  _allocChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: classes.map(c => c.key),
+      datasets: [{ data: classes.map(c => c.val), backgroundColor: classes.map(c => _cssVar(c.color)), borderWidth: 0 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '62%',
+      plugins: {
+        legend: { position: 'bottom', labels: { color: _cssVar('--text2'), font: { size: 11 }, boxWidth: 12, padding: 12 } },
+        tooltip: { callbacks: { label: (c) => c.label + ': ' + fmt(c.parsed) + (net > 0 ? ' (' + (c.parsed / net * 100).toFixed(1) + '%)' : '') } }
+      }
+    }
+  });
+}
+
+function drawCashflowChart(){
+  const ctx = document.getElementById('dash-cf-chart');
+  const meta = document.getElementById('dash-cf-meta');
+  if (!ctx) return;
+  if (_cfChart){ _cfChart.destroy(); _cfChart = null; }
+
+  const months = _recentMonths(6);
+  const incBy = {}, expBy = {};
+  (DB.income   || []).forEach(i => { const ym = String(i.date||'').slice(0,7); if (ym) incBy[ym] = (incBy[ym]||0) + (Number(i.net)||Number(i.gross)||0); });
+  (DB.expenses || []).forEach(x => { const ym = String(x.date||'').slice(0,7); if (ym) expBy[ym] = (expBy[ym]||0) + expenseAmountSgd(x); });
+  const inc = months.map(m => incBy[m] || 0);
+  const exp = months.map(m => expBy[m] || 0);
+
+  const totIn = inc.reduce((a,b)=>a+b,0), totEx = exp.reduce((a,b)=>a+b,0);
+  if (meta){
+    const rate = totIn > 0 ? ((totIn - totEx) / totIn * 100) : null;
+    meta.textContent = rate != null ? ('savings rate ' + fmtPct(rate)) : 'no income yet';
+  }
+  if (totIn === 0 && totEx === 0){ if (meta) meta.textContent = 'no data'; return; }
+
+  _cfChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: months.map(_ymLabel),
+      datasets: [
+        { label: 'Income',   data: inc.map(v => toDisplay(v, 'SGD')), backgroundColor: _cssVar('--green') },
+        { label: 'Expenses', data: exp.map(v => toDisplay(v, 'SGD')), backgroundColor: _cssVar('--red') }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: _cssVar('--text3'), font: { size: 10 } }, grid: { display: false } },
+        y: { ticks: { color: _cssVar('--text3'), font: { size: 10 } }, grid: { color: _cssVar('--border') } }
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { color: _cssVar('--text2'), font: { size: 11 }, boxWidth: 12, padding: 12 } },
+        tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + fmt(c.parsed.y, { noConvert: true }) } }
+      }
+    }
+  });
+}
+
+function renderSummary(items){
+  return `<div class="h-summary">${
+    items.map(it => `
+      <div class="h-summary-item ${it.accent || ''}">
+        <div class="h-summary-label">${kjrEscape(it.label)}</div>
+        ${it.value ? `<div class="h-summary-value">${it.value}</div>` : ''}
+        ${it.sub ? `<div class="h-summary-sub">${it.sub}</div>` : ''}
+      </div>`).join('')
+  }</div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RENDER ALL — top-level redraw
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderAll(){
+  updateCcyToggleUI();
+  renderDashboard();
+  renderStocks();
+  renderCrypto();
+  renderRealestate();
+  renderCash();
+  renderCpf();
+  renderCashflow();
+  if (document.getElementById('page-settings').classList.contains('active')) {
+    loadSettingsForm();
+    renderDiagnostics();
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   BOOT
+   ═══════════════════════════════════════════════════════════════════════ */
+/* Delegated click handler for Edit buttons.
+   We no longer inline onclick="openEntityModal('table','${id}')" because that
+   interpolates user-supplied data into a JS context — even with ids validated
+   on save, defence-in-depth says don't put untrusted data into JS strings.
+   Instead, the buttons carry data-edit-table + data-edit-id. The handler
+   re-validates the id with kjrSafeId before dispatching.
+   This listener attaches once at boot and survives every re-render. */
+function installEventDelegation(){
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-edit-table][data-edit-id]');
+    if (!btn) return;
+    const table = btn.getAttribute('data-edit-table');
+    const id    = btn.getAttribute('data-edit-id');
+    if (!ENTITY_SCHEMAS[table]) return;
+    if (!kjrSafeId(id)) { showToast('Invalid entry id', 'error'); return; }
+    openEntityModal(table, id);
+  });
+}
+
+async function boot(){
+  applyTheme(localStorage.getItem(LK_THEME) || 'dark');
+  renderNav();
+  installEventDelegation();
+  installAutoRefreshVisibility();
+  const had = loadLocal();
+  if (!had) saveLocal(); // seed empty DB so localStorage has the canonical shape
+  runSalaryEngine({ notify: true }); // backfill auto income + CPF before first paint
+  updateCcyToggleUI();
+  renderAll();
+  showPage('dashboard'); // land on the dashboard overview
+  updateSyncStatusPill();
+
+  if (getSyncUrl()) {
+    // Best-effort pull on boot. If the sheet is empty (no schema), seed it.
+    await pullFromRemote({ allowSeed: true });
+    runSalaryEngine({ rerender: true }); // remote may carry updated salary config
+    // Start the auto-refresh loop after the initial pull, so we don't race it
+    startAutoRefresh();
+  } else {
+    // First-launch onboarding for users who haven't configured the backend yet
+    maybeShowWizardOnBoot();
+  }
+}
+
+document.addEventListener('DOMContentLoaded', boot);
+</script>
+</body>
+</html>
