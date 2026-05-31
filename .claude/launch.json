@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "investment-tracker",
+      "name": "kjr-portfolio",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "-l", "3801", "."],
-      "port": 3801
+      "runtimeArgs": ["serve", "-l", "3807", "."],
+      "port": 3807
     }
   ]
 }

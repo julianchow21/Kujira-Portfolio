@@ -20,6 +20,21 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
+  /* Default = warm light theme (cream + terracotta), ported from the prototype.
+     Dark lives in html.dark below and is opt-in via the theme toggle. */
+  --bg:#faf9f6;--bg2:#ffffff;--bg3:#f4f2ec;--bg4:#eae7dd;
+  --border:#e7e3da;--border2:#d8d3c6;
+  --text:#1f1d1a;--text2:#6b665e;--text3:#9a958b;
+  --red:#b13838;--red2:#8f2c2c;--red-soft:#f7e6e6;--red-border:#e6c5c5;
+  --green:#2f7d4f;--green-soft:#e6f1ea;--green-border:#bedcc9;
+  --blue:#3a5e8c;--blue-soft:#e4ebf4;--blue-border:#c2d3e6;
+  --amber:#9a6a14;--amber-soft:#f8efd6;--amber-border:#e7d3a0;
+  --purple:#7a4fa3;
+  --accent:#c15f3c;--accent2:#a64f30;--accent-soft:#f4e3da;--accent-border:#e6c5b4;
+  --on-accent:#ffffff;
+  --radius:8px;--radius-lg:12px;
+}
+html.dark{
   --bg:#0f0f0f;--bg2:#161616;--bg3:#1e1e1e;--bg4:#252525;
   --border:#2a2a2a;--border2:#333;
   --text:#e8e8e8;--text2:#999;--text3:#666;
@@ -29,26 +44,16 @@
   --amber:#f59e0b;--amber-soft:#2a1f0a;--amber-border:#3a2f1a;
   --purple:#a78bfa;
   --accent:#2dd4bf;--accent2:#14b8a6;--accent-soft:#0d2420;--accent-border:#1a3530;
-  --radius:8px;--radius-lg:12px;
+  --on-accent:#0f0f0f;
 }
-html.light{
-  --bg:#f0f2f5;--bg2:#ffffff;--bg3:#f5f6f8;--bg4:#eaecef;
-  --border:#e0e2e6;--border2:#d0d3d8;
-  --text:#111318;--text2:#555b66;--text3:#9099a6;
-  --red:#d63b3a;--red2:#b52e2d;--red-soft:#fde8e8;--red-border:#fca5a5;
-  --green:#2e8b3e;--green-soft:#e6f4e8;--green-border:#a5d6a7;
-  --blue:#1a6fd4;--blue-soft:#e0ecfb;--blue-border:#93c5fd;
-  --amber:#b87000;--amber-soft:#fef3dc;--amber-border:#fcd34d;
-  --accent:#0d9488;--accent2:#0f766e;--accent-soft:#ccfbf1;--accent-border:#5eead4;
-}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;transition:background 0.2s,color 0.2s}
+body{font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;transition:background 0.2s,color 0.2s}
 a{color:var(--blue);text-decoration:none}
 a:hover{text-decoration:underline}
 
 /* TOPBAR */
 .topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:0;height:56px;position:sticky;top:0;z-index:100}
 .logo{font-weight:800;font-size:16px;letter-spacing:0.2px;margin-right:32px;display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);cursor:pointer}
-.logo-mark{width:32px;height:32px;flex-shrink:0;border-radius:8px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900;color:#0f0f0f}
+.logo-mark{width:32px;height:32px;flex-shrink:0;border-radius:8px;background:linear-gradient(135deg,var(--accent),#d97a55);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900;color:#fff}
 .logo-name{display:flex;flex-direction:column;line-height:1.1}
 .logo-name span:first-child{font-size:14px;font-weight:800;letter-spacing:0.5px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 .logo-name span:last-child{font-size:9px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--text3);-webkit-text-fill-color:var(--text3)}
@@ -118,8 +123,8 @@ tbody tr:hover td{background:var(--bg3)}
 .btn{padding:7px 14px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--bg3);cursor:pointer;font-size:13px;color:var(--text);transition:all 0.15s;display:inline-flex;align-items:center;gap:6px;font-family:inherit;white-space:nowrap}
 .btn:hover{background:var(--bg4)}
 .btn:disabled{opacity:0.5;cursor:not-allowed}
-.btn-primary{background:var(--accent);color:#0f0f0f;border-color:var(--accent);font-weight:600}
-.btn-primary:hover{background:var(--accent2);border-color:var(--accent2);color:#fff}
+.btn-primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
+.btn-primary:hover{background:var(--accent2);border-color:var(--accent2);color:var(--on-accent)}
 .btn-danger{background:var(--red-soft);color:var(--red);border-color:var(--red-border)}
 .btn-danger:hover{background:var(--red);color:#fff}
 .btn-sm{padding:4px 10px;font-size:12px}
@@ -164,7 +169,12 @@ textarea.fi{resize:vertical;min-height:70px}
 .ccy-toggle{display:inline-flex;border:1px solid var(--border2);border-radius:999px;overflow:hidden;background:var(--bg3)}
 .ccy-toggle button{padding:5px 11px;border:none;background:transparent;color:var(--text3);font-size:11px;font-weight:700;letter-spacing:0.3px;cursor:pointer;font-family:inherit;transition:all 0.15s}
 .ccy-toggle button:hover{color:var(--text)}
-.ccy-toggle button.active{background:var(--accent);color:#fff}
+.ccy-toggle button.active{background:var(--accent);color:var(--on-accent)}
+/* THEME TOGGLE (settings) — mirrors the currency toggle */
+.theme-toggle{display:inline-flex;border:1px solid var(--border2);border-radius:999px;overflow:hidden;background:var(--bg3)}
+.theme-toggle button{padding:7px 16px;border:none;background:transparent;color:var(--text3);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 0.15s;display:inline-flex;align-items:center;gap:6px}
+.theme-toggle button:hover{color:var(--text)}
+.theme-toggle button.active{background:var(--accent);color:var(--on-accent)}
 .page.phase2-locked > *:not(.phase2-card){display:none}
 
 /* SETUP WIZARD */
@@ -206,6 +216,20 @@ textarea.fi{resize:vertical;min-height:70px}
 .tag.crypto{color:var(--amber);border-color:var(--amber-border);background:var(--amber-soft)}
 .tag.pos{color:var(--green);border-color:var(--green-border);background:var(--green-soft)}
 .tag.neg{color:var(--red);border-color:var(--red-border);background:var(--red-soft)}
+.integrity-bar{margin-top:14px;border-radius:var(--radius-lg);padding:12px 16px;font-size:13px;border:1px solid var(--border)}
+.integrity-bar.ok{background:var(--green-soft);border-color:var(--green-border);color:var(--green);font-weight:600}
+.integrity-bar.bad{background:var(--amber-soft);border-color:var(--amber-border)}
+.integrity-title{font-weight:700;color:var(--amber);margin-bottom:6px}
+.integrity-list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+.integrity-list li{color:var(--text2);line-height:1.5}
+.integrity-list li.error{color:var(--red)}
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+@media (max-width:840px){.dash-grid{grid-template-columns:1fr}}
+.dash-chart-wrap{position:relative;height:260px}
+.dash-hero{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px 24px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+.dash-hero-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
+.dash-hero-value{font-size:40px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums;line-height:1}
+.dash-hero-sub{font-size:12px;color:var(--text2)}
 .px-ext{font-size:10px;color:var(--text3);margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .px-ext-tag{display:inline-block;padding:0 4px;border-radius:3px;background:var(--bg4);border:1px solid var(--border2);color:var(--text2);font-weight:700;font-size:9px;letter-spacing:0.3px;text-transform:uppercase}
 
@@ -280,7 +304,20 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
   <!-- DASHBOARD -->
   <section class="page" id="page-dashboard">
     <div class="page-head"><div><div class="page-title">Dashboard</div><div class="page-sub">Net worth at a glance.</div></div></div>
-    <div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">📊</div><div class="empty-title">Dashboard arrives in Phase 5</div><div class="empty-sub">Net worth KPI, allocation donut, monthly P&L, FIRE progress. The skeleton needs holdings + cashflow data first.</div></div></div></div>
+    <div id="dash-networth"></div>
+    <div id="dash-integrity"></div>
+    <div id="dash-assets"></div>
+    <div class="dash-grid">
+      <div class="card">
+        <div class="card-head"><h3>Allocation</h3><span class="hint" id="dash-alloc-meta"></span></div>
+        <div class="card-body"><div class="dash-chart-wrap"><canvas id="dash-alloc-chart"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Cashflow</h3><span class="hint" id="dash-cf-meta"></span></div>
+        <div class="card-body"><div class="dash-chart-wrap"><canvas id="dash-cf-chart"></canvas></div></div>
+      </div>
+    </div>
+    <div id="dash-cpf"></div>
   </section>
 
   <!-- STOCKS -->
@@ -336,6 +373,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
     </div>
     <div id="cash-summary"></div>
     <div id="cash-body"></div>
+    <div id="cash-ledger"></div>
   </section>
 
   <!-- CPF -->
@@ -441,6 +479,16 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
   <!-- SETTINGS -->
   <section class="page" id="page-settings">
     <div class="page-head"><div><div class="page-title">Settings</div><div class="page-sub">Sync, assumptions, theme.</div></div></div>
+
+    <div class="card">
+      <div class="card-head"><h3>Appearance</h3><span class="hint">Switch between the light and dark look.</span></div>
+      <div class="card-body">
+        <div class="theme-toggle" role="group" aria-label="Theme">
+          <button type="button" data-theme="light" onclick="setThemeChoice('light')">☀ Light</button>
+          <button type="button" data-theme="dark" onclick="setThemeChoice('dark')">🌙 Dark</button>
+        </div>
+      </div>
+    </div>
 
     <div class="card">
       <div class="card-head"><h3>Sync</h3><span id="sync-status-detail" class="hint"></span></div>
@@ -683,7 +731,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
    Architecture mirrors Kujira Collectibles + Send Ops conventions.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const APP_VERSION = '0.6.1-per-tab-ccy';
+const APP_VERSION = '0.9.2-client-onboarding';
 const SCHEMA = 'kujira-portfolio';
 
 /* Local storage keys */
@@ -980,7 +1028,7 @@ const TABS = [
 /* Phase 2 lock — tabs whose UI and renderers are parked while Phase 1 ships.
    Real markup stays in the DOM (preserved underneath), just hidden by the
    .phase2-locked class. To unblock a tab, remove it from this set. */
-const PHASE_2_TABS = new Set(['dashboard', 'crypto', 'projections']);
+const PHASE_2_TABS = new Set(['crypto', 'projections']);
 
 function _phase2LabelFor(key){
   const tab = TABS.find(t => t.key === key);
@@ -1015,6 +1063,7 @@ function freshDB(){
     crypto:       [],
     realestate:   [],
     cash:         [],
+    cashTxns:     [],
     cpfBalances:  { OA:0, SA:0, MA:0, RA:0, updatedAt:null },
     cpfHistory:   [],
     income:       [],
@@ -1190,7 +1239,7 @@ function loadLocal(){
    Also re-validates ids on every list-typed table — a corrupted sheet or hostile
    payload cannot land an id like "x'); evil(); //" that would break event-delegation
    downstream. Items with invalid ids get a fresh uid() so they're still recoverable. */
-const _LIST_TABLES = ['stocks','stockTxns','crypto','realestate','cash','cpfHistory','income','expenses','snapshots','changelog','trash'];
+const _LIST_TABLES = ['stocks','stockTxns','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash'];
 
 function _sanitiseList(arr, table){
   if (!Array.isArray(arr)) return [];
@@ -1655,13 +1704,12 @@ function renderSetupWizardStep(){
       <ol>
         <li>Click <strong>Extensions → Apps Script</strong> in the menu.</li>
         <li>Delete whatever code is already there.</li>
-        <li>Open the backend code from this project's GitHub and paste it in.</li>
+        <li>Open the backend code (button below), click <strong>Copy raw file</strong>, and paste it in.</li>
         <li>Click <strong>Save</strong> (disk icon).</li>
         <li>Click the function dropdown, pick <code>initOnce</code>, then <strong>▶ Run</strong>. Grant the permissions Google asks for — it needs to read/write your sheet and call Yahoo Finance / CoinGecko.</li>
       </ol>
       <div class="actions">
-        <a class="btn btn-primary" href="https://github.com/" target="_blank" rel="noopener noreferrer">Open the .txt file</a>
-        <span class="hint" style="align-self:center">(Update this link to your published backend file after deploy)</span>
+        <a class="btn btn-primary" href="https://github.com/julianchow21/Investment-Tracker/blob/main/apps-script.gs" target="_blank" rel="noopener noreferrer">Open the backend code</a>
       </div>
     </div>`;
   } else if (_swStep === 3){
@@ -1806,7 +1854,7 @@ function renderDiagnostics(){
     'Apps Script URL: ' + (getSyncUrl() ? '✓ set' : '✗ not set'),
     'Last sync (TS) : ' + (ts ? ts + ' (' + relTime(ts) + ')' : '—'),
     'Last pull seen : ' + (last || '—'),
-    'Theme          : ' + (document.documentElement.classList.contains('light') ? 'light' : 'dark'),
+    'Theme          : ' + (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
     'Local rows     : ' +
       'stocks=' + DB.stocks.length +
       ' crypto=' + DB.crypto.length +
@@ -1903,6 +1951,7 @@ function showPage(key){
     b.classList.toggle('active', b.dataset.tab === key);
   });
   updateCcyToggleUI(); // reflect the new tab's currency
+  if (key === 'dashboard') renderDashboard(); // (re)draw charts now the canvas is sized
   if (key === 'settings') { loadSettingsForm(); renderDiagnostics(); }
   if (window.scrollTo) window.scrollTo({ top: 0, behavior: 'instant' });
 }
@@ -1910,13 +1959,30 @@ function showPage(key){
 /* ═══════════════════════════════════════════════════════════════════════
    THEME
    ═══════════════════════════════════════════════════════════════════════ */
+function currentTheme(){
+  return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+}
 function applyTheme(t){
-  document.documentElement.classList.toggle('light', t === 'light');
+  document.documentElement.classList.toggle('dark', t === 'dark');
+  updateThemeUI(t);
+  // Charts read colours from CSS vars at draw time, so redraw if the dashboard is up.
+  if (typeof _currentTab !== 'undefined' && _currentTab === 'dashboard' && typeof renderDashboard === 'function') {
+    renderDashboard();
+  }
+}
+function setThemeChoice(t){
+  t = (t === 'dark') ? 'dark' : 'light';
+  localStorage.setItem(LK_THEME, t);
+  applyTheme(t);
 }
 function toggleTheme(){
-  const next = document.documentElement.classList.contains('light') ? 'dark' : 'light';
-  localStorage.setItem(LK_THEME, next);
-  applyTheme(next);
+  setThemeChoice(currentTheme() === 'dark' ? 'light' : 'dark');
+}
+function updateThemeUI(t){
+  t = t || currentTheme();
+  document.querySelectorAll('.theme-toggle button').forEach(b => {
+    b.classList.toggle('active', b.dataset.theme === t);
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -2302,7 +2368,7 @@ const ENTITY_SCHEMAS = {
     fields: [
       { key:'symbol',  label:'Symbol',  type:'text',   required:true, placeholder:'AAPL or D05', hint:'Yahoo ticker. For SGX, omit the .SI — we add it.' },
       { key:'market',  label:'Market',  type:'select', required:true, options:[['SGX','SGX (Singapore)'],['US','US (NYSE/NASDAQ)']], default:'US' },
-      { key:'shares',  label:'Shares',  type:'number', required:true, step:'0.0001', placeholder:'100' },
+      { key:'shares',  label:'Shares',  type:'number', required:true, step:'0.0001', placeholder:'100', hint:'Your current holding. If you log trades below, this is treated as the opening position and trades adjust it.' },
       { key:'avgCost', label:'Avg cost per share', type:'number', required:true, step:'0.0001', placeholder:'150.00' },
       { key:'currency', label:'Cost currency', type:'select', options:[['USD','USD'],['SGD','SGD']], default:'USD', hint:'Currency the avg cost is stated in. Defaults match the market.' },
       { key:'notes',   label:'Notes', type:'textarea' }
@@ -2325,9 +2391,12 @@ const ENTITY_SCHEMAS = {
       { key:'shares',  label:'Shares', type:'number', required:true, step:'0.0001', placeholder:'10' },
       { key:'price',   label:'Price per share', type:'number', required:true, step:'0.0001', placeholder:'150.00', hint:'In the stock\'s own currency.' },
       { key:'fees',    label:'Fees / commission', type:'number', step:'0.01', placeholder:'0.00' },
+      { key:'cashAccountId', label:'Funded from (cash account)', type:'select',
+        optionsFn: () => [['', '— Not linked —']].concat((DB.cash || []).map(c => [c.id, (c.name || '?') + ' · ' + (c.currency || 'SGD')])),
+        hint:'Buys debit this account, sells credit it. Use a same-currency account.' },
       { key:'notes',   label:'Notes', type:'textarea' }
     ],
-    defaults: { date: new Date().toISOString().slice(0,10), side:'buy', fees:0 }
+    defaults: { date: new Date().toISOString().slice(0,10), side:'buy', fees:0, cashAccountId:'' }
   },
   crypto: {
     title: 'crypto holding',
@@ -2359,12 +2428,32 @@ const ENTITY_SCHEMAS = {
     title: 'cash account',
     fields: [
       { key:'name',     label:'Account name', type:'text', required:true, placeholder:'DBS Multiplier' },
-      { key:'account',  label:'Account type', type:'select', options:[['Savings','Savings'],['Current','Current'],['FD','Fixed deposit'],['MMF','Money market'],['Foreign','Foreign currency'],['Other','Other']], default:'Savings' },
-      { key:'amount',   label:'Balance', type:'number', required:true, step:'0.01', placeholder:'10000' },
+      { key:'account',  label:'Account type', type:'select', options:[['Savings','Savings'],['Current','Current'],['FD','Fixed deposit'],['MMF','Money market'],['Brokerage','Brokerage cash'],['Foreign','Foreign currency'],['Other','Other']], default:'Savings' },
+      { key:'amount',   label:'Balance', type:'number', step:'0.01', placeholder:'10000', hint:'For Brokerage accounts the balance is calculated from movements + linked trades below — leave blank.' },
       { key:'currency', label:'Currency', type:'select', options:[['SGD','SGD'],['USD','USD'],['EUR','EUR'],['GBP','GBP'],['HKD','HKD'],['JPY','JPY'],['AUD','AUD'],['MYR','MYR'],['Other','Other']], default:'SGD' },
       { key:'notes',    label:'Notes', type:'textarea' }
     ],
     defaults: { account:'Savings', currency:'SGD' }
+  },
+  cashTxns: {
+    title: 'cash movement',
+    fields: [
+      { key:'type',   label:'Type', type:'select', required:true,
+        options:[['deposit','Deposit'],['withdrawal','Withdrawal'],['transfer','Transfer between accounts'],['dividend','Dividend'],['interest','Interest'],['fee','Fee'],['adjustment','Adjustment (+/-)']], default:'deposit',
+        hint:'Deposit/dividend/interest add; withdrawal/fee subtract; transfer moves between two accounts; adjustment uses the sign you enter.' },
+      { key:'cashAccountId', label:'Account (or "to" for a transfer)', type:'select', required:true,
+        optionsFn: () => (DB.cash || []).map(c => [c.id, (c.name || '?') + ' · ' + (c.currency || 'SGD')]),
+        hint:'For a transfer, this is the destination account.' },
+      { key:'fromAccountId', label:'From account (transfers only)', type:'select',
+        optionsFn: () => [['', '— n/a —']].concat((DB.cash || []).map(c => [c.id, (c.name || '?') + ' · ' + (c.currency || 'SGD')])),
+        hint:'Source account. Leave as n/a unless this is a transfer.' },
+      { key:'date',   label:'Date', type:'date', required:true },
+      { key:'amount', label:'Amount', type:'number', required:true, step:'0.01', placeholder:'1000.00', hint:'Amount leaving the source, in its currency.' },
+      { key:'amountIn', label:'Amount received (cross-currency transfers)', type:'number', step:'0.01', placeholder:'auto',
+        hint:'Only for transfers where the two accounts use different currencies. Leave blank if same currency.' },
+      { key:'notes',  label:'Notes', type:'textarea' }
+    ],
+    defaults: { date: new Date().toISOString().slice(0,10), type:'deposit', fromAccountId:'' }
   },
   cpfHistory: {
     title: 'CPF entry',
@@ -2527,6 +2616,35 @@ function entityModalSave(){
     }
   }
 
+  // Transfer validation: needs a distinct source; cross-currency needs the
+  // received amount or the two sides won't reconcile.
+  if (table === 'cashTxns' && item.type === 'transfer'){
+    if (!item.fromAccountId){ showToast('Transfer needs a "From account"', 'error'); return; }
+    if (item.fromAccountId === item.cashAccountId){ showToast('Transfer source and destination must differ', 'error'); return; }
+    const fromAcct = (DB.cash || []).find(c => c.id === item.fromAccountId);
+    const toAcct   = (DB.cash || []).find(c => c.id === item.cashAccountId);
+    const fromCcy = fromAcct ? (fromAcct.currency || 'SGD') : 'SGD';
+    const toCcy   = toAcct ? (toAcct.currency || 'SGD') : 'SGD';
+    const hasIn = item.amountIn != null && isFinite(item.amountIn);
+    if (fromCcy !== toCcy && !hasIn){
+      if (!confirm(fromCcy + ' → ' + toCcy + ' transfer with no received amount. Both sides will use ' + fmt(toSGD(Number(item.amount)||0, fromCcy)) + ', which is wrong across currencies.\n\nEnter "Amount received" for an exact figure, or save anyway?')) return;
+    }
+  }
+
+  // Trade funded from a cash account in a different currency: flag, since we
+  // do not auto-convert the cash leg. Same-currency keeps the math exact.
+  if (table === 'stockTxns' && item.cashAccountId){
+    const stock = DB.stocks.find(s => s.id === item.stockId);
+    const acct  = (DB.cash || []).find(c => c.id === item.cashAccountId);
+    if (stock && acct){
+      const stockCcy = stock.currency || (stock.market === 'SGX' ? 'SGD' : 'USD');
+      const acctCcy  = acct.currency || 'SGD';
+      if (stockCcy !== acctCcy){
+        if (!confirm('This trade is in ' + stockCcy + ' but ' + (acct.name || 'the cash account') + ' holds ' + acctCcy + '. The cash leg will not be currency-converted, so the balance may be off.\n\nLink anyway?')) return;
+      }
+    }
+  }
+
   // Defence-in-depth: ids must match the safe regex. Regenerate if not.
   if (!kjrSafeId(item.id)) item.id = uid(table);
 
@@ -2549,7 +2667,26 @@ function entityModalSave(){
 function entityModalDelete(){
   if (!_modalState || _modalState.isNew) return;
   const { table, item } = _modalState;
-  if (!confirm('Move this entry to trash? You can restore it from Settings → Recently deleted.')) return;
+
+  // Referential-integrity guard: warn if deleting this would orphan movements
+  // or trades that point at it, which would unbalance the books.
+  let refWarning = '';
+  if (table === 'cash'){
+    const moves = (DB.cashTxns || []).filter(t => t.cashAccountId === item.id || t.fromAccountId === item.id).length;
+    const trades = (DB.stockTxns || []).filter(t => t.cashAccountId === item.id).length;
+    if (moves || trades){
+      const parts = [];
+      if (moves) parts.push(moves + ' cash movement' + (moves > 1 ? 's' : ''));
+      if (trades) parts.push(trades + ' linked trade' + (trades > 1 ? 's' : ''));
+      refWarning = 'This account is referenced by ' + parts.join(' and ') + '. Deleting it will leave those entries pointing at a missing account and unbalance the books.\n\n';
+    }
+  } else if (table === 'stocks'){
+    const trades = (DB.stockTxns || []).filter(t => t.stockId === item.id).length;
+    if (trades) refWarning = 'This stock has ' + trades + ' trade' + (trades > 1 ? 's' : '') + ' in the ledger that will be left orphaned.\n\n';
+  }
+
+  const prompt = refWarning + 'Move this entry to trash? You can restore it from Settings → Recently deleted.';
+  if (!confirm(prompt)) return;
   sendToTrash(table, item.id);
   closeEntityModal();
   renderAll();
@@ -2560,14 +2697,19 @@ function entityModalDelete(){
    STOCK TRADE LEDGER — derive position from transactions
    ═══════════════════════════════════════════════════════════════════════ */
 /* Average-cost method. Returns null when a stock has no logged trades, so
-   the caller falls back to the manually-entered shares/avgCost. Values are
-   in the stock's own currency (price/fees are entered in that currency). */
+   the caller falls back to the manually-entered shares/avgCost. When trades
+   exist, the manually-entered shares/avgCost are the OPENING position and the
+   trades adjust it from there (so selling 10 of a 3,000 holding leaves 2,990).
+   Values are in the stock's own currency (price/fees in that currency). */
 function deriveStockPosition(stockId){
   const txns = (DB.stockTxns || [])
     .filter(t => t.stockId === stockId)
     .sort((a,b) => String(a.date||'').localeCompare(String(b.date||'')));
   if (!txns.length) return null;
-  let shares = 0, costBasis = 0, realisedPL = 0;
+  const stock = (DB.stocks || []).find(s => s.id === stockId) || {};
+  let shares    = Number(stock.shares) || 0;                 // opening position
+  let costBasis = shares * (Number(stock.avgCost) || 0);     // opening cost basis
+  let realisedPL = 0;
   for (const t of txns){
     const qty  = Math.abs(Number(t.shares) || 0);
     const px   = Number(t.price) || 0;
@@ -2588,9 +2730,12 @@ function deriveStockPosition(stockId){
 }
 
 /* Shares held for a stock as of a date, ignoring one transaction (the one
-   being edited). Used to warn when a sell would exceed the holding. */
+   being edited). Includes the manually-entered opening position so the
+   over-sell warning matches the derived holding. */
 function sharesHeldAsOf(stockId, asOfDate, excludeTxnId){
-  return (DB.stockTxns || [])
+  const stock = (DB.stocks || []).find(s => s.id === stockId) || {};
+  const opening = Number(stock.shares) || 0;
+  return opening + (DB.stockTxns || [])
     .filter(t => t.stockId === stockId && t.id !== excludeTxnId && String(t.date || '') <= String(asOfDate || ''))
     .reduce((sh, t) => sh + (t.side === 'sell' ? -1 : 1) * Math.abs(Number(t.shares) || 0), 0);
 }
@@ -2897,6 +3042,58 @@ function renderRealestate(){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   CASH — derived balances for brokerage accounts
+   ═══════════════════════════════════════════════════════════════════════ */
+function isBrokerageAcct(acct){ return acct && acct.account === 'Brokerage'; }
+
+/* Signed effect of a cash movement on the balance, in the account currency. */
+function cashMovementDelta(t){
+  const amt = Number(t.amount) || 0;
+  if (t.type === 'adjustment') return amt;                 // signed as entered
+  if (t.type === 'withdrawal' || t.type === 'fee') return -Math.abs(amt);
+  return Math.abs(amt);                                    // deposit/dividend/interest
+}
+
+/* Net cash effect of a linked stock trade on its funding account, in the
+   trade currency. Buys debit (incl. fees), sells credit (net of fees). */
+function cashTradeFlow(t){
+  const qty = Math.abs(Number(t.shares) || 0);
+  const px  = Number(t.price) || 0;
+  const fees = Number(t.fees) || 0;
+  return t.side === 'sell' ? (px * qty - fees) : -(px * qty + fees);
+}
+
+/* Amount credited to a transfer's destination account, in the destination
+   currency. Uses amountIn when given (cross-currency), else the out amount. */
+function transferInAmount(t){
+  const ai = (t.amountIn != null && t.amountIn !== '') ? Number(t.amountIn) : NaN;
+  return isFinite(ai) ? Math.abs(ai) : Math.abs(Number(t.amount) || 0);
+}
+
+/* Live balance of any cash account, in its own currency:
+   typed balance (opening) + movements + transfers in/out + linked trade
+   flows. A pure manual account with no activity just shows its typed amount. */
+function deriveCashBalance(acct){
+  let bal = Number(acct.amount) || 0;
+  (DB.cashTxns || []).forEach(t => {
+    if (t.type === 'transfer'){
+      if (t.fromAccountId === acct.id) bal -= Math.abs(Number(t.amount) || 0);
+      if (t.cashAccountId === acct.id) bal += transferInAmount(t);
+    } else if (t.cashAccountId === acct.id){
+      bal += cashMovementDelta(t);
+    }
+  });
+  (DB.stockTxns || []).forEach(t => { if (t.cashAccountId === acct.id) bal += cashTradeFlow(t); });
+  return bal;
+}
+
+/* Whether an account has any linked movements or trades (drives the ◆ mark). */
+function hasCashActivity(acct){
+  return (DB.cashTxns || []).some(t => t.cashAccountId === acct.id || t.fromAccountId === acct.id)
+      || (DB.stockTxns || []).some(t => t.cashAccountId === acct.id);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    CASH — render
    ═══════════════════════════════════════════════════════════════════════ */
 function renderCash(){
@@ -2924,15 +3121,16 @@ function renderCash(){
   let totSgd = 0, fxMissing = false;
   const rows = list.map(c => {
     const ccy = c.currency || 'SGD';
-    const sgd = toSGD(c.amount || 0, ccy);
+    const bal = deriveCashBalance(c);          // native-currency balance
+    const sgd = toSGD(bal, ccy);
     if (fxMissingFor(ccy)) fxMissing = true;
     totSgd += sgd;
-    return { c, ccy, sgd };
+    return { c, ccy, sgd, bal, derived: hasCashActivity(c) };
   });
 
   // Currency breakdown
   const byCcy = {};
-  rows.forEach(r => { byCcy[r.ccy] = (byCcy[r.ccy] || 0) + Number(r.c.amount || 0); });
+  rows.forEach(r => { byCcy[r.ccy] = (byCcy[r.ccy] || 0) + r.bal; });
   const ccyChips = Object.entries(byCcy).map(([k,v]) => `<span class="tag" style="margin-right:6px">${kjrEscape(k)} ${v.toLocaleString('en-SG', {maximumFractionDigits:2})}</span>`).join('');
 
   sumEl.innerHTML = renderSummary([
@@ -2948,14 +3146,80 @@ function renderCash(){
       ${rows.map(r => `<tr>
         <td class="tl cell-sym">${kjrEscape(r.c.name)}</td>
         <td class="tl"><span class="tag">${kjrEscape(r.c.account || '—')}</span></td>
-        <td class="num">${Number(r.c.amount || 0).toLocaleString('en-SG', {maximumFractionDigits:2})}</td>
+        <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${r.bal.toLocaleString('en-SG', {maximumFractionDigits:2})}${r.derived ? '<span class="hint" title="Calculated from movements + linked trades"> ◆</span>' : ''}</td>
         <td class="num">${kjrEscape(r.ccy)}</td>
-        <td class="num">${fmt(r.sgd)}</td>
+        <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${fmt(r.sgd)}</td>
         <td class="tl muted">${kjrEscape(r.c.notes || '')}</td>
         <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cash" data-edit-id="${kjrEscape(r.c.id)}">Edit</button></td>
       </tr>`).join('')}
     </tbody></table></div></div>
   `;
+
+  renderCashTxns();
+}
+
+/* Cash movements ledger — deposits, withdrawals, dividends, interest, fees.
+   Sits below the cash table. Brokerage balances derive from these plus any
+   linked stock trades. */
+function renderCashTxns(){
+  setRenderCcy('cash');
+  const el = document.getElementById('cash-ledger');
+  if (!el) return;
+  const accts = DB.cash || [];
+  if (!accts.length){ el.innerHTML = ''; return; }
+
+  const nameOf = id => { const a = accts.find(x => x.id === id); return a ? a.name : '—'; };
+  const ccyOf  = id => { const a = accts.find(x => x.id === id); return a ? (a.currency || 'SGD') : 'SGD'; };
+  const txns = (DB.cashTxns || []).slice().sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
+
+  const head = `<div class="card">
+      <div class="card-head"><h3>Cash movements</h3>
+        <button class="btn btn-primary btn-sm" onclick="openEntityModal('cashTxns')">＋ Add movement</button>
+      </div>`;
+
+  const TYPE_LABEL = { deposit:'Deposit', withdrawal:'Withdrawal', transfer:'Transfer', dividend:'Dividend', interest:'Interest', fee:'Fee', adjustment:'Adjustment' };
+
+  if (!txns.length){
+    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">🧾</div><div class="empty-title">No cash movements</div><div class="empty-sub">Log deposits, withdrawals, transfers, dividends, and interest here. Account balances are calculated from these plus any trades funded from them.</div></div></div></div>`;
+    return;
+  }
+
+  el.innerHTML = head + `
+    <div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <th class="tl">Date</th><th class="tl">Account</th><th class="tl">Type</th><th>Amount</th><th class="tl">Notes</th><th></th>
+    </tr></thead><tbody>
+      ${txns.map(t => {
+        if (t.type === 'transfer'){
+          const outCcy = ccyOf(t.fromAccountId), inCcy = ccyOf(t.cashAccountId);
+          const outAmt = Math.abs(Number(t.amount) || 0), inAmt = transferInAmount(t);
+          const sameCcy = outCcy === inCcy && outAmt === inAmt;
+          // Transfers show native amounts (not the display currency) so the
+          // FX leg is visible, e.g. S$27,000 → US$20,000.
+          const amtTxt = sameCcy
+            ? fmt(outAmt, { currency: outCcy })
+            : `${fmt(outAmt, { currency: outCcy })} → ${fmt(inAmt, { currency: inCcy })}`;
+          return `<tr>
+            <td class="tl">${fmtDateSG(t.date)}</td>
+            <td class="tl cell-sym">${kjrEscape(nameOf(t.fromAccountId))} → ${kjrEscape(nameOf(t.cashAccountId))}</td>
+            <td class="tl"><span class="tag">Transfer</span></td>
+            <td class="num">${amtTxt}</td>
+            <td class="tl muted">${kjrEscape(t.notes || '')}</td>
+            <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cashTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
+          </tr>`;
+        }
+        const ccy = ccyOf(t.cashAccountId);
+        const delta = cashMovementDelta(t);
+        const cls = delta >= 0 ? 'pos' : 'neg';
+        return `<tr>
+          <td class="tl">${fmtDateSG(t.date)}</td>
+          <td class="tl cell-sym">${kjrEscape(nameOf(t.cashAccountId))}</td>
+          <td class="tl"><span class="tag ${delta >= 0 ? 'pos' : 'neg'}">${kjrEscape(TYPE_LABEL[t.type] || t.type)}</span></td>
+          <td class="num ${cls}">${fmt(toSGD(delta, ccy))}</td>
+          <td class="tl muted">${kjrEscape(t.notes || '')}</td>
+          <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cashTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div></div>`;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -3258,6 +3522,238 @@ function renderCashflow(){
 /* ═══════════════════════════════════════════════════════════════════════
    SUMMARY ROW helper
    ═══════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════
+   DASHBOARD — net worth, allocation, cashflow. All computed in SGD, then
+   fmt() converts to the dashboard tab's display currency.
+   ═══════════════════════════════════════════════════════════════════════ */
+function _stockMvSGD(){
+  let mv = 0;
+  (DB.stocks || []).forEach(s => {
+    const ccy = s.currency || (s.market === 'SGX' ? 'SGD' : 'USD');
+    const derived = deriveStockPosition(s.id);
+    const shares  = derived ? derived.shares  : (s.shares  || 0);
+    const avgCost = derived ? derived.avgCost : (s.avgCost || 0);
+    const px = DB._priceCache[yahooSymbol(s)];
+    if (px && px.price != null) mv += toSGD(px.price * shares, px.currency || ccy);
+    else mv += toSGD(shares * avgCost, ccy); // fall back to cost basis
+  });
+  return mv;
+}
+function _cashSGD(){ return (DB.cash || []).reduce((s,c) => s + toSGD(Number(c.amount)||0, c.currency || 'SGD'), 0); }
+function _cpfSGD(){
+  const b = DB.cpfBalances || {};
+  const sum = (Number(b.OA)||0)+(Number(b.SA)||0)+(Number(b.MA)||0)+(Number(b.RA)||0);
+  if (sum > 0) return sum;
+  const c = cpfComputedFromHistory(); return c.OA + c.SA + c.MA + c.RA;
+}
+function _realestateSGD(){ return (DB.realestate || []).reduce((s,r) => s + (Number(r.value)||0), 0); }
+function _cryptoSGD(){
+  let mv = 0;
+  (DB.crypto || []).forEach(c => {
+    const px = DB._priceCache[coinIdFor(c.coingeckoId || c.symbol)];
+    if (px && px.sgd != null) mv += px.sgd * (Number(c.amount)||0);
+    else mv += toSGD((Number(c.amount)||0) * (Number(c.avgCost)||0), c.currency || 'USD');
+  });
+  return mv;
+}
+
+function _cssVar(name){ return (getComputedStyle(document.documentElement).getPropertyValue(name) || '').trim() || '#888'; }
+
+/* ─── Money integrity / reconciliation ─────────────────────────────────
+   Surfaces places where double-entry is incomplete so no money silently
+   appears or disappears: trades not funded from cash, negative balances
+   (a missing deposit/transfer), and orphaned references to deleted records. */
+function runReconciliation(){
+  const issues = [];
+  const cashIds  = new Set((DB.cash   || []).map(c => c.id));
+  const stockIds = new Set((DB.stocks || []).map(s => s.id));
+
+  const unlinked = (DB.stockTxns || []).filter(t => !t.cashAccountId);
+  if (unlinked.length) issues.push({ level:'warn',
+    msg: unlinked.length + ' stock trade' + (unlinked.length > 1 ? 's are' : ' is') + ' not funded from a cash account, so the matching cash movement is not tracked.' });
+
+  let orphanCash = 0;
+  (DB.cashTxns || []).forEach(t => {
+    if (t.cashAccountId && !cashIds.has(t.cashAccountId)) orphanCash++;
+    else if (t.type === 'transfer' && t.fromAccountId && !cashIds.has(t.fromAccountId)) orphanCash++;
+  });
+  if (orphanCash) issues.push({ level:'error',
+    msg: orphanCash + ' cash movement' + (orphanCash > 1 ? 's reference' : ' references') + ' a deleted account.' });
+
+  let orphanTrade = 0;
+  (DB.stockTxns || []).forEach(t => {
+    if (t.stockId && !stockIds.has(t.stockId)) orphanTrade++;
+    else if (t.cashAccountId && !cashIds.has(t.cashAccountId)) orphanTrade++;
+  });
+  if (orphanTrade) issues.push({ level:'error',
+    msg: orphanTrade + ' trade' + (orphanTrade > 1 ? 's reference' : ' references') + ' a deleted stock or cash account.' });
+
+  (DB.cash || []).forEach(c => {
+    const bal = deriveCashBalance(c);
+    if (bal < -0.005) issues.push({ level:'warn',
+      msg: (c.name || 'A cash account') + ' is negative (' + fmt(toSGD(bal, c.currency || 'SGD')) + '), so a deposit or transfer in is probably missing.' });
+  });
+
+  return { ok: issues.length === 0, issues };
+}
+
+/* Last n 'YYYY-MM' months ending with the current month. */
+function _recentMonths(n){
+  const out = [];
+  const d = new Date();
+  for (let i = n - 1; i >= 0; i--){
+    const dd = new Date(d.getFullYear(), d.getMonth() - i, 1);
+    out.push(dd.getFullYear() + '-' + String(dd.getMonth() + 1).padStart(2, '0'));
+  }
+  return out;
+}
+
+let _allocChart = null, _cfChart = null;
+
+function renderDashboard(){
+  setRenderCcy('dashboard');
+  const nwEl = document.getElementById('dash-networth');
+  if (!nwEl) return;
+
+  const classes = [
+    { key:'Stocks',      val:_stockMvSGD(),     color:'--accent' },
+    { key:'Cash',        val:_cashSGD(),        color:'--blue'   },
+    { key:'CPF',         val:_cpfSGD(),         color:'--green'  },
+    { key:'Real Estate', val:_realestateSGD(),  color:'--amber'  }
+  ];
+  const crypto = _cryptoSGD();
+  if (crypto > 0) classes.push({ key:'Crypto', val:crypto, color:'--accent2' });
+  const net = classes.reduce((s,c) => s + c.val, 0);
+
+  // Net worth hero
+  nwEl.innerHTML = `<div class="dash-hero">
+    <div><div class="dash-hero-label">Total net worth</div><div class="dash-hero-value">${fmt(net)}</div></div>
+    <div class="dash-hero-sub">${classes.filter(c => c.val > 0).length} asset class${classes.filter(c => c.val > 0).length === 1 ? '' : 'es'} · as of ${fmtDateSG(new Date())}</div>
+  </div>`;
+
+  // Data integrity / reconciliation
+  const intEl = document.getElementById('dash-integrity');
+  if (intEl){
+    const rec = runReconciliation();
+    if (rec.ok){
+      intEl.innerHTML = `<div class="integrity-bar ok">✓ Books balanced — every movement is accounted for.</div>`;
+    } else {
+      intEl.innerHTML = `<div class="integrity-bar bad">
+        <div class="integrity-title">⚠ ${rec.issues.length} thing${rec.issues.length > 1 ? 's' : ''} to check</div>
+        <ul class="integrity-list">${rec.issues.map(i => `<li class="${i.level}">${kjrEscape(i.msg)}</li>`).join('')}</ul>
+      </div>`;
+    }
+  }
+
+  // Asset-class KPI row
+  const assetsEl = document.getElementById('dash-assets');
+  if (assetsEl){
+    if (net <= 0){
+      assetsEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">📊</div><div class="empty-title">No holdings yet</div><div class="empty-sub">Add stocks, cash, CPF, or property and your net worth and allocation appear here.</div></div></div></div>`;
+    } else {
+      assetsEl.innerHTML = renderSummary(classes.map(c => ({
+        label: c.key,
+        value: fmt(c.val),
+        sub: net > 0 ? (c.val / net * 100).toFixed(1) + '% of net worth' : '',
+        accent: c.val > 0 ? 'accent' : ''
+      })));
+    }
+  }
+
+  // CPF breakdown
+  const cpfEl = document.getElementById('dash-cpf');
+  if (cpfEl){
+    const b = DB.cpfBalances || {};
+    const fromHist = ((Number(b.OA)||0)+(Number(b.SA)||0)+(Number(b.MA)||0)+(Number(b.RA)||0)) <= 0;
+    const bal = fromHist ? cpfComputedFromHistory() : b;
+    const cpfTotal = (Number(bal.OA)||0)+(Number(bal.SA)||0)+(Number(bal.MA)||0)+(Number(bal.RA)||0);
+    if (cpfTotal > 0){
+      cpfEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head"><h3>CPF breakdown</h3><span class="hint">${fromHist ? 'computed from history' : 'from saved balances'}</span></div><div class="card-body">` +
+        renderSummary([
+          { label:'OA', value: fmt(Number(bal.OA)||0), accent:'accent' },
+          { label:'SA', value: fmt(Number(bal.SA)||0) },
+          { label:'MA', value: fmt(Number(bal.MA)||0) },
+          { label:'RA', value: fmt(Number(bal.RA)||0) }
+        ]) + `</div></div>`;
+    } else {
+      cpfEl.innerHTML = '';
+    }
+  }
+
+  // Charts only when the tab is visible (Chart.js needs a sized canvas).
+  const visible = document.getElementById('page-dashboard').classList.contains('active');
+  if (visible && typeof Chart !== 'undefined'){
+    drawAllocationChart(classes.filter(c => c.val > 0), net);
+    drawCashflowChart();
+  }
+}
+
+function drawAllocationChart(classes, net){
+  const ctx = document.getElementById('dash-alloc-chart');
+  const meta = document.getElementById('dash-alloc-meta');
+  if (!ctx) return;
+  if (_allocChart){ _allocChart.destroy(); _allocChart = null; }
+  if (!classes.length){ if (meta) meta.textContent = 'no data'; return; }
+  if (meta) meta.textContent = '';
+  _allocChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: classes.map(c => c.key),
+      datasets: [{ data: classes.map(c => c.val), backgroundColor: classes.map(c => _cssVar(c.color)), borderWidth: 0 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '62%',
+      plugins: {
+        legend: { position: 'bottom', labels: { color: _cssVar('--text2'), font: { size: 11 }, boxWidth: 12, padding: 12 } },
+        tooltip: { callbacks: { label: (c) => c.label + ': ' + fmt(c.parsed) + (net > 0 ? ' (' + (c.parsed / net * 100).toFixed(1) + '%)' : '') } }
+      }
+    }
+  });
+}
+
+function drawCashflowChart(){
+  const ctx = document.getElementById('dash-cf-chart');
+  const meta = document.getElementById('dash-cf-meta');
+  if (!ctx) return;
+  if (_cfChart){ _cfChart.destroy(); _cfChart = null; }
+
+  const months = _recentMonths(6);
+  const incBy = {}, expBy = {};
+  (DB.income   || []).forEach(i => { const ym = String(i.date||'').slice(0,7); if (ym) incBy[ym] = (incBy[ym]||0) + (Number(i.net)||Number(i.gross)||0); });
+  (DB.expenses || []).forEach(x => { const ym = String(x.date||'').slice(0,7); if (ym) expBy[ym] = (expBy[ym]||0) + expenseAmountSgd(x); });
+  const inc = months.map(m => incBy[m] || 0);
+  const exp = months.map(m => expBy[m] || 0);
+
+  const totIn = inc.reduce((a,b)=>a+b,0), totEx = exp.reduce((a,b)=>a+b,0);
+  if (meta){
+    const rate = totIn > 0 ? ((totIn - totEx) / totIn * 100) : null;
+    meta.textContent = rate != null ? ('savings rate ' + fmtPct(rate)) : 'no income yet';
+  }
+  if (totIn === 0 && totEx === 0){ if (meta) meta.textContent = 'no data'; return; }
+
+  _cfChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: months.map(_ymLabel),
+      datasets: [
+        { label: 'Income',   data: inc.map(v => toDisplay(v, 'SGD')), backgroundColor: _cssVar('--green') },
+        { label: 'Expenses', data: exp.map(v => toDisplay(v, 'SGD')), backgroundColor: _cssVar('--red') }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: _cssVar('--text3'), font: { size: 10 } }, grid: { display: false } },
+        y: { ticks: { color: _cssVar('--text3'), font: { size: 10 } }, grid: { color: _cssVar('--border') } }
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { color: _cssVar('--text2'), font: { size: 11 }, boxWidth: 12, padding: 12 } },
+        tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + fmt(c.parsed.y, { noConvert: true }) } }
+      }
+    }
+  });
+}
+
 function renderSummary(items){
   return `<div class="h-summary">${
     items.map(it => `
@@ -3274,6 +3770,7 @@ function renderSummary(items){
    ═══════════════════════════════════════════════════════════════════════ */
 function renderAll(){
   updateCcyToggleUI();
+  renderDashboard();
   renderStocks();
   renderCrypto();
   renderRealestate();
@@ -3309,7 +3806,7 @@ function installEventDelegation(){
 }
 
 async function boot(){
-  applyTheme(localStorage.getItem(LK_THEME) || 'dark');
+  applyTheme(localStorage.getItem(LK_THEME) || 'light');
   renderNav();
   installEventDelegation();
   installAutoRefreshVisibility();
@@ -3318,7 +3815,7 @@ async function boot(){
   runSalaryEngine({ notify: true }); // backfill auto income + CPF before first paint
   updateCcyToggleUI();
   renderAll();
-  showPage('stocks'); // Dashboard is Phase 2; land on the first live tab
+  showPage('dashboard'); // land on the dashboard overview
   updateSyncStatusPill();
 
   if (getSyncUrl()) {

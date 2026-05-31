@@ -711,7 +711,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
    Architecture mirrors Kujira Collectibles + Send Ops conventions.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const APP_VERSION = '0.9.0-reconciliation';
+const APP_VERSION = '0.9.2-client-onboarding';
 const SCHEMA = 'kujira-portfolio';
 
 /* Local storage keys */
@@ -1684,13 +1684,12 @@ function renderSetupWizardStep(){
       <ol>
         <li>Click <strong>Extensions → Apps Script</strong> in the menu.</li>
         <li>Delete whatever code is already there.</li>
-        <li>Open the backend code from this project's GitHub and paste it in.</li>
+        <li>Open the backend code (button below), click <strong>Copy raw file</strong>, and paste it in.</li>
         <li>Click <strong>Save</strong> (disk icon).</li>
         <li>Click the function dropdown, pick <code>initOnce</code>, then <strong>▶ Run</strong>. Grant the permissions Google asks for — it needs to read/write your sheet and call Yahoo Finance / CoinGecko.</li>
       </ol>
       <div class="actions">
-        <a class="btn btn-primary" href="https://github.com/" target="_blank" rel="noopener noreferrer">Open the .txt file</a>
-        <span class="hint" style="align-self:center">(Update this link to your published backend file after deploy)</span>
+        <a class="btn btn-primary" href="https://github.com/julianchow21/Investment-Tracker/blob/main/apps-script.gs" target="_blank" rel="noopener noreferrer">Open the backend code</a>
       </div>
     </div>`;
   } else if (_swStep === 3){
@@ -2332,7 +2331,7 @@ const ENTITY_SCHEMAS = {
     fields: [
       { key:'symbol',  label:'Symbol',  type:'text',   required:true, placeholder:'AAPL or D05', hint:'Yahoo ticker. For SGX, omit the .SI — we add it.' },
       { key:'market',  label:'Market',  type:'select', required:true, options:[['SGX','SGX (Singapore)'],['US','US (NYSE/NASDAQ)']], default:'US' },
-      { key:'shares',  label:'Shares',  type:'number', required:true, step:'0.0001', placeholder:'100' },
+      { key:'shares',  label:'Shares',  type:'number', required:true, step:'0.0001', placeholder:'100', hint:'Your current holding. If you log trades below, this is treated as the opening position and trades adjust it.' },
       { key:'avgCost', label:'Avg cost per share', type:'number', required:true, step:'0.0001', placeholder:'150.00' },
       { key:'currency', label:'Cost currency', type:'select', options:[['USD','USD'],['SGD','SGD']], default:'USD', hint:'Currency the avg cost is stated in. Defaults match the market.' },
       { key:'notes',   label:'Notes', type:'textarea' }
@@ -2661,14 +2660,19 @@ function entityModalDelete(){
    STOCK TRADE LEDGER — derive position from transactions
    ═══════════════════════════════════════════════════════════════════════ */
 /* Average-cost method. Returns null when a stock has no logged trades, so
-   the caller falls back to the manually-entered shares/avgCost. Values are
-   in the stock's own currency (price/fees are entered in that currency). */
+   the caller falls back to the manually-entered shares/avgCost. When trades
+   exist, the manually-entered shares/avgCost are the OPENING position and the
+   trades adjust it from there (so selling 10 of a 3,000 holding leaves 2,990).
+   Values are in the stock's own currency (price/fees in that currency). */
 function deriveStockPosition(stockId){
   const txns = (DB.stockTxns || [])
     .filter(t => t.stockId === stockId)
     .sort((a,b) => String(a.date||'').localeCompare(String(b.date||'')));
   if (!txns.length) return null;
-  let shares = 0, costBasis = 0, realisedPL = 0;
+  const stock = (DB.stocks || []).find(s => s.id === stockId) || {};
+  let shares    = Number(stock.shares) || 0;                 // opening position
+  let costBasis = shares * (Number(stock.avgCost) || 0);     // opening cost basis
+  let realisedPL = 0;
   for (const t of txns){
     const qty  = Math.abs(Number(t.shares) || 0);
     const px   = Number(t.price) || 0;
@@ -2689,9 +2693,12 @@ function deriveStockPosition(stockId){
 }
 
 /* Shares held for a stock as of a date, ignoring one transaction (the one
-   being edited). Used to warn when a sell would exceed the holding. */
+   being edited). Includes the manually-entered opening position so the
+   over-sell warning matches the derived holding. */
 function sharesHeldAsOf(stockId, asOfDate, excludeTxnId){
-  return (DB.stockTxns || [])
+  const stock = (DB.stocks || []).find(s => s.id === stockId) || {};
+  const opening = Number(stock.shares) || 0;
+  return opening + (DB.stockTxns || [])
     .filter(t => t.stockId === stockId && t.id !== excludeTxnId && String(t.date || '') <= String(asOfDate || ''))
     .reduce((sh, t) => sh + (t.side === 'sell' ? -1 : 1) * Math.abs(Number(t.shares) || 0), 0);
 }

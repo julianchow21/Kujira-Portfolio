@@ -20,6 +20,21 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
+  /* Default = warm light theme (cream + terracotta), ported from the prototype.
+     Dark lives in html.dark below and is opt-in via the theme toggle. */
+  --bg:#faf9f6;--bg2:#ffffff;--bg3:#f4f2ec;--bg4:#eae7dd;
+  --border:#e7e3da;--border2:#d8d3c6;
+  --text:#1f1d1a;--text2:#6b665e;--text3:#9a958b;
+  --red:#b13838;--red2:#8f2c2c;--red-soft:#f7e6e6;--red-border:#e6c5c5;
+  --green:#2f7d4f;--green-soft:#e6f1ea;--green-border:#bedcc9;
+  --blue:#3a5e8c;--blue-soft:#e4ebf4;--blue-border:#c2d3e6;
+  --amber:#9a6a14;--amber-soft:#f8efd6;--amber-border:#e7d3a0;
+  --purple:#7a4fa3;
+  --accent:#c15f3c;--accent2:#a64f30;--accent-soft:#f4e3da;--accent-border:#e6c5b4;
+  --on-accent:#ffffff;
+  --radius:8px;--radius-lg:12px;
+}
+html.dark{
   --bg:#0f0f0f;--bg2:#161616;--bg3:#1e1e1e;--bg4:#252525;
   --border:#2a2a2a;--border2:#333;
   --text:#e8e8e8;--text2:#999;--text3:#666;
@@ -29,26 +44,16 @@
   --amber:#f59e0b;--amber-soft:#2a1f0a;--amber-border:#3a2f1a;
   --purple:#a78bfa;
   --accent:#2dd4bf;--accent2:#14b8a6;--accent-soft:#0d2420;--accent-border:#1a3530;
-  --radius:8px;--radius-lg:12px;
+  --on-accent:#0f0f0f;
 }
-html.light{
-  --bg:#f0f2f5;--bg2:#ffffff;--bg3:#f5f6f8;--bg4:#eaecef;
-  --border:#e0e2e6;--border2:#d0d3d8;
-  --text:#111318;--text2:#555b66;--text3:#9099a6;
-  --red:#d63b3a;--red2:#b52e2d;--red-soft:#fde8e8;--red-border:#fca5a5;
-  --green:#2e8b3e;--green-soft:#e6f4e8;--green-border:#a5d6a7;
-  --blue:#1a6fd4;--blue-soft:#e0ecfb;--blue-border:#93c5fd;
-  --amber:#b87000;--amber-soft:#fef3dc;--amber-border:#fcd34d;
-  --accent:#0d9488;--accent2:#0f766e;--accent-soft:#ccfbf1;--accent-border:#5eead4;
-}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;transition:background 0.2s,color 0.2s}
+body{font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;transition:background 0.2s,color 0.2s}
 a{color:var(--blue);text-decoration:none}
 a:hover{text-decoration:underline}
 
 /* TOPBAR */
 .topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:0;height:56px;position:sticky;top:0;z-index:100}
 .logo{font-weight:800;font-size:16px;letter-spacing:0.2px;margin-right:32px;display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);cursor:pointer}
-.logo-mark{width:32px;height:32px;flex-shrink:0;border-radius:8px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900;color:#0f0f0f}
+.logo-mark{width:32px;height:32px;flex-shrink:0;border-radius:8px;background:linear-gradient(135deg,var(--accent),#d97a55);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900;color:#fff}
 .logo-name{display:flex;flex-direction:column;line-height:1.1}
 .logo-name span:first-child{font-size:14px;font-weight:800;letter-spacing:0.5px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 .logo-name span:last-child{font-size:9px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--text3);-webkit-text-fill-color:var(--text3)}
@@ -118,8 +123,8 @@ tbody tr:hover td{background:var(--bg3)}
 .btn{padding:7px 14px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--bg3);cursor:pointer;font-size:13px;color:var(--text);transition:all 0.15s;display:inline-flex;align-items:center;gap:6px;font-family:inherit;white-space:nowrap}
 .btn:hover{background:var(--bg4)}
 .btn:disabled{opacity:0.5;cursor:not-allowed}
-.btn-primary{background:var(--accent);color:#0f0f0f;border-color:var(--accent);font-weight:600}
-.btn-primary:hover{background:var(--accent2);border-color:var(--accent2);color:#fff}
+.btn-primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
+.btn-primary:hover{background:var(--accent2);border-color:var(--accent2);color:var(--on-accent)}
 .btn-danger{background:var(--red-soft);color:var(--red);border-color:var(--red-border)}
 .btn-danger:hover{background:var(--red);color:#fff}
 .btn-sm{padding:4px 10px;font-size:12px}
@@ -164,7 +169,12 @@ textarea.fi{resize:vertical;min-height:70px}
 .ccy-toggle{display:inline-flex;border:1px solid var(--border2);border-radius:999px;overflow:hidden;background:var(--bg3)}
 .ccy-toggle button{padding:5px 11px;border:none;background:transparent;color:var(--text3);font-size:11px;font-weight:700;letter-spacing:0.3px;cursor:pointer;font-family:inherit;transition:all 0.15s}
 .ccy-toggle button:hover{color:var(--text)}
-.ccy-toggle button.active{background:var(--accent);color:#fff}
+.ccy-toggle button.active{background:var(--accent);color:var(--on-accent)}
+/* THEME TOGGLE (settings) — mirrors the currency toggle */
+.theme-toggle{display:inline-flex;border:1px solid var(--border2);border-radius:999px;overflow:hidden;background:var(--bg3)}
+.theme-toggle button{padding:7px 16px;border:none;background:transparent;color:var(--text3);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 0.15s;display:inline-flex;align-items:center;gap:6px}
+.theme-toggle button:hover{color:var(--text)}
+.theme-toggle button.active{background:var(--accent);color:var(--on-accent)}
 .page.phase2-locked > *:not(.phase2-card){display:none}
 
 /* SETUP WIZARD */
@@ -469,6 +479,16 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
   <!-- SETTINGS -->
   <section class="page" id="page-settings">
     <div class="page-head"><div><div class="page-title">Settings</div><div class="page-sub">Sync, assumptions, theme.</div></div></div>
+
+    <div class="card">
+      <div class="card-head"><h3>Appearance</h3><span class="hint">Switch between the light and dark look.</span></div>
+      <div class="card-body">
+        <div class="theme-toggle" role="group" aria-label="Theme">
+          <button type="button" data-theme="light" onclick="setThemeChoice('light')">☀ Light</button>
+          <button type="button" data-theme="dark" onclick="setThemeChoice('dark')">🌙 Dark</button>
+        </div>
+      </div>
+    </div>
 
     <div class="card">
       <div class="card-head"><h3>Sync</h3><span id="sync-status-detail" class="hint"></span></div>
@@ -1834,7 +1854,7 @@ function renderDiagnostics(){
     'Apps Script URL: ' + (getSyncUrl() ? '✓ set' : '✗ not set'),
     'Last sync (TS) : ' + (ts ? ts + ' (' + relTime(ts) + ')' : '—'),
     'Last pull seen : ' + (last || '—'),
-    'Theme          : ' + (document.documentElement.classList.contains('light') ? 'light' : 'dark'),
+    'Theme          : ' + (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
     'Local rows     : ' +
       'stocks=' + DB.stocks.length +
       ' crypto=' + DB.crypto.length +
@@ -1939,13 +1959,30 @@ function showPage(key){
 /* ═══════════════════════════════════════════════════════════════════════
    THEME
    ═══════════════════════════════════════════════════════════════════════ */
+function currentTheme(){
+  return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+}
 function applyTheme(t){
-  document.documentElement.classList.toggle('light', t === 'light');
+  document.documentElement.classList.toggle('dark', t === 'dark');
+  updateThemeUI(t);
+  // Charts read colours from CSS vars at draw time, so redraw if the dashboard is up.
+  if (typeof _currentTab !== 'undefined' && _currentTab === 'dashboard' && typeof renderDashboard === 'function') {
+    renderDashboard();
+  }
+}
+function setThemeChoice(t){
+  t = (t === 'dark') ? 'dark' : 'light';
+  localStorage.setItem(LK_THEME, t);
+  applyTheme(t);
 }
 function toggleTheme(){
-  const next = document.documentElement.classList.contains('light') ? 'dark' : 'light';
-  localStorage.setItem(LK_THEME, next);
-  applyTheme(next);
+  setThemeChoice(currentTheme() === 'dark' ? 'light' : 'dark');
+}
+function updateThemeUI(t){
+  t = t || currentTheme();
+  document.querySelectorAll('.theme-toggle button').forEach(b => {
+    b.classList.toggle('active', b.dataset.theme === t);
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -3769,7 +3806,7 @@ function installEventDelegation(){
 }
 
 async function boot(){
-  applyTheme(localStorage.getItem(LK_THEME) || 'dark');
+  applyTheme(localStorage.getItem(LK_THEME) || 'light');
   renderNav();
   installEventDelegation();
   installAutoRefreshVisibility();
