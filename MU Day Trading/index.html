@@ -148,7 +148,8 @@ input[type=number]{width:96px}
 .testout.err{display:block;color:var(--red);background:var(--red-soft);border:1px solid var(--red-border)}
 
 /* Banner / toast */
-.banner{background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);border-radius:var(--radius);padding:9px 12px;font-size:12px;margin-top:14px;display:none}
+.banner{background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);border-radius:var(--radius);padding:9px 12px;font-size:12px;margin-top:14px;display:none;cursor:pointer}
+.banner:hover{border-color:var(--amber)}
 .banner.show{display:block}
 .toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:300;display:flex;flex-direction:column;gap:8px;align-items:center;width:max-content;max-width:92vw}
 .toast{background:var(--bg4);border:1px solid var(--amber-border);color:var(--text);border-radius:var(--radius);padding:10px 14px;font-size:13px;box-shadow:0 6px 22px rgba(0,0,0,.5);animation:tin .2s ease}
@@ -460,10 +461,15 @@ function isRegularSession(sec){
 }
 
 /* ====================== Data layer ====================== */
+// Public CORS proxies are a best-effort fallback only. They go down, rate-limit, or
+// paywall without notice (corsproxy.io now needs a paid plan), so they are not a
+// reliable data path. Configure a Cloudflare Worker or Apps Script URL for real use.
 const PUBLIC_PROXIES = [
-  t => "https://api.allorigins.win/raw?url="+encodeURIComponent(t),
-  t => "https://corsproxy.io/?url="+encodeURIComponent(t),
-  t => "https://api.codetabs.com/v1/proxy/?quest="+t,
+  { make: t => "https://api.allorigins.win/raw?url="+encodeURIComponent(t) },
+  { make: t => "https://api.codetabs.com/v1/proxy/?quest="+t },
+  { make: t => "https://api.allorigins.win/get?url="+encodeURIComponent(t),
+    unwrap: d => (d && typeof d.contents==="string") ? JSON.parse(d.contents) : d },
+  { make: t => "https://thingproxy.freeboard.io/fetch/"+t },
 ];
 function rangeParams(r){
   if(r==="1d")  return { interval:"1m",  range:"1d",  pre:true  };
@@ -476,35 +482,37 @@ function yahooTarget(p){
 function requestUrls(p){
   const t=yahooTarget(p);
   const m=cfg.proxyMode, base=(cfg.proxyUrl||"").trim();
-  if(m==="worker" && base){
-    return [ base+(base.includes("?")?"&":"?")+"symbol="+SYMBOL+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) ];
+  if((m==="worker"||m==="appsscript") && !base) return []; // configured mode but no URL yet
+  if(m==="worker"){
+    return [ { url: base+(base.includes("?")?"&":"?")+"symbol="+SYMBOL+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) } ];
   }
-  if(m==="appsscript" && base){
-    return [ base+(base.includes("?")?"&":"?")+"action=chart&symbol="+SYMBOL+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) ];
+  if(m==="appsscript"){
+    return [ { url: base+(base.includes("?")?"&":"?")+"action=chart&symbol="+SYMBOL+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) } ];
   }
-  if(m==="direct"){
-    return [ t, ...PUBLIC_PROXIES.map(f=>f(t)) ]; // try direct, then fall back to public
-  }
-  return PUBLIC_PROXIES.map(f=>f(t));
+  const pub = PUBLIC_PROXIES.map(pp=>({ url: pp.make(t), unwrap: pp.unwrap }));
+  if(m==="direct") return [ { url:t }, ...pub ]; // try direct, then fall back to public
+  return pub;
 }
 async function fetchChart(p){
-  const urls=requestUrls(p);
-  let lastErr="no data source configured";
-  for(const url of urls){
+  const reqs=requestUrls(p);
+  if(!reqs.length) return { ok:false, error:"no proxy URL set" };
+  let lastErr="no data source";
+  for(const req of reqs){
     try{
       const ctl=new AbortController();
       const to=setTimeout(()=>ctl.abort(), 12000);
-      const resp=await fetch(url,{method:"GET",redirect:"follow",signal:ctl.signal});
+      const resp=await fetch(req.url,{method:"GET",redirect:"follow",signal:ctl.signal});
       clearTimeout(to);
       if(!resp.ok){ lastErr="HTTP "+resp.status; continue; }
       const text=await resp.text();
-      let data; try{ data=JSON.parse(text); }catch(e){ lastErr="bad JSON from proxy"; continue; }
+      let data; try{ data=JSON.parse(text); }catch(e){ lastErr="proxy returned non-JSON"; continue; }
+      if(req.unwrap){ try{ data=req.unwrap(data); }catch(e){ lastErr="proxy returned non-JSON"; continue; } }
       const result=data && data.chart && data.chart.result && data.chart.result[0];
       if(!result){
         const d=data && data.chart && data.chart.error && data.chart.error.description;
         lastErr=d||"no chart data"; continue;
       }
-      return { ok:true, result, via:url };
+      return { ok:true, result };
     }catch(e){ lastErr=(e&&e.name==="AbortError")?"timeout":(e.message||"fetch failed"); }
   }
   return { ok:false, error:lastErr };
@@ -884,8 +892,13 @@ function addAlert(){
 /* ====================== Refresh loop ====================== */
 function showError(msg){
   const b=$("#errBanner");
-  if(msg){ b.textContent="Could not load live data: "+msg+". Check the data proxy in Settings."; b.classList.add("show"); }
-  else b.classList.remove("show");
+  if(msg){
+    const tip = (cfg.proxyMode==="public" || cfg.proxyMode==="direct")
+      ? "Public proxies are unreliable and often down. Tap here to open Settings and connect a Cloudflare Worker or your Apps Script URL for live data."
+      : "Tap here to open Settings and check the data proxy.";
+    b.innerHTML="<b>Could not load live data</b> ("+esc(msg)+"). "+tip;
+    b.classList.add("show");
+  } else b.classList.remove("show");
 }
 async function refresh(manual){
   if(inFlight) return;
@@ -999,6 +1012,7 @@ function saveSettingsFromDrawer(){
 function wire(){
   $("#refreshBtn").addEventListener("click",()=>refresh(true));
   $("#gearBtn").addEventListener("click",openDrawer);
+  $("#errBanner").addEventListener("click",openDrawer);
   $("#drawerX").addEventListener("click",closeDrawer);
   $("#scrim").addEventListener("click",closeDrawer);
 
