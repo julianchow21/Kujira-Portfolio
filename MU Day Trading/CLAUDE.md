@@ -10,21 +10,23 @@ Single-file SPA, all CSS/JS/HTML in `index.html`. No framework, no bundler. Char
 
 One Yahoo v8 chart call per refresh: `query1.finance.yahoo.com/v8/finance/chart/MU?interval=&range=&includePrePost=`. `meta` gives price, prevClose (`chartPreviousClose`), day high/low, volume, marketState, regularMarketTime. `timestamp` + `indicators.quote[0]` give the OHLCV series that feeds the chart and every indicator. `parseResult()` normalises both. Same endpoint the Investment Tracker Apps Script already proxies.
 
-**Core vs chart split (important).** The header, indicator cards, and alerts are ALWAYS driven by today's 1d data (`lastCore`). The range selector (1D/5D/1M) only changes the chart (`lastChart`) via `loadChart()`. This keeps the live numbers anchored to today and means alerts keep firing even when parked on 5D/1M. Do not wire the header or alerts to `curRange`.
+**Core vs chart split (important).** The header, indicator cards, and alerts are ALWAYS driven by today's 1m session (`lastCore`, `CORE_PARAMS`). The timeframe selector only changes the chart (`lastChart`) via `loadChart()`. This keeps the live numbers anchored to today and means alerts keep firing on any timeframe. Do not wire the header or alerts to `curTf`.
+
+**Timeframes (`TIMEFRAMES`).** Tabs are 1m / 5m / 15m / 1h / 1D, each a Yahoo interval+range pair that Yahoo accepts (e.g. 1m needs range <=7d, 15m <=60d, 60m <=730d). `intraday:true` for minute/hour bars (VWAP valid, ET time axis). The `1m` tab reuses `lastCore` (same data), so switching to it is instant. Adding a tab means adding a valid combo to `TIMEFRAMES`.
 
 ### Proxy (CORS)
 
 Browser cannot hit Yahoo directly. `cfg.proxyMode` in Settings:
 - `public` (default): trial-only public CORS proxies, fallback chain in `PUBLIC_PROXIES`. Flaky, flagged in-UI, not for real-money decisions.
-- `worker`: Cloudflare Worker, see `mu-yahoo-worker.js`. Recommended for real use.
-- `appsscript`: Investment Tracker `/exec` after adding the `chart` action, see `apps-script-chart-snippet.js`.
+- `worker`: Cloudflare Worker, code in `Worker/`. Recommended for real use (Julian chose this).
+- `appsscript`: Kujira Portfolio `/exec` after adding the `chart` action, see `Docs/Apps Script Chart Action`.
 - `direct`: raw Yahoo, usually CORS-blocked, falls back to public.
 
 All proxies return Yahoo's native JSON so `parseResult` is unchanged.
 
 ### Indicators
 
-Client-side from the series: `ema()`, `rsi()` (Wilder), `macd()` (12/26/9), `vwapSeries()` (anchored to the regular session via `isRegularSession()`, null outside). VWAP overlay shows on 1D only. Cards are always session/intraday (from `lastCore`); chart overlays use the displayed range's series, so on 5D/1M the chart EMAs differ from the cards by design.
+Client-side from the series: `ema()`, `rsi()` (Wilder), `macd()` (12/26/9), `vwapSeries()` (resets at each market day via `etDateKey()`, regular-session bars only via `isRegularSession()`, null outside). VWAP overlay shows on intraday timeframes only (hidden on 1D daily). Cards are always session/intraday (from `lastCore`); chart overlays use the displayed timeframe's series, so on coarser timeframes the chart EMAs differ from the cards by design.
 
 ### Alerts
 
@@ -32,7 +34,8 @@ Client-side from the series: `ema()`, `rsi()` (Wilder), `macd()` (12/26/9), `vwa
 
 ## Gotchas
 
-- **Lightweight Charts fit-after-setData:** call `fitContent()` / `setVisibleRange()` inside `requestAnimationFrame` after `setData`, otherwise a range switch fits against the previous range's layout and bunches candles to one side. See `refitChart()`.
+- **Lightweight Charts fit-after-setData:** call `fitContent()` inside `requestAnimationFrame` after `setData`, otherwise a timeframe switch fits against the previous timeframe's layout and bunches candles to one side. See `refitChart()`.
+- **Multi-day intraday axis needs the tick type.** On a multi-day intraday chart (5m/15m/1h) every session starts at 09:30, so a time-only `tickMarkFormatter` prints "09:30" on every tick. Use the second arg (`tickMarkType`): `<=2` (Year/Month/DayOfMonth) is a date boundary so show the date, `>=3` (Time) shows the clock. The crosshair also shows date + time on intraday so you know which day.
 - **Market clock is DST-aware via Intl** (`America/New_York`), not hardcoded offsets. Holidays are not handled (only weekends show "Closed").
 - **`.topbar` has z-index:100** so the settings drawer (z-index:201) and its scrim paint above the backdrop-filter topbar.
 - Chart axis and crosshair times are ET (market time), not SGT.
@@ -45,10 +48,10 @@ Ported from Investment Tracker: `--bg/bg2/bg3/bg4`, `--green` (gains) / `--red` 
 
 ## Files
 
-- `index.html` — the dashboard (canonical, no date prefix).
-- `mu-yahoo-worker.js` — Cloudflare Worker proxy (recommended data path).
-- `apps-script-chart-snippet.js` — optional `chart` action to reuse the Investment Tracker backend.
-- `README.md` — user setup and usage.
+- `index.html` — the dashboard (canonical runtime name, no date prefix).
+- `Worker/` — Cloudflare Worker proxy code (the chosen data path).
+- `Docs/` — user guide and the optional Apps Script chart-action snippet.
+- `Backups/` — dated `index.html` snapshots taken before significant changes.
 
 ## Hosting
 

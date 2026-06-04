@@ -963,8 +963,8 @@ function scheduleNext(){
 /* ====================== Settings drawer ====================== */
 const PROXY_HINTS={
   public:"Works instantly with no setup, but routes through a shared public service. Fine to try, not reliable enough to trade on. Switch to a Cloudflare Worker for real use.",
-  worker:"Paste your deployed Worker URL (code in the Worker folder). Fast, private, ~40 lines, same deploy flow as the Kujira price worker.",
-  appsscript:"Paste your Kujira Portfolio /exec URL after adding the chart action (see the Apps Script file in Docs). Reuses a backend you already run.",
+  worker:"Paste your deployed Worker URL (see mu-yahoo-worker.js). Fast, private, ~20 lines, same deploy flow as the Kujira price worker.",
+  appsscript:"Paste your Investment Tracker /exec URL after adding the chart action (see apps-script-chart-snippet.js). Reuses a backend you already run.",
   direct:"Calls Yahoo directly. Usually blocked by the browser (CORS); falls back to public proxies if it fails.",
 };
 function openDrawer(){ syncDrawer(); $("#scrim").classList.add("show"); $("#drawer").classList.add("show"); }
