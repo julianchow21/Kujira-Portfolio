@@ -553,19 +553,6 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
     </div>
 
     <div class="card">
-      <div class="card-head"><h3>Backup &amp; restore</h3><span class="hint">Download a full copy, or load one back.</span></div>
-      <div class="card-body">
-        <p class="hint" style="margin-bottom:12px">Export saves everything (holdings, cash, CPF, P&amp;L, settings) to a JSON file on your device. Keep it somewhere safe. Import replaces all current data with a backup file, so export first if you are unsure.</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-primary" onclick="exportBackup()">Export backup</button>
-          <button class="btn" onclick="document.getElementById('import-file-input').click()">Import backup</button>
-          <input type="file" id="import-file-input" accept="application/json,.json" style="display:none" onchange="importBackupFromFile(this)">
-          <span class="hint" id="backup-meta"></span>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
       <div class="card-head"><h3>Base currency &amp; FX</h3></div>
       <div class="card-body">
         <div class="form-grid">
@@ -802,7 +789,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
    Architecture mirrors Kujira Collectibles + Send Ops conventions.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const APP_VERSION = '0.9.7-backup-restore';
+const APP_VERSION = '0.9.6-cash-derive-fix';
 const SCHEMA = 'kujira-portfolio';
 
 /* Local storage keys */
@@ -2071,86 +2058,6 @@ function resetLocalConfirm(){
   loadSettingsForm();
   renderAll();
   showToast('Local data reset. Pull from cloud to restore.', 'success');
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   BACKUP / RESTORE — download or load the whole DB as a JSON file.
-   The safety net for local-only users (no cloud sync configured). Export is
-   the full DB minus the transient price cache; import runs through
-   mergeDefaults (same validation as a cloud pull) so a malformed or hostile
-   file cannot corrupt the app. Import always confirms before overwriting.
-   ═══════════════════════════════════════════════════════════════════════ */
-function exportBackup(){
-  try {
-    const payload = Object.assign({}, localPersistPayload(), {
-      _backup: { app: 'kujira-portfolio', appVersion: APP_VERSION, exportedAt: new Date().toISOString() }
-    });
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const stamp = _isoDate(new Date());
-    a.href = url;
-    a.download = 'kujira-portfolio-backup-' + stamp + '.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    const meta = document.getElementById('backup-meta');
-    if (meta) meta.textContent = 'Exported ' + stamp;
-    showToast('Backup downloaded', 'success');
-  } catch (e) {
-    showToast('Export failed: ' + (e && e.message ? e.message : e), 'error');
-  }
-}
-
-function importBackupFromFile(input){
-  const file = input && input.files && input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onerror = () => { showToast('Could not read that file', 'error'); input.value = ''; };
-  reader.onload = () => {
-    let parsed;
-    try {
-      parsed = JSON.parse(reader.result);
-    } catch (e) {
-      showToast('That is not a valid JSON backup file', 'error');
-      input.value = '';
-      return;
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)){
-      showToast('That file does not look like a portfolio backup', 'error');
-      input.value = '';
-      return;
-    }
-    // Soft check: a real backup has at least one known table or our marker.
-    const known = ['stocks','cash','cpfHistory','income','expenses','settings','_backup'];
-    if (!known.some(k => k in parsed)){
-      showToast('That file does not look like a portfolio backup', 'error');
-      input.value = '';
-      return;
-    }
-    const stampTxt = (parsed._backup && parsed._backup.exportedAt)
-      ? ('\n\nBackup date: ' + parsed._backup.exportedAt) : '';
-    if (!confirm('Import this backup? It REPLACES all current data in this browser.' + stampTxt + '\n\nTip: export your current data first if you might want it back.')) {
-      input.value = '';
-      return;
-    }
-    try {
-      DB = mergeDefaults(parsed);   // same validation path as a cloud pull
-      saveLocal();
-      loadSettingsForm();
-      runSalaryEngine({});
-      renderAll();
-      showPage('dashboard');
-      const meta = document.getElementById('backup-meta');
-      if (meta) meta.textContent = 'Imported ' + _isoDate(new Date());
-      showToast('Backup imported', 'success');
-    } catch (e) {
-      showToast('Import failed: ' + (e && e.message ? e.message : e), 'error');
-    }
-    input.value = '';  // allow re-importing the same file name
-  };
-  reader.readAsText(file);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
