@@ -4,15 +4,15 @@ Candidate features, not started. Pick from here when ready. Full specs for the t
 drafts live in `~/Claude Projects/Claude/tasks/todo.md` under "feature drafts". Each item
 has rough priority and effort so picking is fast. Update status as things move.
 
-Last updated: 06/06/2026. App at v0.9.7-backup-restore.
+Last updated: 06/06/2026. App at v0.9.8-interest-tax.
 
 ## Priority view
 
 | # | Feature | Value | Effort | Status |
 |---|---------|-------|--------|--------|
-| 1 | Account interest accrual (cash APY) | High | Low | Backlog |
+| 1 | Account interest accrual (cash APY) | High | Low | Done (v0.9.8) |
 | 2 | Dividend income tracking | High | Medium | Backlog |
-| 3 | SG income tax (Settings, salary + bonus) | High | Medium | Drafted |
+| 3 | SG income tax (Settings, salary + bonus) | High | Medium | Done (v0.9.8) |
 | 4 | Stocks column manager (reorder/hide) | Medium | Medium | Drafted |
 | 5 | Fix em dashes in prose copy (house style) | Low | Low | Backlog |
 | 6 | IBKR CSV import | High | High | Backlog |

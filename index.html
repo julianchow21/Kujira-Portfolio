@@ -251,6 +251,7 @@ textarea.fi{resize:vertical;min-height:70px}
 .bucket-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.4px;font-weight:600}
 .bucket-amt{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
 .bucket-sub{font-size:11px;color:var(--text2)}
+.hint-block{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
 .px-ext{font-size:10px;color:var(--text3);margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .px-ext-tag{display:inline-block;padding:0 4px;border-radius:3px;background:var(--bg4);border:1px solid var(--border2);color:var(--text2);font-weight:700;font-size:9px;letter-spacing:0.3px;text-transform:uppercase}
 
@@ -670,6 +671,33 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
     </div>
 
     <div class="card">
+      <div class="card-head"><h3>Income tax (Singapore)</h3><span class="hint">Estimates annual SG resident or non-resident tax from your salary + bonus. Monthly figure is a provision, not PAYE.</span></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="lbl">Residency</label>
+            <select id="cfg-tax-residency" class="fi" onchange="renderTaxEstimate()">
+              <option value="resident">Singapore resident (citizen / PR)</option>
+              <option value="non-resident">Non-resident (higher of 15% flat / graduated)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="lbl">Total reliefs (SGD)</label>
+            <input type="number" step="1" min="0" id="cfg-tax-reliefs" class="fi" placeholder="1000" oninput="renderTaxEstimate()">
+            <div class="hint">Earned income relief ($1,000 default). Add NSman, course fees, etc. Reliefs reduce chargeable income.</div>
+          </div>
+          <div class="form-group full">
+            <label class="lbl">Manual annual tax override (SGD, optional)</label>
+            <input type="number" step="1" min="0" id="cfg-tax-manual" class="fi" placeholder="Leave blank to use computed estimate" oninput="renderTaxEstimate()">
+            <div class="hint">If you know your actual NOA figure, enter it here to override the estimate.</div>
+          </div>
+        </div>
+        <div id="cfg-tax-estimate" style="margin-top:8px"></div>
+        <div style="margin-top:14px"><button class="btn btn-primary" onclick="saveSettingsFromForm()">Save</button></div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-head"><h3>CPF interest rates</h3><span class="hint">Defaults follow the official board rates.</span></div>
       <div class="card-body">
         <div class="form-grid">
@@ -802,7 +830,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
    Architecture mirrors Kujira Collectibles + Send Ops conventions.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const APP_VERSION = '0.9.7-backup-restore';
+const APP_VERSION = '0.9.8-interest-tax';
 const SCHEMA = 'kujira-portfolio';
 
 /* Local storage keys */
@@ -886,6 +914,26 @@ function getPayday(year, month){
      55+ the OA/MA/RA split is not automated yet — income still generates,
      CPF is skipped with a note. */
 const CPF_OW_CEILING_2026 = 8000;
+
+/* Singapore resident income-tax brackets (YA2025 = same as YA2024+).
+   Each band: { from, to, rate (%), base (cumulative tax at `from`) }.
+   Source: IRAS. Store as a const — user sets reliefs, not bracket values.
+   Verified cumulative bases at band boundaries. */
+const SG_TAX_BRACKETS = [
+  { from:       0, to:    20000, rate:  0,   base:      0 },
+  { from:   20000, to:    30000, rate:  2,   base:      0 },
+  { from:   30000, to:    40000, rate:  3.5, base:    200 },
+  { from:   40000, to:    80000, rate:  7,   base:    550 },
+  { from:   80000, to:   120000, rate: 11.5, base:   3350 },
+  { from:  120000, to:   160000, rate: 15,   base:   7950 },
+  { from:  160000, to:   200000, rate: 18,   base:  13950 },
+  { from:  200000, to:   240000, rate: 19,   base:  21150 },
+  { from:  240000, to:   280000, rate: 19.5, base:  28750 },
+  { from:  280000, to:   320000, rate: 20,   base:  36550 },
+  { from:  320000, to:   500000, rate: 22,   base:  44550 },
+  { from:  500000, to:  1000000, rate: 23,   base:  84150 },
+  { from: 1000000, to: Infinity, rate: 24,   base: 199150 }
+];
 
 function cpfContribRatesForAge(age){
   if (age == null || age <= 55) return { employer:17.0, employee:20.0 };
@@ -1171,7 +1219,13 @@ function freshDB(){
       efTarget:       null,
       // Salary allocation rules: how each payday's take-home is earmarked.
       // Each: { id, name, pct, dest }. Should sum to 100%.
-      salaryRules:    []
+      salaryRules:    [],
+      // SG income tax estimate. Annual figure; monthly = annual / 12 (accrual, not PAYE).
+      tax: {
+        residency:       'resident',  // 'resident' | 'non-resident'
+        totalReliefs:    1000,        // SGD. Default = earned income relief ($1,000).
+        manualAnnualTax: null         // Override. Null = use computed estimate.
+      }
     },
     _priceCache:  {},
     changelog:    [],
@@ -1382,6 +1436,7 @@ function mergeDefaults(loaded){
   // salaryRules is an array; keep loaded value if it is one, else default.
   out.settings.salaryRules = Array.isArray(safe.settings && safe.settings.salaryRules)
     ? safe.settings.salaryRules : base.settings.salaryRules.slice();
+  out.settings.tax = Object.assign({}, base.settings.tax, (safe.settings && safe.settings.tax) || {});
   out.categories = Object.assign({}, base.categories, safe.categories || {});
   out.cpfBalances = Object.assign({}, base.cpfBalances, safe.cpfBalances || {});
   _LIST_TABLES.forEach(t => { out[t] = _sanitiseList(out[t], t); });
@@ -1917,6 +1972,13 @@ function loadSettingsForm(){
   setV('cfg-rebalance-threshold', s.rebalanceThreshold || 5);
   setV('cfg-ef-target',         s.efTarget || '');
   updateTargetSumHint();
+  // Income tax
+  const tax = s.tax || {};
+  const taxResSel = document.getElementById('cfg-tax-residency');
+  if (taxResSel) taxResSel.value = tax.residency || 'resident';
+  setV('cfg-tax-reliefs', tax.totalReliefs != null ? tax.totalReliefs : 1000);
+  setV('cfg-tax-manual',  tax.manualAnnualTax != null ? tax.manualAnnualTax : '');
+  renderTaxEstimate();
   // Salary allocation rules
   renderSalaryRulesEditor();
 }
@@ -1972,6 +2034,13 @@ function saveSettingsFromForm(){
   s.targets.crypto     = clampPct('cfg-target-crypto');
   s.rebalanceThreshold = numOrNull('cfg-rebalance-threshold') || 5;
   s.efTarget           = numOrNull('cfg-ef-target');
+  // Income tax
+  if (!s.tax) s.tax = {};
+  const taxResSel = document.getElementById('cfg-tax-residency');
+  s.tax.residency       = taxResSel ? (taxResSel.value || 'resident') : 'resident';
+  const taxReliefs      = numOrNull('cfg-tax-reliefs');
+  s.tax.totalReliefs    = taxReliefs != null ? taxReliefs : 1000;
+  s.tax.manualAnnualTax = numOrNull('cfg-tax-manual');
   saveData();
   runSalaryEngine({ rerender: true, notify: true }); // backfill/refresh auto entries
   renderAll(); // base-currency change reconverts every tab + syncs the toggle
@@ -2059,6 +2128,117 @@ function renderBucketPreview(){
     </div>`;
   }).join('');
   el.innerHTML = `<div class="hint" style="margin-bottom:6px">This month on take-home of ${fmt(takeHome)}${cpf.allocated===false&&age==null?' (set birth year for exact CPF)':''}:</div><div class="bucket-grid">${cells}</div>`;
+}
+
+/* ─── SG Income Tax engine ──────────────────────────────────────────────
+   Finance model:
+   - Tax is annual (Year of Assessment), progressive, on chargeable income.
+   - Chargeable income = annual gross (12×monthly + bonus) − annual employee
+     CPF (capped at OW ceiling × 12) − total reliefs.
+   - Resident: progressive brackets (SG_TAX_BRACKETS).
+   - Non-resident: employment income taxed at HIGHER of 15% flat or graduated.
+   - Monthly provision = annual tax ÷ 12 (accrual, not PAYE withholding).
+   Verified against IRAS worked examples at $40k, $80k, $120k. */
+
+function computeSgIncomeTax(chargeableIncome){
+  const ci = Math.max(0, Number(chargeableIncome) || 0);
+  if (ci === 0) return 0;
+  // Walk bands from highest to find the right one.
+  for (let i = SG_TAX_BRACKETS.length - 1; i >= 0; i--){
+    const band = SG_TAX_BRACKETS[i];
+    if (ci > band.from){
+      return _round2(band.base + (ci - band.from) * band.rate / 100);
+    }
+  }
+  return 0;
+}
+
+/* Returns a breakdown object or null if salary is not configured.
+   Memo key is a JSON snapshot of the relevant inputs for cheap dirty-check. */
+function estimateAnnualTax(){
+  const sal = DB.settings.salary || {};
+  const tax = DB.settings.tax || {};
+  const gross = Number(sal.grossMonthly) || 0;
+  if (!gross) return null;
+
+  const bonus           = Number(sal.annualBonus) || 0;
+  const annualGross     = gross * 12 + bonus;
+
+  // Annual employee CPF: apply monthly OW ceiling, then sum 12 months.
+  const age          = _ageOnYear(new Date().getFullYear());
+  const rates        = cpfContribRatesForAge(age);
+  const monthlyWage  = Math.min(gross, CPF_OW_CEILING_2026);
+  const annualEmpCpf = monthlyWage * (rates.employee / 100) * 12;
+
+  const reliefs         = Math.max(0, Number(tax.totalReliefs) || 0);
+  const chargeableIncome = Math.max(0, annualGross - annualEmpCpf - reliefs);
+
+  let annualTax;
+  if (tax.manualAnnualTax != null){
+    annualTax = Math.max(0, Number(tax.manualAnnualTax) || 0);
+  } else if (tax.residency === 'non-resident'){
+    // Non-resident employment income: higher of 15% flat or graduated.
+    const graduated = computeSgIncomeTax(chargeableIncome);
+    const flat      = chargeableIncome * 0.15;
+    annualTax       = Math.max(graduated, flat);
+  } else {
+    annualTax = computeSgIncomeTax(chargeableIncome);
+  }
+
+  const effectiveRate = chargeableIncome > 0 ? annualTax / chargeableIncome * 100 : 0;
+
+  return {
+    annualGross, annualEmpCpf, reliefs, chargeableIncome,
+    annualTax: _round2(annualTax),
+    effectiveRate: Math.round(effectiveRate * 100) / 100,
+    monthlyProvision: _round2(annualTax / 12),
+    residency: tax.residency || 'resident',
+    isManual: tax.manualAnnualTax != null
+  };
+}
+
+/* Render the tax estimate preview inside the Settings card. */
+function renderTaxEstimate(){
+  const el = document.getElementById('cfg-tax-estimate');
+  if (!el) return;
+  const est = estimateAnnualTax();
+  if (!est){
+    el.innerHTML = '<div class="hint">Set a gross monthly salary in the Salary card above to see an estimate.</div>';
+    return;
+  }
+  const fmt2 = n => n.toLocaleString('en-SG', { style:'currency', currency:'SGD', minimumFractionDigits:0, maximumFractionDigits:0 });
+  const nr = est.residency === 'non-resident';
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:10px">
+      <div class="hint-block">
+        <div class="hint" style="font-size:11px;margin-bottom:2px">Annual gross</div>
+        <div style="font-weight:600">${fmt2(est.annualGross)}</div>
+      </div>
+      <div class="hint-block">
+        <div class="hint" style="font-size:11px;margin-bottom:2px">Less employee CPF</div>
+        <div style="font-weight:600">(${fmt2(est.annualEmpCpf)})</div>
+      </div>
+      <div class="hint-block">
+        <div class="hint" style="font-size:11px;margin-bottom:2px">Less reliefs</div>
+        <div style="font-weight:600">(${fmt2(est.reliefs)})</div>
+      </div>
+      <div class="hint-block">
+        <div class="hint" style="font-size:11px;margin-bottom:2px">Chargeable income</div>
+        <div style="font-weight:600">${fmt2(est.chargeableIncome)}</div>
+      </div>
+      <div class="hint-block" style="border-left:2px solid var(--accent);padding-left:10px">
+        <div class="hint" style="font-size:11px;margin-bottom:2px">Est. annual tax${est.isManual ? ' (manual override)' : ''}</div>
+        <div style="font-weight:700;font-size:16px">${fmt2(est.annualTax)}</div>
+        <div class="hint">${est.effectiveRate.toFixed(2)}% effective rate${nr ? ' (non-resident — higher of 15% flat / graduated)' : ''}</div>
+      </div>
+      <div class="hint-block" style="border-left:2px solid var(--accent);padding-left:10px">
+        <div class="hint" style="font-size:11px;margin-bottom:2px">Monthly provision</div>
+        <div style="font-weight:700;font-size:16px">${fmt2(est.monthlyProvision)}</div>
+        <div class="hint">Accrual. SG has no monthly PAYE.</div>
+      </div>
+    </div>
+    <div class="hint" style="margin-top:10px;font-size:11px">Rates: YA2025 resident brackets (IRAS). Estimate only — does not account for NSman or dependent reliefs beyond the "Total reliefs" field. Verify on mytax.iras.gov.sg before filing.</div>
+  `;
 }
 
 function resetLocalConfirm(){
@@ -2747,6 +2927,7 @@ const ENTITY_SCHEMAS = {
       { key:'account',  label:'Account type', type:'select', options:[['Savings','Savings'],['Current','Current'],['FD','Fixed deposit'],['MMF','Money market'],['Brokerage','Brokerage cash'],['Foreign','Foreign currency'],['Other','Other']], default:'Savings' },
       { key:'amount',   label:'Balance', type:'number', step:'0.01', placeholder:'10000', hint:'For Brokerage accounts the balance is calculated from movements + linked trades below — leave blank.' },
       { key:'currency', label:'Currency', type:'select', options:[['SGD','SGD'],['USD','USD'],['EUR','EUR'],['GBP','GBP'],['HKD','HKD'],['JPY','JPY'],['AUD','AUD'],['MYR','MYR'],['Other','Other']], default:'SGD' },
+      { key:'apy',      label:'Interest rate % p.a. (APY)', type:'number', step:'0.01', placeholder:'0.00', hint:'Annual yield. Shown as projected monthly / annual interest. Leave blank for non-interest-bearing accounts.' },
       { key:'notes',    label:'Notes', type:'textarea' }
     ],
     defaults: { account:'Savings', currency:'SGD' }
@@ -3409,6 +3590,17 @@ function hasCashActivity(acct){
       || (DB.stockTxns || []).some(t => t.cashAccountId === acct.id);
 }
 
+/* Projected monthly interest for one account using its APY field.
+   Uses the derived balance so movements/trades are included automatically. */
+function projectedMonthlyInterest(acct){
+  const apy = Number(acct.apy) || 0;
+  if (!apy) return 0;
+  return deriveCashBalance(acct) * (apy / 100) / 12;
+}
+function projectedAnnualInterest(acct){
+  return projectedMonthlyInterest(acct) * 12;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    CASH — render
    ═══════════════════════════════════════════════════════════════════════ */
@@ -3434,30 +3626,42 @@ function renderCash(){
     return;
   }
 
-  let totSgd = 0, fxMissing = false;
+  let totSgd = 0, fxMissing = false, totInterestSgd = 0;
   const rows = list.map(c => {
     const ccy = c.currency || 'SGD';
     const bal = deriveCashBalance(c);          // native-currency balance
     const sgd = toSGD(bal, ccy);
     if (fxMissingFor(ccy)) fxMissing = true;
     totSgd += sgd;
-    return { c, ccy, sgd, bal, derived: hasCashActivity(c) };
+    const monthlyInt  = projectedMonthlyInterest(c);
+    const annualInt   = monthlyInt * 12;
+    const intSgd      = toSGD(annualInt, ccy);
+    totInterestSgd   += intSgd;
+    return { c, ccy, sgd, bal, derived: hasCashActivity(c), apy: Number(c.apy)||0, monthlyInt };
   });
+
+  const showApy = rows.some(r => r.apy > 0);
 
   // Currency breakdown
   const byCcy = {};
   rows.forEach(r => { byCcy[r.ccy] = (byCcy[r.ccy] || 0) + r.bal; });
   const ccyChips = Object.entries(byCcy).map(([k,v]) => `<span class="tag" style="margin-right:6px">${kjrEscape(k)} ${v.toLocaleString('en-SG', {maximumFractionDigits:2})}</span>`).join('');
 
-  sumEl.innerHTML = renderSummary([
-    { label:'Accounts',     value: String(list.length), accent:'accent' },
-    { label:'Total (' + displayCcy() + ')',  value: fmt(totSgd), accent:'accent', sub: fxMissing ? 'FX missing for some — set in Settings or refresh' : '' },
-    { label:'By currency',  value: '', sub: ccyChips || '—' }
-  ]);
+  const summaryCards = [
+    { label:'Accounts',    value: String(list.length), accent:'accent' },
+    { label:'Total (' + displayCcy() + ')', value: fmt(totSgd), accent:'accent', sub: fxMissing ? 'FX missing for some — set in Settings or refresh' : '' },
+    { label:'By currency', value: '', sub: ccyChips || '—' }
+  ];
+  if (showApy){
+    summaryCards.push({ label:'Projected annual interest', value: fmt(totInterestSgd), accent:'accent', sub:'Based on APY × current balances' });
+  }
+  sumEl.innerHTML = renderSummary(summaryCards);
 
   bodyEl.innerHTML = `
     <div class="card"><div class="tbl-wrap"><table class="holdings"><thead><tr>
-      <th class="tl">Account</th><th class="tl">Type</th><th>Balance</th><th>Currency</th><th>${displayCcy()} value</th><th class="tl">Notes</th><th></th>
+      <th class="tl">Account</th><th class="tl">Type</th><th>Balance</th><th>Currency</th><th>${displayCcy()} value</th>
+      ${showApy ? '<th>APY %</th><th>Monthly interest</th>' : ''}
+      <th class="tl">Notes</th><th></th>
     </tr></thead><tbody>
       ${rows.map(r => `<tr>
         <td class="tl cell-sym">${kjrEscape(r.c.name)}</td>
@@ -3465,6 +3669,7 @@ function renderCash(){
         <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${r.bal.toLocaleString('en-SG', {maximumFractionDigits:2})}${r.derived ? '<span class="hint" title="Calculated from movements + linked trades"> ◆</span>' : ''}</td>
         <td class="num">${kjrEscape(r.ccy)}</td>
         <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${fmt(r.sgd)}</td>
+        ${showApy ? `<td class="num">${r.apy ? r.apy.toFixed(2) + '%' : '—'}</td><td class="num">${r.monthlyInt ? r.c.currency && r.c.currency !== 'SGD' ? r.c.currency + ' ' + r.monthlyInt.toLocaleString('en-SG',{maximumFractionDigits:2}) : fmt(toSGD(r.monthlyInt, r.ccy)) : '—'}</td>` : ''}
         <td class="tl muted">${kjrEscape(r.c.notes || '')}</td>
         <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cash" data-edit-id="${kjrEscape(r.c.id)}">Edit</button></td>
       </tr>`).join('')}
