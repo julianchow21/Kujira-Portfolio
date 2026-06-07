@@ -173,6 +173,24 @@ function kjrSafeNumber(n, opts){
   return v;
 }
 
+/* ─── Money helpers (#Crit-2) ───────────────────────────────────────────
+   roundMoney: general dp-aware rounding (dp=2 for SGD/USD, 4 for share
+   prices, 8 for crypto). Treats NaN/null as 0 (same convention as _round2).
+   safeRatio: percentage / ratio with a zero-denominator guard. Returns null
+   when denom is zero, negative, or non-finite — so display code shows '—'. */
+function roundMoney(v, dp){
+  const scale = Math.pow(10, dp != null ? dp : 2);
+  return Math.round((Number(v) || 0) * scale) / scale;
+}
+
+function safeRatio(num, denom, scale){
+  const d = Number(denom);
+  if (!d || d <= 0 || !isFinite(d)) return null;
+  const n = Number(num);
+  if (!isFinite(n)) return null;
+  return n / d * (scale != null ? scale : 100);
+}
+
 /* ─── Stock P&L — average-cost method ──────────────────────────────────
    Pure version of deriveStockPosition. Takes the opening position and a
    pre-sorted (chronological) array of trade objects directly, so it can be
@@ -180,24 +198,27 @@ function kjrSafeNumber(n, opts){
      openingShares   manual shares field on the stock record
      openingAvgCost  manual avg-cost field on the stock record
      sortedTxns      array of { side, shares, price, fees } in date order
-   Values are in the stock's own currency (price and fees in that currency). */
+   Values are in the stock's own currency (price and fees in that currency).
+   roundMoney(dp=2) is applied at each accumulation step to prevent float
+   drift across long trade histories. */
 function computeStockPosition(openingShares, openingAvgCost, sortedTxns){
   let shares    = Number(openingShares)  || 0;
-  let costBasis = shares * (Number(openingAvgCost) || 0);
+  let costBasis = roundMoney(shares * (Number(openingAvgCost) || 0));
   let realisedPL = 0;
   for (const t of sortedTxns){
     const qty  = Math.abs(Number(t.shares) || 0);
     const px   = Number(t.price) || 0;
     const fees = Number(t.fees)  || 0;
     if (t.side === 'sell'){
-      const avg     = shares > 0 ? costBasis / shares : 0;
-      const sellQty = Math.min(qty, shares);
-      realisedPL += (px * sellQty - fees) - avg * sellQty;
-      costBasis  -= avg * sellQty;
-      shares     -= sellQty;
+      const avg        = shares > 0 ? costBasis / shares : 0;
+      const sellQty    = Math.min(qty, shares);
+      const costRemoved = roundMoney(avg * sellQty);
+      realisedPL = roundMoney(realisedPL + (px * sellQty - fees) - costRemoved);
+      costBasis  = roundMoney(costBasis - costRemoved);
+      shares    -= sellQty;
     } else {
-      costBasis += px * qty + fees;
-      shares    += qty;
+      costBasis = roundMoney(costBasis + px * qty + fees);
+      shares   += qty;
     }
   }
   const avgCost = shares > 0 ? costBasis / shares : 0;
@@ -214,6 +235,7 @@ if (typeof module !== 'undefined' && module.exports) {
     _round2, computeCpfContribution,
     _monthsBetween,
     kjrSafeNumber,
+    roundMoney, safeRatio,
     computeStockPosition
   };
 }

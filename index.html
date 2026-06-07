@@ -845,7 +845,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
    Architecture mirrors Kujira Collectibles + Send Ops conventions.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const APP_VERSION = '0.9.10-seed-guard';
+const APP_VERSION = '0.9.12-money-helper';
 const APP_DISPLAY_VERSION = 'v0.9 (7 Jun)';
 const SCHEMA = 'kujira-portfolio';
 
@@ -3138,17 +3138,17 @@ function renderStocks(){
     const derived = deriveStockPosition(s.id);
     const shares  = derived ? derived.shares  : (s.shares  || 0);
     const avgCost = derived ? derived.avgCost : (s.avgCost || 0);
-    if (derived){ anyDerived = true; totRealised += toSGD(derived.realisedPL, ccy); }
-    const cost  = toSGD(shares * avgCost, ccy);
+    if (derived){ anyDerived = true; totRealised += roundMoney(toSGD(derived.realisedPL, ccy)); }
+    const cost  = roundMoney(toSGD(shares * avgCost, ccy));
     let priceSgd = null, mv = null, pl = null, plPct = null, stale = true, priceCcy = null;
     if (px && px.price != null){
       anyPriced = true;
       const pxCcy = px.currency || ccy;
       if (fxMissingFor(pxCcy)) anyFxMissing = true;
       priceSgd = toSGD(px.price, pxCcy);
-      mv  = priceSgd * shares;
-      pl  = mv - cost;
-      plPct = cost > 0 ? (pl/cost*100) : null;
+      mv  = roundMoney(priceSgd * shares);
+      pl  = roundMoney(mv - cost);
+      plPct = safeRatio(pl, cost);
       stale = isStale(px.fetchedAt, 24);
       priceCcy = pxCcy;
     } else { anyPriceMissing = true; }
@@ -3158,8 +3158,8 @@ function renderStocks(){
   });
 
   const showPl = anyPriced && !anyPriceMissing;
-  const totPl = totMv - totCost;
-  const totPlPct = totCost > 0 ? (totPl/totCost*100) : null;
+  const totPl = roundMoney(totMv - totCost);
+  const totPlPct = safeRatio(totPl, totCost);
   const mvSub = anyFxMissing ? 'FX missing — set rate in Settings'
               : anyPriceMissing && anyPriced ? 'some prices missing — refresh'
               : anyPriceMissing ? 'click Refresh prices to populate'
@@ -3304,14 +3304,14 @@ function renderCrypto(){
     const px  = DB._priceCache[cid] || null;
     const ccy = c.currency || 'USD';
     if (fxMissingFor(ccy)) anyFxMissing = true;
-    const cost = toSGD((c.amount||0) * (c.avgCost||0), ccy);
+    const cost = roundMoney(toSGD((c.amount||0) * (c.avgCost||0), ccy));
     let mv = null, pl = null, plPct = null, stale = true, priceSgd = null;
     if (px && px.sgd != null){
       anyPriced = true;
       priceSgd = px.sgd; // CoinGecko prices come in SGD
-      mv = priceSgd * (c.amount || 0);
-      pl = mv - cost;
-      plPct = cost > 0 ? (pl/cost*100) : null;
+      mv = roundMoney(priceSgd * (c.amount || 0));
+      pl = roundMoney(mv - cost);
+      plPct = safeRatio(pl, cost);
       stale = isStale(px.fetchedAt, 24);
     } else { anyPriceMissing = true; }
     totCost += cost;
@@ -3320,8 +3320,8 @@ function renderCrypto(){
   });
 
   const showPl = anyPriced && !anyPriceMissing;
-  const totPl = totMv - totCost;
-  const totPlPct = totCost > 0 ? (totPl/totCost*100) : null;
+  const totPl = roundMoney(totMv - totCost);
+  const totPlPct = safeRatio(totPl, totCost);
   const mvSub = anyFxMissing ? 'FX missing for cost basis'
               : anyPriceMissing && anyPriced ? 'some prices missing — refresh'
               : anyPriceMissing ? 'click Refresh prices to populate'
@@ -4063,7 +4063,7 @@ function renderDashboard(){
   ];
   const crypto = _cryptoSGD();
   if (crypto > 0) classes.push({ key:'Crypto', val:crypto, color:'--accent2' });
-  const net = classes.reduce((s,c) => s + c.val, 0);
+  const net = roundMoney(classes.reduce((s,c) => s + c.val, 0));
 
   // Net worth hero
   nwEl.innerHTML = `<div class="dash-hero">

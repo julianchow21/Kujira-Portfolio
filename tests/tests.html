@@ -112,6 +112,21 @@
   t('payday 2026-05: last working day = 29', () => eq(getPayday(2026, 5),  '2026-05-29'));
   t('payday 2026-12: last working day = 31', () => eq(getPayday(2026, 12), '2026-12-31'));
 
+  /* ── roundMoney + safeRatio (#Crit-2 helpers) ───────────────────── */
+  group('roundMoney');
+  t('roundMoney fixes the classic 0.1+0.2 float bug', () => eq(roundMoney(0.1 + 0.2), 0.3));
+  t('roundMoney 2dp default',   () => eq(roundMoney(1234.567), 1234.57));
+  t('roundMoney 4dp share price', () => eq(roundMoney(1.23456, 4), 1.2346));
+  t('roundMoney null/NaN treated as 0', () => eq(roundMoney(null), 0));
+
+  group('safeRatio');
+  t('safeRatio returns null for zero denom',     () => eq(safeRatio(100, 0), null));
+  t('safeRatio returns null for negative denom', () => eq(safeRatio(100, -50), null));
+  t('safeRatio returns null for NaN denom',      () => eq(safeRatio(100, NaN), null));
+  t('safeRatio P&L pct: 1395/4500 = 31',        () => eq(safeRatio(1395, 4500), 31));
+  t('safeRatio negative P&L',                    () => eq(safeRatio(-500, 1000), -50));
+  t('safeRatio custom scale (ratio not pct)',    () => eq(safeRatio(1, 4, 1), 0.25));
+
   /* ── Summary ─────────────────────────────────────────────────────── */
   const sum = document.getElementById('summary');
   sum.textContent = pass + ' passed, ' + fail + ' failed';
