@@ -59,10 +59,11 @@ a:hover{text-decoration:underline}
 /* TOPBAR */
 .topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:0;height:56px;position:sticky;top:0;z-index:100}
 .logo{font-weight:800;font-size:16px;letter-spacing:0.2px;margin-right:32px;display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);cursor:pointer}
-.logo-mark{width:32px;height:32px;flex-shrink:0;border-radius:8px;object-fit:cover}
+.logo:hover,.logo:focus{text-decoration:none;outline:none}
+.logo-whale{height:30px;width:auto;flex-shrink:0}
 .logo-name{display:flex;flex-direction:column;line-height:1.1}
 .logo-name span:first-child{font-size:14px;font-weight:800;letter-spacing:0.5px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.logo-name span:last-child{font-size:9px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--text3);-webkit-text-fill-color:var(--text3)}
+.logo-name span:last-child{font-size:9px;font-weight:400;letter-spacing:0.3px;text-transform:none;color:var(--text3);-webkit-text-fill-color:var(--text3);opacity:0.85}
 .nav{display:flex;gap:2px;flex:1;overflow-x:auto;scrollbar-width:none}
 .nav::-webkit-scrollbar{display:none}
 .nav-btn{padding:8px 14px;border-radius:var(--radius);border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--text2);transition:all 0.15s;font-family:inherit;display:flex;align-items:center;gap:6px;white-space:nowrap}
@@ -304,9 +305,13 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
 
 <!-- TOPBAR -->
 <header class="topbar">
-  <a class="logo" onclick="showPage('dashboard')">
-    <img class="logo-mark" src="whale-icon.png" alt="Kujira">
-    <span class="logo-name"><span>KUJIRA PORTFOLIO</span><span id="logo-version">PORTFOLIO TRACKER</span></span>
+  <a class="logo" onclick="showPage('dashboard');return false">
+    <img class="logo-whale" src="whale-icon.png" alt="Kujira">
+    <div class="logo-name">
+      <span>KUJIRA</span>
+      <span>Portfolio</span>
+      <span id="logo-version"></span>
+    </div>
   </a>
   <nav class="nav" id="nav-host">
     <!-- nav buttons injected by JS -->
@@ -837,6 +842,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
    ═══════════════════════════════════════════════════════════════════════ */
 
 const APP_VERSION = '0.9.9-dark-icon';
+const APP_DISPLAY_VERSION = 'v0.9 (7 Jun)';
 const SCHEMA = 'kujira-portfolio';
 
 /* Local storage keys */
@@ -4550,9 +4556,9 @@ function installEventDelegation(){
 
 async function boot(){
   applyTheme(localStorage.getItem(LK_THEME) || 'dark');
-  // Stamp version into the logo subtitle so it's always visible
+  // Stamp display version into the logo (matches Collectibles app-ver format)
   const verEl = document.getElementById('logo-version');
-  if (verEl) verEl.textContent = 'v' + APP_VERSION;
+  if (verEl) verEl.textContent = APP_DISPLAY_VERSION;
   renderNav();
   installEventDelegation();
   installAutoRefreshVisibility();
