@@ -13,3 +13,6 @@
 node_modules/
 _*.tmp
 _consolidation_result.txt
+
+# Local-only backup snapshots (git history already versions index.html)
+Backups/
