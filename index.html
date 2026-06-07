@@ -9,7 +9,7 @@
      only. 'unsafe-inline' is still required for inline event handlers + styles;
      future hardening could move to script hashes for stricter CSP. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://script.google.com https://*.googleusercontent.com https://script.googleusercontent.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none';">
-<title>Kujira Investments</title>
+<title>Kujira Portfolio</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="whale-icon.png">
 <link rel="apple-touch-icon" href="whale-icon.png">
@@ -306,7 +306,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
 <header class="topbar">
   <a class="logo" onclick="showPage('dashboard')">
     <img class="logo-mark" src="whale-icon.png" alt="Kujira">
-    <span class="logo-name"><span>KUJIRA INVESTMENTS</span><span id="logo-version">PORTFOLIO TRACKER</span></span>
+    <span class="logo-name"><span>KUJIRA PORTFOLIO</span><span id="logo-version">PORTFOLIO TRACKER</span></span>
   </a>
   <nav class="nav" id="nav-host">
     <!-- nav buttons injected by JS -->
@@ -831,7 +831,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
-   KUJIRA INVESTMENTS — Portfolio Tracker
+   KUJIRA PORTFOLIO — Finance Tracker
    Phase 1: skeleton, sync handshake, settings.
    Architecture mirrors Kujira Collectibles + Send Ops conventions.
    ═══════════════════════════════════════════════════════════════════════ */
