@@ -830,7 +830,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
 </div>
 
 <!-- TOAST HOST -->
-<div id="toast-host"></div>
+<div id="toast-host" aria-live="polite" role="status"></div>
 
 <!-- CONFLICT MODAL (built on demand) -->
 
@@ -845,7 +845,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
    Architecture mirrors Kujira Collectibles + Send Ops conventions.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const APP_VERSION = '0.9.13-sync-hardening';
+const APP_VERSION = '0.9.15-offline';
 const APP_DISPLAY_VERSION = 'v0.9 (7 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
@@ -1627,6 +1627,17 @@ window.addEventListener('storage', (e) => {
   } catch (_) {}
 });
 
+/* History back-button (#Med-8): restore the tab from the history state.
+   The _navigatingHistory guard prevents showPage from pushing a new entry
+   while we are already travelling through history. */
+window.addEventListener('popstate', (e) => {
+  const tab = (e.state && e.state.tab) ? e.state.tab
+            : (location.hash.replace('#', '') || 'dashboard');
+  _navigatingHistory = true;
+  showPage(tab);
+  _navigatingHistory = false;
+});
+
 /* ═══════════════════════════════════════════════════════════════════════
    CONFLICT MODAL
    ═══════════════════════════════════════════════════════════════════════ */
@@ -2371,6 +2382,7 @@ function renderNav(){
 }
 
 function showPage(key){
+  const prev = _currentTab;
   _currentTab = key;
   document.querySelectorAll('.page').forEach(p => {
     p.classList.remove('active');
@@ -2391,6 +2403,7 @@ function showPage(key){
   if (key === 'dashboard') renderDashboard(); // (re)draw charts now the canvas is sized
   if (key === 'settings') { loadSettingsForm(); renderDiagnostics(); }
   if (window.scrollTo) window.scrollTo({ top: 0, behavior: 'instant' });
+  if (key !== prev && !_navigatingHistory) history.pushState({ tab: key }, '', '#' + key);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -2488,8 +2501,9 @@ function toSGD(amount, currency){
    `_renderCcy` is the currency for the render pass in flight. Every render
    function sets it via setRenderCcy() at its top, so fmt() converts to the
    right currency even when renderAll() paints every tab in one go. */
-let _currentTab = 'stocks';
-let _renderCcy  = 'SGD';
+let _currentTab       = 'stocks';
+let _navigatingHistory = false; // true while popstate fires, stops showPage re-pushing
+let _renderCcy        = 'SGD';
 
 function tabDefaultCcy(tab){ return tab === 'stocks' ? 'USD' : (DB.settings.baseCurrency || 'SGD'); }
 function tabDisplayCcy(tab){
@@ -2797,7 +2811,9 @@ function sendToTrash(table, id){
 /* ═══════════════════════════════════════════════════════════════════════
    ENTITY MODAL — shared CRUD form for the four holdings tables
    ═══════════════════════════════════════════════════════════════════════ */
-let _modalState = null; // { table, item, isNew }
+let _modalState  = null; // { table, item, isNew }
+let _modalOpener = null; // element focused before modal opened (restored on close)
+let _modalKeyTrap = null; // keydown handler reference so we can remove it cleanly
 
 const ENTITY_SCHEMAS = {
   stocks: {
@@ -2964,7 +2980,22 @@ function openEntityModal(table, existingId){
   }
 
   document.getElementById('em-delete').style.display = existing ? '' : 'none';
-  document.getElementById('entity-modal').classList.add('open');
+  _modalOpener = document.activeElement;
+  const _overlay = document.getElementById('entity-modal');
+  if (_modalKeyTrap) _overlay.removeEventListener('keydown', _modalKeyTrap);
+  _modalKeyTrap = function(e){
+    if (e.key === 'Escape'){ e.preventDefault(); closeEntityModal(); return; }
+    if (e.key !== 'Tab') return;
+    const focusable = Array.from(_overlay.querySelectorAll(
+      'input:not([disabled]),select:not([disabled]),textarea:not([disabled]),button:not([disabled])'
+    )).filter(el => el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey){ if (document.activeElement === first){ e.preventDefault(); last.focus(); } }
+    else           { if (document.activeElement === last) { e.preventDefault(); first.focus(); } }
+  };
+  _overlay.addEventListener('keydown', _modalKeyTrap);
+  _overlay.classList.add('open');
   setTimeout(() => { const first = body.querySelector('input,select,textarea'); if (first) first.focus(); }, 50);
 }
 
@@ -2994,8 +3025,12 @@ function renderField(f, value){
 }
 
 function closeEntityModal(){
-  document.getElementById('entity-modal').classList.remove('open');
+  const overlay = document.getElementById('entity-modal');
+  if (_modalKeyTrap){ overlay.removeEventListener('keydown', _modalKeyTrap); _modalKeyTrap = null; }
+  overlay.classList.remove('open');
   _modalState = null;
+  if (_modalOpener && typeof _modalOpener.focus === 'function'){ try { _modalOpener.focus(); } catch (_){} }
+  _modalOpener = null;
 }
 
 function entityModalSave(){
@@ -4479,6 +4514,7 @@ async function boot(){
   updateCcyToggleUI();
   renderAll();
   showPage('dashboard'); // land on the dashboard overview
+  history.replaceState({ tab: 'dashboard' }, '', '#dashboard'); // replace push with a seed entry
   updateSyncStatusPill();
 
   if (getSyncUrl()) {
@@ -4494,6 +4530,10 @@ async function boot(){
 }
 
 document.addEventListener('DOMContentLoaded', boot);
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>

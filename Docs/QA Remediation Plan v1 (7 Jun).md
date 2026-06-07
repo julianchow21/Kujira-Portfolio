@@ -68,8 +68,8 @@ Legend: FIXED done this round · DONE already in code · OVERSTATED real but sma
 - **Phase 0 — safety net.** [x] backup · [x] #Crit-1 seed guard via `kjr-core.js` + `tests/tests.html` (10/10) · [x] extract money/CPF/payday pure logic + golden tests (27/27). `computeStockPosition`, full CPF engine, `kjrSafeNumber`, payday helpers all in `kjr-core.js`; `deriveStockPosition` delegates to it.
 - **Phase 1 — money correctness (#Crit-2).** [x] `roundMoney(v, dp)` and `safeRatio(num, denom, scale)` in `kjr-core.js`. Applied to stock/crypto P&L arithmetic and net worth sum. `computeStockPosition` rounds at each accumulation step. All division guards were already in place; NaN/Infinity already handled by display helpers. 37/37 tests pass.
 - **Phase 2 — sync/integrity.** [x] `SCHEMA_VERSION`+`_runMigrations` infrastructure (#High-7); [x] `AbortSignal.timeout(30000)` on pull+push with `TimeoutError` handling (#High-10); [x] `storage` event cross-tab sync (#High-9); [x] `_isoDateSG` SGT-pinned snapshots (#High-2). Skipped: optional GAS shared-secret (#Crit-5 — solo threat model, accept).
-- **Phase 3 — UX/a11y.** History API (#Med-8), focus trap (#Low-6), aria-live (#Low-1), debounce check (#Med-7), sticky/resize verify (#Low-2/5).
-- **Phase 4 — offline.** Service worker app-shell cache (#Med-1).
+- **Phase 3 — UX/a11y.** [x] `aria-live="polite" role="status"` on toast host (#Low-1); [x] `history.pushState` + `popstate` back-button navigation (#Med-8); [x] Tab/Escape focus trap in `openEntityModal`, opener restored on close (#Low-6); [x] debounce confirmed not needed (#Med-7). Sticky/resize (#Low-2/5): Chart.js `responsive:true` already handles resize; iOS sticky-header not reproducible in preview — accepted.
+- **Phase 4 — offline.** [x] `sw.js` — install caches `index.html`, `kjr-core.js`, `manifest.webmanifest`, `whale-icon.png`, Chart.js CDN; network-first for HTML, cache-first for static + CDN, GAS calls never intercepted. Registered in `index.html`. Verified in preview: SW activated, all 5 assets in `kjr-portfolio-v1` cache (#Med-1).
 
 ## Verification
 
