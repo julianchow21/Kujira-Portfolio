@@ -4062,13 +4062,11 @@ function runReconciliation(){
   if (orphanCash) issues.push({ level:'error',
     msg: orphanCash + ' cash movement' + (orphanCash > 1 ? 's reference' : ' references') + ' a deleted account.' });
 
-  let orphanTrade = 0;
-  (DB.stockTxns || []).forEach(t => {
-    if (t.stockId && !stockIds.has(t.stockId)) orphanTrade++;
-    else if (t.cashAccountId && !cashIds.has(t.cashAccountId)) orphanTrade++;
-  });
-  if (orphanTrade) issues.push({ level:'error',
-    msg: orphanTrade + ' trade' + (orphanTrade > 1 ? 's reference' : ' references') + ' a deleted stock or cash account.' });
+  const orphanTradeIds = (DB.stockTxns || [])
+    .filter(t => (t.stockId && !stockIds.has(t.stockId)) || (t.cashAccountId && !cashIds.has(t.cashAccountId)))
+    .map(t => t.id);
+  if (orphanTradeIds.length) issues.push({ level:'error', fixFn:'cleanOrphanedTrades',
+    msg: orphanTradeIds.length + ' trade' + (orphanTradeIds.length > 1 ? 's reference' : ' references') + ' a deleted stock or cash account.' });
 
   (DB.cash || []).forEach(c => {
     const bal = deriveCashBalance(c);
@@ -4077,6 +4075,22 @@ function runReconciliation(){
   });
 
   return { ok: issues.length === 0, issues };
+}
+
+/* Move every trade referencing a missing stock or cash account to trash.
+   Wired to the "Remove orphaned" button in the integrity bar. */
+function cleanOrphanedTrades(){
+  const cashIds  = new Set((DB.cash   || []).map(c => c.id));
+  const stockIds = new Set((DB.stocks || []).map(s => s.id));
+  const orphans  = (DB.stockTxns || [])
+    .filter(t => (t.stockId && !stockIds.has(t.stockId)) || (t.cashAccountId && !cashIds.has(t.cashAccountId)))
+    .map(t => t.id);
+  if (!orphans.length) return;
+  const n = orphans.length;
+  if (!confirm('Move ' + n + ' orphaned trade' + (n > 1 ? 's' : '') + ' to trash? You can restore from Settings → Recently deleted.')) return;
+  orphans.forEach(id => sendToTrash('stockTxns', id));
+  renderAll();
+  showToast('Moved ' + n + ' orphaned trade' + (n > 1 ? 's' : '') + ' to trash', 'success');
 }
 
 /* Last n 'YYYY-MM' months ending with the current month. */
@@ -4166,7 +4180,11 @@ function renderDashboard(){
     } else {
       intEl.innerHTML = `<div class="integrity-bar bad">
         <div class="integrity-title">⚠ ${rec.issues.length} thing${rec.issues.length > 1 ? 's' : ''} to check</div>
-        <ul class="integrity-list">${rec.issues.map(i => `<li class="${i.level}">${kjrEscape(i.msg)}</li>`).join('')}</ul>
+        <ul class="integrity-list">${rec.issues.map(i =>
+          `<li class="${i.level}">${kjrEscape(i.msg)}${i.fixFn
+            ? ` <button class="btn btn-sm btn-danger" style="margin-left:8px;padding:1px 8px;font-size:11px" onclick="${kjrEscape(i.fixFn)}()">Remove orphaned</button>`
+            : ''}</li>`
+        ).join('')}</ul>
       </div>`;
     }
   }
