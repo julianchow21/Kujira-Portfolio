@@ -67,7 +67,7 @@ Legend: FIXED done this round · DONE already in code · OVERSTATED real but sma
 
 - **Phase 0 — safety net.** [x] backup · [x] #Crit-1 seed guard via `kjr-core.js` + `tests/tests.html` (10/10) · [x] extract money/CPF/payday pure logic + golden tests (27/27). `computeStockPosition`, full CPF engine, `kjrSafeNumber`, payday helpers all in `kjr-core.js`; `deriveStockPosition` delegates to it.
 - **Phase 1 — money correctness (#Crit-2).** [x] `roundMoney(v, dp)` and `safeRatio(num, denom, scale)` in `kjr-core.js`. Applied to stock/crypto P&L arithmetic and net worth sum. `computeStockPosition` rounds at each accumulation step. All division guards were already in place; NaN/Infinity already handled by display helpers. 37/37 tests pass.
-- **Phase 2 — sync/integrity.** Schema migration (#High-7), fetch timeout + backoff (#High-10), cross-tab sync (#High-9), timezone-safe snapshots (#High-2), optional GAS shared-secret (#Crit-5).
+- **Phase 2 — sync/integrity.** [x] `SCHEMA_VERSION`+`_runMigrations` infrastructure (#High-7); [x] `AbortSignal.timeout(30000)` on pull+push with `TimeoutError` handling (#High-10); [x] `storage` event cross-tab sync (#High-9); [x] `_isoDateSG` SGT-pinned snapshots (#High-2). Skipped: optional GAS shared-secret (#Crit-5 — solo threat model, accept).
 - **Phase 3 — UX/a11y.** History API (#Med-8), focus trap (#Low-6), aria-live (#Low-1), debounce check (#Med-7), sticky/resize verify (#Low-2/5).
 - **Phase 4 — offline.** Service worker app-shell cache (#Med-1).
 

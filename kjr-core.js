@@ -69,6 +69,14 @@ function _isoDate(d){
     + String(d.getDate()).padStart(2, '0');
 }
 
+/* ISO date forced to Asia/Singapore timezone. Use this for any date that
+   should reflect the user's business day (snapshots, payday display) rather
+   than the device-local date. _isoDate is kept for pure date-arithmetic where
+   the input Date is already constructed at midnight (e.g. getPayday). */
+function _isoDateSG(d){
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Singapore' }).format(d);
+}
+
 /* Last working day of a month. month is 1-12. Starts at the last calendar
    day and walks backwards past Saturdays, Sundays and SG public holidays. */
 function getPayday(year, month){
@@ -229,7 +237,7 @@ function computeStockPosition(openingShares, openingAvgCost, sortedTxns){
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     looksPopulated, seedDecision,
-    SG_HOLIDAYS, _isoDate, getPayday,
+    SG_HOLIDAYS, _isoDate, _isoDateSG, getPayday,
     CPF_OW_CEILING_2026, SG_TAX_BRACKETS,
     cpfContribRatesForAge, cpfAllocationForAge,
     _round2, computeCpfContribution,

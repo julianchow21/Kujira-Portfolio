@@ -845,9 +845,12 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
    Architecture mirrors Kujira Collectibles + Send Ops conventions.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const APP_VERSION = '0.9.12-money-helper';
+const APP_VERSION = '0.9.13-sync-hardening';
 const APP_DISPLAY_VERSION = 'v0.9 (7 Jun)';
 const SCHEMA = 'kujira-portfolio';
+/* Payload schema version. Increment when a breaking field rename or removal
+   lands; add the migration fn to _MIGRATIONS in the DB section below. */
+const SCHEMA_VERSION = 1;
 
 /* Local storage keys */
 const LK_DB        = 'kjr-pf-db-v1';
@@ -1286,6 +1289,23 @@ function loadLocal(){
   }
 }
 
+/* Forward-only schema migrations. Add entries here when a breaking field rename
+   or removal ships — key is the version being migrated TO.
+   Example (not active): _MIGRATIONS[2] = db => { db.newField = db.oldField; delete db.oldField; return db; }
+   Currently at v1 — no migrations needed yet; the infrastructure is the deliverable. */
+const _MIGRATIONS = {};
+
+function _runMigrations(db){
+  const v = Number(db.schemaVersion) || 0;
+  if (v >= SCHEMA_VERSION) return db;
+  let out = Object.assign({}, db);
+  for (let from = v; from < SCHEMA_VERSION; from++){
+    const fn = _MIGRATIONS[from + 1];
+    if (fn) out = fn(out);
+  }
+  return out;
+}
+
 /* Defensive merge so old payloads pick up new top-level keys when we ship features.
    Also re-validates ids on every list-typed table — a corrupted sheet or hostile
    payload cannot land an id like "x'); evil(); //" that would break event-delegation
@@ -1304,7 +1324,7 @@ function _sanitiseList(arr, table){
 
 function mergeDefaults(loaded){
   const base = freshDB();
-  const safe = (loaded && typeof loaded === 'object') ? loaded : {};
+  const safe = (loaded && typeof loaded === 'object') ? _runMigrations(loaded) : {};
   const out  = Object.assign({}, base, safe);
   out.settings   = Object.assign({}, base.settings, safe.settings || {});
   out.settings.cpfRates    = Object.assign({}, base.settings.cpfRates,    (safe.settings && safe.settings.cpfRates) || {});
@@ -1321,6 +1341,7 @@ function mergeDefaults(loaded){
   out.cpfBalances = Object.assign({}, base.cpfBalances, safe.cpfBalances || {});
   _LIST_TABLES.forEach(t => { out[t] = _sanitiseList(out[t], t); });
   if (!out._priceCache || typeof out._priceCache !== 'object') out._priceCache = {};
+  out.schemaVersion = SCHEMA_VERSION;
   return out;
 }
 
@@ -1350,6 +1371,7 @@ function syncPayload(){
   return Object.assign({}, DB, {
     schema: SCHEMA,
     version: 1,
+    schemaVersion: SCHEMA_VERSION,
     appVersion: APP_VERSION,
     updatedAt: new Date().toISOString(),
     lastSeenRemoteAt: localStorage.getItem(LK_LAST_PULL) || null
@@ -1429,10 +1451,13 @@ async function pushToRemote(){
       return;
     }
 
+    const pushSignal = (AbortSignal.any && AbortSignal.timeout)
+      ? AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])
+      : controller.signal;
     const resp = await fetch(url, {
       method: 'POST', mode: 'cors', redirect: 'follow',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body, signal: controller.signal
+      body, signal: pushSignal
     });
     const parsed = await safeJson(resp);
     if (!parsed.ok) {
@@ -1503,8 +1528,13 @@ async function pushToRemote(){
     setLastPull(stamp, 'server');  // push response gives us the real server stamp
     setSyncStatus('synced');
   } catch (err) {
-    if (err.name === 'AbortError') return; // superseded
-    setSyncStatus('failed', err.message);
+    if (err.name === 'AbortError') return; // superseded by a newer push
+    if (err.name === 'TimeoutError') {
+      setSyncStatus('failed', 'Push timed out after 30 s');
+      showToast('Push timed out. Will retry on next save.', 'error');
+    } else {
+      setSyncStatus('failed', err.message);
+    }
   } finally {
     if (_activeSyncController === controller) _activeSyncController = null;
   }
@@ -1515,7 +1545,10 @@ async function pullFromRemote(opts){
   if (!url) { setSyncStatus('local'); return false; }
   setSyncStatus('syncing');
   try {
-    const resp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
+    const resp = await fetch(url, {
+      method:'GET', mode:'cors', redirect:'follow',
+      signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined
+    });
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
     if (data.schema !== SCHEMA){
@@ -1556,7 +1589,12 @@ async function pullFromRemote(opts){
     renderAll();
     return true;
   } catch (err) {
-    setSyncStatus('failed', err.message);
+    if (err.name === 'TimeoutError') {
+      setSyncStatus('failed', 'Pull timed out after 30 s');
+      showToast('Pull timed out. Check your connection and try again.', 'error');
+    } else {
+      setSyncStatus('failed', err.message);
+    }
     return false;
   }
 }
@@ -1574,6 +1612,19 @@ window.addEventListener('beforeunload', () => {
   } catch (_) {
     try { navigator.sendBeacon(url, new Blob([payload], { type: 'text/plain' })); } catch (__) {}
   }
+});
+
+/* Cross-tab sync (#High-9): when another tab saves to LK_DB, pick up the
+   change and re-render. The storage event fires only in OTHER tabs (not the
+   one that wrote), so there is no self-loop. Skip during conflict resolution
+   to avoid a mid-flight clobber. */
+window.addEventListener('storage', (e) => {
+  if (e.key !== LK_DB || !e.newValue) return;
+  if (_conflictResolvingNow) return;
+  try {
+    DB = mergeDefaults(JSON.parse(e.newValue));
+    renderAll();
+  } catch (_) {}
 });
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -4028,7 +4079,7 @@ function takeSnapshot(opts){
   if (!Array.isArray(DB.snapshots)) DB.snapshots = [];
   const byClass = _netWorthClassesSGD();
   const net = byClass.stocks + byClass.cash + byClass.cpf + byClass.realestate + byClass.crypto;
-  const today = _isoDate(new Date());
+  const today = _isoDateSG(new Date());
   const existing = DB.snapshots.find(s => s.date === today);
   if (existing){
     existing.net = net; existing.byClass = byClass;
@@ -4044,7 +4095,7 @@ function takeSnapshot(opts){
    something to record (net worth > 0). Called on boot. */
 function autoSnapshot(){
   if (currentNetWorthSGD() <= 0) return;
-  const today = _isoDate(new Date());
+  const today = _isoDateSG(new Date());
   const has = (DB.snapshots || []).some(s => s.date === today);
   if (has) return;
   takeSnapshot({ noSave: true }); // boot already persists; avoid an extra sync
