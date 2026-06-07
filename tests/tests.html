@@ -9,6 +9,7 @@
   .sub{color:#888;margin:0 0 18px}
   .ok{color:#4ade80}.fail{color:#f87171}
   .row{padding:2px 0}
+  .group{margin-top:10px;color:#888;font-size:12px;padding:2px 0}
   #summary{margin-top:18px;padding:10px 14px;border-radius:8px;font-weight:700;display:inline-block}
   #summary.pass{background:#13351f;color:#4ade80}
   #summary.failed{background:#3a1414;color:#f87171}
@@ -39,8 +40,16 @@
     out.appendChild(div);
     (okFlag ? console.log : console.error)((okFlag ? 'ok   ' : 'FAIL ') + name + (okFlag ? '' : ' — ' + msg));
   }
+  function group(label){
+    const div = document.createElement('div');
+    div.className = 'group';
+    div.textContent = '── ' + label;
+    out.appendChild(div);
+    console.log('\n── ' + label);
+  }
 
   /* ── looksPopulated ─────────────────────────────────────────────── */
+  group('looksPopulated');
   t('empty DB is not populated',      () => eq(looksPopulated({ stocks: [], cash: [] }), false));
   t('null is not populated',          () => eq(looksPopulated(null), false));
   t('a cash row counts as populated', () => eq(looksPopulated({ cash: [{ id: 'a' }] }), true));
@@ -48,6 +57,7 @@
   t('only snapshots != populated',    () => eq(looksPopulated({ snapshots: [{ id: 's' }] }), false));
 
   /* ── seedDecision — the #Crit-1 data-loss guard ─────────────────── */
+  group('seedDecision (#Crit-1)');
   t('matching schema -> ok (normal pull)',
     () => eq(seedDecision({ schema: SCHEMA }, { allowSeed: true }, SCHEMA), 'ok'));
   t('empty remote + allowSeed -> seed (safe first run)',
@@ -59,6 +69,50 @@
   t('empty remote without allowSeed -> push-first',
     () => eq(seedDecision({}, { allowSeed: false }, SCHEMA), 'push-first'));
 
+  /* ── Stock P&L — golden numbers from QA Report v1 (4 Jun) ──────── */
+  group('computeStockPosition — P&L golden numbers');
+  // QA assertion: open 30 @150, sell 10 @290 fee 5 → 20 left, avg 150, realised P&L 1,395
+  const plResult = computeStockPosition(30, 150, [{ side: 'sell', shares: 10, price: 290, fees: 5 }]);
+  t('P&L: realised P&L = 1395', () => eq(plResult.realisedPL, 1395));
+  t('P&L: 20 shares remain after partial sell', () => eq(plResult.shares, 20));
+  t('P&L: avg cost stays 150 after partial sell', () => eq(plResult.avgCost, 150));
+  t('P&L: no position after full sell', () => {
+    const r = computeStockPosition(10, 200, [{ side: 'sell', shares: 10, price: 250, fees: 0 }]);
+    eq(r.shares, 0); eq(r.avgCost, 0);
+  });
+
+  /* ── CPF — golden numbers from QA Report v1 (4 Jun) ─────────────── */
+  group('computeCpfContribution — age 36, gross 8000');
+  // QA assertion: employee 1600, employer 1360, total 2960, net 6400, OA+SA+MA sums to total
+  const cpf36 = computeCpfContribution(8000, 36);
+  t('CPF age 36: employeeCPF = 1600',          () => eq(cpf36.employeeCPF, 1600));
+  t('CPF age 36: employerCPF = 1360',          () => eq(cpf36.employerCPF, 1360));
+  t('CPF age 36: total = 2960',                () => eq(cpf36.total, 2960));
+  t('CPF age 36: net = 6400',                  () => eq(cpf36.net, 6400));
+  t('CPF age 36: OA+SA+MA sums to total',      () => eq(cpf36.byAccount.OA + cpf36.byAccount.SA + cpf36.byAccount.MA, cpf36.total));
+
+  group('computeCpfContribution — OW ceiling');
+  // QA assertion: gross 12000 caps contribution wage at 8000, but net reflects full gross
+  const cpfCeil = computeCpfContribution(12000, 36);
+  t('CPF OW ceiling: wage capped at 8000',                    () => eq(cpfCeil.wage, 8000));
+  t('CPF OW ceiling: net = gross - employeeCPF on capped wage', () => eq(cpfCeil.net, 10400));
+
+  group('computeCpfContribution — age band differences');
+  t('CPF age 60: lower rates than age 36', () => {
+    const c60 = computeCpfContribution(8000, 60);
+    if (c60.total >= cpf36.total) throw new Error('age-60 total ' + c60.total + ' should be < age-36 total ' + cpf36.total);
+  });
+
+  /* ── Paydays — golden numbers from QA Report v1 (4 Jun) ─────────── */
+  group('getPayday — last working day (2026)');
+  // QA assertion: Jan→30, Feb→27, Apr→30, May→29, Dec→31
+  t('payday 2026-01: last working day = 30', () => eq(getPayday(2026, 1),  '2026-01-30'));
+  t('payday 2026-02: last working day = 27', () => eq(getPayday(2026, 2),  '2026-02-27'));
+  t('payday 2026-04: last working day = 30', () => eq(getPayday(2026, 4),  '2026-04-30'));
+  t('payday 2026-05: last working day = 29', () => eq(getPayday(2026, 5),  '2026-05-29'));
+  t('payday 2026-12: last working day = 31', () => eq(getPayday(2026, 12), '2026-12-31'));
+
+  /* ── Summary ─────────────────────────────────────────────────────── */
   const sum = document.getElementById('summary');
   sum.textContent = pass + ' passed, ' + fail + ' failed';
   sum.className = fail ? 'failed' : 'pass';

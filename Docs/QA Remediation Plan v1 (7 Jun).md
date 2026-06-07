@@ -65,7 +65,7 @@ Legend: FIXED done this round · DONE already in code · OVERSTATED real but sma
 
 ## Phased plan
 
-- **Phase 0 — safety net.** [x] backup · [x] #Crit-1 seed guard via `kjr-core.js` + `tests/tests.html` (10/10) · [ ] extract money/CPF/payday pure logic + golden tests (4 Jun numbers).
+- **Phase 0 — safety net.** [x] backup · [x] #Crit-1 seed guard via `kjr-core.js` + `tests/tests.html` (10/10) · [x] extract money/CPF/payday pure logic + golden tests (27/27). `computeStockPosition`, full CPF engine, `kjrSafeNumber`, payday helpers all in `kjr-core.js`; `deriveStockPosition` delegates to it.
 - **Phase 1 — money correctness (#Crit-2).** Money helper (fixed-point), migrate ~95 float sites, NaN guards (#Med-9). Gated behind Phase 0 tests.
 - **Phase 2 — sync/integrity.** Schema migration (#High-7), fetch timeout + backoff (#High-10), cross-tab sync (#High-9), timezone-safe snapshots (#High-2), optional GAS shared-secret (#Crit-5).
 - **Phase 3 — UX/a11y.** History API (#Med-8), focus trap (#Low-6), aria-live (#Low-1), debounce check (#Med-7), sticky/resize verify (#Low-2/5).

@@ -876,122 +876,6 @@ const CPF_DEFAULTS = {
   extraFirst30kAge55: 1.0   // additional +1% on first S$30k from age 55
 };
 
-/* Singapore public holidays. 2026 follows the MOM gazette. 2027 covers the
-   fixed-date holidays only — the lunar/Islamic/Hindu dates are not gazetted
-   yet at time of writing. Top up each December. Observed-Monday dates (when a
-   holiday falls on a Sunday) are the entries that matter for payday. */
-const SG_HOLIDAYS = new Set([
-  // 2026
-  '2026-01-01', // New Year's Day
-  '2026-02-17', // Chinese New Year
-  '2026-02-18', // Chinese New Year
-  '2026-03-20', // Hari Raya Puasa
-  '2026-04-03', // Good Friday
-  '2026-05-01', // Labour Day
-  '2026-05-27', // Hari Raya Haji
-  '2026-06-01', // Vesak Day (observed, falls Sun 31 May)
-  '2026-08-10', // National Day (observed, falls Sun 9 Aug)
-  '2026-11-09', // Deepavali (observed, falls Sun 8 Nov)
-  '2026-12-25', // Christmas Day
-  // 2027 — fixed-date only, verify and complete in Dec 2026
-  '2027-01-01', // New Year's Day
-  '2027-03-26', // Good Friday
-  '2027-05-01', // Labour Day
-  '2027-08-09', // National Day
-  '2027-12-25'  // Christmas Day
-]);
-
-function _isoDate(d){
-  return d.getFullYear() + '-'
-    + String(d.getMonth() + 1).padStart(2, '0') + '-'
-    + String(d.getDate()).padStart(2, '0');
-}
-
-/* Last working day of a month. month is 1-12. Starts at the last calendar
-   day and walks backwards past Saturdays, Sundays and SG public holidays.
-   This is how most SG employers pay end-of-month salary. */
-function getPayday(year, month){
-  const d = new Date(year, month, 0); // day 0 of next month = last day of this month
-  while (true) {
-    const dow = d.getDay(); // 0=Sun, 6=Sat
-    if (dow !== 0 && dow !== 6 && !SG_HOLIDAYS.has(_isoDate(d))) break;
-    d.setDate(d.getDate() - 1);
-  }
-  return _isoDate(d);
-}
-
-/* ─── CPF contribution engine (2026) ───────────────────────────────────
-   Drives both the auto-salary income entry (employee/employer split, net)
-   and the auto-CPF account contributions. Rates are CPF Board figures.
-   - Age ≤55 band is high-confidence.
-   - Senior bands (55+) reflect the scheduled increases; verify before relying.
-   - OW (Ordinary Wage) monthly ceiling for 2026 is S$8,000.
-   - Auto-CPF allocation is only generated for ages ≤55 (SA still open). For
-     55+ the OA/MA/RA split is not automated yet — income still generates,
-     CPF is skipped with a note. */
-const CPF_OW_CEILING_2026 = 8000;
-
-/* Singapore resident income-tax brackets (YA2025 = same as YA2024+).
-   Each band: { from, to, rate (%), base (cumulative tax at `from`) }.
-   Source: IRAS. Store as a const — user sets reliefs, not bracket values.
-   Verified cumulative bases at band boundaries. */
-const SG_TAX_BRACKETS = [
-  { from:       0, to:    20000, rate:  0,   base:      0 },
-  { from:   20000, to:    30000, rate:  2,   base:      0 },
-  { from:   30000, to:    40000, rate:  3.5, base:    200 },
-  { from:   40000, to:    80000, rate:  7,   base:    550 },
-  { from:   80000, to:   120000, rate: 11.5, base:   3350 },
-  { from:  120000, to:   160000, rate: 15,   base:   7950 },
-  { from:  160000, to:   200000, rate: 18,   base:  13950 },
-  { from:  200000, to:   240000, rate: 19,   base:  21150 },
-  { from:  240000, to:   280000, rate: 19.5, base:  28750 },
-  { from:  280000, to:   320000, rate: 20,   base:  36550 },
-  { from:  320000, to:   500000, rate: 22,   base:  44550 },
-  { from:  500000, to:  1000000, rate: 23,   base:  84150 },
-  { from: 1000000, to: Infinity, rate: 24,   base: 199150 }
-];
-
-function cpfContribRatesForAge(age){
-  if (age == null || age <= 55) return { employer:17.0, employee:20.0 };
-  if (age <= 60) return { employer:15.5, employee:17.0 };
-  if (age <= 65) return { employer:12.0, employee:11.5 };
-  if (age <= 70) return { employer:9.0,  employee:7.5 };
-  return { employer:7.5, employee:5.0 };
-}
-
-/* OA/SA/MA as % of wage, under 55 (2026 allocation). Returns null for 55+
-   so callers know to skip auto-CPF rather than guess the OA/MA/RA split. */
-function cpfAllocationForAge(age){
-  if (age == null || age <= 35) return { OA:23.0, SA:6.0,  MA:8.0  };
-  if (age <= 45)                return { OA:21.0, SA:7.0,  MA:9.0  };
-  if (age <= 50)                return { OA:19.0, SA:8.0,  MA:10.0 };
-  if (age <= 55)                return { OA:15.0, SA:11.5, MA:10.5 };
-  return null; // 55+ not automated
-}
-
-const _round2 = n => Math.round((Number(n) || 0) * 100) / 100;
-
-/* Pure calc. Given gross monthly SGD and age, returns the CPF split.
-   alloc is null (and byAccount empty) for ages above 55. */
-function computeCpfContribution(grossMonthly, age){
-  const gross = Number(grossMonthly) || 0;
-  const wage  = Math.min(gross, CPF_OW_CEILING_2026);
-  const rates = cpfContribRatesForAge(age);
-  const employerCPF = _round2(rates.employer / 100 * wage);
-  const employeeCPF = _round2(rates.employee / 100 * wage);
-  const total       = _round2(employerCPF + employeeCPF);
-  const net         = _round2(gross - employeeCPF);
-
-  const alloc = cpfAllocationForAge(age);
-  let byAccount = {};
-  if (alloc){
-    byAccount = { OA: _round2(alloc.OA/100*wage), SA: _round2(alloc.SA/100*wage), MA: _round2(alloc.MA/100*wage) };
-    // Absorb rounding remainder into OA so the split equals the total.
-    const splitSum = _round2(byAccount.OA + byAccount.SA + byAccount.MA);
-    byAccount.OA = _round2(byAccount.OA + (total - splitSum));
-  }
-  return { wage, employerCPF, employeeCPF, total, net, byAccount, allocated: !!alloc };
-}
 
 /* Age (whole years) on a given ISO date, from birthYear. Coarse: uses the
    year difference only, since we store birth year not full DOB. */
@@ -1001,17 +885,6 @@ function _ageOnYear(year){
   return Number(year) - Number(by);
 }
 
-/* Inclusive list of 'YYYY-MM' between two 'YYYY-MM' bounds. */
-function _monthsBetween(startYM, endYM){
-  const out = [];
-  let [y, m] = startYM.split('-').map(Number);
-  const [ey, em] = endYM.split('-').map(Number);
-  while (y < ey || (y === ey && m <= em)){
-    out.push(y + '-' + String(m).padStart(2, '0'));
-    m++; if (m > 12){ m = 1; y++; }
-  }
-  return out;
-}
 
 /* The set of pay-months to generate for, bounded by the salary start, an
    optional end date, and today (never future). Returns [] when salary is
@@ -1287,15 +1160,6 @@ function kjrSafeString(s, maxLen){
   return v;
 }
 
-function kjrSafeNumber(n, opts){
-  opts = opts || {};
-  if (n === '' || n == null) return opts.fallback != null ? opts.fallback : null;
-  const v = Number(n);
-  if (!isFinite(v)) return opts.fallback != null ? opts.fallback : null;
-  if (opts.min != null && v < opts.min) return opts.fallback != null ? opts.fallback : null;
-  if (opts.max != null && v > opts.max) return opts.fallback != null ? opts.fallback : null;
-  return v;
-}
 
 /* Money formatter and the single currency-conversion point for the app.
    Values are stored and computed in SGD; fmt converts to the active display
@@ -3230,26 +3094,7 @@ function deriveStockPosition(stockId){
     .sort((a,b) => String(a.date||'').localeCompare(String(b.date||'')));
   if (!txns.length) return null;
   const stock = (DB.stocks || []).find(s => s.id === stockId) || {};
-  let shares    = Number(stock.shares) || 0;                 // opening position
-  let costBasis = shares * (Number(stock.avgCost) || 0);     // opening cost basis
-  let realisedPL = 0;
-  for (const t of txns){
-    const qty  = Math.abs(Number(t.shares) || 0);
-    const px   = Number(t.price) || 0;
-    const fees = Number(t.fees)  || 0;
-    if (t.side === 'sell'){
-      const avg = shares > 0 ? costBasis / shares : 0;
-      const sellQty = Math.min(qty, shares);
-      realisedPL += (px * sellQty - fees) - avg * sellQty;
-      costBasis  -= avg * sellQty;
-      shares     -= sellQty;
-    } else {
-      costBasis += px * qty + fees;
-      shares    += qty;
-    }
-  }
-  const avgCost = shares > 0 ? costBasis / shares : 0;
-  return { shares, avgCost, costBasis, realisedPL, txnCount: txns.length };
+  return computeStockPosition(Number(stock.shares) || 0, Number(stock.avgCost) || 0, txns);
 }
 
 /* Shares held for a stock as of a date, ignoring one transaction (the one
