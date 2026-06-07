@@ -10,6 +10,12 @@
      future hardening could move to script hashes for stricter CSP. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://script.google.com https://*.googleusercontent.com https://script.googleusercontent.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none';">
 <title>Kujira Investments</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="whale-icon.png">
+<link rel="apple-touch-icon" href="whale-icon.png">
+<meta name="theme-color" content="#0f0f0f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <!-- Subresource Integrity: jsdelivr serves Chart.js with this exact hash.
      If the CDN is ever compromised and serves modified JS, the browser refuses
      to execute it. The pin is to a specific version (4.4.1) for the same reason. -->
@@ -830,7 +836,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
    Architecture mirrors Kujira Collectibles + Send Ops conventions.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const APP_VERSION = '0.9.8-interest-tax';
+const APP_VERSION = '0.9.9-dark-icon';
 const SCHEMA = 'kujira-portfolio';
 
 /* Local storage keys */
@@ -4543,7 +4549,7 @@ function installEventDelegation(){
 }
 
 async function boot(){
-  applyTheme(localStorage.getItem(LK_THEME) || 'light');
+  applyTheme(localStorage.getItem(LK_THEME) || 'dark');
   renderNav();
   installEventDelegation();
   installAutoRefreshVisibility();
