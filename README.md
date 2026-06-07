@@ -1,4 +1,4 @@
-# Kujira Investments — Portfolio Tracker
+# Kujira Portfolio — Portfolio Tracker
 
 A single-page app that tracks your **net worth in one place**: SGX + US stocks, crypto, real estate, cash, CPF (with full history), salary, and expenses. Forward projections for FIRE and CPF growth. Base currency SGD.
 
@@ -18,7 +18,7 @@ The app's first-launch wizard walks you through these steps interactively. The v
 ### Step 1 — Create the Google Sheet
 
 1. Go to **[sheets.new](https://sheets.new)** to create a blank sheet.
-2. Name it anything you like, e.g. *My Investment Tracker*.
+2. Name it anything you like, e.g. *My Portfolio Tracker*.
 
 ### Step 2 — Paste the backend code
 
@@ -34,7 +34,7 @@ The app's first-launch wizard walks you through these steps interactively. The v
 
 1. Top right: **Deploy → New deployment**.
 2. Click the gear icon next to *Select type* → **Web app**.
-3. Description: *My Investment Tracker* (or anything).
+3. Description: *My Portfolio Tracker* (or anything).
 4. Execute as: **Me**.
 5. Who has access: **Anyone**.
 6. Click **Deploy**.

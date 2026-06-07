@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kujira Portfolio — core tests</title>
+<style>
+  body{font:14px/1.6 'SF Mono',ui-monospace,monospace;background:#0f0f0f;color:#e7e7e7;margin:0;padding:24px}
+  h1{font-size:16px;margin:0 0 4px}
+  .sub{color:#888;margin:0 0 18px}
+  .ok{color:#4ade80}.fail{color:#f87171}
+  .row{padding:2px 0}
+  #summary{margin-top:18px;padding:10px 14px;border-radius:8px;font-weight:700;display:inline-block}
+  #summary.pass{background:#13351f;color:#4ade80}
+  #summary.failed{background:#3a1414;color:#f87171}
+</style>
+</head>
+<body>
+<h1>Kujira Portfolio — core unit tests</h1>
+<p class="sub">Zero build, zero framework. Loads ../kjr-core.js and asserts. Golden numbers trace to Docs/QA Report v1 (4 Jun).md.</p>
+<div id="out"></div>
+<div id="summary"></div>
+
+<!-- The unit under test (same file index.html loads) -->
+<script src="../kjr-core.js"></script>
+<script>
+(function(){
+  const SCHEMA = 'kujira-portfolio';
+  const out = document.getElementById('out');
+  let pass = 0, fail = 0;
+
+  function eq(a, b){ if (a !== b) throw new Error('expected ' + JSON.stringify(b) + ', got ' + JSON.stringify(a)); }
+  function t(name, fn){
+    let okFlag = true, msg = '';
+    try { fn(); } catch (e){ okFlag = false; msg = e.message; }
+    if (okFlag){ pass++; } else { fail++; }
+    const div = document.createElement('div');
+    div.className = 'row ' + (okFlag ? 'ok' : 'fail');
+    div.textContent = (okFlag ? '  ok   ' : '  FAIL ') + name + (okFlag ? '' : '  — ' + msg);
+    out.appendChild(div);
+    (okFlag ? console.log : console.error)((okFlag ? 'ok   ' : 'FAIL ') + name + (okFlag ? '' : ' — ' + msg));
+  }
+
+  /* ── looksPopulated ─────────────────────────────────────────────── */
+  t('empty DB is not populated',      () => eq(looksPopulated({ stocks: [], cash: [] }), false));
+  t('null is not populated',          () => eq(looksPopulated(null), false));
+  t('a cash row counts as populated', () => eq(looksPopulated({ cash: [{ id: 'a' }] }), true));
+  t('a stock holding is populated',   () => eq(looksPopulated({ stocks: [{ id: 'x' }] }), true));
+  t('only snapshots != populated',    () => eq(looksPopulated({ snapshots: [{ id: 's' }] }), false));
+
+  /* ── seedDecision — the #Crit-1 data-loss guard ─────────────────── */
+  t('matching schema -> ok (normal pull)',
+    () => eq(seedDecision({ schema: SCHEMA }, { allowSeed: true }, SCHEMA), 'ok'));
+  t('empty remote + allowSeed -> seed (safe first run)',
+    () => eq(seedDecision({ schema: undefined, stocks: [], cash: [] }, { allowSeed: true }, SCHEMA), 'seed'));
+  t('CRITICAL: populated remote under OLD schema -> refuse (no wipe)',
+    () => eq(seedDecision({ schema: 'kujira-portfolio-v0', cash: [{ id: 'a', bal: 50000 }] }, { allowSeed: true }, SCHEMA), 'refuse'));
+  t('CRITICAL: malformed remote with data arrays -> refuse',
+    () => eq(seedDecision({ stocks: [{ id: 's' }] }, { allowSeed: true }, SCHEMA), 'refuse'));
+  t('empty remote without allowSeed -> push-first',
+    () => eq(seedDecision({}, { allowSeed: false }, SCHEMA), 'push-first'));
+
+  const sum = document.getElementById('summary');
+  sum.textContent = pass + ' passed, ' + fail + ' failed';
+  sum.className = fail ? 'failed' : 'pass';
+  window.__TEST_RESULT = { pass: pass, fail: fail };
+  console.log('\n' + pass + ' passed, ' + fail + ' failed');
+})();
+</script>
+</body>
+</html>

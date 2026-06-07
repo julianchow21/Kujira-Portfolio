@@ -1,5 +1,5 @@
 /**
- * Kujira Investments · Portfolio Tracker — Google Sheets sync + price proxy
+ * Kujira Portfolio · Portfolio Tracker — Google Sheets sync + price proxy
  *
  * One Apps Script Web App that does two jobs:
  *   1. State sync — JSON blob round-trip between the HTML app and a Google Sheet

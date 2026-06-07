@@ -834,6 +834,10 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
 
 <!-- CONFLICT MODAL (built on demand) -->
 
+<!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
+     app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
+     undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
+<script src="kjr-core.js"></script>
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
    KUJIRA PORTFOLIO — Finance Tracker
@@ -841,7 +845,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
    Architecture mirrors Kujira Collectibles + Send Ops conventions.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const APP_VERSION = '0.9.9-dark-icon';
+const APP_VERSION = '0.9.10-seed-guard';
 const APP_DISPLAY_VERSION = 'v0.9 (7 Jun)';
 const SCHEMA = 'kujira-portfolio';
 
@@ -1651,10 +1655,20 @@ async function pullFromRemote(opts){
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
     if (data.schema !== SCHEMA){
-      // Empty sheet — seed it from local on first run
-      if (opts && opts.allowSeed){
-        await pushToRemote();
+      // Schema mismatch. seedDecision() (kjr-core.js) decides if seeding is
+      // safe. Fail SAFE: if the helper didn't load, never auto-overwrite.
+      const decision = (typeof seedDecision === 'function')
+        ? seedDecision(data, opts, SCHEMA) : 'refuse';
+      if (decision === 'seed'){
+        await pushToRemote();   // genuinely empty remote → safe first-run seed
         return true;
+      }
+      if (decision === 'refuse'){
+        // Remote holds financial data under an unexpected schema (e.g. a
+        // SCHEMA version bump). Never clobber it — #Crit-1.
+        setSyncStatus('failed', 'Remote has data under an unexpected schema — not overwriting.');
+        showToast('Cloud has data under a different schema. Not overwriting it. To replace the cloud with this device, use Settings → Push to cloud.', 'error');
+        return false;
       }
       throw new Error('Sheet has no ' + SCHEMA + ' data yet. Push first.');
     }
@@ -1878,7 +1892,7 @@ function renderSetupWizardStep(){
       <ol>
         <li>Click the button below to open Google Sheets in a new tab.</li>
         <li>Click <strong>+ Blank</strong> to create a new sheet.</li>
-        <li>Give it a name like <em>My Investment Tracker</em>.</li>
+        <li>Give it a name like <em>My Portfolio Tracker</em>.</li>
         <li>Leave the tab open — you'll come back to it.</li>
       </ol>
       <div class="actions">
@@ -1897,7 +1911,7 @@ function renderSetupWizardStep(){
         <li>Click the function dropdown, pick <code>initOnce</code>, then <strong>▶ Run</strong>. Grant the permissions Google asks for — it needs to read/write your sheet and call Yahoo Finance / CoinGecko.</li>
       </ol>
       <div class="actions">
-        <a class="btn btn-primary" href="https://github.com/julianchow21/Investment-Tracker/blob/main/apps-script.gs" target="_blank" rel="noopener noreferrer">Open the backend code</a>
+        <a class="btn btn-primary" href="https://github.com/julianchow21/Kujira-Portfolio/blob/main/apps-script.gs" target="_blank" rel="noopener noreferrer">Open the backend code</a>
       </div>
     </div>`;
   } else if (_swStep === 3){
@@ -1907,7 +1921,7 @@ function renderSetupWizardStep(){
       <ol>
         <li>Click <strong>Deploy → New deployment</strong>.</li>
         <li>Click the gear icon next to <em>Select type</em>, pick <strong>Web app</strong>.</li>
-        <li>Description: <em>My Investment Tracker</em>.</li>
+        <li>Description: <em>My Portfolio Tracker</em>.</li>
         <li>Execute as: <strong>Me</strong>.</li>
         <li>Who has access: <strong>Anyone</strong>.</li>
         <li>Click <strong>Deploy</strong> and copy the Web app URL (ends in <code>/exec</code>).</li>

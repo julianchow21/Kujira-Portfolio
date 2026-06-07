@@ -4,7 +4,7 @@ Last updated: 27/05/2026.
 
 ## What this app is, technically
 
-Kujira Investments is **static HTML, CSS, and JavaScript** hosted on GitHub Pages. When you visit it, the files are downloaded to your browser and run locally. There is no server-side application. There is no database we maintain. There is no "account" with us.
+Kujira Portfolio is **static HTML, CSS, and JavaScript** hosted on GitHub Pages. When you visit it, the files are downloaded to your browser and run locally. There is no server-side application. There is no database we maintain. There is no "account" with us.
 
 ## What data we collect
 
