@@ -274,6 +274,19 @@ table.holdings td{font-variant-numeric:tabular-nums}
 table.holdings td.cell-sym{font-weight:600}
 table.holdings td.muted{color:var(--text3)}
 table.holdings .price-stale{color:var(--text3);font-style:italic}
+table.holdings th.sticky-col,table.holdings td.sticky-col{position:sticky;left:0;background:var(--bg2);border-right:1px solid var(--border);z-index:2}
+table.holdings th.sticky-col{z-index:3}
+table.holdings th.sortable{cursor:pointer;user-select:none;position:relative;padding-right:20px}
+table.holdings th.sortable:hover,table.holdings th.sortable:focus-visible{color:var(--text)}
+table.holdings th.sortable .sort-glyph{position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:9px;color:var(--accent)}
+.btn-xs{padding:2px 7px;font-size:12px;line-height:1.2}
+a.btn,a.btn:hover{text-decoration:none}
+@media (pointer:coarse){ .col-mgr-move .btn-xs{min-width:36px;min-height:36px;justify-content:center} }
+.col-mgr-row{display:flex;align-items:center;gap:10px;padding:6px 2px;border-bottom:1px solid var(--border)}
+.col-mgr-row:last-child{border-bottom:none}
+.col-mgr-move{display:inline-flex;gap:2px;flex-shrink:0}
+.col-mgr-lbl{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;flex:1}
+.col-mgr-lbl input{cursor:pointer}
 
 /* FORM TWEAKS */
 .form-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:12px}
@@ -367,6 +380,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
       <div class="h-toolbar">
         <button class="btn btn-primary" onclick="openEntityModal('stocks')">＋ Add stock</button>
         <button class="btn" onclick="refreshStockPrices()" id="btn-refresh-stocks">↻ Refresh prices</button>
+        <button class="btn" onclick="openStockColumns()" id="btn-stock-cols">⚙ Columns</button>
         <span class="freshness" id="freshness-stocks">No prices yet</span>
       </div>
     </div>
@@ -540,7 +554,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
               <input type="password" id="cfg-sync-url" class="fi" placeholder="https://script.google.com/macros/s/.../exec" spellcheck="false" autocomplete="off" style="flex:1">
               <button type="button" class="btn" id="btn-toggle-url" onclick="toggleSyncUrlReveal()" title="Show/hide URL" style="min-width:88px">Show</button>
             </div>
-            <div class="hint">Paste the deployed Web App URL. Treat this like a password — anyone with this URL can read and write your sheet. See README for setup steps.</div>
+            <div class="hint">Paste the deployed Web App URL. Treat this like a password, anyone with this URL can read and write your sheet. See README for setup steps.</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
@@ -584,8 +598,8 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
           <div class="form-group">
             <label class="lbl">Base currency</label>
             <select id="cfg-base-currency" class="fi">
-              <option value="SGD">SGD — Singapore Dollar</option>
-              <option value="USD">USD — US Dollar</option>
+              <option value="SGD">SGD (Singapore Dollar)</option>
+              <option value="USD">USD (US Dollar)</option>
             </select>
           </div>
           <div class="form-group">
@@ -805,11 +819,26 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
   </div>
 </div>
 
+<!-- STOCK COLUMN MANAGER -->
+<div class="overlay" id="stock-cols-modal" role="dialog" aria-modal="true" aria-label="Manage stock columns">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-head">
+      <h3>Columns</h3>
+      <button class="btn btn-ghost btn-sm" onclick="closeStockColumns()" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="stock-cols-body"></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" onclick="resetStockColumns()">Reset to default</button>
+      <button class="btn btn-primary btn-sm" onclick="closeStockColumns()">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- SETUP WIZARD — 4-step onboarding for first-time users -->
 <div class="overlay" id="setup-wizard">
   <div class="modal" style="max-width:620px">
     <div class="modal-head">
-      <h3>Welcome — let's get you set up</h3>
+      <h3>Welcome, let's get you set up</h3>
       <button class="btn-ghost btn btn-sm" onclick="closeSetupWizard()" aria-label="Close">✕</button>
     </div>
     <div class="modal-body">
@@ -822,7 +851,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
       <div id="sw-body"></div>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-ghost" onclick="closeSetupWizard()" style="margin-right:auto">Skip — I'll do it later</button>
+      <button class="btn btn-ghost" onclick="closeSetupWizard()" style="margin-right:auto">Skip, I'll do it later</button>
       <button class="btn" id="sw-back" onclick="setupWizardBack()" style="display:none">Back</button>
       <button class="btn btn-primary" id="sw-next" onclick="setupWizardNext()">Next</button>
     </div>
@@ -846,7 +875,7 @@ table.holdings .price-stale{color:var(--text3);font-style:italic}
    ═══════════════════════════════════════════════════════════════════════ */
 
 const APP_VERSION = 'v1.0';
-const APP_DISPLAY_VERSION = 'v0.9 (7 Jun)';
+const APP_DISPLAY_VERSION = 'v1.1 (11 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1067,6 +1096,128 @@ function ensurePhase2Card(section, key){
 /* ═══════════════════════════════════════════════════════════════════════
    DB — single source of truth, mirrors Kujira's pattern
    ═══════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════
+   STOCKS COLUMN REGISTRY — drives the holdings table + the column manager.
+   Each column: key, label(dc), defVis (default visible), cls, render(r,ctx).
+   Symbol (sticky) and the row actions are fixed and live outside this list.
+   `backend:true` marks columns that need the widened Apps Script price fields
+   (day range, 52w range, volume); they render — until a redeploy populates them.
+   ═══════════════════════════════════════════════════════════════════════ */
+const STOCK_COLUMNS = [
+  { key:'market', label:()=>'Market', cls:'tl', defVis:true,
+    render:r => `<span class="tag ${r.s.market==='SGX'?'sgx':'us'}">${kjrEscape(r.s.market)}</span>` },
+  { key:'shares', label:()=>'Shares', cls:'num', defVis:true,
+    render:r => r.derived
+      ? `${r.shares}<span class="hint" title="Derived from ${r.derived.txnCount} trade${r.derived.txnCount===1?'':'s'}"> ◆</span>`
+      : `${r.shares}` },
+  { key:'avgCost', label:()=>'Avg cost', cls:'num', defVis:true,
+    render:r => fmt(toSGD(r.avgCost, r.ccy)) },
+  { key:'price', label:()=>'Price', cls:'num', defVis:true,
+    render:r => r.priceSgd!=null
+      ? `${fmt(r.priceSgd)}${r.stale?' <span class="hint">(stale)</span>':''}${r.extLine}`
+      : '<span class="price-stale">—</span>' },
+  { key:'dayChange', label:dc=>`Day P&L (${dc})`, cls:'num', defVis:false,
+    render:r => r.changeSgd!=null ? `<span class="${r.changeSgd>=0?'pos':'neg'}">${fmt(r.changeSgd)}</span>` : '—' },
+  { key:'dayChangePct', label:()=>'Day %', cls:'num', defVis:false,
+    render:r => (r.px&&r.px.changePct!=null) ? `<span class="${r.px.changePct>=0?'pos':'neg'}">${fmtPct(r.px.changePct)}</span>` : '—' },
+  { key:'prevClose', label:()=>'Prev close', cls:'num', defVis:false,
+    render:r => r.prevCloseSgd!=null ? fmt(r.prevCloseSgd) : '—' },
+  { key:'dayRange', label:()=>'Day range', cls:'num', defVis:false, backend:true,
+    // priceCcy is only set when px.price != null; fall back to the quote's own
+    // currency, then the stock's, so ranges never render unconverted.
+    render:r => (r.px&&r.px.dayLow!=null&&r.px.dayHigh!=null)
+      ? `${fmt(toSGD(r.px.dayLow,r.priceCcy||r.px.currency||r.ccy))}–${fmt(toSGD(r.px.dayHigh,r.priceCcy||r.px.currency||r.ccy))}` : '—' },
+  { key:'week52', label:()=>'52w range', cls:'num', defVis:false, backend:true,
+    render:r => (r.px&&r.px.week52Low!=null&&r.px.week52High!=null)
+      ? `${fmt(toSGD(r.px.week52Low,r.priceCcy||r.px.currency||r.ccy))}–${fmt(toSGD(r.px.week52High,r.priceCcy||r.px.currency||r.ccy))}` : '—' },
+  { key:'volume', label:()=>'Volume', cls:'num', defVis:false, backend:true,
+    render:r => (r.px&&r.px.volume!=null) ? Number(r.px.volume).toLocaleString('en-SG') : '—' },
+  { key:'mv', label:dc=>`Market value (${dc})`, cls:'num', defVis:true,
+    render:r => r.mv!=null ? fmt(r.mv) : '—' },
+  { key:'cost', label:dc=>`Cost basis (${dc})`, cls:'num', defVis:false,
+    render:r => fmt(r.cost) },
+  { key:'pl', label:dc=>`P&L (${dc})`, cls:'num', defVis:true,
+    render:r => r.pl!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${fmt(r.pl)}</span>` : '—' },
+  { key:'plPct', label:()=>'P&L %', cls:'num', defVis:true,
+    render:r => r.plPct!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${fmtPct(r.plPct)}</span>` : '—' },
+  { key:'realised', label:dc=>`Realised P&L (${dc})`, cls:'num', defVis:false,
+    render:r => r.realisedSgd!=null ? `<span class="${r.realisedSgd>=0?'pos':'neg'}">${fmt(r.realisedSgd)}</span>` : '—' },
+  { key:'weight', label:()=>'Weight %', cls:'num', defVis:false,
+    render:r => r.weight!=null ? r.weight.toFixed(1)+'%' : '—' },
+  { key:'divIncome', label:dc=>`Dividend/yr (${dc})`, cls:'num', defVis:false,
+    render:r => r.divAnnualSgd!=null ? fmt(r.divAnnualSgd) : '—' },
+  { key:'divYoc', label:()=>'Yield on cost', cls:'num', defVis:false,
+    render:r => r.divYoc!=null ? r.divYoc.toFixed(2)+'%' : '—' },
+  { key:'divYield', label:()=>'Div yield', cls:'num', defVis:false,
+    render:r => r.divYieldCur!=null ? r.divYieldCur.toFixed(2)+'%' : '—' },
+  { key:'updated', label:()=>'Updated', cls:'num muted', defVis:true,
+    render:r => (r.px&&r.px.fetchedAt) ? relTime(r.px.fetchedAt) : '—' }
+];
+const STOCK_COL_LABEL = {
+  market:'Market', shares:'Shares', avgCost:'Avg cost', price:'Price',
+  dayChange:'Day P&L (position change)', dayChangePct:'Day change %', prevClose:'Prev close',
+  dayRange:'Day range', week52:'52-week range', volume:'Volume',
+  mv:'Market value', cost:'Cost basis', pl:'Unrealised P&L', plPct:'P&L %',
+  realised:'Realised P&L', weight:'Portfolio weight %', divIncome:'Dividend income / yr',
+  divYoc:'Dividend yield on cost', divYield:'Current dividend yield', updated:'Updated'
+};
+function defaultStockColumns(){ return STOCK_COLUMNS.map(c => ({ key:c.key, visible: !!c.defVis })); }
+/* Reconcile a stored column preference against the current registry: keep known
+   keys in their saved order + visibility, append any new columns at their default,
+   drop unknown keys. Mirrors how mergeDefaults de-risks schema evolution. */
+function reconcileStockColumns(stored){
+  const valid = new Set(STOCK_COLUMNS.map(c => c.key));
+  const out = [], seen = new Set();
+  if (Array.isArray(stored)) stored.forEach(e => {
+    if (e && valid.has(e.key) && !seen.has(e.key)){ out.push({ key:e.key, visible: e.visible !== false }); seen.add(e.key); }
+  });
+  STOCK_COLUMNS.forEach(c => { if (!seen.has(c.key)){ out.push({ key:c.key, visible: !!c.defVis }); seen.add(c.key); } });
+  return out;
+}
+/* Registry defs in the user's saved order, each carrying its current visibility. */
+function orderedStockCols(){
+  const pref = reconcileStockColumns(DB.settings && DB.settings.stocksColumns);
+  const byKey = {}; STOCK_COLUMNS.forEach(c => byKey[c.key] = c);
+  return pref.map(p => Object.assign({}, byKey[p.key], { visible: p.visible })).filter(c => c.key);
+}
+
+/* Sort accessors, kept separate so the registry stays presentation-only.
+   Each returns a raw comparable (number, string, or null). Money values
+   compare in SGD so mixed-currency columns sort correctly. Null = no data,
+   always sorts last regardless of direction. */
+const STOCK_SORT_VALS = {
+  symbol:       r => r.s.symbol || '',
+  market:       r => r.s.market || '',
+  shares:       r => r.shares,
+  avgCost:      r => toSGD(r.avgCost, r.ccy),
+  price:        r => r.priceSgd,
+  dayChange:    r => r.changeSgd,
+  dayChangePct: r => (r.px && r.px.changePct != null) ? r.px.changePct : null,
+  prevClose:    r => r.prevCloseSgd,
+  dayRange:     r => (r.px && r.px.dayHigh != null) ? toSGD(r.px.dayHigh, r.priceCcy || r.px.currency || r.ccy) : null,
+  week52:       r => (r.px && r.px.week52High != null) ? toSGD(r.px.week52High, r.priceCcy || r.px.currency || r.ccy) : null,
+  volume:       r => (r.px && r.px.volume != null) ? r.px.volume : null,
+  mv:           r => r.mv,
+  cost:         r => r.cost,
+  pl:           r => r.pl,
+  plPct:        r => r.plPct,
+  realised:     r => r.realisedSgd,
+  weight:       r => r.weight,
+  divIncome:    r => r.divAnnualSgd,
+  divYoc:       r => r.divYoc,
+  divYield:     r => r.divYieldCur,
+  updated:      r => (r.px && r.px.fetchedAt) || null
+};
+/* Header click cycle: asc → desc → clear. Unknown keys are ignored. */
+function setStockSort(key){
+  if (!STOCK_SORT_VALS[key]) return;
+  const cur = DB.settings.stocksSort || {};
+  DB.settings.stocksSort = cur.key !== key ? { key, dir:'asc' }
+    : cur.dir === 'asc' ? { key, dir:'desc' }
+    : { key:null, dir:null };
+  saveData(); renderStocks();
+}
+
 function freshDB(){
   return {
     stocks:       [],
@@ -1087,6 +1238,8 @@ function freshDB(){
     settings:     {
       baseCurrency: 'SGD',
       tabCurrency:  {},   // per-tab display overrides; defaults: stocks=USD, rest=SGD
+      stocksColumns: defaultStockColumns(),  // holdings table columns: order + visibility
+      stocksSort:   { key:null, dir:null },  // holdings table sort: column + asc|desc
       fxRates:      { USDSGD: null, lastUpdated: null },
       fxOverrides:  { USDSGD: null },
       birthYear:    null,
@@ -1269,7 +1422,7 @@ function saveLocal(){
         continue; // try a leaner payload
       }
       console.error('localStorage write failed', e);
-      showToast('Local save failed: ' + (e && e.message ? e.message : e) + '. Your data is still in memory — set up cloud sync in Settings to protect it.', 'error');
+      showToast('Local save failed: ' + (e && e.message ? e.message : e) + '. Your data is still in memory, set up cloud sync in Settings to protect it.', 'error');
       return false;
     }
   }
@@ -1332,6 +1485,12 @@ function mergeDefaults(loaded){
   out.settings.fxOverrides = Object.assign({}, base.settings.fxOverrides, (safe.settings && safe.settings.fxOverrides) || {});
   out.settings.salary      = Object.assign({}, base.settings.salary,      (safe.settings && safe.settings.salary)      || {});
   out.settings.tabCurrency = Object.assign({}, base.settings.tabCurrency, (safe.settings && safe.settings.tabCurrency) || {});
+  out.settings.stocksColumns = reconcileStockColumns(safe.settings && safe.settings.stocksColumns);
+  const _ss = (safe.settings && safe.settings.stocksSort) || {};
+  out.settings.stocksSort = {
+    key: typeof _ss.key === 'string' ? _ss.key : null,
+    dir: (_ss.dir === 'asc' || _ss.dir === 'desc') ? _ss.dir : null
+  };
   out.settings.targets     = Object.assign({}, base.settings.targets,     (safe.settings && safe.settings.targets)     || {});
   // salaryRules is an array; keep loaded value if it is one, else default.
   out.settings.salaryRules = Array.isArray(safe.settings && safe.settings.salaryRules)
@@ -1513,8 +1672,8 @@ async function pushToRemote(){
           return;
         }
         console.warn('[sync] auto-recovery exhausted retries', r);
-        setSyncStatus('failed', 'Auto-recovery failed — try Pull from cloud');
-        showToast('Sync failed — Settings → Pull from cloud to recover', 'error');
+        setSyncStatus('failed', 'Auto-recovery failed, try Pull from cloud');
+        showToast('Sync failed, Settings → Pull from cloud to recover', 'error');
       } catch (recoverErr) {
         console.warn('[sync] auto-recovery threw:', recoverErr.message);
         setSyncStatus('failed', recoverErr.message);
@@ -1563,7 +1722,7 @@ async function pullFromRemote(opts){
       if (decision === 'refuse'){
         // Remote holds financial data under an unexpected schema (e.g. a
         // SCHEMA version bump). Never clobber it — #Crit-1.
-        setSyncStatus('failed', 'Remote has data under an unexpected schema — not overwriting.');
+        setSyncStatus('failed', 'Remote has data under an unexpected schema, not overwriting.');
         showToast('Cloud has data under a different schema. Not overwriting it. To replace the cloud with this device, use Settings → Push to cloud.', 'error');
         return false;
       }
@@ -1581,7 +1740,7 @@ async function pullFromRemote(opts){
     const stamp = data._savedAt || data.updatedAt || new Date().toISOString();
     if (!hasServerStamp) {
       console.warn('[sync] pull response missing _savedAt — backend out of date');
-      showToast('Backend out of date — redeploy Apps Script (see README) to stop sync conflicts.', 'error');
+      showToast('Backend out of date, redeploy Apps Script (see README) to stop sync conflicts.', 'error');
     }
     localStorage.setItem(LK_SYNC_TS, stamp);
     setLastPull(stamp, hasServerStamp ? 'server' : 'client');
@@ -1779,7 +1938,7 @@ function setupWizardNext(){
         if (!confirm('That URL does not look like a Google Apps Script Web App URL. Save anyway?')) return;
       }
       setSyncUrl(v);
-      showToast('Connected — pulling your data', 'success');
+      showToast('Connected, pulling your data', 'success');
       closeSetupWizard();
       pullFromRemote({ allowSeed: true });
       return;
@@ -1813,13 +1972,13 @@ function renderSetupWizardStep(){
 
   if (_swStep === 1){
     body.innerHTML = `<div class="sw-step">
-      <h4>Step 1 — Create a Google Sheet</h4>
+      <h4>Step 1: Create a Google Sheet</h4>
       <p>You'll need an empty Google Sheet to hold your data. Only you will have access to it. We never see it.</p>
       <ol>
         <li>Click the button below to open Google Sheets in a new tab.</li>
         <li>Click <strong>+ Blank</strong> to create a new sheet.</li>
         <li>Give it a name like <em>My Portfolio Tracker</em>.</li>
-        <li>Leave the tab open — you'll come back to it.</li>
+        <li>Leave the tab open, you'll come back to it.</li>
       </ol>
       <div class="actions">
         <a class="btn btn-primary" href="https://sheets.new" target="_blank" rel="noopener noreferrer">Open Google Sheets</a>
@@ -1827,14 +1986,14 @@ function renderSetupWizardStep(){
     </div>`;
   } else if (_swStep === 2){
     body.innerHTML = `<div class="sw-step">
-      <h4>Step 2 — Paste the Apps Script code</h4>
+      <h4>Step 2: Paste the Apps Script code</h4>
       <p>In your new Google Sheet:</p>
       <ol>
         <li>Click <strong>Extensions → Apps Script</strong> in the menu.</li>
         <li>Delete whatever code is already there.</li>
         <li>Open the backend code (button below), click <strong>Copy raw file</strong>, and paste it in.</li>
         <li>Click <strong>Save</strong> (disk icon).</li>
-        <li>Click the function dropdown, pick <code>initOnce</code>, then <strong>▶ Run</strong>. Grant the permissions Google asks for — it needs to read/write your sheet and call Yahoo Finance / CoinGecko.</li>
+        <li>Click the function dropdown, pick <code>initOnce</code>, then <strong>▶ Run</strong>. Grant the permissions Google asks for, it needs to read/write your sheet and call Yahoo Finance / CoinGecko.</li>
       </ol>
       <div class="actions">
         <a class="btn btn-primary" href="https://github.com/julianchow21/Kujira-Portfolio/blob/main/apps-script.gs" target="_blank" rel="noopener noreferrer">Open the backend code</a>
@@ -1842,7 +2001,7 @@ function renderSetupWizardStep(){
     </div>`;
   } else if (_swStep === 3){
     body.innerHTML = `<div class="sw-step">
-      <h4>Step 3 — Deploy as a Web App</h4>
+      <h4>Step 3: Deploy as a Web App</h4>
       <p>Still in the Apps Script editor:</p>
       <ol>
         <li>Click <strong>Deploy → New deployment</strong>.</li>
@@ -1858,7 +2017,7 @@ function renderSetupWizardStep(){
     </div>`;
   } else if (_swStep === 4){
     body.innerHTML = `<div class="sw-step">
-      <h4>Step 4 — Paste the URL here</h4>
+      <h4>Step 4: Paste the URL here</h4>
       <p>Paste the URL you copied from the deploy dialog. We'll save it locally and pull your data.</p>
       <input type="url" id="sw-url-input" class="fi" placeholder="https://script.google.com/macros/s/.../exec" spellcheck="false" autocomplete="off">
       <p style="margin-top:14px;font-size:12px;color:var(--text3)">The URL is stored only in this browser. We never transmit it anywhere except to your own Apps Script.</p>
@@ -2181,7 +2340,7 @@ function renderTaxEstimate(){
       <div class="hint-block" style="border-left:2px solid var(--accent);padding-left:10px">
         <div class="hint" style="font-size:11px;margin-bottom:2px">Est. annual tax${est.isManual ? ' (manual override)' : ''}</div>
         <div style="font-weight:700;font-size:16px">${fmt2(est.annualTax)}</div>
-        <div class="hint">${est.effectiveRate.toFixed(2)}% effective rate${nr ? ' (non-resident — higher of 15% flat / graduated)' : ''}</div>
+        <div class="hint">${est.effectiveRate.toFixed(2)}% effective rate${nr ? ' (non-resident, higher of 15% flat / graduated)' : ''}</div>
       </div>
       <div class="hint-block" style="border-left:2px solid var(--accent);padding-left:10px">
         <div class="hint" style="font-size:11px;margin-bottom:2px">Monthly provision</div>
@@ -2189,7 +2348,7 @@ function renderTaxEstimate(){
         <div class="hint">Accrual. SG has no monthly PAYE.</div>
       </div>
     </div>
-    <div class="hint" style="margin-top:10px;font-size:11px">Rates: YA2025 resident brackets (IRAS). Estimate only — does not account for NSman or dependent reliefs beyond the "Total reliefs" field. Verify on mytax.iras.gov.sg before filing.</div>
+    <div class="hint" style="margin-top:10px;font-size:11px">Rates: YA2025 resident brackets (IRAS). Estimate only, does not account for NSman or dependent reliefs beyond the "Total reliefs" field. Verify on mytax.iras.gov.sg before filing.</div>
   `;
 }
 
@@ -2819,11 +2978,12 @@ const ENTITY_SCHEMAS = {
   stocks: {
     title: 'stock holding',
     fields: [
-      { key:'symbol',  label:'Symbol',  type:'text',   required:true, placeholder:'AAPL or D05', hint:'Yahoo ticker. For SGX, omit the .SI — we add it.' },
+      { key:'symbol',  label:'Symbol',  type:'text',   required:true, placeholder:'AAPL or D05', hint:'Yahoo ticker. For SGX, omit the .SI (we add it).' },
       { key:'market',  label:'Market',  type:'select', required:true, options:[['SGX','SGX (Singapore)'],['US','US (NYSE/NASDAQ)']], default:'US' },
       { key:'shares',  label:'Shares',  type:'number', required:true, step:'0.0001', placeholder:'100', hint:'Your current holding. If you log trades below, this is treated as the opening position and trades adjust it.' },
       { key:'avgCost', label:'Avg cost per share', type:'number', required:true, step:'0.0001', placeholder:'150.00' },
       { key:'currency', label:'Cost currency', type:'select', options:[['USD','USD'],['SGD','SGD']], default:'USD', hint:'Currency the avg cost is stated in. Defaults match the market.' },
+      { key:'divPerShare', label:'Annual dividend / share', type:'number', step:'0.0001', min:'0', placeholder:'0.00', hint:'Optional, in the cost currency. Drives projected dividend income and yield on cost. Leave blank for non-payers.' },
       { key:'notes',   label:'Notes', type:'textarea' }
     ],
     defaults: { market:'US', currency:'USD' },
@@ -2831,6 +2991,8 @@ const ENTITY_SCHEMAS = {
       // Coerce currency when market changes if user hasn't set one
       if (!item.currency) item.currency = item.market === 'SGX' ? 'SGD' : 'USD';
       item.symbol = (item.symbol || '').trim().toUpperCase();
+      // Dividends cannot be negative; clamp bad input to "no dividend".
+      if (item.divPerShare != null && Number(item.divPerShare) < 0) item.divPerShare = null;
     }
   },
   stockTxns: {
@@ -2882,7 +3044,7 @@ const ENTITY_SCHEMAS = {
     fields: [
       { key:'name',     label:'Account name', type:'text', required:true, placeholder:'DBS Multiplier' },
       { key:'account',  label:'Account type', type:'select', options:[['Savings','Savings'],['Current','Current'],['FD','Fixed deposit'],['MMF','Money market'],['Brokerage','Brokerage cash'],['Foreign','Foreign currency'],['Other','Other']], default:'Savings' },
-      { key:'amount',   label:'Balance', type:'number', step:'0.01', placeholder:'10000', hint:'For Brokerage accounts the balance is calculated from movements + linked trades below — leave blank.' },
+      { key:'amount',   label:'Balance', type:'number', step:'0.01', placeholder:'10000', hint:'For Brokerage accounts the balance is calculated from movements + linked trades below, leave blank.' },
       { key:'currency', label:'Currency', type:'select', options:[['SGD','SGD'],['USD','USD'],['EUR','EUR'],['GBP','GBP'],['HKD','HKD'],['JPY','JPY'],['AUD','AUD'],['MYR','MYR'],['Other','Other']], default:'SGD' },
       { key:'apy',      label:'Interest rate % p.a. (APY)', type:'number', step:'0.01', placeholder:'0.00', hint:'Annual yield. Shown as projected monthly / annual interest. Leave blank for non-interest-bearing accounts.' },
       { key:'notes',    label:'Notes', type:'textarea' }
@@ -3018,8 +3180,9 @@ function renderField(f, value){
     input = `<textarea class="fi" data-fkey="${f.key}" placeholder="${kjrEscape(f.placeholder||'')}">${safeV}</textarea>`;
   } else {
     const step = f.step ? ` step="${kjrEscape(f.step)}"` : '';
+    const min  = f.min != null ? ` min="${kjrEscape(f.min)}"` : '';
     const inputType = f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text');
-    input = `<input class="fi" type="${inputType}" data-fkey="${f.key}"${step} value="${safeV}" placeholder="${kjrEscape(f.placeholder||'')}"${required}>`;
+    input = `<input class="fi" type="${inputType}" data-fkey="${f.key}"${step}${min} value="${safeV}" placeholder="${kjrEscape(f.placeholder||'')}"${required}>`;
   }
   return `<div class="form-group"${full}><label class="lbl">${kjrEscape(f.label)}${f.required ? ' *' : ''}</label>${input}${hint}</div>`;
 }
@@ -3175,6 +3338,8 @@ function entityModalDelete(){
    trades adjust it from there (so selling 10 of a 3,000 holding leaves 2,990).
    Values are in the stock's own currency (price/fees in that currency). */
 function deriveStockPosition(stockId){
+  // Sort is stable: same-date trades resolve in ledger insertion order, which
+  // becomes the avg-cost path for ties. A trade with no date sorts first.
   const txns = (DB.stockTxns || [])
     .filter(t => t.stockId === stockId)
     .sort((a,b) => String(a.date||'').localeCompare(String(b.date||'')));
@@ -3215,7 +3380,8 @@ function renderStocks(){
 
   // Compute rows. When a stock has logged trades, shares + avg cost are
   // derived from the ledger; otherwise the manual entry is used.
-  let totCost = 0, totMv = 0, totRealised = 0, anyPriceMissing = false, anyFxMissing = false, anyPriced = false, anyDerived = false;
+  let totCost = 0, totMv = 0, totRealised = 0, totDivAnnual = 0,
+      anyPriceMissing = false, anyFxMissing = false, anyPriced = false, anyDerived = false, anyDiv = false;
   const rows = list.map(s => {
     const ysym  = yahooSymbol(s);
     const px    = DB._priceCache[ysym] || null;
@@ -3224,9 +3390,11 @@ function renderStocks(){
     const derived = deriveStockPosition(s.id);
     const shares  = derived ? derived.shares  : (s.shares  || 0);
     const avgCost = derived ? derived.avgCost : (s.avgCost || 0);
-    if (derived){ anyDerived = true; totRealised += roundMoney(toSGD(derived.realisedPL, ccy)); }
+    let realisedSgd = null;
+    if (derived){ anyDerived = true; realisedSgd = roundMoney(toSGD(derived.realisedPL, ccy)); totRealised += realisedSgd; }
     const cost  = roundMoney(toSGD(shares * avgCost, ccy));
     let priceSgd = null, mv = null, pl = null, plPct = null, stale = true, priceCcy = null;
+    let changeSgd = null, prevCloseSgd = null;
     if (px && px.price != null){
       anyPriced = true;
       const pxCcy = px.currency || ccy;
@@ -3237,17 +3405,44 @@ function renderStocks(){
       plPct = safeRatio(pl, cost);
       stale = isStale(px.fetchedAt, 24);
       priceCcy = pxCcy;
+      if (px.change != null) changeSgd = roundMoney(toSGD(px.change, pxCcy) * shares);
+      if (px.previousClose != null) prevCloseSgd = toSGD(px.previousClose, pxCcy);
     } else { anyPriceMissing = true; }
+    // Dividend projection (yield-only model): annual income = shares × annual div per share.
+    const dps = Number(s.divPerShare) || 0;
+    let divAnnualSgd = null, divYoc = null, divYieldCur = null;
+    if (dps > 0 && shares){
+      anyDiv = true;
+      divAnnualSgd = roundMoney(toSGD(shares * dps, ccy));
+      totDivAnnual += divAnnualSgd;
+      divYoc = safeRatio(divAnnualSgd, cost);
+      if (mv != null) divYieldCur = safeRatio(divAnnualSgd, mv);
+    }
+    // Pre-rendered extended-hours line for the price cell.
+    let extLine = '';
+    if (px && px.extendedKind && px.extendedPrice != null){
+      const extCls = (px.extendedChange || 0) >= 0 ? 'pos' : 'neg';
+      const elabel = px.extendedKind === 'pre' ? 'Pre' : 'Post';
+      const pctTxt = px.extendedChangePct != null ? ' ' + fmtPct(px.extendedChangePct) : '';
+      extLine = `<div class="px-ext"><span class="px-ext-tag">${elabel}</span> ${fmt(toSGD(px.extendedPrice, priceCcy))}<span class="${extCls}">${pctTxt}</span></div>`;
+    }
     totCost += cost;
     if (mv != null) totMv += mv;
-    return { s, ysym, px, ccy, cost, mv, pl, plPct, stale, priceCcy, priceSgd, shares, avgCost, derived };
+    return { s, ysym, px, ccy, cost, mv, pl, plPct, stale, priceCcy, priceSgd, shares, avgCost, derived,
+             realisedSgd, changeSgd, prevCloseSgd, divAnnualSgd, divYoc, divYieldCur, extLine, weight:null };
   });
+  // Round the accumulated totals once (Phase-1 convention: round at accumulation).
+  totCost = roundMoney(totCost); totMv = roundMoney(totMv);
+  totRealised = roundMoney(totRealised); totDivAnnual = roundMoney(totDivAnnual);
+
+  // Second pass: portfolio weight needs the total market value.
+  rows.forEach(r => { if (r.mv != null && totMv > 0) r.weight = safeRatio(r.mv, totMv); });
 
   const showPl = anyPriced && !anyPriceMissing;
   const totPl = roundMoney(totMv - totCost);
   const totPlPct = safeRatio(totPl, totCost);
-  const mvSub = anyFxMissing ? 'FX missing — set rate in Settings'
-              : anyPriceMissing && anyPriced ? 'some prices missing — refresh'
+  const mvSub = anyFxMissing ? 'FX missing, set rate in Settings'
+              : anyPriceMissing && anyPriced ? 'some prices missing, refresh'
               : anyPriceMissing ? 'click Refresh prices to populate'
               : '';
 
@@ -3264,40 +3459,59 @@ function renderStocks(){
     summaryItems.push({ label:'Realised P&L', value: fmt(totRealised), sub:'from closed trades',
       accent: totRealised >= 0 ? 'pos' : 'neg' });
   }
+  if (anyDiv){
+    const totDivYoc = safeRatio(totDivAnnual, totCost);
+    summaryItems.push({ label:'Dividend income', value: fmt(totDivAnnual),
+      sub: fmt(roundMoney(totDivAnnual/12)) + ' / mo' + (totDivYoc != null ? ' · ' + totDivYoc.toFixed(2) + '% on cost' : ''),
+      accent:'accent' });
+  }
   sumEl.innerHTML = renderSummary(summaryItems);
 
+  // Apply the persisted sort. Null values sort last in both directions.
+  const sortPref = DB.settings.stocksSort || {};
+  const sortFn = (sortPref.key && sortPref.dir) ? STOCK_SORT_VALS[sortPref.key] : null;
+  if (sortFn){
+    const dir = sortPref.dir === 'desc' ? -1 : 1;
+    rows.sort((a, b) => {
+      const va = sortFn(a), vb = sortFn(b);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return (typeof va === 'string' || typeof vb === 'string')
+        ? dir * String(va).localeCompare(String(vb))
+        : dir * (va - vb);
+    });
+  }
+
   const dc = displayCcy();
+  const cols = orderedStockCols().filter(c => c.visible);
+  const ctx = { dc, totMv };
+  // Sortable header cell: reserved glyph space so the layout never shifts.
+  const thSort = (key, lbl, extraCls) => {
+    const active = sortPref.key === key && sortPref.dir;
+    const glyph  = active ? `<span class="sort-glyph">${sortPref.dir === 'asc' ? '▲' : '▼'}</span>` : '';
+    const aria   = active ? ` aria-sort="${sortPref.dir === 'asc' ? 'ascending' : 'descending'}"` : '';
+    return `<th class="sortable${extraCls || ''}" data-sort-key="${key}" tabindex="0"${aria}>${lbl}${glyph}</th>`;
+  };
+  const headCells = cols.map(c => {
+    const lbl = typeof c.label === 'function' ? c.label(dc) : c.label;
+    const tl  = (c.cls && c.cls.indexOf('tl') > -1) ? ' tl' : '';
+    return thSort(c.key, lbl, tl);
+  }).join('');
   bodyEl.innerHTML = `
     <div class="card"><div class="tbl-wrap"><table class="holdings"><thead><tr>
-      <th class="tl">Symbol</th><th class="tl">Market</th><th>Shares</th><th>Avg cost</th>
-      <th>Price</th><th>Market value (${dc})</th><th>P&L (${dc})</th><th>P&L %</th><th>Updated</th><th></th>
+      ${thSort('symbol', 'Symbol', ' tl sticky-col')}${headCells}<th></th>
     </tr></thead><tbody>
       ${rows.map(r => {
-        const plClass = r.pl == null ? '' : (r.pl >= 0 ? 'pos' : 'neg');
-        let extLine = '';
-        if (r.px && r.px.extendedKind && r.px.extendedPrice != null){
-          const extCls = (r.px.extendedChange || 0) >= 0 ? 'pos' : 'neg';
-          const label  = r.px.extendedKind === 'pre' ? 'Pre' : 'Post';
-          const pctTxt = r.px.extendedChangePct != null ? ' ' + fmtPct(r.px.extendedChangePct) : '';
-          extLine = `<div class="px-ext"><span class="px-ext-tag">${label}</span> ${fmt(toSGD(r.px.extendedPrice, r.priceCcy))}<span class="${extCls}">${pctTxt}</span></div>`;
-        }
-        const priceTxt = r.priceSgd != null
-          ? `${fmt(r.priceSgd)}${r.stale ? ' <span class="hint">(stale)</span>' : ''}${extLine}`
-          : '<span class="price-stale">—</span>';
-        const sharesTxt = r.derived
-          ? `${r.shares}<span class="hint" title="Derived from ${r.derived.txnCount} trade${r.derived.txnCount===1?'':'s'}"> ◆</span>`
-          : `${r.shares}`;
+        const cells = cols.map(c => `<td class="${c.cls}">${c.render(r, ctx)}</td>`).join('');
+        const ax = encodeURIComponent(r.ysym);
         return `<tr>
-          <td class="tl cell-sym">${kjrEscape(r.s.symbol)}</td>
-          <td class="tl"><span class="tag ${r.s.market === 'SGX' ? 'sgx' : 'us'}">${kjrEscape(r.s.market)}</span></td>
-          <td class="num">${sharesTxt}</td>
-          <td class="num">${fmt(toSGD(r.avgCost, r.ccy))}</td>
-          <td class="num">${priceTxt}</td>
-          <td class="num">${r.mv != null ? fmt(r.mv) : '—'}</td>
-          <td class="num ${plClass}">${r.pl != null ? fmt(r.pl) : '—'}</td>
-          <td class="num ${plClass}">${r.plPct != null ? fmtPct(r.plPct) : '—'}</td>
-          <td class="num muted">${r.px && r.px.fetchedAt ? relTime(r.px.fetchedAt) : '—'}</td>
-          <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="stocks" data-edit-id="${kjrEscape(r.s.id)}">Edit</button></td>
+          <td class="tl cell-sym sticky-col">${kjrEscape(r.s.symbol)}</td>
+          ${cells}
+          <td class="row-actions">
+            <a class="btn btn-sm btn-ghost" href="MU%20Day%20Trading/index.html?symbol=${ax}" target="_blank" rel="noopener" title="Open chart analysis for ${kjrEscape(r.s.symbol)}">Analyse</a>
+            <button class="btn btn-sm btn-ghost btn-edit" data-edit-table="stocks" data-edit-id="${kjrEscape(r.s.id)}">Edit</button>
+          </td>
         </tr>`;
       }).join('')}
     </tbody></table></div></div>
@@ -3311,6 +3525,79 @@ function renderStocks(){
   }
 
   renderStockTxns();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STOCK COLUMN MANAGER — toggle visibility + reorder. Arrow-based reorder
+   works on desktop and touch alike (HTML5 drag is dead on touch, lessons.md).
+   Changes persist to settings.stocksColumns and re-render immediately.
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderStockColsPanel(){
+  const body = document.getElementById('stock-cols-body');
+  if (!body) return;
+  const cols = orderedStockCols();
+  const anyBackend = cols.some(c => c.backend);
+  body.innerHTML = cols.map((c, i) => {
+    const lbl = STOCK_COL_LABEL[c.key] || c.key;
+    const warn = c.backend ? ' <span class="hint" title="Needs the widened price backend. Redeploy Apps Script to populate.">⚠</span>' : '';
+    return `<div class="col-mgr-row">
+      <span class="col-mgr-move">
+        <button class="btn btn-ghost btn-xs" title="Move up" aria-label="Move ${lbl} up" onclick="moveStockCol('${c.key}',-1)" ${i===0?'disabled':''}>↑</button>
+        <button class="btn btn-ghost btn-xs" title="Move down" aria-label="Move ${lbl} down" onclick="moveStockCol('${c.key}',1)" ${i===cols.length-1?'disabled':''}>↓</button>
+      </span>
+      <label class="col-mgr-lbl"><input type="checkbox" ${c.visible?'checked':''} onchange="toggleStockCol('${c.key}')"> <span>${lbl}${warn}</span></label>
+    </div>`;
+  }).join('') + (anyBackend
+    ? `<div class="hint" style="margin-top:10px;font-size:11px">⚠ Day range, 52-week range and volume need the updated Apps Script. Redeploy the backend (see README) to fill them, otherwise they show the empty token.</div>`
+    : '');
+}
+/* Same focus-trap pattern as openEntityModal: keydown scoped to the overlay
+   (not document), Tab wraps, Escape closes, focus returns to the opener. */
+let _colsOpener = null, _colsKeyTrap = null;
+function openStockColumns(){
+  DB.settings.stocksColumns = reconcileStockColumns(DB.settings.stocksColumns);
+  renderStockColsPanel();
+  const ov = document.getElementById('stock-cols-modal');
+  if (!ov) return;
+  _colsOpener = document.activeElement;
+  if (_colsKeyTrap) ov.removeEventListener('keydown', _colsKeyTrap);
+  _colsKeyTrap = function(e){
+    if (e.key === 'Escape'){ e.preventDefault(); closeStockColumns(); return; }
+    if (e.key !== 'Tab') return;
+    const focusable = Array.from(ov.querySelectorAll('input:not([disabled]),button:not([disabled])'))
+      .filter(el => el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey){ if (document.activeElement === first){ e.preventDefault(); last.focus(); } }
+    else           { if (document.activeElement === last) { e.preventDefault(); first.focus(); } }
+  };
+  ov.addEventListener('keydown', _colsKeyTrap);
+  ov.classList.add('open');
+  setTimeout(() => { const first = ov.querySelector('input,button'); if (first) first.focus(); }, 50);
+}
+function closeStockColumns(){
+  const ov = document.getElementById('stock-cols-modal');
+  if (!ov) return;
+  if (_colsKeyTrap){ ov.removeEventListener('keydown', _colsKeyTrap); _colsKeyTrap = null; }
+  ov.classList.remove('open');
+  if (_colsOpener && typeof _colsOpener.focus === 'function'){ try { _colsOpener.focus(); } catch (_){} }
+  _colsOpener = null;
+}
+function _persistStockCols(){ saveData(); renderStocks(); renderStockColsPanel(); }
+function toggleStockCol(key){
+  const arr = reconcileStockColumns(DB.settings.stocksColumns);
+  const e = arr.find(x => x.key === key); if (e) e.visible = !e.visible;
+  DB.settings.stocksColumns = arr; _persistStockCols();
+}
+function moveStockCol(key, dir){
+  const arr = reconcileStockColumns(DB.settings.stocksColumns);
+  const i = arr.findIndex(x => x.key === key); if (i < 0) return;
+  const j = i + dir; if (j < 0 || j >= arr.length) return;
+  const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  DB.settings.stocksColumns = arr; _persistStockCols();
+}
+function resetStockColumns(){
+  DB.settings.stocksColumns = defaultStockColumns(); _persistStockCols();
 }
 
 /* Trade ledger card — sits below the positions table. Lists every buy/sell
@@ -3409,7 +3696,7 @@ function renderCrypto(){
   const totPl = roundMoney(totMv - totCost);
   const totPlPct = safeRatio(totPl, totCost);
   const mvSub = anyFxMissing ? 'FX missing for cost basis'
-              : anyPriceMissing && anyPriced ? 'some prices missing — refresh'
+              : anyPriceMissing && anyPriced ? 'some prices missing, refresh'
               : anyPriceMissing ? 'click Refresh prices to populate'
               : '';
 
@@ -3606,7 +3893,7 @@ function renderCash(){
 
   const summaryCards = [
     { label:'Accounts',    value: String(list.length), accent:'accent' },
-    { label:'Total (' + displayCcy() + ')', value: fmt(totSgd), accent:'accent', sub: fxMissing ? 'FX missing for some — set in Settings or refresh' : '' },
+    { label:'Total (' + displayCcy() + ')', value: fmt(totSgd), accent:'accent', sub: fxMissing ? 'FX missing for some, set in Settings or refresh' : '' },
     { label:'By currency', value: '', sub: ccyChips || '—' }
   ];
   if (showApy){
@@ -4176,7 +4463,7 @@ function renderDashboard(){
   if (intEl){
     const rec = runReconciliation();
     if (rec.ok){
-      intEl.innerHTML = `<div class="integrity-bar ok">✓ Books balanced — every movement is accounted for.</div>`;
+      intEl.innerHTML = `<div class="integrity-bar ok">✓ Books balanced, every movement is accounted for.</div>`;
     } else {
       intEl.innerHTML = `<div class="integrity-bar bad">
         <div class="integrity-title">⚠ ${rec.issues.length} thing${rec.issues.length > 1 ? 's' : ''} to check</div>
@@ -4310,7 +4597,7 @@ function renderTargetAllocation(classes, net){
 
   const alertHtml = alerts.length
     ? `<div class="rebal-alerts">${alerts.map(a =>
-        `<div class="rebal-alert"><b>${kjrEscape(a.key)}</b> is ${Math.abs(a.drift).toFixed(1)} pts ${a.drift>0?'over':'under'} target — consider ${a.action === 'trim' ? 'trimming' : 'topping up'}.</div>`
+        `<div class="rebal-alert"><b>${kjrEscape(a.key)}</b> is ${Math.abs(a.drift).toFixed(1)} pts ${a.drift>0?'over':'under'} target, consider ${a.action === 'trim' ? 'trimming' : 'topping up'}.</div>`
       ).join('')}</div>`
     : `<div class="integrity-bar ok" style="margin-top:12px">✓ Allocation is within ${thr} pts of every target.</div>`;
 
@@ -4507,6 +4794,8 @@ function renderAll(){
    This listener attaches once at boot and survives every re-render. */
 function installEventDelegation(){
   document.addEventListener('click', (e) => {
+    const th = e.target.closest('th[data-sort-key]');
+    if (th){ setStockSort(th.getAttribute('data-sort-key')); return; }
     const btn = e.target.closest('[data-edit-table][data-edit-id]');
     if (!btn) return;
     const table = btn.getAttribute('data-edit-table');
@@ -4514,6 +4803,14 @@ function installEventDelegation(){
     if (!ENTITY_SCHEMAS[table]) return;
     if (!kjrSafeId(id)) { showToast('Invalid entry id', 'error'); return; }
     openEntityModal(table, id);
+  });
+  // Keyboard sort: sortable headers are tabbable, Enter/Space toggles.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const th = e.target && e.target.closest ? e.target.closest('th[data-sort-key]') : null;
+    if (!th) return;
+    e.preventDefault();
+    setStockSort(th.getAttribute('data-sort-key'));
   });
 }
 

@@ -2,9 +2,12 @@
    Network-first for the app HTML (fresh code when online, shell when offline).
    Cache-first for local static assets and Chart.js CDN.
    Apps Script (GAS) fetches are never intercepted — always live network.
-   Bump CACHE_NAME to force all clients to discard their old shell on next load. */
+   Bump CACHE_NAME to force all clients to discard their old shell on next load.
+   RULE: bump it whenever kjr-core.js or any other cached static asset changes —
+   index.html is network-first (self-healing) but the rest are cache-first and
+   will be served stale forever otherwise. */
 
-const CACHE_NAME = 'kjr-portfolio-v1';
+const CACHE_NAME = 'kjr-portfolio-v2';
 const CHART_JS_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
 
 const CORE_ASSETS = [

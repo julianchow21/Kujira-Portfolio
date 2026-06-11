@@ -253,6 +253,11 @@ function fetchYahooQuotes_(symbolsCsv) {
           previousClose: prev,
           change: change,
           changePct: changePct,
+          dayLow: m.regularMarketDayLow != null ? m.regularMarketDayLow : null,
+          dayHigh: m.regularMarketDayHigh != null ? m.regularMarketDayHigh : null,
+          week52Low: m.fiftyTwoWeekLow != null ? m.fiftyTwoWeekLow : null,
+          week52High: m.fiftyTwoWeekHigh != null ? m.fiftyTwoWeekHigh : null,
+          volume: m.regularMarketVolume != null ? m.regularMarketVolume : null,
           currency: m.currency,
           marketState: m.marketState || null,
           extendedKind: ext.kind,    // 'pre' | 'post' | null

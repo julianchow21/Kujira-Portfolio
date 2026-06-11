@@ -173,7 +173,7 @@ input[type=number]{width:96px}
 <div class="topbar">
   <div class="topbar-in">
     <div class="tick">
-      <span class="sym">MU</span>
+      <span class="sym" id="sym">MU</span>
       <span class="nm" id="nm">Micron Technology</span>
     </div>
     <span class="pill" id="mktPill"><span class="dot"></span><span id="mktTxt">Loading</span></span>
@@ -319,7 +319,7 @@ input[type=number]{width:96px}
   </div>
 
   <div class="fld row-between">
-    <div><label style="margin:0">Include pre / post-market</label><div class="hint">Show extended-hours bars on the 1D chart.</div></div>
+    <div><label style="margin:0">Include pre / post-market</label><div class="hint">Show extended-hours bars on intraday timeframes.</div></div>
     <label class="switch"><input type="checkbox" id="extToggle"><span class="tk"></span></label>
   </div>
 
@@ -340,6 +340,7 @@ input[type=number]{width:96px}
   <span class="warn">For information only, not financial advice.</span>
   Live MU data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
+  <span style="margin-left:8px;color:var(--text3)">v2.0 (11 Jun)</span>
 </div>
 
 <script>
@@ -347,9 +348,16 @@ input[type=number]{width:96px}
 (function(){
 
 /* ====================== Config & state ====================== */
-const SYMBOL = "MU";
+const SYMBOL = (function(){
+  try { var p = new URLSearchParams(location.search).get("symbol"); if (p && p.trim()) return p.trim().toUpperCase(); } catch(e){}
+  return "MU";
+})();
 const YF_HOST = "https://query1.finance.yahoo.com";
-const LS = { cfg:"mu_cfg", alerts:"mu_alerts", log:"mu_alertlog" };
+/* Alerts + log are namespaced per symbol so rules set for MU never fire
+   against another ticker opened via ?symbol=. MU keeps the legacy keys.
+   cfg (proxy settings) stays global by design. */
+const _suffix = SYMBOL === "MU" ? "" : ":" + SYMBOL;
+const LS = { cfg:"mu_cfg", alerts:"mu_alerts" + _suffix, log:"mu_alertlog" + _suffix, cache:"mu_cache_core" + _suffix };
 
 const DEFAULT_CFG = {
   proxyMode: "public",
@@ -372,6 +380,8 @@ let inFlight = false;
 let chartInFlight = false;
 let refreshTimer = null;
 let clockTimer = null;
+let failCount = 0;
+let chartCache = {};
 
 function loadJSON(k, fb){ try{ const v=JSON.parse(localStorage.getItem(k)); return v==null?fb:v; }catch(e){ return fb; } }
 function saveJSON(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
@@ -487,17 +497,17 @@ const CORE_PARAMS = { interval:"1m", range:"1d", pre:true };
 function tfParams(tf){ return TIMEFRAMES[tf] || TIMEFRAMES["1m"]; }
 function tfIsIntraday(tf){ return tfParams(tf).intraday; }
 function yahooTarget(p){
-  return YF_HOST+"/v8/finance/chart/"+SYMBOL+"?interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre && cfg.extended);
+  return YF_HOST+"/v8/finance/chart/"+encodeURIComponent(SYMBOL)+"?interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre && cfg.extended);
 }
 function requestUrls(p){
   const t=yahooTarget(p);
   const m=cfg.proxyMode, base=(cfg.proxyUrl||"").trim();
   if((m==="worker"||m==="appsscript") && !base) return []; // configured mode but no URL yet
   if(m==="worker"){
-    return [ { url: base+(base.includes("?")?"&":"?")+"symbol="+SYMBOL+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) } ];
+    return [ { url: base+(base.includes("?")?"&":"?")+"symbol="+encodeURIComponent(SYMBOL)+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) } ];
   }
   if(m==="appsscript"){
-    return [ { url: base+(base.includes("?")?"&":"?")+"action=chart&symbol="+SYMBOL+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) } ];
+    return [ { url: base+(base.includes("?")?"&":"?")+"action=chart&symbol="+encodeURIComponent(SYMBOL)+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) } ];
   }
   const pub = PUBLIC_PROXIES.map(pp=>({ url: pp.make(t), unwrap: pp.unwrap }));
   if(m==="direct") return [ { url:t }, ...pub ]; // try direct, then fall back to public
@@ -838,7 +848,7 @@ function fireAlert(a, snap){
   alertLog=alertLog.slice(0,30); saveJSON(LS.log, alertLog); renderLog();
   if(cfg.sound) beep();
   if(cfg.notify && "Notification" in window && Notification.permission==="granted"){
-    try{ new Notification("MU "+fmtPx(snap.price), { body:msg }); }catch(e){}
+    try{ new Notification(SYMBOL+" "+fmtPx(snap.price), { body:msg }); }catch(e){}
   }
 }
 let audioCtx=null;
@@ -908,6 +918,7 @@ function showError(msg){
 async function refresh(manual){
   if(inFlight) return;
   inFlight=true;
+  let _ok=false;
   const btn=$("#refreshBtn"); btn.classList.add("spin");
   try{
     // Core: always today's 1m session. Drives header, indicator cards, alerts, age, market pill.
@@ -920,6 +931,9 @@ async function refresh(manual){
     showError(null);
     const core=parseResult(coreRes.result);
     lastCore=core;
+    saveJSON(LS.cache, core);
+    // clear the boot-stale "cached" indicator now that live data has arrived
+    const _bsp=$("#stalePill"); if(_bsp && _bsp.dataset.bootStale){ _bsp.dataset.bootStale=""; }
     setText("footState", " · source ok ("+proxyLabelShort()+")");
     renderHeader(core);
     renderMarketPill(core);
@@ -930,21 +944,26 @@ async function refresh(manual){
     // Chart: the 1m timeframe is the same data as core, others load their own series.
     if(curTf==="1m") paintChart(core);
     else loadChart();
+    _ok=true;
   }catch(e){
     showError(e.message||"unknown error");
   }finally{
     inFlight=false; $("#refreshBtn").classList.remove("spin");
+    if(_ok) failCount=0; else failCount++;
     scheduleNext();
   }
 }
 // Chart-only loader, independent of the core refresh guard so timeframe switches always repaint.
+const _TF_TTL={"5m":60000,"15m":300000,"1h":900000,"1D":3600000};
 async function loadChart(){
   if(curTf==="1m"){ if(lastCore) paintChart(lastCore); return; }
+  const cc=chartCache[curTf];
+  if(cc && (Date.now()-cc.ts < (_TF_TTL[curTf]||60000))){ paintChart(cc.data); return; }
   if(chartInFlight) return;
   chartInFlight=true;
   try{
     const cr=await fetchChart(tfParams(curTf));
-    if(cr.ok) paintChart(parseResult(cr.result));
+    if(cr.ok){ const d=parseResult(cr.result); chartCache[curTf]={data:d,ts:Date.now()}; paintChart(d); }
   }catch(e){ /* keep last chart on failure; core banner covers hard errors */ }
   finally{ chartInFlight=false; }
 }
@@ -957,7 +976,9 @@ function currentIntervalMs(){
 function scheduleNext(){
   clearTimeout(refreshTimer);
   if(document.hidden) return; // resume on visibility
-  refreshTimer=setTimeout(()=>refresh(false), currentIntervalMs());
+  let delay=currentIntervalMs();
+  if(failCount>0) delay=Math.min(300000, Math.max(delay, 15000*Math.pow(2,failCount-1)));
+  refreshTimer=setTimeout(()=>refresh(false), delay);
 }
 
 /* ====================== Settings drawer ====================== */
@@ -1078,12 +1099,35 @@ function boot(){
     setText("footState"," · preview");
   }
   if($("#notifyBtn") && "Notification" in window && Notification.permission==="granted"){ $("#notifyBtn").textContent="Notifications on"; }
+  var symEl=$("#sym"); if(symEl) symEl.textContent=SYMBOL;
+  if(SYMBOL!=="MU"){ var nmEl=$("#nm"); if(nmEl) nmEl.textContent=""; }
+  document.title=SYMBOL+" Day Trading";
+  // SGX tickers: the market clock + session logic model US hours only.
+  if(/\.SI$/.test(SYMBOL)){
+    var pill=$("#mktPill");
+    if(pill && !$("#sgxNote")){
+      var n=document.createElement("span");
+      n.className="pill stale"; n.id="sgxNote";
+      n.title="The market clock and session indicators model US (NYSE/NASDAQ) hours. SGX trades 09:00–17:00 SGT, so open/closed state shown here is wrong for this ticker.";
+      n.innerHTML='<span class="dot"></span>US-hours clock, not SGX';
+      pill.insertAdjacentElement("afterend", n);
+    }
+  }
   wire();
   renderAlerts(); renderLog();
+  // paint from cache for instant cold start — eliminates the blank "—" state on reload
+  const _cached=loadJSON(LS.cache,null);
+  if(_cached && _cached.price!=null){
+    lastCore=_cached;
+    renderHeader(_cached); renderMarketPill(null); renderAge(_cached);
+    lastSnap=renderIndicators(_cached);
+    const _sp=$("#stalePill"); _sp.dataset.bootStale="1"; setText("staleTxt","cached"); _sp.style.display="inline-flex";
+  } else {
+    renderMarketPill(null);
+  }
   // chart lib loads with defer; init once ready
-  if(window.LightweightCharts){ initChart(); }
+  if(window.LightweightCharts){ initChart(); if(lastCore && curTf==="1m") paintChart(lastCore); }
   else { window.addEventListener("load",()=>{ initChart(); if(lastChart) paintChart(lastChart); else if(lastCore) paintChart(lastCore); }); }
-  renderMarketPill(null);
   refresh(true);
   // 1s clock tick for countdown + age, no network
   clockTimer=setInterval(()=>{ renderMarketPill(lastCore); renderAge(lastCore); }, 1000);

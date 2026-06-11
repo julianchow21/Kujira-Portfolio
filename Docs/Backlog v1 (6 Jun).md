@@ -11,12 +11,18 @@ Last updated: 06/06/2026. App at v0.9.8-interest-tax.
 | # | Feature | Value | Effort | Status |
 |---|---------|-------|--------|--------|
 | 1 | Account interest accrual (cash APY) | High | Low | Done (v0.9.8) |
-| 2 | Dividend income tracking | High | Medium | Backlog |
+| 2 | Dividend income tracking | High | Medium | Done (v1.0, yield-only) |
 | 3 | SG income tax (Settings, salary + bonus) | High | Medium | Done (v0.9.8) |
-| 4 | Stocks column manager (reorder/hide) | Medium | Medium | Drafted |
-| 5 | Fix em dashes in prose copy (house style) | Low | Low | Backlog |
+| 4 | Stocks column manager (reorder/hide) | Medium | Medium | Done (v1.0) |
+| 5 | Fix em dashes in prose copy (house style) | Low | Low | Done (v1.0) |
 | 6 | IBKR CSV import | High | High | Backlog |
-| 7 | Single-ticker analysis sub-tab (scalping) | Medium | High | Drafted |
+| 7 | Single-ticker analysis sub-tab (scalping) | Medium | High | Done (v1.0, link-out to MU app) |
+| 8 | Stocks column sorting (click header) | High | Medium | Done (v1.1) |
+| 9 | Holdings search / filter | Medium | Medium | Backlog |
+| 10 | Totals row in holdings table | Low | Low | Backlog |
+| 11 | Dividend ex-date field + upcoming payments | Medium | Medium | Backlog |
+| 12 | Per-lot view in trade ledger | Low | Medium | Backlog |
+| 13 | CSV export (holdings + ledger) | Low | Low | Backlog |
 
 ## Items
 
