@@ -110,6 +110,10 @@ input[type=number]{width:96px}
 .btn:hover{background:var(--accent-border)}
 .btn.ghost{background:var(--bg3);border-color:var(--border2);color:var(--text2)}
 .btn.ghost:hover{color:var(--text)}
+.al-opts{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.al-chk{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--text2);cursor:pointer;user-select:none}
+.al-chk input[type=checkbox]{accent-color:var(--accent);cursor:pointer;width:14px;height:14px}
+.al-badge{font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;background:var(--bg4);color:var(--text3);vertical-align:middle;margin-left:4px}
 .al-list{display:flex;flex-direction:column;gap:7px}
 .al-row{display:flex;align-items:center;gap:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:9px 11px}
 .al-row.fire{animation:fire 1.1s ease-out}
@@ -161,10 +165,30 @@ input[type=number]{width:96px}
 .foot .warn{color:var(--amber)}
 .foot a{color:var(--text2)}
 
+/* Key Levels */
+.level-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)}
+.level-row:last-child{border-bottom:none}
+.level-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.level-lbl{flex:1;font-size:13px}
+.level-px{font-size:13px;color:var(--text2);min-width:72px;text-align:right}
+.level-dist{font-size:12px;min-width:100px;text-align:right}
+.level-alert{font-size:11px;padding:3px 8px;white-space:nowrap}
+
+/* Position Calculator */
+.calc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:12px}
+.calc-lbl{display:block;font-size:11px;font-weight:600;color:var(--text2);margin-bottom:4px}
+.calc-grid input{width:100%}
+.calc-out{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:11px;display:grid;grid-template-columns:1fr 1fr;gap:6px 16px}
+.calc-row{display:contents}
+.calc-k{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;padding:3px 0}
+.calc-v{font-size:14px;font-weight:600;color:var(--text);text-align:right;padding:3px 0}
+.calc-v.up{color:var(--green)}.calc-v.down{color:var(--red)}
+
 @media (max-width:560px){
   .price{font-size:38px}
   #chart{height:300px}.chart-empty{height:300px}
   .tick .nm{display:none}
+  .calc-grid{grid-template-columns:1fr 1fr}
 }
 </style>
 </head>
@@ -204,6 +228,9 @@ input[type=number]{width:96px}
       <div class="stat"><div class="k">Day Low</div><div class="v mono" id="sLow">—</div></div>
       <div class="stat"><div class="k">Range %</div><div class="v mono" id="sRange">—</div></div>
       <div class="stat"><div class="k">Volume</div><div class="v mono" id="sVol">—</div></div>
+      <div class="stat"><div class="k">Gap %</div><div class="v mono" id="sGap">—</div></div>
+      <div class="stat"><div class="k">From Open</div><div class="v mono" id="sFromOpen">—</div></div>
+      <div class="stat"><div class="k">RVOL</div><div class="v mono" id="sRvol">— <span class="chip" id="rvolChip"></span></div></div>
     </div>
   </div>
 
@@ -253,7 +280,31 @@ input[type=number]{width:96px}
         <div class="big mono" id="macdVal">—</div>
         <div class="sub" id="macdSub">signal / hist</div>
       </div>
+      <div class="ind">
+        <div class="lbl">ATR 14 <span class="chip" id="atrChip">—</span></div>
+        <div class="big mono" id="atrVal">—</div>
+        <div class="sub" id="atrSub">14-day ATR</div>
+      </div>
     </div>
+  </div>
+
+  <!-- Key Levels -->
+  <div class="card">
+    <h3>Key Levels</h3>
+    <div id="levelsList"><div class="al-empty">Waiting for data…</div></div>
+  </div>
+
+  <!-- Position Calculator -->
+  <div class="card">
+    <h3>Position Calculator</h3>
+    <div class="calc-grid">
+      <div><label class="calc-lbl">Account S$</label><input type="number" id="calcAcct" placeholder="e.g. 50000" step="1000" min="0"></div>
+      <div><label class="calc-lbl">Risk %</label><input type="number" id="calcRisk" placeholder="e.g. 1" step="0.1" min="0.01" max="100"></div>
+      <div><label class="calc-lbl">Entry US$</label><input type="number" id="calcEntry" placeholder="entry price" step="0.01" min="0"></div>
+      <div><label class="calc-lbl">Stop US$</label><input type="number" id="calcStop" placeholder="stop price" step="0.01" min="0"></div>
+      <div><label class="calc-lbl">SGD/USD</label><input type="number" id="calcFx" placeholder="1.35" step="0.01" min="0.1"></div>
+    </div>
+    <div id="calcOut" class="calc-out" style="display:none"></div>
   </div>
 
   <!-- Alerts -->
@@ -274,6 +325,16 @@ input[type=number]{width:96px}
       <button class="btn" id="alAdd">Add alert</button>
       <div class="spacer"></div>
       <button class="btn ghost" id="notifyBtn" title="Enable browser notifications">Enable notifications</button>
+    </div>
+    <div class="al-opts">
+      <label class="al-chk"><input type="checkbox" id="alOneShot"> One-shot</label>
+      <label class="al-chk" style="gap:7px">Cooldown <select id="alCooldown" style="padding:3px 7px;font-size:12px">
+        <option value="0">None</option>
+        <option value="5">5 min</option>
+        <option value="15">15 min</option>
+        <option value="30">30 min</option>
+        <option value="60">1 hour</option>
+      </select></label>
     </div>
     <div class="al-list" id="alList"></div>
     <div class="al-log" id="alLogWrap" style="display:none">
@@ -328,6 +389,26 @@ input[type=number]{width:96px}
     <label class="switch"><input type="checkbox" id="soundToggle"><span class="tk"></span></label>
   </div>
 
+  <hr style="border:none;border-top:1px solid var(--border);margin:20px 0 16px">
+  <div class="muted" style="font-size:12px;font-weight:600;margin-bottom:8px">Telegram push alerts</div>
+  <div class="hint" style="margin-bottom:12px">Push alerts to your phone even when this tab is closed. Requires the Cloudflare Worker v2 to be deployed with KV + cron enabled. Set Worker URL above, then enter your Chat ID and sync.</div>
+
+  <div class="fld row-between">
+    <div><label style="margin:0">Enable push alerts</label><div class="hint">Auto-sync your enabled alerts to the Worker on each change.</div></div>
+    <label class="switch"><input type="checkbox" id="tgToggle"><span class="tk"></span></label>
+  </div>
+
+  <div class="fld">
+    <label>Telegram Chat ID</label>
+    <input type="text" id="tgChatId" placeholder="e.g. 123456789" style="width:100%;box-sizing:border-box">
+    <div class="hint">Message @userinfobot on Telegram to get your numeric chat ID.</div>
+  </div>
+
+  <div class="fld">
+    <button class="btn ghost" id="tgSyncBtn">Sync alerts to Worker now</button>
+    <div class="testout" id="tgSyncOut" style="display:none"></div>
+  </div>
+
   <div class="foot" style="margin-top:22px;border:none;padding:0">
     <div class="warn">Not financial advice.</div>
     Data via Yahoo Finance, may be delayed up to ~15 minutes and is not guaranteed. Always confirm against your broker before trading. Indicators are computed from the displayed series and can differ from your platform.
@@ -340,7 +421,7 @@ input[type=number]{width:96px}
   <span class="warn">For information only, not financial advice.</span>
   Live MU data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v2.0 (11 Jun)</span>
+  <span style="margin-left:8px;color:var(--text3)">v2.2 (11 Jun)</span>
 </div>
 
 <script>
@@ -366,6 +447,8 @@ const DEFAULT_CFG = {
   extended: false,
   sound: false,
   notify: false,
+  tgEnabled: false,
+  tgChatId: "",
 };
 let cfg = loadCfg();
 let alerts = loadAlerts();
@@ -382,6 +465,9 @@ let refreshTimer = null;
 let clockTimer = null;
 let failCount = 0;
 let chartCache = {};
+let lastDaily = null;    // 1mo daily series — ATR + prev day H/L
+let lastRvolData = null; // 5d/5m series — RVOL computation
+let priceLines = [];     // active chart price lines for key levels
 
 function loadJSON(k, fb){ try{ const v=JSON.parse(localStorage.getItem(k)); return v==null?fb:v; }catch(e){ return fb; } }
 function saveJSON(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
@@ -435,9 +521,12 @@ function etNow(){
 function marketStateFromClock(){
   const {wd,mod}=etNow();
   if(wd===0||wd===6) return "CLOSED";
-  if(mod>=570 && mod<960) return "REGULAR"; // 09:30–16:00
-  if(mod>=240 && mod<570) return "PRE";     // 04:00–09:30
-  if(mod>=960 && mod<1200) return "POST";   // 16:00–20:00
+  const d=etDateStr();
+  if(isHoliday(d)) return "CLOSED";
+  const closeMin=regularCloseMin(d);
+  if(mod>=570 && mod<closeMin) return "REGULAR"; // 09:30–close
+  if(mod>=240 && mod<570)      return "PRE";     // 04:00–09:30
+  if(mod>=closeMin && mod<1200) return "POST";   // close–20:00
   return "CLOSED";
 }
 function etOffsetMin(){ // minutes ET is offset from UTC (negative west)
@@ -493,11 +582,12 @@ const TIMEFRAMES = {
   "1D":  { interval:"1d",  range:"6mo", pre:false, intraday:false },
 };
 // The header, indicators, and alerts always run off today's 1m session, regardless of chart timeframe.
-const CORE_PARAMS = { interval:"1m", range:"1d", pre:true };
+// forcePrePost:true means we always fetch pre/post bars for levels computation, regardless of cfg.extended.
+const CORE_PARAMS = { interval:"1m", range:"1d", pre:true, forcePrePost:true };
 function tfParams(tf){ return TIMEFRAMES[tf] || TIMEFRAMES["1m"]; }
 function tfIsIntraday(tf){ return tfParams(tf).intraday; }
 function yahooTarget(p){
-  return YF_HOST+"/v8/finance/chart/"+encodeURIComponent(SYMBOL)+"?interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre && cfg.extended);
+  return YF_HOST+"/v8/finance/chart/"+encodeURIComponent(SYMBOL)+"?interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.forcePrePost || (p.pre && cfg.extended));
 }
 function requestUrls(p){
   const t=yahooTarget(p);
@@ -719,6 +809,21 @@ function renderHeader(d){
   const rng=(d.dayHigh!=null && d.dayLow!=null && d.prevClose)?((d.dayHigh-d.dayLow)/d.prevClose*100):null;
   setText("sRange", rng==null?"—":rng.toFixed(2)+"%");
   setText("sVol", fmtVol(d.volume));
+  // gap % and from open
+  const gap=(d.sessionOpen!=null&&d.prevClose)?((d.sessionOpen-d.prevClose)/d.prevClose*100):null;
+  const fromOpen=(d.price!=null&&d.sessionOpen)?((d.price-d.sessionOpen)/d.sessionOpen*100):null;
+  setText("sGap", gap==null?"—":fmtPct(gap));
+  setText("sFromOpen", fromOpen==null?"—":fmtPct(fromOpen));
+  // live tab title + tinted favicon
+  const pctN=(chg!=null&&d.prevClose)?chg/d.prevClose*100:null;
+  if(d.price!=null){
+    const arr=chg>0?"▲":chg<0?"▼":"·";
+    document.title=SYMBOL+" "+fmtPx(d.price)+" "+arr+(pctN!=null?Math.abs(pctN).toFixed(1)+"%":"");
+  }
+  const favCol=chg>0?"%232ecc71":chg<0?"%23e24b4a":"%232dd4bf";
+  const favSym=encodeURIComponent(SYMBOL.slice(0,3));
+  const favEl=document.querySelector('link[rel="icon"]');
+  if(favEl) favEl.href=`data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230f0f0f'/><text x='16' y='22' font-size='${SYMBOL.length>2?12:15}' font-family='Arial' font-weight='700' fill='${favCol}' text-anchor='middle'>${favSym}</text></svg>`;
   // extended hours line
   const ext=$("#extLine");
   const ms=(d.marketState||marketStateFromClock());
@@ -773,8 +878,12 @@ function renderMarketPill(d){
   const ms=(d&&d.marketState)||marketStateFromClock();
   const pill=$("#mktPill"), txt=$("#mktTxt");
   let cls="closed", label="Closed";
-  if(ms==="REGULAR"){ cls="open"; label="Market open"; }
-  else if(ms==="PRE"||ms==="PREPRE"){ cls="pre"; label="Pre-market"; }
+  if(ms==="REGULAR"){
+    cls="open";
+    const d=etDateStr(), closeMin=regularCloseMin(d), {mod}=etNow();
+    const closeMs=Date.now()+(closeMin-mod)*60000;
+    label="Open · closes in "+countdown(closeMs);
+  } else if(ms==="PRE"||ms==="PREPRE"){ cls="pre"; label="Pre-market"; }
   else if(ms==="POST"||ms==="POSTPOST"){ cls="post"; label="After-hours"; }
   else {
     const no=nextOpenMs();
@@ -813,6 +922,8 @@ const ALERT_LABELS = {
   ema_bear:()=>"EMA 9 crosses below EMA 20",
 };
 const ALERT_NEEDS_VAL = { price_above:1, price_below:1, rsi_above:1, rsi_below:1 };
+// Crossing alerts fire only on false→true transition; level alerts fire whenever condition is true + armed.
+const CROSS_TYPES = new Set(['rsi_above','rsi_below','price_vwap_above','price_vwap_below','ema_bull','ema_bear']);
 function alertDesc(a){ const f=ALERT_LABELS[a.type]; return f?f(a.value):a.type; }
 function evalCond(a, snap){
   const {price,rsi,vwap,ema9,ema20}=snap;
@@ -830,12 +941,28 @@ function evalCond(a, snap){
 }
 function evaluateAlerts(snap){
   let changed=false;
+  const now=Date.now();
   alerts.forEach(a=>{
     if(!a.enabled) return;
     const cond=evalCond(a,snap);
     if(cond===null) return; // metric not ready
-    if(cond && a.armed){ fireAlert(a, snap); a.armed=false; changed=true; }
-    else if(!cond && !a.armed){ a.armed=true; changed=true; }
+    if(CROSS_TYPES.has(a.type)){
+      // First eval after creation or re-enable: record state without firing.
+      if(a.prevCond===null||a.prevCond===undefined){ a.prevCond=cond; changed=true; return; }
+      const prev=!!a.prevCond;
+      if(cond && !prev){
+        const inCd=a.cooldownMs && a.lastFiredAt && (now-a.lastFiredAt<a.cooldownMs);
+        if(!inCd){ fireAlert(a,snap); a.lastFiredAt=now; if(a.oneShot){ a.enabled=false; } }
+        changed=true;
+      }
+      if(a.prevCond!==cond){ a.prevCond=cond; changed=true; }
+    } else {
+      if(cond && a.armed){
+        const inCd=a.cooldownMs && a.lastFiredAt && (now-a.lastFiredAt<a.cooldownMs);
+        if(!inCd){ fireAlert(a,snap); a.lastFiredAt=now; if(a.oneShot){ a.enabled=false; } }
+        a.armed=false; changed=true;
+      } else if(!cond && !a.armed){ a.armed=true; changed=true; }
+    }
   });
   if(changed){ saveAlerts(); renderAlerts(); }
 }
@@ -875,10 +1002,15 @@ function renderAlerts(){
   const list=$("#alList");
   if(!alerts.length){ list.innerHTML='<div class="al-empty">No alerts yet. Add a price or indicator trigger above.</div>'; return; }
   list.innerHTML=alerts.map(a=>{
-    const st = !a.enabled?["off","—"]: a.armed?["armed","Armed"]:["tripped","Tripped"];
+    let st;
+    if(!a.enabled) st=["off","—"];
+    else if(CROSS_TYPES.has(a.type)) st=a.prevCond?["tripped","Active"]:["armed","Armed"];
+    else st=a.armed?["armed","Armed"]:["tripped","Tripped"];
+    const badges=(a.oneShot?'<span class="al-badge">1×</span>':'')+
+      (a.cooldownMs?'<span class="al-badge">⏱'+Math.round(a.cooldownMs/60000)+'m</span>':'');
     return '<div class="al-row" data-id="'+a.id+'">'
       +'<label class="switch"><input type="checkbox" '+(a.enabled?"checked":"")+' data-tgl="'+a.id+'"><span class="tk"></span></label>'
-      +'<span class="desc">'+esc(alertDesc(a))+'</span>'
+      +'<span class="desc">'+esc(alertDesc(a))+badges+'</span>'
       +'<span class="st '+st[0]+'">'+st[1]+'</span>'
       +'<button class="al-x" data-del="'+a.id+'" title="Delete">&times;</button>'
       +'</div>';
@@ -900,8 +1032,230 @@ function addAlert(){
     value=parseFloat($("#alVal").value);
     if(isNaN(value)){ $("#alVal").focus(); return; }
   }
-  alerts.push({ id:"a"+Date.now().toString(36)+Math.random().toString(36).slice(2,5), type, value, enabled:true, armed:true });
-  saveAlerts(); renderAlerts(); $("#alVal").value="";
+  const oneShot=$("#alOneShot").checked;
+  const cdMin=parseInt($("#alCooldown").value,10)||0;
+  const cooldownMs=cdMin>0?cdMin*60000:0;
+  // prevCond=null signals "first evaluation" for crossing types — prevents fire-on-arm if already true.
+  alerts.push({ id:"a"+Date.now().toString(36)+Math.random().toString(36).slice(2,5), type, value,
+    enabled:true, armed:true, oneShot, cooldownMs, prevCond:null, lastFiredAt:null });
+  saveAlerts(); renderAlerts(); $("#alVal").value=""; $("#alOneShot").checked=false; $("#alCooldown").value="0";
+}
+
+/* ====================== NYSE holidays 2026 ====================== */
+const NYSE_HOLIDAYS = new Set([
+  "2026-01-01","2026-01-19","2026-02-16","2026-04-03",
+  "2026-05-25","2026-07-03","2026-09-07","2026-11-26","2026-12-25",
+]);
+const NYSE_HALF_DAYS = new Set(["2026-07-02","2026-11-27","2026-12-24"]);
+function etDateStr(){ // today's date in ET as YYYY-MM-DD
+  return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date());
+}
+function isHoliday(d){ return NYSE_HOLIDAYS.has(d); }
+function isHalfDay(d){ return NYSE_HALF_DAYS.has(d); }
+function regularCloseMin(d){ return isHalfDay(d)?780:960; } // 13:00 or 16:00 ET in minutes
+
+/* ====================== Daily series (ATR + prev day levels) ====================== */
+const DAILY_PARAMS = { interval:"1d", range:"1mo", pre:false };
+const RVOL_PARAMS  = { interval:"5m", range:"5d",  pre:false };
+
+async function fetchDailySeries(){
+  try{
+    const cr=await fetchChart(DAILY_PARAMS);
+    if(cr.ok) lastDaily=parseResult(cr.result);
+  }catch(e){}
+}
+async function fetchRvolSeries(){
+  try{
+    const cr=await fetchChart(RVOL_PARAMS);
+    if(cr.ok) lastRvolData=parseResult(cr.result);
+  }catch(e){}
+}
+
+/* ====================== ATR ====================== */
+function atrValue(bars, period){
+  if(bars.length<period+1) return null;
+  const trs=[];
+  for(let i=1;i<bars.length;i++){
+    const b=bars[i],p=bars[i-1];
+    trs.push(Math.max(b.high-b.low, Math.abs(b.high-p.close), Math.abs(b.low-p.close)));
+  }
+  let a=trs.slice(0,period).reduce((s,v)=>s+v,0)/period;
+  for(let i=period;i<trs.length;i++) a=(a*(period-1)+trs[i])/period;
+  return a;
+}
+function renderATR(core){
+  if(!lastDaily){ setChip("atrChip",["—",""]); setText("atrVal","—"); setText("atrSub","loading…"); return; }
+  const a=atrValue(lastDaily.bars,14);
+  if(a==null){ setText("atrVal","—"); return; }
+  setText("atrVal","$"+a.toFixed(2));
+  const rng=(core.dayHigh&&core.dayLow)?(core.dayHigh-core.dayLow):null;
+  if(rng!=null){
+    const pct=rng/a*100;
+    setChip("atrChip",[pct.toFixed(0)+"%", pct>=80?"r":pct>=50?"a":"b"]);
+    setText("atrSub","today "+fmtPx(rng)+" · "+pct.toFixed(0)+"% used");
+  } else {
+    setChip("atrChip",["—",""]); setText("atrSub","14-day ATR");
+  }
+}
+
+/* ====================== Key levels ====================== */
+function barMod(sec){ // ET minutes-past-midnight
+  const p=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(new Date(sec*1000));
+  const m={}; p.forEach(x=>m[x.type]=x.value);
+  let hh=parseInt(m.hour,10); if(hh===24) hh=0;
+  return hh*60+parseInt(m.minute,10);
+}
+function prevDayLevels(){
+  if(!lastDaily||!lastDaily.bars.length) return null;
+  const today=etDateStr();
+  for(let i=lastDaily.bars.length-1;i>=0;i--){
+    const b=lastDaily.bars[i];
+    if(etDateKey(b.time)!==today) return {h:b.high,l:b.low,c:b.close};
+  }
+  return null;
+}
+function premarketLevels(core){
+  const pre=core.bars.filter(b=>{const m=barMod(b.time); return m>=240&&m<570;});
+  if(!pre.length) return null;
+  return {h:Math.max(...pre.map(b=>b.high)), l:Math.min(...pre.map(b=>b.low))};
+}
+function openingRange(core, minutes){
+  const rtBars=core.bars.filter(b=>isRegularSession(b.time));
+  if(!rtBars.length) return null;
+  const startSec=rtBars[0].time;
+  const orBars=rtBars.filter(b=>b.time<=startSec+minutes*60);
+  if(!orBars.length) return null;
+  return {h:Math.max(...orBars.map(b=>b.high)), l:Math.min(...orBars.map(b=>b.low))};
+}
+function updateChartLevels(levels){
+  if(!chartReady||!sCandle) return;
+  priceLines.forEach(l=>{try{sCandle.removePriceLine(l);}catch(e){}});
+  priceLines=[];
+  levels.forEach(l=>{
+    try{
+      priceLines.push(sCandle.createPriceLine({
+        price:l.px, color:l.hex, lineWidth:1,
+        lineStyle:1, // Dashed
+        axisLabelVisible:true, title:l.lbl,
+      }));
+    }catch(e){}
+  });
+}
+function renderLevels(core){
+  const price=core.price;
+  const pd=prevDayLevels(), pm=premarketLevels(core);
+  const or15=openingRange(core,15), or30=openingRange(core,30);
+  const levels=[];
+  const add=(lbl,px,hex)=>{ if(px!=null&&!isNaN(px)) levels.push({lbl,px,hex}); };
+  add("Prev Close",    core.prevClose,  "#888");
+  add("Today Open",   core.sessionOpen, "#f59e0b");
+  if(pd){ add("Prev Day Hi", pd.h, "#4CAF50"); add("Prev Day Lo", pd.l, "#e24b4a"); }
+  if(pm){ add("PM High",     pm.h, "#a78bfa"); add("PM Low",      pm.l, "#a78bfa"); }
+  if(or15){ add("OR15 Hi",   or15.h, "#4a9eff"); add("OR15 Lo",  or15.l, "#4a9eff"); }
+  if(or30 && (!or15 || or30.h!==or15.h)){ add("OR30 Hi", or30.h, "#3a8eef"); }
+  if(or30 && (!or15 || or30.l!==or15.l)){ add("OR30 Lo", or30.l, "#3a8eef"); }
+  levels.sort((a,b)=>b.px-a.px);
+  const list=$("#levelsList");
+  if(!levels.length){list.innerHTML='<div class="al-empty">No level data available yet.</div>'; return;}
+  list.innerHTML=levels.map(l=>{
+    const d=price!=null?price-l.px:null;
+    const dStr=d!=null?((d>=0?"+":"")+d.toFixed(2)+" / "+(d/l.px*100>=0?"+":"")+(d/l.px*100).toFixed(1)+"%"):"—";
+    return `<div class="level-row">
+      <span class="level-dot" style="background:${l.hex}"></span>
+      <span class="level-lbl">${esc(l.lbl)}</span>
+      <span class="level-px mono">$${l.px.toFixed(2)}</span>
+      <span class="level-dist mono ${d==null?"":(d>=0?"up":"down")}">${dStr}</span>
+      <button class="btn ghost level-alert" data-px="${l.px}" data-above="${price!=null&&l.px>price?1:0}">Alert</button>
+    </div>`;
+  }).join("");
+  list.querySelectorAll(".level-alert").forEach(btn=>{
+    btn.onclick=()=>{
+      const px=parseFloat(btn.dataset.px);
+      if(!isNaN(px)){
+        const type=btn.dataset.above==="1"?"price_above":"price_below";
+        alerts.push({id:"a"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),type,value:px,enabled:true,armed:true});
+        saveAlerts(); renderAlerts();
+        toast("Alert set at "+fmtPx(px));
+      }
+    };
+  });
+  updateChartLevels(levels);
+}
+
+/* ====================== RVOL ====================== */
+function computeRvol(core){
+  if(!lastRvolData||!core) return null;
+  const todayKey=etDateKey(Date.now()/1000);
+  const curMod=etNow().mod;
+  // today cumulative volume
+  const todayVol=core.bars.filter(b=>isRegularSession(b.time)).reduce((s,b)=>s+(b.volume||0),0);
+  // prior sessions from rvol data
+  const sessMap={};
+  lastRvolData.bars.forEach(b=>{
+    if(!isRegularSession(b.time)) return;
+    const dk=etDateKey(b.time);
+    if(dk===todayKey) return;
+    if(!sessMap[dk]) sessMap[dk]=[];
+    sessMap[dk].push(b);
+  });
+  const sessions=Object.keys(sessMap).sort().slice(-5);
+  if(!sessions.length) return null;
+  const prevVols=sessions.map(dk=>{
+    return sessMap[dk].filter(b=>barMod(b.time)<=curMod).reduce((s,b)=>s+(b.volume||0),0);
+  }).filter(v=>v>0);
+  if(!prevVols.length) return null;
+  const avg=prevVols.reduce((a,b)=>a+b,0)/prevVols.length;
+  return avg>0?todayVol/avg:null;
+}
+function renderRvol(core){
+  const rvol=computeRvol(core);
+  if(rvol==null){ setText("sRvol","— "); setChip("rvolChip",["—",""]); return; }
+  setText("sRvol",rvol.toFixed(2)+" ");
+  const chip=rvol>=1.5?["Active","g"]:rvol<=0.7?["Thin","r"]:["Normal",""];
+  setChip("rvolChip",chip);
+}
+
+/* ====================== Position calculator ====================== */
+function calcSave(){
+  cfg.calc=cfg.calc||{};
+  cfg.calc.acct  = parseFloat($("#calcAcct").value)||null;
+  cfg.calc.risk  = parseFloat($("#calcRisk").value)||null;
+  cfg.calc.entry = parseFloat($("#calcEntry").value)||null;
+  cfg.calc.stop  = parseFloat($("#calcStop").value)||null;
+  cfg.calc.fx    = parseFloat($("#calcFx").value)||1.35;
+  saveCfg();
+  renderCalc();
+}
+function calcLoad(){
+  const c=cfg.calc||{};
+  if(c.acct)  $("#calcAcct").value=c.acct;
+  if(c.risk)  $("#calcRisk").value=c.risk;
+  if(c.entry) $("#calcEntry").value=c.entry;
+  if(c.stop)  $("#calcStop").value=c.stop;
+  $("#calcFx").value=c.fx||1.35;
+}
+function renderCalc(){
+  const acct=parseFloat($("#calcAcct").value), risk=parseFloat($("#calcRisk").value);
+  const entry=parseFloat($("#calcEntry").value), stop=parseFloat($("#calcStop").value);
+  const fx=parseFloat($("#calcFx").value)||1.35;
+  const out=$("#calcOut");
+  if(!acct||!risk||!entry||!stop||entry===stop){ out.style.display="none"; return; }
+  const riskSgd=acct*(risk/100);
+  const riskUsd=riskSgd/fx;
+  const perShare=Math.abs(entry-stop);
+  const shares=Math.floor(riskUsd/perShare);
+  const posUsd=shares*entry;
+  const long=entry>stop;
+  const r1=entry+(long?perShare:-perShare);
+  const r2=entry+(long?2*perShare:-2*perShare);
+  out.style.display="grid";
+  out.innerHTML=`
+    <span class="calc-k">Shares</span><span class="calc-v">${shares.toLocaleString()}</span>
+    <span class="calc-k">Position US$</span><span class="calc-v">$${posUsd.toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+    <span class="calc-k">Risk S$</span><span class="calc-v down">S$${riskSgd.toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+    <span class="calc-k">Risk US$</span><span class="calc-v down">$${riskUsd.toFixed(2)}</span>
+    <span class="calc-k">1R target</span><span class="calc-v up">$${r1.toFixed(2)}</span>
+    <span class="calc-k">2R target</span><span class="calc-v up">$${r2.toFixed(2)}</span>`;
 }
 
 /* ====================== Refresh loop ====================== */
@@ -941,6 +1295,9 @@ async function refresh(manual){
     const snap=renderIndicators(core);
     lastSnap=snap;
     evaluateAlerts(snap);
+    renderLevels(core);
+    renderATR(core);
+    renderRvol(core);
     // Chart: the 1m timeframe is the same data as core, others load their own series.
     if(curTf==="1m") paintChart(core);
     else loadChart();
@@ -996,6 +1353,9 @@ function syncDrawer(){
   $("#refreshSec").value=cfg.refreshSec;
   $("#extToggle").checked=!!cfg.extended;
   $("#soundToggle").checked=!!cfg.sound;
+  $("#tgToggle").checked=!!cfg.tgEnabled;
+  $("#tgChatId").value=cfg.tgChatId||"";
+  $("#tgSyncOut").style.display="none";
   updateProxyFld();
 }
 function updateProxyFld(){
@@ -1031,7 +1391,30 @@ function saveSettingsFromDrawer(){
   cfg.refreshSec=Math.max(5,Math.min(300, parseInt($("#refreshSec").value,10)||15));
   cfg.extended=$("#extToggle").checked;
   cfg.sound=$("#soundToggle").checked;
+  cfg.tgEnabled=$("#tgToggle").checked;
+  cfg.tgChatId=$("#tgChatId").value.trim();
   saveCfg();
+}
+
+/* ====================== Telegram sync ====================== */
+async function syncAlertsToWorker(){
+  saveSettingsFromDrawer();
+  const out=$("#tgSyncOut");
+  const workerUrl=(cfg.proxyUrl||"").replace(/\/$/,"");
+  if(!workerUrl||cfg.proxyMode!=="worker"){
+    out.className="testout err"; out.textContent="Set proxy mode to Cloudflare Worker and paste the Worker URL first."; out.style.display="block"; return;
+  }
+  if(!cfg.tgChatId){
+    out.className="testout err"; out.textContent="Enter a Telegram Chat ID first."; out.style.display="block"; return;
+  }
+  out.className="testout ok"; out.textContent="Syncing…"; out.style.display="block";
+  const payload={ symbol:SYMBOL, chatId:cfg.tgChatId,
+    alerts:alerts.filter(a=>a.enabled).map(a=>({ id:a.id, type:a.type, value:a.value, oneShot:!!a.oneShot, cooldownMs:a.cooldownMs||0 })) };
+  try{
+    const r=await fetch(workerUrl+"/alerts",{ method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+    if(r.ok){ out.className="testout ok"; out.textContent="Synced "+payload.alerts.length+" alert(s) to Worker."; }
+    else { out.className="testout err"; out.textContent="Worker returned HTTP "+r.status+"."; }
+  }catch(e){ out.className="testout err"; out.textContent="Sync failed: "+(e.message||e); }
 }
 
 /* ====================== Wiring ====================== */
@@ -1069,7 +1452,7 @@ function wire(){
   });
   $("#alList").addEventListener("change",e=>{
     const tg=e.target.closest("[data-tgl]");
-    if(tg){ const a=alerts.find(x=>x.id===tg.dataset.tgl); if(a){ a.enabled=tg.checked; a.armed=true; saveAlerts(); renderAlerts(); } }
+    if(tg){ const a=alerts.find(x=>x.id===tg.dataset.tgl); if(a){ a.enabled=tg.checked; a.armed=true; if(a.enabled) a.prevCond=null; saveAlerts(); renderAlerts(); } }
   });
   $("#alLogClear").addEventListener("click",()=>{ alertLog=[]; saveJSON(LS.log,alertLog); renderLog(); });
   $("#notifyBtn").addEventListener("click",async()=>{
@@ -1079,12 +1462,20 @@ function wire(){
     $("#notifyBtn").textContent=cfg.notify?"Notifications on":"Notifications blocked";
   });
 
+  // position calculator
+  ["calcAcct","calcRisk","calcEntry","calcStop","calcFx"].forEach(id=>{
+    const el=$("#"+id);
+    if(el){ el.addEventListener("input",()=>{ calcSave(); }); }
+  });
+
   // drawer
   $("#proxyMode").addEventListener("change",updateProxyFld);
   $("#testBtn").addEventListener("click",testConnection);
   ["proxyMode","proxyUrl","refreshSec","extToggle","soundToggle"].forEach(id=>{
     $("#"+id).addEventListener("change",()=>{ saveSettingsFromDrawer(); scheduleNext(); if(id==="extToggle"||id==="proxyMode"||id==="proxyUrl") refresh(true); });
   });
+  ["tgToggle","tgChatId"].forEach(id=>{ $("#"+id).addEventListener("change",saveSettingsFromDrawer); });
+  $("#tgSyncBtn").addEventListener("click",syncAlertsToWorker);
 
   // visibility: pause when hidden, refresh immediately when shown
   document.addEventListener("visibilitychange",()=>{
@@ -1128,7 +1519,11 @@ function boot(){
   // chart lib loads with defer; init once ready
   if(window.LightweightCharts){ initChart(); if(lastCore && curTf==="1m") paintChart(lastCore); }
   else { window.addEventListener("load",()=>{ initChart(); if(lastChart) paintChart(lastChart); else if(lastCore) paintChart(lastCore); }); }
+  calcLoad();
   refresh(true);
+  // non-blocking supporting fetches — daily series for ATR/levels, 5m series for RVOL
+  fetchDailySeries().then(()=>{ if(lastCore){ renderATR(lastCore); renderLevels(lastCore); } });
+  fetchRvolSeries().then(()=>{ if(lastCore) renderRvol(lastCore); });
   // 1s clock tick for countdown + age, no network
   clockTimer=setInterval(()=>{ renderMarketPill(lastCore); renderAge(lastCore); }, 1000);
 }

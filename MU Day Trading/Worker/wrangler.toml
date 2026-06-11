@@ -1,0 +1,19 @@
+# wrangler.toml — MU Yahoo Worker v2
+# Deploy with: wrangler deploy
+# (requires Wrangler CLI: npm install -g wrangler && wrangler login)
+
+name = "mu-yahoo-worker"
+main = "MU Yahoo Worker v2 (11 Jun).js"
+compatibility_date = "2024-01-01"
+
+# KV namespace for alert storage.
+# Create it once: wrangler kv:namespace create "MU_ALERTS"
+# Replace "your-kv-namespace-id" with the id printed by that command.
+[[kv_namespaces]]
+binding = "MU_ALERTS"
+id = "your-kv-namespace-id"
+
+# Cron: fire every minute so server-side alerts run without the browser tab open.
+# Free plan supports up to 3 cron triggers.
+[triggers]
+crons = ["* * * * *"]
