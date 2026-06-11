@@ -11,7 +11,7 @@ compatibility_date = "2024-01-01"
 # Replace "your-kv-namespace-id" with the id printed by that command.
 [[kv_namespaces]]
 binding = "MU_ALERTS"
-id = "your-kv-namespace-id"
+id = "b79903d38a8f4ca0b7153f37abce0a71"
 
 # Cron: fire every minute so server-side alerts run without the browser tab open.
 # Free plan supports up to 3 cron triggers.
