@@ -22,6 +22,7 @@
  *   GET   /exec                                    → state blob
  *   POST  /exec                  body: payload     → save state blob (with conflict check)
  *   GET   /exec?action=prices&symbols=AAPL,D05.SI  → Yahoo Finance quotes
+ *   GET   /exec?action=fundamentals&symbols=AAPL   → Yahoo quoteSummary (PE, PB, beta, …)
  *   GET   /exec?action=crypto&ids=bitcoin&vs=sgd   → CoinGecko prices
  *   GET   /exec?action=fx&pairs=USDSGD,EURSGD      → Yahoo Finance FX rates
  *
@@ -68,6 +69,7 @@ function doGet(e) {
   try {
     const action = (e && e.parameter && e.parameter.action) || '';
     if (action === 'prices') return json_(fetchYahooQuotes_(e.parameter.symbols || ''));
+    if (action === 'fundamentals') return json_(fetchYahooFundamentals_(e.parameter.symbols || ''));
     if (action === 'crypto') return json_(fetchCoinGecko_(e.parameter.ids || '', e.parameter.vs || 'sgd,usd'));
     if (action === 'fx')     return json_(fetchYahooFx_(e.parameter.pairs || ''));
 
@@ -97,7 +99,7 @@ function doGet(e) {
 const ALLOWED_KEYS = {
   schema:1, version:1, schemaVersion:1, appVersion:1, updatedAt:1, updatedBy:1,
   lastSeenRemoteAt:1,
-  stocks:1, stockTxns:1, crypto:1, realestate:1, cash:1, cashTxns:1,
+  stocks:1, stockTxns:1, watchlist:1, crypto:1, realestate:1, cash:1, cashTxns:1,
   cpfBalances:1, cpfHistory:1,
   income:1, expenses:1,
   snapshots:1, categories:1, settings:1,
@@ -113,7 +115,7 @@ function sanitisePayload_(data) {
   const clean = {};
   Object.keys(data || {}).forEach(k => { if (ALLOWED_KEYS[k]) clean[k] = data[k]; });
   // Hard caps on arrays — protect against accidental runaway
-  ['stocks','stockTxns','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash'].forEach(t => {
+  ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash'].forEach(t => {
     if (Array.isArray(clean[t]) && clean[t].length > MAX_ARRAY_LEN) {
       clean[t] = clean[t].slice(0, MAX_ARRAY_LEN);
     }
@@ -304,6 +306,148 @@ function extractExtendedPrice_(r) {
   if (regStart != null && lastTs <  regStart) return { kind: 'pre',  price: lastPrice };
   if (regEnd   != null && lastTs >= regEnd)   return { kind: 'post', price: lastPrice };
   return { kind: null, price: null };
+}
+
+/* ─── Fundamentals proxy: Yahoo quoteSummary ─────────────────────────────
+   symbols param is a comma list of Yahoo tickers. The v10 quoteSummary
+   endpoint carries the slow-moving stats the chart meta lacks: PE, PB,
+   market cap, beta, payout ratio, 50/200-day averages. Unlike v8 chart it
+   is crumb-protected: hit fc.yahoo.com for a session cookie, exchange it
+   for a crumb at v1/test/getcrumb, then pass both on every call. The
+   cookie+crumb pair is cached 30 min, per-symbol fundamentals 6 h
+   (CacheService TTL ceiling — these change daily at most). On a 401 the
+   crumb is refreshed once and the failed symbols retried. Missing fields
+   (ETFs have no PE) come back null and the app renders its empty token. */
+const FUND_CACHE_TTL_SEC  = 21600;  // 6 h, CacheService maximum
+const CRUMB_CACHE_TTL_SEC = 1800;
+
+const YF_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+              '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+function getYahooCrumb_(forceFresh) {
+  const cache = CacheService.getScriptCache();
+  if (!forceFresh) {
+    const hit = cache.get('ycrumb');
+    if (hit) { try { return JSON.parse(hit); } catch (_) {} }
+  }
+  // Step 1: fc.yahoo.com 404s but sets the session cookie we need.
+  const r1 = UrlFetchApp.fetch('https://fc.yahoo.com', {
+    muteHttpExceptions: true, followRedirects: false, headers: { 'User-Agent': YF_UA }
+  });
+  const rawSetCookie = r1.getAllHeaders()['Set-Cookie'];
+  const cookieParts = (Array.isArray(rawSetCookie) ? rawSetCookie : [rawSetCookie])
+    .filter(Boolean).map(c => String(c).split(';')[0]);
+  if (!cookieParts.length) throw new Error('Yahoo did not set a session cookie');
+  const cookie = cookieParts.join('; ');
+  // Step 2: exchange the cookie for a crumb.
+  const r2 = UrlFetchApp.fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+    muteHttpExceptions: true, headers: { 'User-Agent': YF_UA, Cookie: cookie }
+  });
+  const crumb = r2.getContentText().trim();
+  if (r2.getResponseCode() !== 200 || !crumb || crumb.indexOf('<') !== -1) {
+    throw new Error('Yahoo crumb fetch failed (HTTP ' + r2.getResponseCode() + ')');
+  }
+  const pair = { cookie: cookie, crumb: crumb };
+  cache.put('ycrumb', JSON.stringify(pair), CRUMB_CACHE_TTL_SEC);
+  return pair;
+}
+
+function raw_(o) { return (o && o.raw != null) ? o.raw : null; }
+
+function fetchYahooFundamentals_(symbolsCsv) {
+  const symbols = String(symbolsCsv || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!symbols.length) return { fundamentals: {} };
+
+  const cache = CacheService.getScriptCache();
+  const out = {};
+  let missing = [];
+
+  symbols.forEach(s => {
+    const hit = cache.get('yf:' + s);
+    if (hit) {
+      try { out[s] = JSON.parse(hit); return; } catch (_) {}
+    }
+    missing.push(s);
+  });
+
+  if (missing.length) {
+    let pair;
+    try { pair = getYahooCrumb_(false); }
+    catch (err) { return { error: 'Yahoo crumb: ' + err.message, fundamentals: out }; }
+
+    const attempt = (syms, cr) => {
+      const reqs = syms.map(s => ({
+        url: 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/' +
+             encodeURIComponent(s) +
+             '?modules=price,summaryDetail,defaultKeyStatistics&crumb=' +
+             encodeURIComponent(cr.crumb),
+        muteHttpExceptions: true,
+        followRedirects: true,
+        headers: { 'User-Agent': YF_UA, 'Accept': 'application/json', Cookie: cr.cookie }
+      }));
+      try { return UrlFetchApp.fetchAll(reqs); }
+      catch (err) { return null; }
+    };
+
+    let responses = attempt(missing, pair);
+    if (!responses) return { error: 'Yahoo quoteSummary fetchAll failed', fundamentals: out };
+
+    // Stale crumb shows up as a wall of 401s. Refresh once and retry those.
+    if (responses.some(r => r.getResponseCode() === 401)) {
+      try {
+        pair = getYahooCrumb_(true);
+        const retryIdx = [];
+        responses.forEach((r, i) => { if (r.getResponseCode() === 401) retryIdx.push(i); });
+        const retried = attempt(retryIdx.map(i => missing[i]), pair);
+        if (retried) retryIdx.forEach((origI, k) => { responses[origI] = retried[k]; });
+      } catch (_) { /* keep the 401 responses, reported per symbol below */ }
+    }
+
+    const toCache = {};
+    responses.forEach((resp, i) => {
+      const symbol = missing[i];
+      const code = resp.getResponseCode();
+      if (code !== 200) {
+        out[symbol] = { symbol: symbol, error: 'HTTP ' + code };
+        return;
+      }
+      try {
+        const j = JSON.parse(resp.getContentText());
+        const r = j.quoteSummary && j.quoteSummary.result && j.quoteSummary.result[0];
+        if (!r) {
+          const errMsg = (j.quoteSummary && j.quoteSummary.error && j.quoteSummary.error.description) || 'No data';
+          out[symbol] = { symbol: symbol, error: errMsg };
+          return;
+        }
+        const sd = r.summaryDetail || {};
+        const ks = r.defaultKeyStatistics || {};
+        const pr = r.price || {};
+        const entry = {
+          symbol: symbol,
+          trailingPE:   raw_(sd.trailingPE),
+          forwardPE:    raw_(sd.forwardPE) != null ? raw_(sd.forwardPE) : raw_(ks.forwardPE),
+          priceToBook:  raw_(ks.priceToBook),
+          marketCap:    raw_(pr.marketCap) != null ? raw_(pr.marketCap) : raw_(sd.marketCap),
+          beta:         raw_(sd.beta) != null ? raw_(sd.beta) : raw_(ks.beta),
+          payoutRatio:  raw_(sd.payoutRatio),
+          dividendRate: raw_(sd.dividendRate),
+          sma50:        raw_(sd.fiftyDayAverage),
+          sma200:       raw_(sd.twoHundredDayAverage),
+          currency:     pr.currency || null,
+          fetchedAt:    new Date().toISOString()
+        };
+        out[symbol] = entry;
+        toCache['yf:' + symbol] = JSON.stringify(entry);
+      } catch (err) {
+        out[symbol] = { symbol: symbol, error: err.message };
+      }
+    });
+    if (Object.keys(toCache).length) {
+      cache.putAll(toCache, FUND_CACHE_TTL_SEC);
+    }
+  }
+
+  return { fundamentals: out };
 }
 
 /* ─── Price proxy: CoinGecko ─────────────────────────────────────────────

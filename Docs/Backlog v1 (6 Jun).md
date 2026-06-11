@@ -4,7 +4,7 @@ Candidate features, not started. Pick from here when ready. Full specs for the t
 drafts live in `~/Claude Projects/Claude/tasks/todo.md` under "feature drafts". Each item
 has rough priority and effort so picking is fast. Update status as things move.
 
-Last updated: 06/06/2026. App at v0.9.8-interest-tax.
+Last updated: 11/06/2026. App at v1.2.
 
 ## Priority view
 
@@ -18,11 +18,19 @@ Last updated: 06/06/2026. App at v0.9.8-interest-tax.
 | 6 | IBKR CSV import | High | High | Backlog |
 | 7 | Single-ticker analysis sub-tab (scalping) | Medium | High | Done (v1.0, link-out to MU app) |
 | 8 | Stocks column sorting (click header) | High | Medium | Done (v1.1) |
-| 9 | Holdings search / filter | Medium | Medium | Backlog |
-| 10 | Totals row in holdings table | Low | Low | Backlog |
-| 11 | Dividend ex-date field + upcoming payments | Medium | Medium | Backlog |
-| 12 | Per-lot view in trade ledger | Low | Medium | Backlog |
-| 13 | CSV export (holdings + ledger) | Low | Low | Backlog |
+| 9 | Sector tags + allocation bar | High | Medium | Done (v1.2) |
+| 10 | Fundamentals columns (P/E, P/B, mkt cap, beta) | High | Medium | Done (v1.2, needs Apps Script redeploy) |
+| 11 | Momentum stats (52w position, vs 200d MA) | Medium | Low | Done (v1.2) |
+| 12 | Watchlist tab (tickers not yet owned) | Medium | Medium | Done (v1.2) |
+| 13 | Holdings search / filter | Medium | Medium | Backlog |
+| 14 | Totals row in holdings table | Low | Low | Backlog |
+| 15 | Dividend ex-date field + upcoming payments | Medium | Medium | Backlog |
+| 16 | Per-lot view in trade ledger | Low | Medium | Backlog |
+| 17 | CSV export (holdings + ledger) | Low | Low | Backlog |
+| 18 | Watchlist column sort / column manager | Low | Low | Backlog |
+| 19 | 50d MA column | Low | Low | Backlog |
+| 20 | Net-of-withholding dividend toggle (US 30% WHT) | Medium | Low | Backlog |
+| 21 | Sector auto-fill from Yahoo assetProfile | Low | Medium | Backlog |
 
 ## Items
 

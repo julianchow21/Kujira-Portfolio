@@ -13,7 +13,7 @@
    user having entered any holdings. */
 function looksPopulated(db){
   if (!db || typeof db !== 'object') return false;
-  var tables = ['stocks','crypto','realestate','cash','cpfHistory','income','expenses'];
+  var tables = ['stocks','watchlist','crypto','realestate','cash','cpfHistory','income','expenses'];
   return tables.some(function(t){ return Array.isArray(db[t]) && db[t].length > 0; });
 }
 
@@ -199,6 +199,50 @@ function safeRatio(num, denom, scale){
   return n / d * (scale != null ? scale : 100);
 }
 
+/* ─── Momentum + sector helpers (v1.2) ──────────────────────────────────
+   rangePosition: where a price sits inside a low–high band, 0..1. Null when
+   any input is missing, non-finite, or the band has zero/negative width.
+   Price is clamped into the band so a quote a tick outside the published
+   52w range still reads 0 or 1 rather than overflowing the display.
+   vsBaseline: signed fractional distance of price from a baseline (e.g. the
+   200-day average). Null on missing/zero baseline. Both are ratio-only, so
+   they are currency-invariant — feed them native-currency values.
+   sectorClass: GICS sector → cyclical / defensive / sensitive bucket
+   (Fidelity sector-rotation convention). Unknown or fund labels → null.  */
+function rangePosition(price, low, high){
+  if (price == null || low == null || high == null) return null;
+  const p = Number(price), lo = Number(low), hi = Number(high);
+  if (!isFinite(p) || !isFinite(lo) || !isFinite(hi)) return null;
+  const width = hi - lo;
+  if (width <= 0) return null;
+  return Math.min(1, Math.max(0, (p - lo) / width));
+}
+
+function vsBaseline(price, baseline){
+  const p = Number(price), b = Number(baseline);
+  if (price == null || baseline == null) return null;
+  if (!isFinite(p) || !isFinite(b) || b <= 0) return null;
+  return (p - b) / b;
+}
+
+const SECTOR_CLASS = {
+  'Consumer Discretionary': 'cyclical',
+  'Financials':             'cyclical',
+  'Industrials':            'cyclical',
+  'Materials':              'cyclical',
+  'Real Estate':            'cyclical',
+  'Consumer Staples':       'defensive',
+  'Utilities':              'defensive',
+  'Healthcare':             'defensive',
+  'Information Technology': 'sensitive',
+  'Energy':                 'sensitive',
+  'Communication Services': 'sensitive'
+};
+
+function sectorClass(sector){
+  return SECTOR_CLASS[sector] || null;
+}
+
 /* ─── Stock P&L — average-cost method ──────────────────────────────────
    Pure version of deriveStockPosition. Takes the opening position and a
    pre-sorted (chronological) array of trade objects directly, so it can be
@@ -244,6 +288,7 @@ if (typeof module !== 'undefined' && module.exports) {
     _monthsBetween,
     kjrSafeNumber,
     roundMoney, safeRatio,
+    rangePosition, vsBaseline, SECTOR_CLASS, sectorClass,
     computeStockPosition
   };
 }

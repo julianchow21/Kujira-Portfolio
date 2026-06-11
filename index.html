@@ -282,6 +282,25 @@ table.holdings th.sortable .sort-glyph{position:absolute;right:6px;top:50%;trans
 .btn-xs{padding:2px 7px;font-size:12px;line-height:1.2}
 a.btn,a.btn:hover{text-decoration:none}
 @media (pointer:coarse){ .col-mgr-move .btn-xs{min-width:36px;min-height:36px;justify-content:center} }
+/* Sector allocation card (v1.2) */
+.alloc-card .card-body{padding-top:12px;padding-bottom:12px}
+.alloc-head{font-size:13px;font-weight:700;color:var(--text2)}
+.alloc-head .hint{font-weight:400}
+.alloc-bar{display:flex;height:14px;border-radius:7px;overflow:hidden;margin:10px 0 8px;background:var(--bg3)}
+.alloc-seg{min-width:2px}
+.alloc-legend{display:flex;flex-wrap:wrap;gap:5px 14px;font-size:12px;color:var(--text2)}
+.alloc-key{white-space:nowrap}
+.alloc-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:0}
+.alloc-split{margin-top:8px;font-size:12px;color:var(--text3)}
+.alloc-warn{margin-top:8px;display:inline-block;font-size:12px;color:var(--amber);background:var(--amber-soft);border:1px solid var(--amber-border);border-radius:var(--radius);padding:3px 9px}
+/* Sector class chips in the holdings table */
+.sec-chip{display:inline-block;font-size:10px;font-weight:700;letter-spacing:0.3px;padding:1px 6px;border-radius:8px;vertical-align:1px}
+.sec-cyclical{color:var(--amber);background:var(--amber-soft);border:1px solid var(--amber-border)}
+.sec-defensive{color:var(--green);background:var(--green-soft);border:1px solid var(--green-border)}
+.sec-sensitive{color:var(--blue);background:var(--blue-soft);border:1px solid var(--blue-border)}
+/* Watchlist */
+.wl-note{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wl-hit{display:inline-block;font-size:11px;font-weight:700;color:var(--green);background:var(--green-soft);border:1px solid var(--green-border);border-radius:8px;padding:1px 7px;margin-left:5px}
 .col-mgr-row{display:flex;align-items:center;gap:10px;padding:6px 2px;border-bottom:1px solid var(--border)}
 .col-mgr-row:last-child{border-bottom:none}
 .col-mgr-move{display:inline-flex;gap:2px;flex-shrink:0}
@@ -386,6 +405,7 @@ a.btn,a.btn:hover{text-decoration:none}
     </div>
     <div id="stocks-summary"></div>
     <div id="stocks-body"></div>
+    <div id="stocks-watchlist"></div>
     <div id="stocks-ledger"></div>
   </section>
 
@@ -875,7 +895,7 @@ a.btn,a.btn:hover{text-decoration:none}
    ═══════════════════════════════════════════════════════════════════════ */
 
 const APP_VERSION = 'v1.0';
-const APP_DISPLAY_VERSION = 'v1.1 (11 Jun)';
+const APP_DISPLAY_VERSION = 'v1.2 (11 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1106,6 +1126,13 @@ function ensurePhase2Card(section, key){
 const STOCK_COLUMNS = [
   { key:'market', label:()=>'Market', cls:'tl', defVis:true,
     render:r => `<span class="tag ${r.s.market==='SGX'?'sgx':'us'}">${kjrEscape(r.s.market)}</span>` },
+  { key:'sector', label:()=>'Sector', cls:'tl', defVis:false,
+    render:r => {
+      if (!r.s.sector) return '—';
+      const cl = sectorClass(r.s.sector);
+      const chip = cl ? ` <span class="sec-chip sec-${cl}" title="${cl} sector">${cl==='cyclical'?'Cycl':cl==='defensive'?'Def':'Sens'}</span>` : '';
+      return kjrEscape(r.s.sector) + chip;
+    } },
   { key:'shares', label:()=>'Shares', cls:'num', defVis:true,
     render:r => r.derived
       ? `${r.shares}<span class="hint" title="Derived from ${r.derived.txnCount} trade${r.derived.txnCount===1?'':'s'}"> ◆</span>`
@@ -1130,6 +1157,18 @@ const STOCK_COLUMNS = [
   { key:'week52', label:()=>'52w range', cls:'num', defVis:false, backend:true,
     render:r => (r.px&&r.px.week52Low!=null&&r.px.week52High!=null)
       ? `${fmt(toSGD(r.px.week52Low,r.priceCcy||r.px.currency||r.ccy))}–${fmt(toSGD(r.px.week52High,r.priceCcy||r.px.currency||r.ccy))}` : '—' },
+  { key:'pos52w', label:()=>'52w pos', cls:'num', defVis:false, backend:true,
+    // Where the price sits in the 52w band: 0% = at the low, 100% = at the high.
+    render:r => {
+      const v = r.px ? rangePosition(r.px.price, r.px.week52Low, r.px.week52High) : null;
+      return v!=null ? `<span title="0% = 52w low, 100% = 52w high">${(v*100).toFixed(0)}%</span>` : '—';
+    } },
+  { key:'vs200d', label:()=>'vs 200d avg', cls:'num', defVis:false, backend:true,
+    render:r => {
+      const f = r.px && r.px.fund;
+      const v = f ? vsBaseline(r.px.price, f.sma200) : null;
+      return v!=null ? `<span class="${v>=0?'pos':'neg'}">${v>=0?'▲':'▼'} ${Math.abs(v*100).toFixed(1)}%</span>` : '—';
+    } },
   { key:'volume', label:()=>'Volume', cls:'num', defVis:false, backend:true,
     render:r => (r.px&&r.px.volume!=null) ? Number(r.px.volume).toLocaleString('en-SG') : '—' },
   { key:'mv', label:dc=>`Market value (${dc})`, cls:'num', defVis:true,
@@ -1150,16 +1189,33 @@ const STOCK_COLUMNS = [
     render:r => r.divYoc!=null ? r.divYoc.toFixed(2)+'%' : '—' },
   { key:'divYield', label:()=>'Div yield', cls:'num', defVis:false,
     render:r => r.divYieldCur!=null ? r.divYieldCur.toFixed(2)+'%' : '—' },
+  // Fundamentals come from the quoteSummary proxy (px.fund). ETFs and unfetched
+  // symbols have no fund object — every cell falls back to the '—' token.
+  { key:'peTtm', label:()=>'P/E', cls:'num', defVis:false, backend:true,
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.trailingPE!=null) ? f.trailingPE.toFixed(1) : '—'; } },
+  { key:'peFwd', label:()=>'Fwd P/E', cls:'num', defVis:false, backend:true,
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.forwardPE!=null) ? f.forwardPE.toFixed(1) : '—'; } },
+  { key:'pb', label:()=>'P/B', cls:'num', defVis:false, backend:true,
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.priceToBook!=null) ? f.priceToBook.toFixed(2) : '—'; } },
+  { key:'beta', label:()=>'Beta', cls:'num', defVis:false, backend:true,
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.beta!=null) ? f.beta.toFixed(2) : '—'; } },
+  { key:'payout', label:()=>'Payout', cls:'num', defVis:false, backend:true,
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.payoutRatio!=null) ? (f.payoutRatio*100).toFixed(0)+'%' : '—'; } },
+  { key:'mktCap', label:()=>'Mkt cap', cls:'num', defVis:false, backend:true,
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.marketCap!=null) ? fmtCompact(toSGD(f.marketCap, f.currency||r.px.currency||r.ccy)) : '—'; } },
   { key:'updated', label:()=>'Updated', cls:'num muted', defVis:true,
     render:r => (r.px&&r.px.fetchedAt) ? relTime(r.px.fetchedAt) : '—' }
 ];
 const STOCK_COL_LABEL = {
-  market:'Market', shares:'Shares', avgCost:'Avg cost', price:'Price',
+  market:'Market', sector:'Sector', shares:'Shares', avgCost:'Avg cost', price:'Price',
   dayChange:'Day P&L (position change)', dayChangePct:'Day change %', prevClose:'Prev close',
-  dayRange:'Day range', week52:'52-week range', volume:'Volume',
+  dayRange:'Day range', week52:'52-week range', pos52w:'52-week range position',
+  vs200d:'Price vs 200-day average', volume:'Volume',
   mv:'Market value', cost:'Cost basis', pl:'Unrealised P&L', plPct:'P&L %',
   realised:'Realised P&L', weight:'Portfolio weight %', divIncome:'Dividend income / yr',
-  divYoc:'Dividend yield on cost', divYield:'Current dividend yield', updated:'Updated'
+  divYoc:'Dividend yield on cost', divYield:'Current dividend yield',
+  peTtm:'P/E (trailing)', peFwd:'P/E (forward)', pb:'Price / book', beta:'Beta',
+  payout:'Dividend payout %', mktCap:'Market cap', updated:'Updated'
 };
 function defaultStockColumns(){ return STOCK_COLUMNS.map(c => ({ key:c.key, visible: !!c.defVis })); }
 /* Reconcile a stored column preference against the current registry: keep known
@@ -1206,6 +1262,18 @@ const STOCK_SORT_VALS = {
   divIncome:    r => r.divAnnualSgd,
   divYoc:       r => r.divYoc,
   divYield:     r => r.divYieldCur,
+  // Sector groups by cyclical/defensive/sensitive bucket first, then name,
+  // so an asc sort clusters the classes together. Untagged sorts last (null).
+  sector:       r => r.s.sector ? ((sectorClass(r.s.sector) || 'z') + '·' + r.s.sector) : null,
+  pos52w:       r => r.px ? rangePosition(r.px.price, r.px.week52Low, r.px.week52High) : null,
+  vs200d:       r => (r.px && r.px.fund) ? vsBaseline(r.px.price, r.px.fund.sma200) : null,
+  peTtm:        r => (r.px && r.px.fund && r.px.fund.trailingPE  != null) ? r.px.fund.trailingPE  : null,
+  peFwd:        r => (r.px && r.px.fund && r.px.fund.forwardPE   != null) ? r.px.fund.forwardPE   : null,
+  pb:           r => (r.px && r.px.fund && r.px.fund.priceToBook != null) ? r.px.fund.priceToBook : null,
+  beta:         r => (r.px && r.px.fund && r.px.fund.beta        != null) ? r.px.fund.beta        : null,
+  payout:       r => (r.px && r.px.fund && r.px.fund.payoutRatio != null) ? r.px.fund.payoutRatio : null,
+  mktCap:       r => (r.px && r.px.fund && r.px.fund.marketCap   != null)
+                       ? toSGD(r.px.fund.marketCap, r.px.fund.currency || r.px.currency || r.ccy) : null,
   updated:      r => (r.px && r.px.fetchedAt) || null
 };
 /* Header click cycle: asc → desc → clear. Unknown keys are ignored. */
@@ -1222,6 +1290,7 @@ function freshDB(){
   return {
     stocks:       [],
     stockTxns:    [],
+    watchlist:    [],
     crypto:       [],
     realestate:   [],
     cash:         [],
@@ -1350,6 +1419,19 @@ function fmtPct(n, dp){
   return (v >= 0 ? '+' : '') + v.toFixed(dp != null ? dp : 2) + '%';
 }
 
+/* Compact money for huge figures (market cap): $3.21T, US$310.45B, $48.0M.
+   Takes an SGD figure and follows the display-currency toggle like fmt(). */
+function fmtCompact(n){
+  let v = Number(n);
+  if (!isFinite(v) || v <= 0) return '—';
+  v = toDisplay(v, 'SGD');
+  const cur = displayCcy() === 'USD' ? 'US$' : '$';
+  if (v >= 1e12) return cur + (v/1e12).toFixed(2) + 'T';
+  if (v >= 1e9)  return cur + (v/1e9).toFixed(2) + 'B';
+  if (v >= 1e6)  return cur + (v/1e6).toFixed(1) + 'M';
+  return cur + Math.round(v).toLocaleString('en-SG');
+}
+
 function fmtDateSG(d){
   // DD/MM/YYYY per Singapore convention
   if (!d) return '';
@@ -1463,7 +1545,7 @@ function _runMigrations(db){
    Also re-validates ids on every list-typed table — a corrupted sheet or hostile
    payload cannot land an id like "x'); evil(); //" that would break event-delegation
    downstream. Items with invalid ids get a fresh uid() so they're still recoverable. */
-const _LIST_TABLES = ['stocks','stockTxns','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash'];
+const _LIST_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash'];
 
 function _sanitiseList(arr, table){
   if (!Array.isArray(arr)) return [];
@@ -2881,18 +2963,20 @@ function priceFreshnessText(table){
 }
 
 function priceFor(table, item){
-  if (table === 'stocks') return DB._priceCache[yahooSymbol(item)] || null;
+  if (table === 'stocks' || table === 'watchlist') return DB._priceCache[yahooSymbol(item)] || null;
   if (table === 'crypto') return DB._priceCache[coinIdFor(item.coingeckoId || item.symbol)] || null;
   return null;
 }
 
 async function refreshStockPrices(){
-  if (!DB.stocks.length){ showToast('No stocks to refresh'); return; }
+  if (!DB.stocks.length && !(DB.watchlist || []).length){ showToast('No stocks to refresh'); return; }
   if (!getSyncUrl()){ showToast('Set the Apps Script URL first', 'error'); return; }
   const btn = document.getElementById('btn-refresh-stocks');
   if (btn) btn.disabled = true;
   try {
-    const symbols = Array.from(new Set(DB.stocks.map(yahooSymbol).filter(Boolean)));
+    const symbols = Array.from(new Set(
+      DB.stocks.map(yahooSymbol).concat((DB.watchlist || []).map(yahooSymbol)).filter(Boolean)
+    ));
     if (!symbols.length){ showToast('No valid symbols', 'error'); return; }
     const url = getSyncUrl() + (getSyncUrl().includes('?') ? '&' : '?') +
                 'action=prices&symbols=' + encodeURIComponent(symbols.join(','));
@@ -2912,11 +2996,38 @@ async function refreshStockPrices(){
     saveData();
     renderStocks();
     showToast('Prices: ' + ok + ' refreshed' + (fail ? ', ' + fail + ' failed' : ''), fail ? 'error' : 'success');
+    // Fundamentals ride behind the price refresh, fire-and-forget: the cells
+    // fill in when they land, and a miss leaves the '—' tokens (non-fatal).
+    refreshFundamentals(symbols);
   } catch (err) {
     showToast('Price refresh failed: ' + err.message, 'error');
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+/* Fundamentals (PE, PB, beta, payout, 200d MA …) from the quoteSummary proxy.
+   Slow-moving stats: the server caches them 6 h, so this is cheap to call on
+   every price refresh. Stored under _priceCache[sym].fund — memory-only, same
+   as quotes. Success is silent (the columns visibly populate); only a total
+   wipe-out gets a toast, since that usually means Yahoo's crumb gate. */
+async function refreshFundamentals(symbols){
+  try {
+    const url = getSyncUrl() + (getSyncUrl().includes('?') ? '&' : '?') +
+                'action=fundamentals&symbols=' + encodeURIComponent(symbols.join(','));
+    const resp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
+    const data = await resp.json();
+    if (data.error && !data.fundamentals) throw new Error(data.error);
+    let ok = 0;
+    Object.entries(data.fundamentals || {}).forEach(([sym, f]) => {
+      if (!f || f.error) return;
+      if (!DB._priceCache[sym]) DB._priceCache[sym] = { symbol: sym };
+      DB._priceCache[sym].fund = f;
+      ok++;
+    });
+    if (ok){ renderStocks(); }
+    else if (symbols.length){ showToast('Fundamentals unavailable (Yahoo declined the request)', 'error'); }
+  } catch (_) { /* nice-to-have columns; quotes and money maths are unaffected */ }
 }
 
 async function refreshCryptoPrices(){
@@ -2974,12 +3085,33 @@ let _modalState  = null; // { table, item, isNew }
 let _modalOpener = null; // element focused before modal opened (restored on close)
 let _modalKeyTrap = null; // keydown handler reference so we can remove it cleanly
 
+/* GICS 11 sectors + two app-level labels. Values feed sectorClass() in
+   kjr-core.js, which buckets them cyclical / defensive / sensitive for the
+   allocation view. Keep the strings in sync with SECTOR_CLASS there. */
+const GICS_SECTOR_OPTIONS = [
+  ['', '— Untagged —'],
+  ['Communication Services','Communication Services'],
+  ['Consumer Discretionary','Consumer Discretionary'],
+  ['Consumer Staples','Consumer Staples'],
+  ['Energy','Energy'],
+  ['Financials','Financials'],
+  ['Healthcare','Healthcare'],
+  ['Industrials','Industrials'],
+  ['Information Technology','Information Technology'],
+  ['Materials','Materials'],
+  ['Real Estate','Real Estate'],
+  ['Utilities','Utilities'],
+  ['ETF / Fund','ETF / Fund'],
+  ['Other','Other']
+];
+
 const ENTITY_SCHEMAS = {
   stocks: {
     title: 'stock holding',
     fields: [
       { key:'symbol',  label:'Symbol',  type:'text',   required:true, placeholder:'AAPL or D05', hint:'Yahoo ticker. For SGX, omit the .SI (we add it).' },
       { key:'market',  label:'Market',  type:'select', required:true, options:[['SGX','SGX (Singapore)'],['US','US (NYSE/NASDAQ)']], default:'US' },
+      { key:'sector',  label:'Sector',  type:'select', options:GICS_SECTOR_OPTIONS, default:'', hint:'Optional. Drives the sector allocation view and the cyclical/defensive split.' },
       { key:'shares',  label:'Shares',  type:'number', required:true, step:'0.0001', placeholder:'100', hint:'Your current holding. If you log trades below, this is treated as the opening position and trades adjust it.' },
       { key:'avgCost', label:'Avg cost per share', type:'number', required:true, step:'0.0001', placeholder:'150.00' },
       { key:'currency', label:'Cost currency', type:'select', options:[['USD','USD'],['SGD','SGD']], default:'USD', hint:'Currency the avg cost is stated in. Defaults match the market.' },
@@ -3012,6 +3144,21 @@ const ENTITY_SCHEMAS = {
       { key:'notes',   label:'Notes', type:'textarea' }
     ],
     defaults: { date: new Date().toISOString().slice(0,10), side:'buy', fees:0, cashAccountId:'' }
+  },
+  watchlist: {
+    title: 'watchlist ticker',
+    fields: [
+      { key:'symbol', label:'Symbol', type:'text', required:true, placeholder:'NVDA or U11', hint:'Yahoo ticker. For SGX, omit the .SI (we add it).' },
+      { key:'market', label:'Market', type:'select', required:true, options:[['SGX','SGX (Singapore)'],['US','US (NYSE/NASDAQ)']], default:'US' },
+      { key:'sector', label:'Sector', type:'select', options:GICS_SECTOR_OPTIONS, default:'' },
+      { key:'targetPrice', label:'Target buy price', type:'number', step:'0.0001', min:'0', placeholder:'0.00', hint:'Optional, in the ticker\'s own trading currency. The row flags when price reaches it.' },
+      { key:'notes',  label:'Notes', type:'textarea' }
+    ],
+    defaults: { market:'US' },
+    afterRead: (item) => {
+      item.symbol = (item.symbol || '').trim().toUpperCase();
+      if (item.targetPrice != null && Number(item.targetPrice) <= 0) item.targetPrice = null;
+    }
   },
   crypto: {
     title: 'crypto holding',
@@ -3375,6 +3522,7 @@ function renderStocks(){
     sumEl.innerHTML = '';
     bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">📈</div><div class="empty-title">No stocks yet</div><div class="empty-sub">Click <b>Add stock</b> to record your first position. SGX tickers are auto-suffixed with .SI for Yahoo Finance.</div></div></div></div>`;
     if (fresh) fresh.textContent = 'No prices yet';
+    renderWatchlist(); // the watchlist stands on its own, even with no holdings
     return;
   }
 
@@ -3465,7 +3613,7 @@ function renderStocks(){
       sub: fmt(roundMoney(totDivAnnual/12)) + ' / mo' + (totDivYoc != null ? ' · ' + totDivYoc.toFixed(2) + '% on cost' : ''),
       accent:'accent' });
   }
-  sumEl.innerHTML = renderSummary(summaryItems);
+  sumEl.innerHTML = renderSummary(summaryItems) + renderSectorAllocation(rows, anyPriceMissing);
 
   // Apply the persisted sort. Null values sort last in both directions.
   const sortPref = DB.settings.stocksSort || {};
@@ -3524,7 +3672,153 @@ function renderStocks(){
     fresh.textContent = txt;
   }
 
+  renderWatchlist();
   renderStockTxns();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SECTOR ALLOCATION — stacked bar + cyclical/defensive split + flags
+   ═══════════════════════════════════════════════════════════════════════ */
+/* Weights use market value when every holding is priced, else fall back to
+   cost basis for ALL rows — mixing the two bases would distort the split.
+   'ETF / Fund' is excluded from the sector-concentration flag (a broad index
+   fund is diversification, not concentration), but a single holding above
+   25% still flags, ETF or not. */
+function renderSectorAllocation(rows, anyPriceMissing){
+  if (!rows.length) return '';
+  const useMv = !anyPriceMissing;
+  const basisOf = r => useMv ? (r.mv != null ? r.mv : 0) : (r.cost || 0);
+  const total = roundMoney(rows.reduce((a, r) => a + basisOf(r), 0));
+  if (total <= 0) return '';
+
+  if (!rows.some(r => r.s.sector)){
+    return `<div class="card alloc-card"><div class="card-body">
+      <div class="alloc-head">Sector allocation</div>
+      <div class="empty-sub">Tag a sector on each holding (Edit → Sector) to see the split here, plus the cyclical/defensive balance.</div>
+    </div></div>`;
+  }
+
+  const bySector = {};
+  rows.forEach(r => {
+    const k = r.s.sector || 'Untagged';
+    bySector[k] = (bySector[k] || 0) + basisOf(r);
+  });
+  const entries = Object.entries(bySector)
+    .map(([sector, v]) => ({ sector, v, pct: safeRatio(v, total) }))
+    .filter(e => e.pct != null && e.pct > 0)
+    .sort((a, b) => b.v - a.v);
+
+  // Rank-ordered token palette; Untagged is always neutral grey. Seven hues
+  // cycle, so adjacent segments can never share a colour.
+  const PALETTE = ['var(--accent)','var(--blue)','var(--green)','var(--amber)','var(--purple)','var(--accent2)','var(--red)'];
+  let ci = 0;
+  entries.forEach(e => { e.color = e.sector === 'Untagged' ? 'var(--border2)' : PALETTE[ci++ % PALETTE.length]; });
+
+  const bar = entries.map(e =>
+    `<div class="alloc-seg" style="width:${e.pct}%;background:${e.color}" title="${kjrEscape(e.sector)} ${e.pct.toFixed(1)}%"></div>`).join('');
+  const legend = entries.map(e =>
+    `<span class="alloc-key"><span class="alloc-dot" style="background:${e.color}"></span>${kjrEscape(e.sector)} ${e.pct.toFixed(1)}%</span>`).join('');
+
+  // Cyclical / defensive / sensitive split (sectorClass from kjr-core.js).
+  const cls = { cyclical: 0, defensive: 0, sensitive: 0 };
+  let unclass = 0;
+  entries.forEach(e => {
+    const c = sectorClass(e.sector);
+    if (c) cls[c] += e.v; else unclass += e.v;
+  });
+  const splitParts = [];
+  if (cls.cyclical)  splitParts.push('Cyclical '    + safeRatio(cls.cyclical,  total).toFixed(0) + '%');
+  if (cls.sensitive) splitParts.push('Sensitive '   + safeRatio(cls.sensitive, total).toFixed(0) + '%');
+  if (cls.defensive) splitParts.push('Defensive '   + safeRatio(cls.defensive, total).toFixed(0) + '%');
+  if (unclass)       splitParts.push('Unclassified ' + safeRatio(unclass,      total).toFixed(0) + '%');
+
+  const warns = [];
+  const topSector = entries.find(e => e.sector !== 'Untagged' && e.sector !== 'ETF / Fund');
+  if (topSector && topSector.pct > 40) warns.push(kjrEscape(topSector.sector) + ' is ' + topSector.pct.toFixed(0) + '% of stocks');
+  rows.forEach(r => {
+    if (r.s.sector === 'ETF / Fund') return;
+    const p = safeRatio(basisOf(r), total);
+    if (p != null && p > 25) warns.push(kjrEscape(r.s.symbol) + ' alone is ' + p.toFixed(0) + '%');
+  });
+  const warnHtml = warns.length
+    ? `<div class="alloc-warn" title="Concentration flags: one sector above 40%, or one holding above 25%, of your stocks">⚠ Concentration: ${warns.join(' · ')}</div>`
+    : '';
+
+  return `<div class="card alloc-card"><div class="card-body">
+    <div class="alloc-head">Sector allocation <span class="hint">${useMv ? 'by market value' : 'by cost (prices missing)'}</span></div>
+    <div class="alloc-bar">${bar}</div>
+    <div class="alloc-legend">${legend}</div>
+    ${splitParts.length ? `<div class="alloc-split" title="Cyclical sectors move with the economy, defensive demand holds in a downturn, sensitive sit in between (tech, energy, telecoms)">${splitParts.join(' · ')}</div>` : ''}
+    ${warnHtml}
+  </div></div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   WATCHLIST — tickers you do not own yet. Same price pipeline as holdings
+   (symbols join the refresh union), fixed lean columns, no money maths.
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderWatchlist(){
+  const el = document.getElementById('stocks-watchlist');
+  if (!el) return;
+  const list = DB.watchlist || [];
+
+  const head = `
+    <div class="card">
+      <div class="card-head">
+        <h3>Watchlist</h3>
+        <button class="btn btn-primary btn-sm" onclick="openEntityModal('watchlist')">＋ Add ticker</button>
+      </div>`;
+
+  if (!list.length){
+    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">👀</div><div class="empty-title">Nothing on watch</div><div class="empty-sub">Track tickers you are waiting to buy. Set a target price and the row flags when the market gets there. Watchlist symbols refresh together with your holdings.</div></div></div></div>`;
+    return;
+  }
+
+  const sorted = list.slice().sort((a, b) => String(a.symbol || '').localeCompare(String(b.symbol || '')));
+  el.innerHTML = head + `
+    <div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <th class="tl">Symbol</th><th class="tl">Market</th><th class="tl">Sector</th>
+      <th>Price</th><th>Day %</th><th>52w pos</th><th>P/E</th><th>P/B</th><th>Target</th><th class="tl">Notes</th><th></th>
+    </tr></thead><tbody>
+      ${sorted.map(w => {
+        const px  = priceFor('watchlist', w);
+        const ccy = (px && px.currency) || (w.market === 'SGX' ? 'SGD' : 'USD');
+        const f   = px && px.fund;
+        const priceCell = (px && px.price != null)
+          ? fmt(toSGD(px.price, ccy)) + (isStale(px.fetchedAt, 24) ? ' <span class="hint">(stale)</span>' : '')
+          : '<span class="price-stale">—</span>';
+        const dayCell = (px && px.changePct != null)
+          ? `<span class="${px.changePct >= 0 ? 'pos' : 'neg'}">${fmtPct(px.changePct)}</span>` : '—';
+        const posV = px ? rangePosition(px.price, px.week52Low, px.week52High) : null;
+        const posCell = posV != null ? `<span title="0% = 52w low, 100% = 52w high">${(posV*100).toFixed(0)}%</span>` : '—';
+        const peCell = (f && f.trailingPE  != null) ? f.trailingPE.toFixed(1)  : '—';
+        const pbCell = (f && f.priceToBook != null) ? f.priceToBook.toFixed(2) : '—';
+        // Buy target lives in the ticker's own currency, so the comparison
+        // against the native quote price needs no FX at all.
+        const atTarget = (w.targetPrice != null && px && px.price != null && px.price <= Number(w.targetPrice));
+        const targetCell = w.targetPrice != null
+          ? fmt(toSGD(Number(w.targetPrice), ccy)) + (atTarget ? ' <span class="wl-hit">✓ At target</span>' : '')
+          : '—';
+        const ax = encodeURIComponent(yahooSymbol(w));
+        return `<tr>
+          <td class="tl cell-sym">${kjrEscape(w.symbol)}</td>
+          <td class="tl"><span class="tag ${w.market === 'SGX' ? 'sgx' : 'us'}">${kjrEscape(w.market || '')}</span></td>
+          <td class="tl">${w.sector ? kjrEscape(w.sector) : '—'}</td>
+          <td class="num">${priceCell}</td>
+          <td class="num">${dayCell}</td>
+          <td class="num">${posCell}</td>
+          <td class="num">${peCell}</td>
+          <td class="num">${pbCell}</td>
+          <td class="num">${targetCell}</td>
+          <td class="tl wl-note" title="${kjrEscape(w.notes || '')}">${w.notes ? kjrEscape(w.notes) : ''}</td>
+          <td class="row-actions">
+            <a class="btn btn-sm btn-ghost" href="MU%20Day%20Trading/index.html?symbol=${ax}" target="_blank" rel="noopener" title="Open chart analysis for ${kjrEscape(w.symbol)}">Analyse</a>
+            <button class="btn btn-sm btn-ghost btn-edit" data-edit-table="watchlist" data-edit-id="${kjrEscape(w.id)}">Edit</button>
+          </td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div></div>
+  `;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
