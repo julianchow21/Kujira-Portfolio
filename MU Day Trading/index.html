@@ -33,9 +33,20 @@ button{font-family:inherit;cursor:pointer}
 /* Topbar */
 .topbar{position:sticky;top:0;z-index:100;background:rgba(15,15,15,.82);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
 .topbar-in{max-width:1100px;margin:0 auto;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.tick{display:flex;align-items:baseline;gap:8px}
+.tick{display:flex;align-items:baseline;gap:8px;position:relative}
 .tick .sym{font-size:18px;font-weight:700;letter-spacing:.5px}
 .tick .nm{font-size:12px;color:var(--text2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wl-btn{background:none;border:none;color:var(--text3);font-size:13px;padding:0 1px;cursor:pointer;line-height:1;align-self:center}
+.wl-btn:hover{color:var(--text)}
+.wl-drop{display:none;position:absolute;top:calc(100% + 8px);left:0;min-width:170px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:6px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,.6)}
+.wl-drop.open{display:block}
+.wl-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text)}
+.wl-item:hover{background:var(--bg4)}
+.wl-item.cur{color:var(--accent);cursor:default}
+.wl-del{margin-left:auto;background:none;border:none;color:var(--text3);font-size:15px;line-height:1;cursor:pointer;padding:0 2px}
+.wl-del:hover{color:var(--red)}
+.wl-add{display:flex;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)}
+.wl-add input{flex:1;min-width:0;padding:5px 8px;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
 .spacer{flex:1 1 auto}
 .tb-right{display:flex;align-items:center;gap:10px;margin-left:auto}
 .pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:4px 9px;border-radius:999px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);white-space:nowrap}
@@ -196,8 +207,10 @@ input[type=number]{width:96px}
 
 <div class="topbar">
   <div class="topbar-in">
-    <div class="tick">
+    <div class="tick" id="tickWrap">
       <span class="sym" id="sym">MU</span>
+      <button class="wl-btn" id="wlBtn" title="Switch ticker">▾</button>
+      <div class="wl-drop" id="wlDrop"></div>
       <span class="nm" id="nm">Micron Technology</span>
     </div>
     <span class="pill" id="mktPill"><span class="dot"></span><span id="mktTxt">Loading</span></span>
@@ -421,7 +434,7 @@ input[type=number]{width:96px}
   <span class="warn">For information only, not financial advice.</span>
   Live MU data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v2.2 (11 Jun)</span>
+  <span style="margin-left:8px;color:var(--text3)">v2.3 (11 Jun)</span>
 </div>
 
 <script>
@@ -449,6 +462,7 @@ const DEFAULT_CFG = {
   notify: false,
   tgEnabled: false,
   tgChatId: "",
+  watchlist: ["MU"],
 };
 let cfg = loadCfg();
 let alerts = loadAlerts();
@@ -1396,6 +1410,41 @@ function saveSettingsFromDrawer(){
   saveCfg();
 }
 
+/* ====================== Watchlist / ticker switcher ====================== */
+const TICKER_RE = /^[A-Z.\-]{1,12}$/;
+function renderWatchlist(){
+  const drop=$("#wlDrop");
+  const items=(cfg.watchlist||[]).map(s=>{
+    const cur=s===SYMBOL;
+    return '<div class="wl-item'+(cur?" cur":"")+'"'+(cur?"":" data-sw=\""+esc(s)+"\"")+'>'+esc(s)+
+      (cur?'<span style="margin-left:auto;font-size:9px">●</span>':
+           '<button class="wl-del" data-del="'+esc(s)+'" title="Remove">×</button>')+
+      '</div>';
+  }).join("");
+  drop.innerHTML=items+
+    '<div class="wl-add">'+
+    '<input type="text" id="wlInput" placeholder="Add ticker" maxlength="12">'+
+    '<button class="btn" id="wlAddBtn" style="padding:5px 10px;font-size:12px">+</button>'+
+    '</div>';
+  const inp=document.getElementById("wlInput");
+  document.getElementById("wlAddBtn").addEventListener("click",()=>addTicker((inp.value||"").trim().toUpperCase()));
+  inp.addEventListener("keydown",e=>{ if(e.key==="Enter") addTicker((e.target.value||"").trim().toUpperCase()); });
+}
+function addTicker(sym){
+  if(!sym||!TICKER_RE.test(sym)) return;
+  if(cfg.watchlist.includes(sym)){ switchTicker(sym); return; }
+  if(cfg.watchlist.length>=10) return;
+  cfg.watchlist.push(sym); saveCfg(); renderWatchlist();
+  switchTicker(sym);
+}
+function removeTicker(sym){
+  if(sym===SYMBOL) return;
+  cfg.watchlist=cfg.watchlist.filter(s=>s!==sym); saveCfg(); renderWatchlist();
+}
+function switchTicker(sym){
+  const u=new URL(location.href); u.searchParams.set("symbol",sym); location.href=u.toString();
+}
+
 /* ====================== Telegram sync ====================== */
 async function syncAlertsToWorker(){
   saveSettingsFromDrawer();
@@ -1468,6 +1517,14 @@ function wire(){
     if(el){ el.addEventListener("input",()=>{ calcSave(); }); }
   });
 
+  // watchlist dropdown
+  $("#wlBtn").addEventListener("click",e=>{ e.stopPropagation(); $("#wlDrop").classList.toggle("open"); if($("#wlDrop").classList.contains("open")){ const i=document.getElementById("wlInput"); if(i) setTimeout(()=>i.focus(),40); } });
+  document.addEventListener("click",e=>{ if(!document.getElementById("tickWrap").contains(e.target)) $("#wlDrop").classList.remove("open"); });
+  $("#wlDrop").addEventListener("click",e=>{
+    const sw=e.target.closest("[data-sw]"); if(sw){ switchTicker(sw.dataset.sw); return; }
+    const del=e.target.closest("[data-del]"); if(del){ removeTicker(del.dataset.del); return; }
+  });
+
   // drawer
   $("#proxyMode").addEventListener("change",updateProxyFld);
   $("#testBtn").addEventListener("click",testConnection);
@@ -1504,7 +1561,10 @@ function boot(){
       pill.insertAdjacentElement("afterend", n);
     }
   }
+  if(!Array.isArray(cfg.watchlist)||!cfg.watchlist.length) cfg.watchlist=[SYMBOL];
+  if(!cfg.watchlist.includes(SYMBOL)){ cfg.watchlist.push(SYMBOL); saveCfg(); }
   wire();
+  renderWatchlist();
   renderAlerts(); renderLog();
   // paint from cache for instant cold start — eliminates the blank "—" state on reload
   const _cached=loadJSON(LS.cache,null);
