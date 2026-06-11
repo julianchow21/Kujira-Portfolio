@@ -502,7 +502,8 @@ function fetchYahooFx_(pairsCsv) {
    to the right. Each write is atomic (single setValues call) — half-written
    tabs from a quota timeout are avoided. Best-effort: never throws.        */
 const VIEW_SCHEMAS = {
-  Stocks:        ['id','symbol','market','shares','avgCost','currency','notes','createdAt','updatedAt'],
+  Stocks:        ['id','symbol','market','sector','shares','avgCost','divPerShare','currency','notes','createdAt','updatedAt'],
+  Watchlist:     ['id','symbol','market','sector','targetPrice','notes','createdAt','updatedAt'],
   'Stock Trades':['id','stockId','date','side','shares','price','fees','notes','createdAt','updatedAt'],
   Crypto:        ['id','symbol','coingeckoId','amount','avgCost','currency','notes','createdAt','updatedAt'],
   'Real Estate': ['id','name','value','currency','notes','updatedAt'],
@@ -518,6 +519,7 @@ const VIEW_SCHEMAS = {
 
 function refreshViews_(data) {
   writeTable_('Stocks',       data.stocks);
+  writeTable_('Watchlist',    data.watchlist);
   writeTable_('Stock Trades', sortByField_(data.stockTxns, 'date'));
   writeTable_('Crypto',       data.crypto);
   writeTable_('Real Estate',  data.realestate);

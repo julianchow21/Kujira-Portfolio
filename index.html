@@ -286,7 +286,7 @@ a.btn,a.btn:hover{text-decoration:none}
 .alloc-card .card-body{padding-top:12px;padding-bottom:12px}
 .alloc-head{font-size:13px;font-weight:700;color:var(--text2)}
 .alloc-head .hint{font-weight:400}
-.alloc-bar{display:flex;height:14px;border-radius:7px;overflow:hidden;margin:10px 0 8px;background:var(--bg3)}
+.alloc-stack{display:flex;height:14px;border-radius:7px;overflow:hidden;margin:10px 0 8px;background:var(--bg3)}
 .alloc-seg{min-width:2px}
 .alloc-legend{display:flex;flex-wrap:wrap;gap:5px 14px;font-size:12px;color:var(--text2)}
 .alloc-key{white-space:nowrap}
@@ -895,7 +895,7 @@ a.btn,a.btn:hover{text-decoration:none}
    ═══════════════════════════════════════════════════════════════════════ */
 
 const APP_VERSION = 'v1.0';
-const APP_DISPLAY_VERSION = 'v1.2 (11 Jun)';
+const APP_DISPLAY_VERSION = 'v1.2.1 (11 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -3746,7 +3746,7 @@ function renderSectorAllocation(rows, anyPriceMissing){
 
   return `<div class="card alloc-card"><div class="card-body">
     <div class="alloc-head">Sector allocation <span class="hint">${useMv ? 'by market value' : 'by cost (prices missing)'}</span></div>
-    <div class="alloc-bar">${bar}</div>
+    <div class="alloc-stack">${bar}</div>
     <div class="alloc-legend">${legend}</div>
     ${splitParts.length ? `<div class="alloc-split" title="Cyclical sectors move with the economy, defensive demand holds in a downturn, sensitive sit in between (tech, energy, telecoms)">${splitParts.join(' · ')}</div>` : ''}
     ${warnHtml}
@@ -3833,7 +3833,7 @@ function renderStockColsPanel(){
   const anyBackend = cols.some(c => c.backend);
   body.innerHTML = cols.map((c, i) => {
     const lbl = STOCK_COL_LABEL[c.key] || c.key;
-    const warn = c.backend ? ' <span class="hint" title="Needs the widened price backend. Redeploy Apps Script to populate.">⚠</span>' : '';
+    const warn = c.backend ? ' <span class="hint" title="Populated on price refresh. Requires apps-script.gs v1.2 or later deployed.">⚠</span>' : '';
     return `<div class="col-mgr-row">
       <span class="col-mgr-move">
         <button class="btn btn-ghost btn-xs" title="Move up" aria-label="Move ${lbl} up" onclick="moveStockCol('${c.key}',-1)" ${i===0?'disabled':''}>↑</button>
