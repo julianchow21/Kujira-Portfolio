@@ -438,7 +438,7 @@ input[type=number]{width:96px}
   <span class="warn">For information only, not financial advice.</span>
   Live MU data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v2.6 (11 Jun)</span>
+  <span style="margin-left:8px;color:var(--text3)">v2.7 (11 Jun)</span>
 
 </div>
 
@@ -737,7 +737,8 @@ function vwapSeries(bars){ // anchored to each regular session; resets at every 
 function lastNonNull(arr){ for(let i=arr.length-1;i>=0;i--) if(arr[i]!=null) return arr[i]; return null; }
 
 /* ====================== Chart (Lightweight Charts) ====================== */
-let chart=null, sCandle=null, sVol=null, sVwap=null, sE9=null, sE20=null, chartReady=false;
+let chart=null, sLine=null, sVol=null, sVwap=null, sE9=null, sE20=null, chartReady=false;
+let barByTime={}, _pulseState=true, _pulseTick=null;
 const C = {};
 function readTokens(){
   const cs=getComputedStyle(document.documentElement);
@@ -761,7 +762,14 @@ function initChart(){
     localization:{ priceFormatter:p=>"$"+Number(p).toFixed(2),
       timeFormatter:t=> tfIsIntraday(curTf)?(fmtDate(t)+" "+fmtClock(t)+" ET"):fmtDate(t) },
   });
-  sCandle=chart.addCandlestickSeries({ upColor:C.green, downColor:C.red, borderUpColor:C.green, borderDownColor:C.red, wickUpColor:C.green, wickDownColor:C.red, priceLineColor:C.text3 });
+  sLine=chart.addAreaSeries({
+    topColor:'rgba(45,212,191,0.12)', bottomColor:'rgba(45,212,191,0.01)',
+    lineColor:'#2dd4bf', lineWidth:2,
+    priceLineVisible:true, priceLineColor:'#2dd4bf',
+    lastValueVisible:true,
+    crosshairMarkerVisible:true, crosshairMarkerRadius:4,
+    crosshairMarkerBorderColor:'#2dd4bf', crosshairMarkerBackgroundColor:'#2dd4bf',
+  });
   sVol=chart.addHistogramSeries({ priceFormat:{type:"volume"}, priceScaleId:"vol", color:C.border2, lastValueVisible:false, priceLineVisible:false });
   chart.priceScale("vol").applyOptions({ scaleMargins:{top:0.84,bottom:0} });
   sVwap=chart.addLineSeries({ color:C.accent, lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
@@ -770,6 +778,13 @@ function initChart(){
   chartReady=true;
   applyOverlayVisibility();
   applyGrid();
+  // Pulse the current-price line in Kujira teal
+  if(_pulseTick) clearInterval(_pulseTick);
+  _pulseTick=setInterval(()=>{
+    if(!sLine) return;
+    _pulseState=!_pulseState;
+    sLine.applyOptions({ priceLineColor: _pulseState?'#2dd4bf':'rgba(45,212,191,0.18)' });
+  }, 550);
   if(window.ResizeObserver){
     let rt; new ResizeObserver(()=>{ clearTimeout(rt); rt=setTimeout(refitChart,120); }).observe(el);
   }
@@ -777,11 +792,14 @@ function initChart(){
   const cross=$("#cross");
   chart.subscribeCrosshairMove(param=>{
     if(!param.time || !param.point){ cross.style.display="none"; return; }
-    const c=param.seriesData.get(sCandle);
+    const c=param.seriesData.get(sLine);
     if(!c){ cross.style.display="none"; return; }
     const v=param.seriesData.get(sVol);
+    const bar=barByTime[param.time]||null;
     const t = tfIsIntraday(curTf)?(fmtDate(param.time)+" "+fmtClock(param.time)+" ET"):fmtDate(param.time);
-    cross.innerHTML='<b>'+t+'</b>  O '+c.open.toFixed(2)+'  H '+c.high.toFixed(2)+'  L '+c.low.toFixed(2)+'  C '+c.close.toFixed(2)+(v?('  Vol '+fmtVol(v.value)):"");
+    cross.innerHTML=bar
+      ?'<b>'+t+'</b>  O '+bar.open.toFixed(2)+'  H '+bar.high.toFixed(2)+'  L '+bar.low.toFixed(2)+'  C '+bar.close.toFixed(2)+(v?('  Vol '+fmtVol(v.value)):"")
+      :'<b>'+t+'</b>  '+c.value.toFixed(2)+(v?('  Vol '+fmtVol(v.value)):"");
     cross.style.display="block";
   });
 }
@@ -800,7 +818,8 @@ function paintChart(d){
   lastChart=d;
   if(!chartReady) return;
   const bars=d.bars;
-  sCandle.setData(bars.map(b=>({time:b.time,open:b.open,high:b.high,low:b.low,close:b.close})));
+  barByTime={}; bars.forEach(b=>{ barByTime[b.time]=b; });
+  sLine.setData(bars.map(b=>({time:b.time,value:b.close})));
   sVol.setData(bars.map(b=>({time:b.time,value:b.volume||0,color: b.close>=b.open?"rgba(38,166,154,.3)":"rgba(239,83,80,.3)"})));
   const closes=bars.map(b=>b.close);
   const e9=ema(closes,9), e20=ema(closes,20), vw=vwapSeries(bars);
@@ -1155,12 +1174,12 @@ function openingRange(core, minutes){
   return {h:Math.max(...orBars.map(b=>b.high)), l:Math.min(...orBars.map(b=>b.low))};
 }
 function updateChartLevels(levels){
-  if(!chartReady||!sCandle) return;
-  priceLines.forEach(l=>{try{sCandle.removePriceLine(l);}catch(e){}});
+  if(!chartReady||!sLine) return;
+  priceLines.forEach(l=>{try{sLine.removePriceLine(l);}catch(e){}});
   priceLines=[];
   levels.forEach(l=>{
     try{
-      priceLines.push(sCandle.createPriceLine({
+      priceLines.push(sLine.createPriceLine({
         price:l.px, color:l.hex, lineWidth:1,
         lineStyle:1, // Dashed
         axisLabelVisible:true, title:l.lbl,
