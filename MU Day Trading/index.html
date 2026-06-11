@@ -91,6 +91,7 @@ button{font-family:inherit;cursor:pointer}
 .tgl{font-size:11px;font-weight:600;padding:5px 10px;border-radius:999px;border:1px solid var(--border2);background:var(--bg3);color:var(--text3);display:inline-flex;align-items:center;gap:6px}
 .tgl .sw{width:8px;height:8px;border-radius:2px;background:var(--text3)}
 .tgl.on{color:var(--text)}
+.tgl.on .sw{background:var(--text2)}
 .tgl.on.vwap{border-color:var(--accent-border);background:var(--accent-soft)} .tgl.on.vwap .sw{background:var(--accent)}
 .tgl.on.e9{border-color:var(--blue-border);background:var(--blue-soft)} .tgl.on.e9 .sw{background:var(--blue)}
 .tgl.on.e20{border-color:var(--amber-border);background:var(--amber-soft)} .tgl.on.e20 .sw{background:var(--amber)}
@@ -260,9 +261,11 @@ input[type=number]{width:96px}
       </div>
       <div class="spacer"></div>
       <div class="toggles">
-        <button class="tgl vwap on" data-ov="vwap"><span class="sw"></span>VWAP</button>
-        <button class="tgl e9 on" data-ov="ema9"><span class="sw"></span>EMA 9</button>
-        <button class="tgl e20 on" data-ov="ema20"><span class="sw"></span>EMA 20</button>
+        <button class="tgl" id="autoFitBtn" title="Fit all data to screen" style="color:var(--text2);padding:5px 9px"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><path d="M1 5V1h4M9 1h4v4M1 9v4h4M9 13h4V9"/></svg></button>
+        <button class="tgl vwap" data-ov="vwap"><span class="sw"></span>VWAP</button>
+        <button class="tgl e9" data-ov="ema9"><span class="sw"></span>EMA 9</button>
+        <button class="tgl e20" data-ov="ema20"><span class="sw"></span>EMA 20</button>
+        <button class="tgl" id="gridBtn"><span class="sw"></span>Grid</button>
       </div>
     </div>
     <div id="chartHolder">
@@ -435,7 +438,7 @@ input[type=number]{width:96px}
   <span class="warn">For information only, not financial advice.</span>
   Live MU data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v2.5 (11 Jun)</span>
+  <span style="margin-left:8px;color:var(--text3)">v2.6 (11 Jun)</span>
 
 </div>
 
@@ -465,13 +468,16 @@ const DEFAULT_CFG = {
   tgEnabled: false,
   tgChatId: "",
   watchlist: ["MU"],
+  overlays: { vwap:false, ema9:false, ema20:false },
+  gridOn: false,
 };
 let cfg = loadCfg();
 let alerts = loadAlerts();
 let alertLog = loadJSON(LS.log, []);
 
 let curTf = "1m";
-let overlays = { vwap:true, ema9:true, ema20:true };
+let overlays = Object.assign({ vwap:false, ema9:false, ema20:false }, cfg.overlays||{});
+let gridOn = !!cfg.gridOn;
 let lastCore = null;        // today's 1d dataset: drives header, indicators, alerts, age, pill
 let lastChart = null;       // dataset currently painted on the chart (1d / 5d / 3mo)
 let lastSnap = null;        // {price,rsi,vwap,ema9,ema20} for alert edge-detection
@@ -746,7 +752,7 @@ function initChart(){
   chart=LightweightCharts.createChart(el,{
     autoSize:true,
     layout:{ background:{type:"solid",color:"transparent"}, textColor:C.text2, fontSize:11 },
-    grid:{ vertLines:{color:C.border}, horzLines:{color:C.border} },
+    grid:{ vertLines:{color:C.border,visible:false}, horzLines:{color:C.border,visible:false} },
     rightPriceScale:{ borderColor:C.border2, scaleMargins:{top:0.08,bottom:0.22} },
     timeScale:{ borderColor:C.border2, timeVisible:true, secondsVisible:false, rightOffset:3,
       tickMarkFormatter:(t,tt)=> (tfIsIntraday(curTf) && tt>=3) ? fmtClock(t) : fmtDate(t) },
@@ -763,6 +769,7 @@ function initChart(){
   sE20=chart.addLineSeries({ color:C.amber, lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
   chartReady=true;
   applyOverlayVisibility();
+  applyGrid();
   if(window.ResizeObserver){
     let rt; new ResizeObserver(()=>{ clearTimeout(rt); rt=setTimeout(refitChart,120); }).observe(el);
   }
@@ -777,6 +784,10 @@ function initChart(){
     cross.innerHTML='<b>'+t+'</b>  O '+c.open.toFixed(2)+'  H '+c.high.toFixed(2)+'  L '+c.low.toFixed(2)+'  C '+c.close.toFixed(2)+(v?('  Vol '+fmtVol(v.value)):"");
     cross.style.display="block";
   });
+}
+function applyGrid(){
+  if(!chartReady||!chart) return;
+  chart.applyOptions({grid:{vertLines:{visible:gridOn},horzLines:{visible:gridOn}}});
 }
 function applyOverlayVisibility(){
   if(!chartReady) return;
@@ -1489,8 +1500,16 @@ function wire(){
     t.addEventListener("click",()=>{
       const k=t.dataset.ov; overlays[k]=!overlays[k];
       t.classList.toggle("on",overlays[k]); applyOverlayVisibility();
+      cfg.overlays=Object.assign({},overlays); saveCfg();
     });
   });
+  const _gridBtn=$("#gridBtn");
+  if(_gridBtn) _gridBtn.addEventListener("click",()=>{
+    gridOn=!gridOn; _gridBtn.classList.toggle("on",gridOn); applyGrid();
+    cfg.gridOn=gridOn; saveCfg();
+  });
+  const _afBtn=$("#autoFitBtn");
+  if(_afBtn) _afBtn.addEventListener("click",()=>{ if(chart) chart.timeScale().fitContent(); });
   // alerts
   $("#alAdd").addEventListener("click",addAlert);
   $("#alType").addEventListener("change",()=>{
@@ -1566,6 +1585,8 @@ function boot(){
   if(!Array.isArray(cfg.watchlist)||!cfg.watchlist.length) cfg.watchlist=[SYMBOL];
   if(!cfg.watchlist.includes(SYMBOL)){ cfg.watchlist.push(SYMBOL); saveCfg(); }
   wire();
+  document.querySelectorAll(".tgl[data-ov]").forEach(t=>t.classList.toggle("on",!!overlays[t.dataset.ov]));
+  const _gb=$("#gridBtn"); if(_gb) _gb.classList.toggle("on",gridOn);
   renderWatchlist();
   renderAlerts(); renderLog();
   // paint from cache for instant cold start — eliminates the blank "—" state on reload
