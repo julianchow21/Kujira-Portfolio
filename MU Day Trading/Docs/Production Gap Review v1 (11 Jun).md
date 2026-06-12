@@ -95,3 +95,7 @@ The app's niche is right: a focused, instant-loading, no-login cockpit for one n
 - Phase 1: against live or cached data confirm levels match Yahoo's own prev-day values, RVOL sanity-check against Finviz, ATR against TradingView (small tolerance), sizing maths by hand
 - All UI: browser check per UI Quality Standard, golden path plus empty states, mobile 375px, no console errors
 - Holiday clock: spoof a 2026 holiday date and confirm the pill says closed
+
+---
+
+*Disposable point-in-time doc. Delete once fully actioned (see CLAUDE.md, Folder cleanliness).*
