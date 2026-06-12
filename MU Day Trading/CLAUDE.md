@@ -4,7 +4,7 @@ Single-file day-trading dashboard for MU (Micron, NASDAQ). Live price/change/vol
 
 ## Architecture
 
-Single-file SPA, all CSS/JS/HTML in `index.html`. No framework, no bundler. Chart via TradingView Lightweight Charts v4.2.0 (CDN, SRI-pinned `sha384-OK7v...`, global `window.LightweightCharts`).
+Single-file SPA, all CSS/JS/HTML in `index.html`. No framework, no bundler. Chart via TradingView Lightweight Charts **v5.2.0** (CDN standalone, global `window.LightweightCharts`). v5 API: `chart.addSeries(LC.AreaSeries, …)`, `chart.addPane()`, `series.attachPrimitive()`.
 
 ### Data spine
 
@@ -31,6 +31,15 @@ Client-side from the series: `ema()`, `rsi()` (Wilder), `macd()` (12/26/9), `vwa
 ### Alerts
 
 `alerts[]` in localStorage, edge-triggered: fire once when the condition becomes true, re-arm when it goes false (`armed` flag). Types: price above/below, RSI above/below, price x VWAP, EMA9 x EMA20. Visual flash + toast + optional Notification + optional beep. Evaluated every refresh from the core snapshot.
+
+## v3.0 additions (12 Jun)
+
+- **Default ticker:** `cfg.defaultSymbol` — resolution order: `?symbol=` URL param → `cfg.defaultSymbol` → `"MU"`. The `SYMBOL` IIFE reads localStorage directly (cannot use `cfg` or `TICKER_RE` — both are in TDZ at that point)
+- **`fitForTf()` / `fitBars`:** replaces bare `fitContent()`. Resets `autoScale` first (clears sticky user zoom), then uses `setVisibleLogicalRange` with `fitBars` windows for 15m (135) and 1h (105). All fit paths call `refitChart()` which double-rAFs `fitForTf()`
+- **`DayBands` primitive:** shades odd-indexed ET trading days on multi-day intraday TFs (5m/15m/1h). Implemented as a LWC v5.2.0 `ISeriesPrimitive` attached to `sLine`. Feed it bar times via `dayBands.setTimes(times)` from `paintChart`. Disabled on 1m (`range:"1d"`) and 1D
+- **Pinned indicator pills:** `cfg.pinnedOverlays` controls which pills show inline; the rest are in the `⋯` dropdown. `renderToggles()` re-renders the whole row on every toggle/pin change. All click handling is event-delegated on `#togglesDyn`
+- **`levelLines` map:** `cfg.levelLines[label] === false` hides a key level from the chart (but not the card). `updateChartLevels` filters before drawing. Eye toggles in `renderLevels` write to this map
+- **`TICKER_META` / `cfg.tickerMeta`:** static map of ~90 tickers → `{i, s, t}`. `cfg.tickerMeta[SYMBOL]` overrides the map. `renderSymMeta()` injects chips after `#sym`; clicking opens an edit popover
 
 ## Gotchas
 
