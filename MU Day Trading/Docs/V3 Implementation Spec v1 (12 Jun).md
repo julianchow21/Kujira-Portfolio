@@ -6,7 +6,7 @@ Julian day-trades off this dashboard and the current UX fights him: every login 
 
 This plan is written for a Sonnet implementer. Every anchor is given as a function name plus approximate current line. Line numbers WILL drift as you edit, so locate by function/string search, not by absolute line. All verified facts below were read directly from the file, trust them over the project CLAUDE.md (which wrongly says Lightweight Charts v4.2.0 — the CDN tag at line 8 pins **v5.2.0**, and the code uses the v5 API: `chart.addSeries(LC.AreaSeries, …)`, `chart.addPane()`).
 
-**Target file:** `~/Claude Projects/Kujira Portfolio/MU Day Trading/index.html` (single-file SPA, 1879 lines, no framework, no build step)
+**Target file:** `~/Claude Projects/Kujira/Portfolio/MU Day Trading/index.html` (single-file SPA, 1879 lines, no framework, no build step)
 **Decisions already confirmed with Julian:** industry pill uses a built-in lookup map + manual edit (NO Yahoo profile fetch, NO Worker change), and key levels get per-level show/hide toggles on the chart.
 
 ## Read this before touching anything — global pitfalls

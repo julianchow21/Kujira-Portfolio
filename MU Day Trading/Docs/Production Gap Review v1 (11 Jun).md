@@ -2,7 +2,7 @@
 
 ## Context
 
-Julian asked for a full review of `~/Claude Projects/Kujira Portfolio/MU Day Trading/index.html` (1,103 lines, single-file SPA): understand the concept, compare it against production-grade financial and day-trading platforms, and produce findings a Sonnet session can execute. This file is the report and the execution backlog. Read the project `CLAUDE.md` before touching code, it documents the architecture and the gotchas that already bit us once.
+Julian asked for a full review of `~/Claude Projects/Kujira/Portfolio/MU Day Trading/index.html` (1,103 lines, single-file SPA): understand the concept, compare it against production-grade financial and day-trading platforms, and produce findings a Sonnet session can execute. This file is the report and the execution backlog. Read the project `CLAUDE.md` before touching code, it documents the architecture and the gotchas that already bit us once.
 
 ## The concept as built
 
