@@ -24,7 +24,7 @@ The app's first-launch wizard walks you through these steps interactively. The v
 
 1. In your new sheet: **Extensions → Apps Script**.
 2. Delete whatever code is already in `Code.gs`.
-3. Open [`apps-script.gs`](./apps-script.gs) from this repo. Copy everything.
+3. Open [`Portfolio/apps-script.gs`](./Portfolio/apps-script.gs) from this repo. Copy everything.
 4. Paste into `Code.gs`. Click **Save** (or Cmd/Ctrl+S).
 5. From the function dropdown at the top, pick **`initOnce`** and click **▶ Run**.
 6. Google will ask you to grant permissions. Click **Review permissions**, pick your Google account, click **Advanced** → **Go to (your project name)** if there's a "Google hasn't verified this app" warning (this is normal — it's *your own code*), then **Allow**.
@@ -52,7 +52,7 @@ That's it. Add a stock, refresh prices, watch it sync to your sheet.
 
 ## Updating the backend
 
-If we ship a new version of `apps-script.gs`, you'll need to re-paste it:
+If we ship a new version of `Portfolio/apps-script.gs`, you'll need to re-paste it:
 
 1. Open your Apps Script project (from the same Google Sheet → Extensions → Apps Script).
 2. Select all in `Code.gs`, delete, paste the new file, save.
@@ -96,17 +96,13 @@ To report a security issue, please open a private security advisory on the GitHu
 
 ## File layout
 
-This repo hosts two apps on one GitHub Pages site. The repo root is the Kujira Portfolio app (it must stay at root so the live URL and installed PWA keep working). The MU day-trading tracker lives in its own subfolder.
+This repo hosts two apps on one GitHub Pages site, each in its own folder. The root `index.html` is a redirect stub that forwards the old root URL to `Portfolio/` (and its `sw.js` is a kill switch that retires the old root-scoped service worker).
 
-| File | Role |
+| Path | Role |
 |---|---|
-| `index.html` | The Kujira Portfolio app. Served at the site root. |
-| `kjr-core.js` | Pure logic extracted from the app, unit-tested. |
-| `apps-script.gs` | Backend code for Google Apps Script. Paste this into your Code.gs. |
-| `sw.js`, `manifest.webmanifest`, `whale-icon.png` | PWA assets (offline shell, install metadata, icon). |
-| `tests/tests.html` | Unit test runner. Open locally in a browser. |
-| `Docs/` | Backlog and QA SOP. |
-| `MU Day Trading/` | Kujira Trading, a separate SPA for MU day-trade tracking. Own CLAUDE.md and docs. |
+| `Portfolio/` | The Kujira Portfolio app: `index.html`, `kjr-core.js`, `apps-script.gs` (backend for your Code.gs), PWA assets, `tests/`, `Docs/`. |
+| `Trading/` | Kujira Trading, a separate SPA for MU day-trade tracking. Own CLAUDE.md and docs. |
+| `index.html`, `sw.js` | Redirect stub + service worker kill switch for the pre-restructure root URL. |
 | `README.md` | This file. |
 | `PRIVACY.md` | Privacy notice. |
 | `SECURITY.md` | Threat model and security policy. |

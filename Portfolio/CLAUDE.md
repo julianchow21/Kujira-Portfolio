@@ -51,7 +51,8 @@ Warm light theme default (`--bg:#faf9f6`, `--accent:#c15f3c` terracotta). Dark o
 - `tests/tests.html` — unit test runner, open locally
 - `Docs/` — Backlog (active), QA SOP (operational reference)
 - `Backups/` — newest one snapshot per file, gitignored
-- `MU Day Trading/` — sub-project, separate SPA, own CLAUDE.md
+- `../Trading/` — sibling app (MU day-trading dashboard), own CLAUDE.md. Cross-linked both ways with relative paths (`../Trading/`, `../Portfolio/`)
+- `../index.html` + `../sw.js` (repo root) — redirect stub and sw kill switch from the pre-restructure root URL. Do not delete
 
 ## Gotchas
 
