@@ -223,6 +223,10 @@ textarea.fi{resize:vertical;min-height:70px}
 .tag.crypto{color:var(--amber);border-color:var(--amber-border);background:var(--amber-soft)}
 .tag.pos{color:var(--green);border-color:var(--green-border);background:var(--green-soft)}
 .tag.neg{color:var(--red);border-color:var(--red-border);background:var(--red-soft)}
+.tag.warn{color:var(--amber);border-color:var(--amber-border);background:var(--amber-soft)}
+.tag.muted{color:var(--tx3);border-color:var(--border);background:transparent}
+.warn-row td{background:color-mix(in srgb,var(--amber-soft) 30%,transparent)}
+.alert-warn{background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);padding:.5rem .75rem;border-radius:var(--radius);font-size:.85rem}
 .integrity-bar{margin-top:14px;border-radius:var(--radius-lg);padding:12px 16px;font-size:13px;border:1px solid var(--border)}
 .integrity-bar.ok{background:var(--green-soft);border-color:var(--green-border);color:var(--green);font-weight:600}
 .integrity-bar.bad{background:var(--amber-soft);border-color:var(--amber-border)}
@@ -842,6 +846,9 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <nav class="bottom-tab-bar" id="bottom-nav"></nav>
 
 <!-- ENTITY MODAL (shared across Stocks/Crypto/RealEstate/Cash) -->
+<!-- IBKR import preview — dynamically populated by ibkrShowPreview() -->
+<div class="overlay" id="ibkr-preview-overlay" onclick="if(event.target===this)this.classList.remove('open')"></div>
+
 <div class="overlay" id="entity-modal">
   <div class="modal">
     <div class="modal-head">
@@ -904,7 +911,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="kjr-core.js"></script>
+<script src="kjr-core.js?v=1.5"></script>
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
    KUJIRA PORTFOLIO — Finance Tracker
@@ -913,7 +920,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
    ═══════════════════════════════════════════════════════════════════════ */
 
 const APP_VERSION = 'v1.0';
-const APP_DISPLAY_VERSION = 'v1.4 (12 Jun)';
+const APP_DISPLAY_VERSION = 'v1.5 (12 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -3678,6 +3685,142 @@ function exportLedgerCSV(){
   downloadCSV('kujira-trades-' + _isoDateSG(new Date()) + '.csv', headers, rows);
 }
 
+/* ─── IBKR CSV import ───────────────────────────────────────────────────
+   ibkrFileSelected: FileReader entry point, reads the .csv then shows preview.
+   ibkrShowPreview:  renders the preview modal (summary + scrollable table).
+   ibkrConfirmImport: commits new trades (and new-stock stubs) then closes.   */
+function ibkrFileSelected(input){
+  const file = input.files && input.files[0];
+  if (!file) return;
+  input.value = ''; // reset so the same file can be re-selected
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const rows    = parseCSV(e.target.result);
+      const { trades, skipped } = ibkrExtractTrades(rows);
+      if (!trades.length){ showToast('No eligible trades found in this file', 'error'); return; }
+      const matched = ibkrMatchTrades(trades, DB.stocks || [], DB.stockTxns || []);
+      ibkrShowPreview(matched, skipped);
+    } catch (err) {
+      showToast('Parse error: ' + err.message, 'error');
+    }
+  };
+  reader.readAsText(file);
+}
+
+function ibkrShowPreview(matched, skippedCount){
+  const newTrades   = matched.filter(t => t.status === 'new');
+  const dupTrades   = matched.filter(t => t.status === 'dup');
+  const newStocks   = matched.filter(t => t.status === 'new-stock');
+  const totalCount  = matched.length + skippedCount;
+  const LARGE_WARN  = (DB.stockTxns || []).length + newTrades.length > 300;
+
+  const chipCls = { 'new':'pos', 'dup':'muted', 'new-stock':'warn' };
+  const chipLbl = { 'new':'new', 'dup':'dup', 'new-stock':'new stock' };
+
+  const tableRows = matched.map(t => {
+    const ccySym = t.currency === 'SGD' ? 'S$' : 'US$';
+    const ccy    = t.currency || 'USD';
+    const ccyMismatch = t.stockId && (() => {
+      const s = (DB.stocks || []).find(x => x.id === t.stockId);
+      return s && (s.currency || (s.market === 'SGX' ? 'SGD' : 'USD')) !== ccy;
+    })();
+    return `<tr${ccyMismatch ? ' class="warn-row"' : ''}>
+      <td class="tl">${kjrEscape(t.date)}</td>
+      <td class="tl">${kjrEscape(t.symbol)}</td>
+      <td class="tl"><span class="tag ${t.side === 'sell' ? 'neg' : 'pos'}">${t.side.toUpperCase()}</span></td>
+      <td class="num">${t.shares}</td>
+      <td class="num">${ccySym}${t.price.toFixed(4)}</td>
+      <td class="num muted">${t.fees ? ccySym + t.fees.toFixed(2) : '—'}</td>
+      <td class="tl"><span class="tag ${chipCls[t.status]}">${chipLbl[t.status]}</span>${ccyMismatch ? ' ⚠' : ''}</td>
+    </tr>`;
+  }).join('');
+
+  const warnHtml = LARGE_WARN
+    ? `<div class="alert alert-warn" style="margin:.5rem 1rem">Large ledgers may exceed the cloud sync size cap (~300 trades).</div>`
+    : '';
+
+  const overlay = document.getElementById('ibkr-preview-overlay');
+  const html = `
+    <div class="modal-box" style="max-width:700px;width:95vw">
+      <div class="modal-head"><h3>IBKR import preview</h3></div>
+      <div class="modal-body" style="padding:1rem">
+        <p style="margin:0 0 .75rem">Found <strong>${matched.length}</strong> trades
+          (${totalCount} in file, ${skippedCount} non-equity/ClosedLot skipped):
+          <span class="tag pos">${newTrades.length} new</span>
+          <span class="tag muted">${dupTrades.length} dup</span>
+          <span class="tag warn">${newStocks.length} new stock</span>
+        </p>
+        ${warnHtml}
+        <div class="tbl-wrap" style="max-height:340px;overflow-y:auto">
+          <table class="tbl" style="font-size:.8rem">
+            <thead><tr>
+              <th class="tl">Date</th><th class="tl">Symbol</th><th class="tl">Side</th>
+              <th>Shares</th><th>Price</th><th>Fees</th><th>Status</th>
+            </tr></thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </div>
+        ${newStocks.length ? '<p style="margin:.5rem 0 0;font-size:.8rem;color:var(--tx2)">New stocks will be created as stubs — add sector, cost currency, and notes after import.</p>' : ''}
+      </div>
+      <div class="modal-foot" style="padding:.75rem 1rem;display:flex;gap:.5rem;justify-content:flex-end">
+        <button class="btn btn-ghost" onclick="document.getElementById('ibkr-preview-overlay').classList.remove('open')">Cancel</button>
+        <button class="btn btn-primary" onclick="ibkrConfirmImport()" ${newTrades.length + newStocks.length === 0 ? 'disabled' : ''}>
+          Import ${newTrades.length + newStocks.length} trade${newTrades.length + newStocks.length !== 1 ? 's' : ''}
+        </button>
+      </div>
+    </div>`;
+
+  // Store matched set on the overlay for ibkrConfirmImport to read
+  overlay.dataset.matched = JSON.stringify(matched);
+  overlay.innerHTML = html;
+  overlay.classList.add('open');
+}
+
+function ibkrConfirmImport(){
+  const overlay = document.getElementById('ibkr-preview-overlay');
+  let matched;
+  try { matched = JSON.parse(overlay.dataset.matched || '[]'); } catch(_){ matched = []; }
+  overlay.classList.remove('open');
+
+  const now = new Date().toISOString();
+  let addedTrades = 0, addedStocks = 0;
+
+  // Create stubs for new-stock entries (unique by symbol)
+  const newStockSymbols = {};
+  matched.filter(t => t.status === 'new-stock').forEach(t => {
+    if (newStockSymbols[t.symbol]) return;
+    const stub = {
+      id: uid('stocks'), symbol: t.symbol,
+      market: t.market || 'US',
+      currency: t.currency || 'USD',
+      shares: 0, avgCost: 0,
+      notes: 'Auto-created from IBKR import',
+      createdAt: now, updatedAt: now
+    };
+    newStockSymbols[t.symbol] = stub.id;
+    (DB.stocks = DB.stocks || []).push(stub);
+    addedStocks++;
+  });
+
+  // Commit new trades (skip dups)
+  matched.filter(t => t.status !== 'dup').forEach(t => {
+    const stockId = t.stockId || newStockSymbols[t.symbol];
+    if (!stockId) return;
+    (DB.stockTxns = DB.stockTxns || []).push({
+      id: uid('stockTxns'), stockId,
+      date: t.date, side: t.side,
+      shares: t.shares, price: t.price, fees: t.fees || 0,
+      cashAccountId: '', notes: '', createdAt: now, updatedAt: now
+    });
+    addedTrades++;
+  });
+
+  saveData();
+  renderAll();
+  showToast(`Imported ${addedTrades} trade${addedTrades !== 1 ? 's' : ''}${addedStocks ? ' + ' + addedStocks + ' new stock' + (addedStocks !== 1 ? 's' : '') : ''}`);
+}
+
 function renderStocks(){
   setRenderCcy('stocks');
   const list = DB.stocks || [];
@@ -4262,6 +4405,8 @@ function renderStockTxns(){
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
         ${viewToggle}
         <button class="btn btn-sm btn-ghost" onclick="exportLedgerCSV()">Export CSV</button>
+        <button class="btn btn-sm btn-ghost" onclick="document.getElementById('ibkr-file-input').click()">Import IBKR CSV</button>
+        <input type="file" id="ibkr-file-input" accept=".csv" style="display:none" onchange="ibkrFileSelected(this)">
         <button class="btn btn-primary btn-sm" onclick="openEntityModal('stockTxns')">＋ Add trade</button>
       </div>
     </div>`;

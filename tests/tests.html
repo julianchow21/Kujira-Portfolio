@@ -159,6 +159,123 @@
   t('unknown string -> null',            () => eq(sectorClass('Banking'), null));
   t('null -> null',                      () => eq(sectorClass(null), null));
 
+  /* ── parseCSV ────────────────────────────────────────────────────── */
+  group('parseCSV');
+  t('simple two-row CSV', () => {
+    const r = parseCSV('a,b,c\n1,2,3');
+    return eq(r.length, 2) && eq(r[0][0], 'a') && eq(r[1][2], '3');
+  });
+  t('quoted field with comma inside', () => {
+    const r = parseCSV('"hello, world",b\n1,2');
+    return eq(r[0][0], 'hello, world');
+  });
+  t('doubled-quote escape', () => {
+    const r = parseCSV('"say ""hi""",b');
+    return eq(r[0][0], 'say "hi"');
+  });
+  t('CRLF line endings', () => {
+    const r = parseCSV('a,b\r\n1,2\r\n');
+    return eq(r.length, 2) && eq(r[1][1], '2');
+  });
+  t('trailing blank line ignored', () => {
+    const r = parseCSV('a,b\n1,2\n');
+    return eq(r.length, 2);
+  });
+
+  /* ── ibkrNum ────────────────────────────────────────────────────── */
+  group('ibkrNum');
+  t('"1,234.56" parses to 1234.56', () => eq(ibkrNum('1,234.56'), 1234.56));
+  t('plain "175.5" parses correctly', () => eq(ibkrNum('175.5'), 175.5));
+  t('negative "-7.52" parses correctly', () => eq(ibkrNum('-7.52'), -7.52));
+  t('junk string returns null', () => eq(ibkrNum('n/a'), null));
+  t('null input returns null', () => eq(ibkrNum(null), null));
+  t('empty string returns null', () => eq(ibkrNum(''), null));
+
+  /* ── ibkrExtractTrades ──────────────────────────────────────────── */
+  group('ibkrExtractTrades');
+  const IBKR_HEADER = 'Trades,Header,DataDiscriminator,Asset Category,Currency,Symbol,Date/Time,Quantity,T. Price,C. Price,Proceeds,Comm/Fee,Basis,Realized P/L,MTM P/L,Code';
+  const ibkrBuy  = 'Trades,Data,Order,Stocks,USD,AAPL,"2024-01-15, 10:30:00",100,175.5,176,17550,-7.52,-17557.52,0,50,';
+  const ibkrSell = 'Trades,Data,Order,Stocks,USD,AAPL,"2024-03-20, 14:00:00",-50,190,190.5,-9500,-6.5,8768.76,726.24,-25,';
+  const ibkrClosed = 'Trades,Data,ClosedLot,Stocks,USD,AAPL,"2024-03-20, 14:00:00",-50,190,190.5,-9500,-6.5,8768.76,726.24,-25,';
+  const ibkrOption = 'Trades,Data,Order,Equity and Index Options,USD,AAPL 20240315 170.0 C,"2024-01-15, 09:00:00",1,2.5,2.6,250,-1.05,-251.05,0,10,';
+  const ibkrSubTot = 'Trades,SubTotal,,Stocks,USD,AAPL,,,,,17550,-7.52,,0,50,';
+  const ibkrTotal  = 'Trades,Total,,Stocks,,,,,,,17550,-7.52,,0,50,';
+
+  t('extracts a buy trade correctly', () => {
+    const csv = IBKR_HEADER + '\n' + ibkrBuy;
+    const { trades } = ibkrExtractTrades(parseCSV(csv));
+    return eq(trades.length, 1) && eq(trades[0].side, 'buy') &&
+           eq(trades[0].symbol, 'AAPL') && eq(trades[0].shares, 100) &&
+           eq(trades[0].price, 175.5) && eq(trades[0].fees, 7.52) &&
+           eq(trades[0].date, '2024-01-15');
+  });
+  t('extracts a sell trade correctly', () => {
+    const csv = IBKR_HEADER + '\n' + ibkrSell;
+    const { trades } = ibkrExtractTrades(parseCSV(csv));
+    return eq(trades.length, 1) && eq(trades[0].side, 'sell') && eq(trades[0].shares, 50);
+  });
+  t('ClosedLot rows are skipped (no double-count)', () => {
+    const csv = IBKR_HEADER + '\n' + ibkrBuy + '\n' + ibkrClosed;
+    const { trades, skipped } = ibkrExtractTrades(parseCSV(csv));
+    return eq(trades.length, 1) && eq(skipped, 1);
+  });
+  t('Options rows are skipped', () => {
+    const csv = IBKR_HEADER + '\n' + ibkrBuy + '\n' + ibkrOption;
+    const { trades } = ibkrExtractTrades(parseCSV(csv));
+    return eq(trades.length, 1);
+  });
+  t('SubTotal and Total rows are skipped', () => {
+    const csv = IBKR_HEADER + '\n' + ibkrBuy + '\n' + ibkrSubTot + '\n' + ibkrTotal;
+    const { trades } = ibkrExtractTrades(parseCSV(csv));
+    return eq(trades.length, 1);
+  });
+  t('header-order independence: columns in reversed order still parse', () => {
+    // Swap columns to prove we use header-map not fixed positions
+    const hdr = 'Trades,Header,Comm/Fee,T. Price,Quantity,Date/Time,Symbol,Currency,Asset Category,DataDiscriminator,junk1,junk2,junk3,junk4,junk5,junk6';
+    const row = 'Trades,Data,-7.52,175.5,100,"2024-01-15, 10:30:00",AAPL,USD,Stocks,Order,,,,,,';
+    const { trades } = ibkrExtractTrades(parseCSV(hdr + '\n' + row));
+    return eq(trades.length, 1) && eq(trades[0].price, 175.5) && eq(trades[0].symbol, 'AAPL');
+  });
+  t('thousands-comma quantity "1,000" parses to 1000 shares', () => {
+    const hdr = 'Trades,Header,DataDiscriminator,Asset Category,Currency,Symbol,Date/Time,Quantity,T. Price,C. Price,Proceeds,Comm/Fee,Basis,Realized P/L,MTM P/L,Code';
+    const row = 'Trades,Data,Order,Stocks,USD,AAPL,"2024-01-15, 10:30:00","1,000",175.5,176,17550,-7.52,-17557.52,0,50,';
+    const { trades } = ibkrExtractTrades(parseCSV(hdr + '\n' + row));
+    return eq(trades.length, 1) && eq(trades[0].shares, 1000);
+  });
+
+  /* ── ibkrMatchTrades ────────────────────────────────────────────── */
+  group('ibkrMatchTrades');
+  const stocks = [{ id:'s1', symbol:'AAPL', market:'US', currency:'USD' }];
+  const existingTxns = [{ id:'t1', stockId:'s1', date:'2024-01-15', side:'buy', shares:100, price:175.5 }];
+  const parsed = [
+    { symbol:'AAPL', date:'2024-01-15', side:'buy',  shares:100, price:175.5, fees:7.52 },  // dup
+    { symbol:'AAPL', date:'2024-03-20', side:'sell', shares:50,  price:190,   fees:6.5 },   // new
+    { symbol:'NVDA', date:'2024-02-01', side:'buy',  shares:10,  price:600,   fees:5 }      // new-stock
+  ];
+  const matched = ibkrMatchTrades(parsed, stocks, existingTxns);
+  t('dup detection: exact match returns dup', () => eq(matched[0].status, 'dup'));
+  t('new trade returns new', () => eq(matched[1].status, 'new') && eq(matched[1].stockId, 's1'));
+  t('unknown symbol returns new-stock', () => eq(matched[2].status, 'new-stock') && eq(matched[2].stockId, null));
+  t('new-stock infers market from currency (USD → US)', () => eq(matched[2].market, 'US'));
+  t('new-stock SGD currency infers SGX', () => {
+    const r = ibkrMatchTrades([{ symbol:'D05', date:'2024-01-01', side:'buy', shares:100, price:30, currency:'SGD' }], [], []);
+    return eq(r[0].market, 'SGX');
+  });
+  t('near-match price (within 0.001) is dup', () => {
+    const r = ibkrMatchTrades(
+      [{ symbol:'AAPL', date:'2024-01-15', side:'buy', shares:100, price:175.5005 }],
+      stocks, existingTxns
+    );
+    return eq(r[0].status, 'dup');
+  });
+  t('different date is not dup', () => {
+    const r = ibkrMatchTrades(
+      [{ symbol:'AAPL', date:'2024-01-16', side:'buy', shares:100, price:175.5 }],
+      stocks, existingTxns
+    );
+    return eq(r[0].status, 'new');
+  });
+
   /* ── Summary ─────────────────────────────────────────────────────── */
   const sum = document.getElementById('summary');
   sum.textContent = pass + ' passed, ' + fail + ' failed';

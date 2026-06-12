@@ -4,7 +4,7 @@ Candidate features, not started. Pick from here when ready. Full specs for the t
 drafts live in `~/Claude Projects/Claude/tasks/todo.md` under "feature drafts". Each item
 has rough priority and effort so picking is fast. Update status as things move.
 
-Last updated: 12/06/2026. App at v1.4.
+Last updated: 12/06/2026. App at v1.5.
 
 ## Priority view
 
@@ -15,7 +15,7 @@ Last updated: 12/06/2026. App at v1.4.
 | 3 | SG income tax (Settings, salary + bonus) | High | Medium | Done (v0.9.8) |
 | 4 | Stocks column manager (reorder/hide) | Medium | Medium | Done (v1.0) |
 | 5 | Fix em dashes in prose copy (house style) | Low | Low | Done (v1.0) |
-| 6 | IBKR CSV import | High | High | Backlog |
+| 6 | IBKR CSV import | High | High | Done (v1.5) |
 | 7 | Single-ticker analysis sub-tab (scalping) | Medium | High | Done (v1.0, link-out to MU app) |
 | 8 | Stocks column sorting (click header) | High | Medium | Done (v1.1) |
 | 9 | Sector tags + allocation bar | High | Medium | Done (v1.2) |

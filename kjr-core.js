@@ -277,6 +277,118 @@ function computeStockPosition(openingShares, openingAvgCost, sortedTxns){
   return { shares, avgCost, costBasis, realisedPL, txnCount: sortedTxns.length };
 }
 
+/* ─── IBKR Activity Statement CSV import ───────────────────────────────
+   parseCSV: minimal RFC 4180 parser — handles quoted fields, doubled-quote
+   escapes, CRLF + LF line endings. Returns array of string arrays.
+   ibkrNum: strips thousands commas from an IBKR numeric cell and returns a
+   finite float, or null on junk.
+   ibkrExtractTrades: filters a parseCSV result down to Trades/Data/Order rows
+   for Stocks only, maps to a normalised trade array.
+   ibkrMatchTrades: tags each extracted trade as 'new', 'dup', or 'new-stock'
+   against existing DB state. */
+function parseCSV(text){
+  const rows = [];
+  let row = [], cell = '', inQ = false;
+  for (let i = 0; i < text.length; i++){
+    const c = text[i];
+    if (inQ){
+      if (c === '"' && text[i+1] === '"'){ cell += '"'; i++; }
+      else if (c === '"') inQ = false;
+      else cell += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r'){
+      if (c === '\r' && text[i+1] === '\n') i++;
+      row.push(cell); cell = '';
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+    } else cell += c;
+  }
+  if (row.some(Boolean) || cell){ row.push(cell); rows.push(row); }
+  return rows;
+}
+
+function ibkrNum(s){
+  const str = String(s == null ? '' : s).replace(/,/g, '').trim();
+  if (!str) return null;
+  const v = Number(str);
+  return isFinite(v) ? v : null;
+}
+
+function ibkrExtractTrades(rows){
+  // Find the Trades header row to build column name → index map
+  let colMap = null;
+  const trades = [];
+  let skipped = 0;
+
+  for (const row of rows){
+    if (row[0] !== 'Trades') continue;
+
+    if (row[1] === 'Header'){
+      colMap = {};
+      for (let i = 0; i < row.length; i++) colMap[row[i].trim()] = i;
+      continue;
+    }
+
+    if (row[1] !== 'Data') continue; // SubTotal / Total rows
+    if (!colMap) continue;
+
+    // Only keep Order rows; ClosedLot rows double-count trade quantities
+    const discrimIdx = colMap['DataDiscriminator'];
+    if (discrimIdx != null && row[discrimIdx] !== 'Order'){ skipped++; continue; }
+
+    // Only equities; skip Options, Forex, Bonds, CFDs
+    const assetIdx = colMap['Asset Category'];
+    if (assetIdx != null && row[assetIdx] !== 'Stocks'){ skipped++; continue; }
+
+    const get = key => { const i = colMap[key]; return i != null ? (row[i] || '').trim() : ''; };
+
+    const qty  = ibkrNum(get('Quantity'));
+    const px   = ibkrNum(get('T. Price'));
+    const comm = ibkrNum(get('Comm/Fee'));
+    if (qty == null || px == null) { skipped++; continue; }
+
+    // IBKR DateTime format: "2024-01-15, 10:30:00" — take only the date part
+    const rawDt = get('Date/Time');
+    const date  = rawDt.split(',')[0].trim();
+
+    trades.push({
+      symbol:   get('Symbol').toUpperCase(),
+      currency: get('Currency'),
+      date,
+      side:    qty > 0 ? 'buy' : 'sell',
+      shares:  Math.abs(qty),
+      price:   Math.abs(px),
+      fees:    comm != null ? Math.abs(comm) : 0
+    });
+  }
+
+  return { trades, skipped };
+}
+
+function ibkrMatchTrades(parsed, stocks, existingTxns){
+  return parsed.map(t => {
+    // Match symbol case-insensitively
+    const stock = stocks.find(s => (s.symbol || '').toUpperCase() === t.symbol);
+    if (!stock){
+      // Infer market from currency for display purposes
+      const market = t.currency === 'SGD' ? 'SGX' : 'US';
+      return Object.assign({}, t, { status: 'new-stock', stockId: null, market });
+    }
+
+    // Dup check: same stock + date + side + shares (±0.0001) + price (±0.001)
+    const isDup = (existingTxns || []).some(x =>
+      x.stockId === stock.id &&
+      x.date === t.date &&
+      x.side === t.side &&
+      Math.abs((Number(x.shares) || 0) - t.shares) < 0.0001 &&
+      Math.abs((Number(x.price)  || 0) - t.price)  < 0.001
+    );
+
+    return Object.assign({}, t, { status: isDup ? 'dup' : 'new', stockId: stock.id });
+  });
+}
+
 /* node/test shim — harmless in the browser (no `module` global there). */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -289,6 +401,7 @@ if (typeof module !== 'undefined' && module.exports) {
     kjrSafeNumber,
     roundMoney, safeRatio,
     rangePosition, vsBaseline, SECTOR_CLASS, sectorClass,
-    computeStockPosition
+    computeStockPosition,
+    parseCSV, ibkrNum, ibkrExtractTrades, ibkrMatchTrades
   };
 }
