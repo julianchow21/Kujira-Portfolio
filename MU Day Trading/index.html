@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MU Day Trading</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230f0f0f'/><text x='16' y='22' font-size='15' font-family='Arial' font-weight='700' fill='%232dd4bf' text-anchor='middle'>MU</text></svg>">
-<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"
-        integrity="sha384-OK7vELvjHdhUFi31JYioPIcRHTROLdcDa6ZsNWgvgLaKj+9JqhU0Ad8g4wz3CXjA"
+<script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"
+        integrity="sha384-q1KYLSKHgBnW5tWYGGR8+6YV4/iPy31dILoF2I1OD7XiVUvHEp/TaxIQVmB0j3R2"
         crossorigin="anonymous" defer></script>
 <style>
 :root{
@@ -95,10 +95,17 @@ button{font-family:inherit;cursor:pointer}
 .tgl.on.vwap{border-color:var(--accent-border);background:var(--accent-soft)} .tgl.on.vwap .sw{background:var(--accent)}
 .tgl.on.e9{border-color:var(--blue-border);background:var(--blue-soft)} .tgl.on.e9 .sw{background:var(--blue)}
 .tgl.on.e20{border-color:var(--amber-border);background:var(--amber-soft)} .tgl.on.e20 .sw{background:var(--amber)}
+.tgl.on.rs{border-color:var(--amber-border);background:var(--amber-soft)} .tgl.on.rs .sw{background:var(--amber)}
+.tgl.on.rpane{border-color:var(--purple);background:rgba(156,39,176,.12)} .tgl.on.rpane .sw{background:var(--purple)}
+.tgl.on.mpane{border-color:var(--accent-border);background:var(--accent-soft)} .tgl.on.mpane .sw{background:var(--accent)}
 #chart{width:100%;height:360px;position:relative}
 .chart-cross{position:absolute;top:8px;left:8px;font-size:11px;color:var(--text2);background:rgba(15,15,15,.7);padding:4px 8px;border-radius:6px;pointer-events:none;display:none;z-index:5}
 .chart-cross b{color:var(--text);font-weight:600}
 .chart-empty{display:flex;align-items:center;justify-content:center;height:360px;color:var(--text3);font-size:13px;text-align:center}
+/* Tap-to-place popover */
+#tapPop{position:absolute;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:10px 12px;z-index:10;box-shadow:0 6px 20px rgba(0,0,0,.55);display:none;min-width:170px}
+#tapPop .tp-px{font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text)}
+#tapPop .tp-btns{display:flex;gap:6px}
 
 /* Indicators */
 .ind-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
@@ -246,6 +253,7 @@ input[type=number]{width:96px}
       <div class="stat"><div class="k">Gap %</div><div class="v mono" id="sGap">—</div></div>
       <div class="stat"><div class="k">From Open</div><div class="v mono" id="sFromOpen">—</div></div>
       <div class="stat"><div class="k">RVOL</div><div class="v mono" id="sRvol">— <span class="chip" id="rvolChip"></span></div></div>
+      <div class="stat"><div class="k">vs SMH</div><div class="v mono" id="sRSstat">—</div></div>
     </div>
   </div>
 
@@ -263,13 +271,26 @@ input[type=number]{width:96px}
       <div class="toggles">
         <button class="tgl" id="autoFitBtn" title="Fit all data to screen" style="color:var(--text2);padding:5px 9px"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><path d="M1 5V1h4M9 1h4v4M1 9v4h4M9 13h4V9"/></svg></button>
         <button class="tgl vwap" data-ov="vwap"><span class="sw"></span>VWAP</button>
+        <button class="tgl" data-ov="vwapsd"><span class="sw"></span>SD Bands</button>
         <button class="tgl e9" data-ov="ema9"><span class="sw"></span>EMA 9</button>
         <button class="tgl e20" data-ov="ema20"><span class="sw"></span>EMA 20</button>
+        <button class="tgl rs" data-ov="rs"><span class="sw"></span>RS</button>
+        <button class="tgl rpane" data-ov="rsiPane"><span class="sw"></span>RSI</button>
+        <button class="tgl mpane" data-ov="macdPane"><span class="sw"></span>MACD</button>
         <button class="tgl" id="gridBtn"><span class="sw"></span>Grid</button>
       </div>
     </div>
     <div id="chartHolder">
-      <div id="chart"><div class="chart-cross" id="cross"></div></div>
+      <div id="chart">
+        <div class="chart-cross" id="cross"></div>
+        <div id="tapPop">
+          <div class="tp-px" id="tapPx"></div>
+          <div class="tp-btns">
+            <button class="btn" id="tapPlace" style="padding:5px 10px;font-size:12px">Place</button>
+            <button class="btn ghost" id="tapCancel" style="padding:5px 10px;font-size:12px">Cancel</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -438,7 +459,7 @@ input[type=number]{width:96px}
   <span class="warn">For information only, not financial advice.</span>
   Live MU data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v2.7 (11 Jun)</span>
+  <span style="margin-left:8px;color:var(--text3)">v2.8 (11 Jun)</span>
 
 </div>
 
@@ -468,15 +489,16 @@ const DEFAULT_CFG = {
   tgEnabled: false,
   tgChatId: "",
   watchlist: ["MU"],
-  overlays: { vwap:false, ema9:false, ema20:false },
+  overlays: { vwap:false, ema9:false, ema20:false, vwapsd:false, rs:false, rsiPane:false, macdPane:false },
   gridOn: false,
+  customLevels: [],
 };
 let cfg = loadCfg();
 let alerts = loadAlerts();
 let alertLog = loadJSON(LS.log, []);
 
 let curTf = "1m";
-let overlays = Object.assign({ vwap:false, ema9:false, ema20:false }, cfg.overlays||{});
+let overlays = Object.assign({ vwap:false, ema9:false, ema20:false, vwapsd:false, rs:false, rsiPane:false, macdPane:false }, cfg.overlays||{});
 let gridOn = !!cfg.gridOn;
 let lastCore = null;        // today's 1d dataset: drives header, indicators, alerts, age, pill
 let lastChart = null;       // dataset currently painted on the chart (1d / 5d / 3mo)
@@ -608,25 +630,25 @@ const TIMEFRAMES = {
 const CORE_PARAMS = { interval:"1m", range:"1d", pre:true, forcePrePost:true };
 function tfParams(tf){ return TIMEFRAMES[tf] || TIMEFRAMES["1m"]; }
 function tfIsIntraday(tf){ return tfParams(tf).intraday; }
-function yahooTarget(p){
-  return YF_HOST+"/v8/finance/chart/"+encodeURIComponent(SYMBOL)+"?interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.forcePrePost || (p.pre && cfg.extended));
+function yahooTarget(p, sym=SYMBOL){
+  return YF_HOST+"/v8/finance/chart/"+encodeURIComponent(sym)+"?interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.forcePrePost || (p.pre && cfg.extended));
 }
-function requestUrls(p){
-  const t=yahooTarget(p);
+function requestUrls(p, sym=SYMBOL){
+  const t=yahooTarget(p, sym);
   const m=cfg.proxyMode, base=(cfg.proxyUrl||"").trim();
   if((m==="worker"||m==="appsscript") && !base) return []; // configured mode but no URL yet
   if(m==="worker"){
-    return [ { url: base+(base.includes("?")?"&":"?")+"symbol="+encodeURIComponent(SYMBOL)+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) } ];
+    return [ { url: base+(base.includes("?")?"&":"?")+"symbol="+encodeURIComponent(sym)+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) } ];
   }
   if(m==="appsscript"){
-    return [ { url: base+(base.includes("?")?"&":"?")+"action=chart&symbol="+encodeURIComponent(SYMBOL)+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) } ];
+    return [ { url: base+(base.includes("?")?"&":"?")+"action=chart&symbol="+encodeURIComponent(sym)+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) } ];
   }
   const pub = PUBLIC_PROXIES.map(pp=>({ url: pp.make(t), unwrap: pp.unwrap }));
   if(m==="direct") return [ { url:t }, ...pub ]; // try direct, then fall back to public
   return pub;
 }
-async function fetchChart(p){
-  const reqs=requestUrls(p);
+async function fetchChart(p, sym=SYMBOL){
+  const reqs=requestUrls(p, sym);
   if(!reqs.length) return { ok:false, error:"no proxy URL set" };
   let lastErr="no data source";
   for(const req of reqs){
@@ -735,10 +757,43 @@ function vwapSeries(bars){ // anchored to each regular session; resets at every 
   return out;
 }
 function lastNonNull(arr){ for(let i=arr.length-1;i>=0;i--) if(arr[i]!=null) return arr[i]; return null; }
+function vwapBandsData(bars){
+  const vwap=[],up1=[],dn1=[],up2=[],dn2=[];
+  let cumPV=0,cumV=0,cumPV2=0,curDay=null;
+  for(let i=0;i<bars.length;i++){
+    const b=bars[i];
+    if(!isRegularSession(b.time)){vwap.push(null);up1.push(null);dn1.push(null);up2.push(null);dn2.push(null);continue;}
+    const day=etDateKey(b.time);
+    if(day!==curDay){cumPV=0;cumV=0;cumPV2=0;curDay=day;}
+    const tp=(b.high+b.low+b.close)/3;
+    const v=b.volume||0;
+    cumPV+=tp*v; cumV+=v;
+    const vw=cumV>0?cumPV/cumV:b.close;
+    cumPV2+=(tp-vw)*(tp-vw)*v;
+    const sd=cumV>0?Math.sqrt(cumPV2/cumV):0;
+    vwap.push(vw); up1.push(vw+sd); dn1.push(vw-sd); up2.push(vw+2*sd); dn2.push(vw-2*sd);
+  }
+  return {vwap,up1,dn1,up2,dn2};
+}
+async function fetchRSSeries(){
+  if(Date.now()-lastRSFetchTime<60000) return;
+  lastRSFetchTime=Date.now();
+  try{
+    const cr=await fetchChart({interval:"1m",range:"1d",pre:false},RS_SYMBOL);
+    if(cr.ok) lastRS=parseResult(cr.result);
+  }catch(e){}
+}
 
 /* ====================== Chart (Lightweight Charts) ====================== */
 let chart=null, sLine=null, sVol=null, sVwap=null, sE9=null, sE20=null, chartReady=false;
+let sVwapU1=null, sVwapD1=null, sVwapU2=null, sVwapD2=null; // VWAP SD bands
+let sRS=null;                                                 // RS overlay (left scale)
+let rsiPane=null, macdPane=null;                              // pane objects (v5)
+let sRsiLine=null, sMacdLine=null, sMacdSig=null, sMacdHist=null;
 let barByTime={}, _pulseState=true, _pulseTick=null;
+let customPriceLines=[];   // price lines for user-placed custom levels
+let lastRS=null, lastRSFetchTime=0; // RS (SMH) data
+const RS_SYMBOL="SMH";
 const C = {};
 function readTokens(){
   const cs=getComputedStyle(document.documentElement);
@@ -759,22 +814,53 @@ function initChart(){
       tickMarkFormatter:(t,tt)=> (tfIsIntraday(curTf) && tt>=3) ? fmtClock(t) : fmtDate(t) },
     crosshair:{ mode:LightweightCharts.CrosshairMode.Normal,
       vertLine:{color:C.text3,labelBackgroundColor:C.bg2}, horzLine:{color:C.text3,labelBackgroundColor:C.bg2} },
-    localization:{ priceFormatter:p=>"$"+Number(p).toFixed(2),
-      timeFormatter:t=> tfIsIntraday(curTf)?(fmtDate(t)+" "+fmtClock(t)+" ET"):fmtDate(t) },
+    localization:{ timeFormatter:t=> tfIsIntraday(curTf)?(fmtDate(t)+" "+fmtClock(t)+" ET"):fmtDate(t) },
   });
-  sLine=chart.addAreaSeries({
+  // v5 API: chart.addSeries(SeriesConstructor, options)
+  const LC=LightweightCharts;
+  const dollarFmt={type:'custom',formatter:p=>"$"+Number(p).toFixed(2),minMove:0.01};
+  sLine=chart.addSeries(LC.AreaSeries,{
     topColor:'rgba(45,212,191,0.12)', bottomColor:'rgba(45,212,191,0.01)',
     lineColor:'#2dd4bf', lineWidth:2,
     priceLineVisible:true, priceLineColor:'#2dd4bf',
     lastValueVisible:true,
     crosshairMarkerVisible:true, crosshairMarkerRadius:4,
     crosshairMarkerBorderColor:'#2dd4bf', crosshairMarkerBackgroundColor:'#2dd4bf',
+    priceFormat:dollarFmt,
   });
-  sVol=chart.addHistogramSeries({ priceFormat:{type:"volume"}, priceScaleId:"vol", color:C.border2, lastValueVisible:false, priceLineVisible:false });
-  chart.priceScale("vol").applyOptions({ scaleMargins:{top:0.84,bottom:0} });
-  sVwap=chart.addLineSeries({ color:C.accent, lineWidth:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
-  sE9 =chart.addLineSeries({ color:C.blue,  lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
-  sE20=chart.addLineSeries({ color:C.amber, lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+  sVol=chart.addSeries(LC.HistogramSeries,{priceFormat:{type:"volume"},priceScaleId:"vol",color:C.border2,lastValueVisible:false,priceLineVisible:false});
+  chart.priceScale("vol").applyOptions({scaleMargins:{top:0.84,bottom:0}});
+  sVwap=chart.addSeries(LC.LineSeries,{color:C.accent,lineWidth:2,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+  sE9  =chart.addSeries(LC.LineSeries,{color:C.blue, lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+  sE20 =chart.addSeries(LC.LineSeries,{color:C.amber,lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
+  // VWAP SD band series (±1σ and ±2σ, dashed, faint accent-blue)
+  const _band={priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,lineStyle:2};
+  sVwapU1=chart.addSeries(LC.LineSeries,{color:'rgba(41,98,255,.45)',lineWidth:1,..._band});
+  sVwapD1=chart.addSeries(LC.LineSeries,{color:'rgba(41,98,255,.45)',lineWidth:1,..._band});
+  sVwapU2=chart.addSeries(LC.LineSeries,{color:'rgba(41,98,255,.22)',lineWidth:1,..._band});
+  sVwapD2=chart.addSeries(LC.LineSeries,{color:'rgba(41,98,255,.22)',lineWidth:1,..._band});
+  // RS overlay on left price scale — shows SMH % from session open
+  sRS=chart.addSeries(LC.LineSeries,{
+    color:'#FF9800',lineWidth:1,priceScaleId:'left',
+    priceLineVisible:false,lastValueVisible:true,crosshairMarkerVisible:false,
+    priceFormat:{type:'custom',formatter:v=>(v>=0?'+':'')+v.toFixed(2)+'%',minMove:0.01},
+  });
+  // RSI pane (pane index 1, collapsed by default)
+  rsiPane=chart.addPane();
+  rsiPane.setStretchFactor(0.001);
+  const rsiFmt={type:'custom',formatter:v=>v.toFixed(1),minMove:0.1};
+  sRsiLine=rsiPane.addSeries(LC.LineSeries,{
+    color:'#9c27b0',lineWidth:1,priceLineVisible:false,lastValueVisible:true,crosshairMarkerVisible:false,priceFormat:rsiFmt,
+  });
+  sRsiLine.createPriceLine({price:70,color:'rgba(239,83,80,.5)',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'OB'});
+  sRsiLine.createPriceLine({price:30,color:'rgba(38,166,154,.5)',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'OS'});
+  // MACD pane (pane index 2, collapsed by default)
+  macdPane=chart.addPane();
+  macdPane.setStretchFactor(0.001);
+  const macdFmt={type:'custom',formatter:v=>v.toFixed(3),minMove:0.001};
+  sMacdHist=macdPane.addSeries(LC.HistogramSeries,{priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,priceFormat:macdFmt});
+  sMacdLine=macdPane.addSeries(LC.LineSeries,{color:C.accent,lineWidth:1,priceLineVisible:false,lastValueVisible:true,crosshairMarkerVisible:false,priceFormat:macdFmt});
+  sMacdSig =macdPane.addSeries(LC.LineSeries,{color:C.amber, lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,priceFormat:macdFmt});
   chartReady=true;
   applyOverlayVisibility();
   applyGrid();
@@ -783,10 +869,31 @@ function initChart(){
   _pulseTick=setInterval(()=>{
     if(!sLine) return;
     _pulseState=!_pulseState;
-    sLine.applyOptions({ priceLineColor: _pulseState?'#2dd4bf':'rgba(45,212,191,0.18)' });
-  }, 550);
+    sLine.applyOptions({priceLineColor:_pulseState?'#2dd4bf':'rgba(45,212,191,0.18)'});
+  },550);
+  // Tap-to-place custom levels
+  const tapPop=document.getElementById("tapPop");
+  const tapPxEl=document.getElementById("tapPx");
+  let _tapTimer=null;
+  function _showTap(price,x,y){
+    if(!tapPop) return;
+    tapPxEl.textContent="Level at "+fmtPx(price);
+    tapPop.style.left=Math.min(x+10, el.offsetWidth-190)+"px";
+    tapPop.style.top=Math.max(y-65, 8)+"px";
+    tapPop._price=price;
+    tapPop.style.display="block";
+    clearTimeout(_tapTimer);
+    _tapTimer=setTimeout(()=>{tapPop.style.display="none";},6000);
+  }
+  chart.subscribeClick(param=>{
+    if(!param.point) return;
+    if(tapPop && tapPop.style.display!=="none"){ tapPop.style.display="none"; return; }
+    const price=sLine.coordinateToPrice(param.point.y);
+    if(price==null||price<=0) return;
+    _showTap(price,param.point.x,param.point.y);
+  });
   if(window.ResizeObserver){
-    let rt; new ResizeObserver(()=>{ clearTimeout(rt); rt=setTimeout(refitChart,120); }).observe(el);
+    let rt; new ResizeObserver(()=>{clearTimeout(rt);rt=setTimeout(refitChart,120);}).observe(el);
   }
 
   const cross=$("#cross");
@@ -807,12 +914,37 @@ function applyGrid(){
   if(!chartReady||!chart) return;
   chart.applyOptions({grid:{vertLines:{visible:gridOn},horzLines:{visible:gridOn}}});
 }
+function applyChartHeight(){
+  const el=document.getElementById("chart"); if(!el) return;
+  const panes=(overlays.rsiPane?1:0)+(overlays.macdPane?1:0);
+  const base=window.innerWidth<=560?300:360;
+  el.style.height=(base+panes*100)+"px";
+  const ce=el.querySelector(".chart-empty"); if(ce) ce.style.height=el.style.height;
+}
 function applyOverlayVisibility(){
   if(!chartReady) return;
-  const intraday = tfIsIntraday(curTf);
-  sVwap.applyOptions({ visible: overlays.vwap && intraday });
-  sE9.applyOptions({ visible: overlays.ema9 });
-  sE20.applyOptions({ visible: overlays.ema20 });
+  const intraday=tfIsIntraday(curTf);
+  sVwap.applyOptions({visible:overlays.vwap&&intraday});
+  sE9.applyOptions({visible:overlays.ema9});
+  sE20.applyOptions({visible:overlays.ema20});
+  // VWAP SD bands — only when VWAP on + SD Bands on + intraday
+  const showBands=overlays.vwap&&overlays.vwapsd&&intraday;
+  if(sVwapU1) sVwapU1.applyOptions({visible:showBands});
+  if(sVwapD1) sVwapD1.applyOptions({visible:showBands});
+  if(sVwapU2) sVwapU2.applyOptions({visible:showBands});
+  if(sVwapD2) sVwapD2.applyOptions({visible:showBands});
+  // RS overlay + left scale
+  if(sRS) sRS.applyOptions({visible:!!overlays.rs});
+  chart.applyOptions({leftPriceScale:{visible:!!overlays.rs}});
+  // RSI pane
+  if(rsiPane){ rsiPane.setStretchFactor(overlays.rsiPane?0.18:0.001); }
+  if(sRsiLine) sRsiLine.applyOptions({visible:!!overlays.rsiPane});
+  // MACD pane
+  if(macdPane){ macdPane.setStretchFactor(overlays.macdPane?0.15:0.001); }
+  if(sMacdLine) sMacdLine.applyOptions({visible:!!overlays.macdPane});
+  if(sMacdSig)  sMacdSig.applyOptions({visible:!!overlays.macdPane});
+  if(sMacdHist) sMacdHist.applyOptions({visible:!!overlays.macdPane});
+  applyChartHeight();
 }
 function paintChart(d){
   lastChart=d;
@@ -822,10 +954,37 @@ function paintChart(d){
   sLine.setData(bars.map(b=>({time:b.time,value:b.close})));
   sVol.setData(bars.map(b=>({time:b.time,value:b.volume||0,color: b.close>=b.open?"rgba(38,166,154,.3)":"rgba(239,83,80,.3)"})));
   const closes=bars.map(b=>b.close);
-  const e9=ema(closes,9), e20=ema(closes,20), vw=vwapSeries(bars);
+  const e9=ema(closes,9), e20=ema(closes,20);
+  const bands=vwapBandsData(bars);
   sE9.setData(bars.map((b,i)=>e9[i]!=null?{time:b.time,value:e9[i]}:null).filter(Boolean));
   sE20.setData(bars.map((b,i)=>e20[i]!=null?{time:b.time,value:e20[i]}:null).filter(Boolean));
-  sVwap.setData(bars.map((b,i)=>vw[i]!=null?{time:b.time,value:vw[i]}:null).filter(Boolean));
+  sVwap.setData(bars.map((b,i)=>bands.vwap[i]!=null?{time:b.time,value:bands.vwap[i]}:null).filter(Boolean));
+  if(sVwapU1) sVwapU1.setData(bars.map((b,i)=>bands.up1[i]!=null?{time:b.time,value:bands.up1[i]}:null).filter(Boolean));
+  if(sVwapD1) sVwapD1.setData(bars.map((b,i)=>bands.dn1[i]!=null?{time:b.time,value:bands.dn1[i]}:null).filter(Boolean));
+  if(sVwapU2) sVwapU2.setData(bars.map((b,i)=>bands.up2[i]!=null?{time:b.time,value:bands.up2[i]}:null).filter(Boolean));
+  if(sVwapD2) sVwapD2.setData(bars.map((b,i)=>bands.dn2[i]!=null?{time:b.time,value:bands.dn2[i]}:null).filter(Boolean));
+  // RS overlay — SMH % from session open, matched to MU bar times
+  if(sRS){
+    if(lastRS&&lastRS.bars.length){
+      let rsOpen=null;
+      for(const b of lastRS.bars){if(isRegularSession(b.time)){rsOpen=b.open;break;}}
+      if(rsOpen==null&&lastRS.bars.length) rsOpen=lastRS.bars[0].open;
+      const rsMap={}; lastRS.bars.forEach(b=>{if(rsOpen) rsMap[b.time]=(b.close-rsOpen)/rsOpen*100;});
+      sRS.setData(bars.map(b=>rsMap[b.time]!=null?{time:b.time,value:rsMap[b.time]}:null).filter(Boolean));
+    } else { sRS.setData([]); }
+  }
+  // RSI pane data
+  if(sRsiLine){
+    const rv=rsi(closes,14);
+    sRsiLine.setData(bars.map((b,i)=>rv[i]!=null?{time:b.time,value:rv[i]}:null).filter(Boolean));
+  }
+  // MACD pane data
+  if(sMacdLine&&sMacdSig&&sMacdHist){
+    const mc=macd(closes);
+    sMacdLine.setData(bars.map((b,i)=>mc.line[i]!=null?{time:b.time,value:mc.line[i]}:null).filter(Boolean));
+    sMacdSig.setData(bars.map((b,i)=>mc.sig[i]!=null?{time:b.time,value:mc.sig[i]}:null).filter(Boolean));
+    sMacdHist.setData(bars.map((b,i)=>mc.hist[i]!=null?{time:b.time,value:mc.hist[i],color:mc.hist[i]>=0?"rgba(38,166,154,.6)":"rgba(239,83,80,.6)"}:null).filter(Boolean));
+  }
   applyOverlayVisibility();
   refitChart();
 }
@@ -1173,6 +1332,24 @@ function openingRange(core, minutes){
   if(!orBars.length) return null;
   return {h:Math.max(...orBars.map(b=>b.high)), l:Math.min(...orBars.map(b=>b.low))};
 }
+function applyCustomLevels(){
+  if(!chartReady||!sLine) return;
+  customPriceLines.forEach(l=>{try{sLine.removePriceLine(l);}catch(e){}});
+  customPriceLines=[];
+  (cfg.customLevels||[]).forEach(l=>{
+    try{
+      customPriceLines.push(sLine.createPriceLine({
+        price:l.px,color:'#787b86',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:l.label||'Custom',
+      }));
+    }catch(e){}
+  });
+}
+function renderRS(){
+  const el=document.getElementById("sRSstat"); if(!el) return;
+  if(!lastRS||lastRS.price==null||lastRS.prevClose==null){ el.textContent="—"; return; }
+  const chg=(lastRS.price-lastRS.prevClose)/lastRS.prevClose*100;
+  el.innerHTML='<span class="'+(chg>=0?"up":"down")+'">'+RS_SYMBOL+" "+fmtPct(chg)+'</span>';
+}
 function updateChartLevels(levels){
   if(!chartReady||!sLine) return;
   priceLines.forEach(l=>{try{sLine.removePriceLine(l);}catch(e){}});
@@ -1225,7 +1402,45 @@ function renderLevels(core){
       }
     };
   });
+  // Custom levels section
+  const custom=(cfg.customLevels||[]).slice().sort((a,b)=>b.px-a.px);
+  if(custom.length){
+    let ch='<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Custom</div>';
+    custom.forEach(l=>{
+      const d=price!=null?price-l.px:null;
+      const dStr=d!=null?((d>=0?"+":"")+d.toFixed(2)+" / "+(d/l.px*100>=0?"+":"")+(d/l.px*100).toFixed(1)+"%"):"—";
+      ch+=`<div class="level-row">
+        <span class="level-dot" style="background:#787b86"></span>
+        <span class="level-lbl">${esc(l.label||'Custom')}</span>
+        <span class="level-px mono">$${l.px.toFixed(2)}</span>
+        <span class="level-dist mono ${d==null?"":(d>=0?"up":"down")}">${dStr}</span>
+        <button class="btn ghost level-alert" data-px="${l.px}" data-above="${price!=null&&l.px>price?1:0}">Alert</button>
+        <button class="al-x" data-delcustom="${esc(l.id)}" title="Remove">×</button>
+      </div>`;
+    });
+    ch+='</div>';
+    list.innerHTML+=ch;
+    list.querySelectorAll("[data-delcustom]").forEach(btn=>{
+      btn.onclick=()=>{
+        cfg.customLevels=(cfg.customLevels||[]).filter(l=>l.id!==btn.dataset.delcustom);
+        saveCfg(); applyCustomLevels();
+        if(lastCore) renderLevels(lastCore);
+      };
+    });
+    // wire alert buttons on custom levels
+    list.querySelectorAll("[data-delcustom]~.level-alert,.level-row:has([data-delcustom]) .level-alert").forEach(btn=>{
+      btn.onclick=()=>{
+        const px=parseFloat(btn.dataset.px);
+        if(!isNaN(px)){
+          const type=btn.dataset.above==="1"?"price_above":"price_below";
+          alerts.push({id:"a"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),type,value:px,enabled:true,armed:true});
+          saveAlerts(); renderAlerts(); toast("Alert set at "+fmtPx(px));
+        }
+      };
+    });
+  }
   updateChartLevels(levels);
+  applyCustomLevels();
 }
 
 /* ====================== RVOL ====================== */
@@ -1344,6 +1559,8 @@ async function refresh(manual){
     renderLevels(core);
     renderATR(core);
     renderRvol(core);
+    // RS refresh — max once per minute, non-blocking
+    if(Date.now()-lastRSFetchTime>60000) fetchRSSeries().then(()=>renderRS());
     // Chart: the 1m timeframe is the same data as core, others load their own series.
     if(curTf==="1m") paintChart(core);
     else loadChart();
@@ -1520,8 +1737,25 @@ function wire(){
       const k=t.dataset.ov; overlays[k]=!overlays[k];
       t.classList.toggle("on",overlays[k]); applyOverlayVisibility();
       cfg.overlays=Object.assign({},overlays); saveCfg();
+      // When RSI/MACD panes toggled, refit after height change
+      if(k==="rsiPane"||k==="macdPane") requestAnimationFrame(()=>requestAnimationFrame(()=>{ if(chart) chart.timeScale().fitContent(); }));
     });
   });
+  // Tap-to-place Place / Cancel buttons
+  const _tapPlace=document.getElementById("tapPlace");
+  const _tapCancel=document.getElementById("tapCancel");
+  const _tapPop=document.getElementById("tapPop");
+  if(_tapPlace) _tapPlace.addEventListener("click",()=>{
+    if(!_tapPop) return;
+    const price=_tapPop._price; if(price==null) return;
+    _tapPop.style.display="none";
+    const id="c"+Date.now().toString(36)+Math.random().toString(36).slice(2,4);
+    cfg.customLevels=(cfg.customLevels||[]).concat([{id,px:Math.round(price*100)/100,label:''}]);
+    saveCfg(); applyCustomLevels();
+    if(lastCore) renderLevels(lastCore);
+    toast("Level placed at "+fmtPx(price));
+  });
+  if(_tapCancel) _tapCancel.addEventListener("click",()=>{ if(_tapPop) _tapPop.style.display="none"; });
   const _gridBtn=$("#gridBtn");
   if(_gridBtn) _gridBtn.addEventListener("click",()=>{
     gridOn=!gridOn; _gridBtn.classList.toggle("on",gridOn); applyGrid();
@@ -1606,6 +1840,7 @@ function boot(){
   wire();
   document.querySelectorAll(".tgl[data-ov]").forEach(t=>t.classList.toggle("on",!!overlays[t.dataset.ov]));
   const _gb=$("#gridBtn"); if(_gb) _gb.classList.toggle("on",gridOn);
+  applyChartHeight();
   renderWatchlist();
   renderAlerts(); renderLog();
   // paint from cache for instant cold start — eliminates the blank "—" state on reload
@@ -1619,13 +1854,14 @@ function boot(){
     renderMarketPill(null);
   }
   // chart lib loads with defer; init once ready
-  if(window.LightweightCharts){ initChart(); if(lastCore && curTf==="1m") paintChart(lastCore); }
-  else { window.addEventListener("load",()=>{ initChart(); if(lastChart) paintChart(lastChart); else if(lastCore) paintChart(lastCore); }); }
+  if(window.LightweightCharts){ initChart(); applyCustomLevels(); if(lastCore && curTf==="1m") paintChart(lastCore); }
+  else { window.addEventListener("load",()=>{ initChart(); applyCustomLevels(); if(lastChart) paintChart(lastChart); else if(lastCore) paintChart(lastCore); }); }
   calcLoad();
   refresh(true);
-  // non-blocking supporting fetches — daily series for ATR/levels, 5m series for RVOL
+  // non-blocking supporting fetches — daily series for ATR/levels, 5m series for RVOL, SMH for RS
   fetchDailySeries().then(()=>{ if(lastCore){ renderATR(lastCore); renderLevels(lastCore); } });
   fetchRvolSeries().then(()=>{ if(lastCore) renderRvol(lastCore); });
+  fetchRSSeries().then(()=>{ renderRS(); if(lastChart) paintChart(lastChart); else if(lastCore) paintChart(lastCore); });
   // 1s clock tick for countdown + age, no network
   clockTimer=setInterval(()=>{ renderMarketPill(lastCore); renderAge(lastCore); }, 1000);
 }
