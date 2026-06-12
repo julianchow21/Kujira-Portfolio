@@ -70,6 +70,7 @@ function doGet(e) {
     const action = (e && e.parameter && e.parameter.action) || '';
     if (action === 'prices') return json_(fetchYahooQuotes_(e.parameter.symbols || ''));
     if (action === 'fundamentals') return json_(fetchYahooFundamentals_(e.parameter.symbols || ''));
+    if (action === 'profile') return json_(fetchYahooProfile_(e.parameter.symbol || ''));
     if (action === 'crypto') return json_(fetchCoinGecko_(e.parameter.ids || '', e.parameter.vs || 'sgd,usd'));
     if (action === 'fx')     return json_(fetchYahooFx_(e.parameter.pairs || ''));
 
@@ -450,6 +451,38 @@ function fetchYahooFundamentals_(symbolsCsv) {
   return { fundamentals: out };
 }
 
+/* ─── Yahoo assetProfile — sector + industry for a single symbol ────────
+   Returns { sector, industry } (both may be null if Yahoo has no data).
+   Used by the sector auto-fill feature in openEntityModal.               */
+const PROFILE_CACHE_TTL_SEC = 21600; // CacheService ceiling is 6 h
+
+function fetchYahooProfile_(symbol) {
+  if (!symbol) return { error: 'No symbol' };
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get('yp:' + symbol);
+  if (hit) { try { return JSON.parse(hit); } catch (_) {} }
+
+  let pair;
+  try { pair = getYahooCrumb_(false); }
+  catch (err) { return { error: 'Yahoo crumb: ' + err.message }; }
+
+  const url = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/' +
+    encodeURIComponent(symbol) + '?modules=assetProfile&crumb=' + encodeURIComponent(pair.crumb);
+  try {
+    const resp = UrlFetchApp.fetch(url, {
+      muteHttpExceptions: true,
+      headers: { 'User-Agent': YF_UA, 'Accept': 'application/json', Cookie: pair.cookie }
+    });
+    if (resp.getResponseCode() !== 200) return { error: 'HTTP ' + resp.getResponseCode() };
+    const j = JSON.parse(resp.getContentText());
+    const r  = j.quoteSummary && j.quoteSummary.result && j.quoteSummary.result[0];
+    const ap = r && r.assetProfile;
+    const result = { sector: (ap && ap.sector) || null, industry: (ap && ap.industry) || null };
+    cache.put('yp:' + symbol, JSON.stringify(result), PROFILE_CACHE_TTL_SEC);
+    return result;
+  } catch (err) { return { error: err.message }; }
+}
+
 /* ─── Price proxy: CoinGecko ─────────────────────────────────────────────
    ids param is a comma list of CoinGecko coin ids, e.g. bitcoin,ethereum.
    vs param is a comma list of vs_currencies, defaults to sgd,usd.        */
@@ -502,7 +535,7 @@ function fetchYahooFx_(pairsCsv) {
    to the right. Each write is atomic (single setValues call) — half-written
    tabs from a quota timeout are avoided. Best-effort: never throws.        */
 const VIEW_SCHEMAS = {
-  Stocks:        ['id','symbol','market','sector','shares','avgCost','divPerShare','currency','notes','createdAt','updatedAt'],
+  Stocks:        ['id','symbol','market','sector','shares','avgCost','divPerShare','divExDate','divPayDate','currency','notes','createdAt','updatedAt'],
   Watchlist:     ['id','symbol','market','sector','targetPrice','notes','createdAt','updatedAt'],
   'Stock Trades':['id','stockId','date','side','shares','price','fees','notes','createdAt','updatedAt'],
   Crypto:        ['id','symbol','coingeckoId','amount','avgCost','currency','notes','createdAt','updatedAt'],

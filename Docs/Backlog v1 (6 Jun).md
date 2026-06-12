@@ -4,7 +4,7 @@ Candidate features, not started. Pick from here when ready. Full specs for the t
 drafts live in `~/Claude Projects/Claude/tasks/todo.md` under "feature drafts". Each item
 has rough priority and effort so picking is fast. Update status as things move.
 
-Last updated: 12/06/2026. App at v1.3.
+Last updated: 12/06/2026. App at v1.4.
 
 ## Priority view
 
@@ -24,12 +24,12 @@ Last updated: 12/06/2026. App at v1.3.
 | 12 | Watchlist tab (tickers not yet owned) | Medium | Medium | Done (v1.2) |
 | 13 | Holdings search / filter | Medium | Medium | Done (v1.3) |
 | 14 | Totals row in holdings table | Low | Low | Done (v1.3) |
-| 15 | Dividend ex-date field + upcoming payments | Medium | Medium | Backlog |
-| 16 | Per-lot view in trade ledger | Low | Medium | Backlog |
+| 15 | Dividend ex-date field + upcoming payments | Medium | Medium | Done (v1.4) |
+| 16 | Per-lot view in trade ledger | Low | Medium | Done (v1.4) |
 | 17 | CSV export (holdings + ledger) | Low | Low | Done (v1.3) |
 | 18 | Watchlist column sort / column manager | Low | Low | Done (v1.3) |
 | 19 | 50d MA column | Low | Low | Done (v1.3) |
-| 21 | Sector auto-fill from Yahoo assetProfile | Low | Medium | Backlog |
+| 21 | Sector auto-fill from Yahoo assetProfile | Low | Medium | Done (v1.4) |
 
 ## Items
 

@@ -306,6 +306,13 @@ a.btn,a.btn:hover{text-decoration:none}
 input.fi-sm,select.fi-sm{padding:.25rem .5rem;font-size:.85rem;height:2rem;min-width:0;width:auto}
 /* Totals row */
 tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
+/* Ledger view toggle */
+.btn-active{background:var(--accent);color:#000;border-color:var(--accent)}
+.ledger-group-row td{background:var(--glass);font-size:.8rem;padding:.35rem 1rem;border-top:1px solid var(--border)}
+.subtotal-row td{background:color-mix(in srgb,var(--glass) 60%,transparent);font-size:.8rem;font-style:italic;border-bottom:1px solid var(--border)}
+/* Dividend card */
+.badge-muted{background:var(--glass);color:var(--tx2);font-size:.75rem;padding:.1rem .4rem;border-radius:999px;font-weight:500;vertical-align:middle}
+.card-hint{padding:.5rem 1rem;font-size:.8rem;color:var(--tx3);border-top:1px solid var(--border)}
 .col-mgr-row{display:flex;align-items:center;gap:10px;padding:6px 2px;border-bottom:1px solid var(--border)}
 .col-mgr-row:last-child{border-bottom:none}
 .col-mgr-move{display:inline-flex;gap:2px;flex-shrink:0}
@@ -416,6 +423,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     <div id="stocks-filterbar" style="display:none"></div>
     <div id="stocks-body"></div>
     <div id="stocks-watchlist"></div>
+    <div id="stocks-dividends"></div>
     <div id="stocks-ledger"></div>
   </section>
 
@@ -905,7 +913,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
    ═══════════════════════════════════════════════════════════════════════ */
 
 const APP_VERSION = 'v1.0';
-const APP_DISPLAY_VERSION = 'v1.3 (12 Jun)';
+const APP_DISPLAY_VERSION = 'v1.4 (12 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -3130,6 +3138,21 @@ const GICS_SECTOR_OPTIONS = [
   ['Other','Other']
 ];
 
+// Yahoo assetProfile uses Morningstar-style names; map to the app's GICS values.
+const YAHOO_SECTOR_TO_GICS = {
+  'Technology':             'Information Technology',
+  'Financial Services':     'Financials',
+  'Consumer Cyclical':      'Consumer Discretionary',
+  'Consumer Defensive':     'Consumer Staples',
+  'Basic Materials':        'Materials',
+  'Communication Services': 'Communication Services',
+  'Energy':                 'Energy',
+  'Healthcare':             'Healthcare',
+  'Industrials':            'Industrials',
+  'Real Estate':            'Real Estate',
+  'Utilities':              'Utilities'
+};
+
 const ENTITY_SCHEMAS = {
   stocks: {
     title: 'stock holding',
@@ -3141,6 +3164,8 @@ const ENTITY_SCHEMAS = {
       { key:'avgCost', label:'Avg cost per share', type:'number', required:true, step:'0.0001', placeholder:'150.00' },
       { key:'currency', label:'Cost currency', type:'select', options:[['USD','USD'],['SGD','SGD']], default:'USD', hint:'Currency the avg cost is stated in. Defaults match the market.' },
       { key:'divPerShare', label:'Annual dividend / share', type:'number', step:'0.0001', min:'0', placeholder:'0.00', hint:'Optional, in the cost currency. Drives projected dividend income and yield on cost. Leave blank for non-payers.' },
+      { key:'divExDate',  label:'Ex-dividend date', type:'date', hint:'Next ex-dividend date. Drives the upcoming payments list (next 90 days).' },
+      { key:'divPayDate', label:'Pay date', type:'date', hint:'Expected payment date (optional).' },
       { key:'notes',   label:'Notes', type:'textarea' }
     ],
     defaults: { market:'US', currency:'USD' },
@@ -3309,6 +3334,29 @@ function openEntityModal(table, existingId){
     if (marketSel && currSel){
       marketSel.addEventListener('change', () => {
         currSel.value = marketSel.value === 'SGX' ? 'SGD' : 'USD';
+      });
+    }
+  }
+
+  // Sector auto-fill: on symbol blur, fetch Yahoo assetProfile and fill sector
+  // if sync is configured and sector is not yet set.
+  if ((table === 'stocks' || table === 'watchlist') && getSyncUrl()){
+    const symbolInput = body.querySelector('[data-fkey="symbol"]');
+    const sectorSel   = body.querySelector('[data-fkey="sector"]');
+    if (symbolInput && sectorSel){
+      symbolInput.addEventListener('blur', async () => {
+        const sym = symbolInput.value.trim().toUpperCase();
+        if (!sym || sectorSel.value) return;
+        const mktEl = body.querySelector('[data-fkey="market"]');
+        const ysym  = yahooSymbol({ symbol: sym, market: mktEl ? mktEl.value : 'US' });
+        try {
+          const base = getSyncUrl();
+          const url  = base + (base.includes('?') ? '&' : '?') + 'action=profile&symbol=' + encodeURIComponent(ysym);
+          const r = await fetch(url);
+          const d = await r.json();
+          const gics = d && d.sector ? (YAHOO_SECTOR_TO_GICS[d.sector] || null) : null;
+          if (gics && !sectorSel.value) sectorSel.value = gics;
+        } catch (_) { /* best-effort, sector stays manual */ }
       });
     }
   }
@@ -3537,6 +3585,7 @@ function sharesHeldAsOf(stockId, asOfDate, excludeTxnId){
 /* ─── Holdings filter state (ephemeral, not persisted) ─────────────────── */
 let _stocksFilter  = { q:'', sector:'', market:'' };
 let _lastStockRows = [];  // cache for CSV export — always reflects what's on screen
+let _ledgerView    = 'flat'; // 'flat' or 'by-stock'
 
 function renderStocksFilterBar(){
   const bar = document.getElementById('stocks-filterbar');
@@ -3646,6 +3695,7 @@ function renderStocks(){
     if (fbEl) fbEl.style.display = 'none';
     _lastStockRows = [];
     renderWatchlist(); // the watchlist stands on its own, even with no holdings
+    renderDividendTimeline([]);
     return;
   }
 
@@ -3851,6 +3901,7 @@ function renderStocks(){
   }
 
   renderWatchlist();
+  renderDividendTimeline(rows);
   renderStockTxns();
 }
 
@@ -4117,6 +4168,74 @@ function resetStockColumns(){
   DB.settings.stocksColumns = defaultStockColumns(); _persistStockCols();
 }
 
+/* Upcoming dividend payments — shows holdings with ex-dates in the next 90 days.
+   Takes the full (unfiltered) rows array from renderStocks so share counts and
+   derived values are already computed and don't need to be recalculated. */
+function renderDividendTimeline(rows){
+  const el = document.getElementById('stocks-dividends');
+  if (!el) return;
+
+  const today = _isoDateSG(new Date());
+  const cutoff = _isoDateSG(new Date(Date.now() + 90 * 86400000));
+
+  // Filter: ex-date set, positive divPerShare, ex-date in today..today+90d window
+  const upcoming = rows
+    .filter(r => r.s.divExDate && Number(r.s.divPerShare) > 0
+               && r.s.divExDate >= today && r.s.divExDate <= cutoff)
+    .sort((a, b) => a.s.divExDate < b.s.divExDate ? -1 : a.s.divExDate > b.s.divExDate ? 1 : 0);
+
+  // Check whether any stock at all has an ex-date (for empty-state messaging)
+  const anyExDate = rows.some(r => r.s.divExDate && Number(r.s.divPerShare) > 0);
+
+  if (!rows.length || (!anyExDate && !upcoming.length)){
+    // No holdings or no holdings with ex-dates — render prompt to set one
+    if (!rows.length){
+      el.innerHTML = '';
+      return;
+    }
+    el.innerHTML = `<div class="card"><div class="card-head"><h3>Upcoming dividends <span class="badge badge-muted">next 90 days</span></h3></div>
+      <div class="card-body"><div class="empty"><div class="empty-icon">📅</div>
+      <div class="empty-title">No ex-dates set</div>
+      <div class="empty-sub">Set an ex-date on any holding to track upcoming payments.</div>
+      </div></div></div>`;
+    return;
+  }
+
+  if (!upcoming.length){
+    // Ex-dates exist but none in window
+    el.innerHTML = `<div class="card"><div class="card-head"><h3>Upcoming dividends <span class="badge badge-muted">next 90 days</span></h3></div>
+      <div class="card-body"><div class="empty"><div class="empty-icon">📅</div>
+      <div class="empty-title">No payments due in the next 90 days</div>
+      <div class="empty-sub">Update ex-dates after each declaration to keep this current.</div>
+      </div></div></div>`;
+    return;
+  }
+
+  const rows2 = upcoming.map(r => {
+    const estIncome = roundMoney(toSGD(r.shares * Number(r.s.divPerShare), r.ccy));
+    return `<tr>
+      <td class="tl">${kjrEscape(r.s.symbol)}</td>
+      <td class="tl">${fmtDateSG(r.s.divExDate)}</td>
+      <td class="tl">${r.s.divPayDate ? fmtDateSG(r.s.divPayDate) : '—'}</td>
+      <td class="num">${r.shares.toLocaleString('en-SG', {maximumFractionDigits:4})}</td>
+      <td class="num">${toSGD(Number(r.s.divPerShare), r.ccy) != null ? fmt(toSGD(Number(r.s.divPerShare), r.ccy)) : '—'}</td>
+      <td class="num">${fmt(estIncome)}</td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `<div class="card">
+    <div class="card-head"><h3>Upcoming dividends <span class="badge badge-muted">next 90 days</span></h3></div>
+    <div class="card-body p0"><div class="tbl-wrap"><table class="tbl">
+      <thead><tr>
+        <th class="tl">Symbol</th><th class="tl">Ex-date</th><th class="tl">Pay date</th>
+        <th class="num">Shares</th><th class="num">Div/share (SGD)</th><th class="num">Est. income (SGD)</th>
+      </tr></thead>
+      <tbody>${rows2}</tbody>
+    </table></div>
+    <div class="card-hint">Update ex-dates after each declaration to keep this current.</div>
+    </div></div>`;
+}
+
 /* Trade ledger card — sits below the positions table. Lists every buy/sell
    across all stocks; positions derive their shares + avg cost from these. */
 function renderStockTxns(){
@@ -4128,49 +4247,85 @@ function renderStockTxns(){
 
   const symbolOf = id => { const s = stocks.find(x => x.id === id); return s ? s.symbol : '—'; };
   const ccyOf    = id => { const s = stocks.find(x => x.id === id); return s ? (s.currency || (s.market === 'SGX' ? 'SGD' : 'USD')) : 'SGD'; };
-  const txns = (DB.stockTxns || []).slice()
-    .sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
+  const allTxns  = (DB.stockTxns || []).slice();
+  const txns     = allTxns.slice().sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
 
-  const head = `
-    <div class="card">
-      <div class="card-head">
-        <h3>Trade history</h3>
-        <div style="display:flex;gap:.5rem;align-items:center">
-          <button class="btn btn-sm btn-ghost" onclick="exportLedgerCSV()">Export CSV</button>
-          <button class="btn btn-primary btn-sm" onclick="openEntityModal('stockTxns')">＋ Add trade</button>
-        </div>
-      </div>`;
+  const flatActive    = _ledgerView !== 'by-stock';
+  const viewToggle    = `<div class="btn-group" style="display:inline-flex;gap:2px">
+    <button class="btn btn-sm${flatActive?' btn-active':' btn-ghost'}" onclick="_ledgerView='flat';renderStockTxns()">Flat</button>
+    <button class="btn btn-sm${!flatActive?' btn-active':' btn-ghost'}" onclick="_ledgerView='by-stock';renderStockTxns()">By stock</button>
+  </div>`;
+
+  const head = `<div class="card">
+    <div class="card-head">
+      <h3>Trade history</h3>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        ${viewToggle}
+        <button class="btn btn-sm btn-ghost" onclick="exportLedgerCSV()">Export CSV</button>
+        <button class="btn btn-primary btn-sm" onclick="openEntityModal('stockTxns')">＋ Add trade</button>
+      </div>
+    </div>`;
 
   if (!txns.length){
     el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">🧾</div><div class="empty-title">No trades logged</div><div class="empty-sub">Log buys and sells here and the position above will track shares, average cost, and realised P&amp;L automatically. Without trades, the position uses the figures you typed in.</div></div></div></div>`;
     return;
   }
 
-  el.innerHTML = head + `
-    <div class="tbl-wrap"><table class="holdings"><thead><tr>
-      <th class="tl">Date</th><th class="tl">Stock</th><th class="tl">Side</th><th>Shares</th><th>Price</th><th>Fees</th><th>Value</th><th class="tl">Notes</th><th></th>
-    </tr></thead><tbody>
-      ${txns.map(t => {
-        const ccy = ccyOf(t.stockId);
-        const qty = Number(t.shares) || 0;
-        const px  = Number(t.price) || 0;
-        const fees = Number(t.fees) || 0;
-        const gross = px * qty;
-        const value = t.side === 'sell' ? gross - fees : gross + fees;
-        const sideCls = t.side === 'sell' ? 'neg' : 'pos';
-        return `<tr>
-          <td class="tl">${fmtDateSG(t.date)}</td>
-          <td class="tl cell-sym">${kjrEscape(symbolOf(t.stockId))}</td>
-          <td class="tl"><span class="tag ${sideCls}">${t.side === 'sell' ? 'SELL' : 'BUY'}</span></td>
-          <td class="num">${qty}</td>
-          <td class="num">${fmt(toSGD(px, ccy))}</td>
-          <td class="num muted">${fees ? fmt(toSGD(fees, ccy)) : '—'}</td>
-          <td class="num">${fmt(toSGD(value, ccy))}</td>
-          <td class="tl muted">${kjrEscape(t.notes || '')}</td>
-          <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="stockTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
-        </tr>`;
-      }).join('')}
-    </tbody></table></div></div>`;
+  const txnRow = (t, showSymbol) => {
+    const ccy = ccyOf(t.stockId);
+    const qty = Number(t.shares) || 0;
+    const px  = Number(t.price) || 0;
+    const fees = Number(t.fees) || 0;
+    const gross = px * qty;
+    const value = t.side === 'sell' ? gross - fees : gross + fees;
+    const sideCls = t.side === 'sell' ? 'neg' : 'pos';
+    return `<tr>
+      <td class="tl">${fmtDateSG(t.date)}</td>
+      <td class="tl cell-sym">${showSymbol ? kjrEscape(symbolOf(t.stockId)) : ''}</td>
+      <td class="tl"><span class="tag ${sideCls}">${t.side === 'sell' ? 'SELL' : 'BUY'}</span></td>
+      <td class="num">${qty}</td>
+      <td class="num">${fmt(toSGD(px, ccy))}</td>
+      <td class="num muted">${fees ? fmt(toSGD(fees, ccy)) : '—'}</td>
+      <td class="num">${fmt(toSGD(value, ccy))}</td>
+      <td class="tl muted">${kjrEscape(t.notes || '')}</td>
+      <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="stockTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
+    </tr>`;
+  };
+
+  const colHead = `<thead><tr>
+    <th class="tl">Date</th><th class="tl">Stock</th><th class="tl">Side</th><th>Shares</th><th>Price</th><th>Fees</th><th>Value</th><th class="tl">Notes</th><th></th>
+  </tr></thead>`;
+
+  let bodyHTML = '';
+  if (flatActive){
+    bodyHTML = txns.map(t => txnRow(t, true)).join('');
+  } else {
+    // Group by stock, ordered alpha by symbol
+    const groups = {};
+    allTxns.forEach(t => { (groups[t.stockId] = groups[t.stockId] || []).push(t); });
+    const stockOrder = Object.keys(groups).sort((a,b) => symbolOf(a).localeCompare(symbolOf(b)));
+    bodyHTML = stockOrder.map(sid => {
+      const grpTxns = groups[sid].slice().sort((a,b) => String(a.date||'').localeCompare(String(b.date||'')));
+      const sym = symbolOf(sid);
+      const ccy = ccyOf(sid);
+      const pos = deriveStockPosition(sid);
+      const subtotal = pos
+        ? `<tr class="subtotal-row">
+            <td colspan="3" class="tl muted">Position</td>
+            <td class="num">${pos.shares}</td>
+            <td class="num">${fmt(toSGD(pos.avgCost, ccy))}</td>
+            <td></td>
+            <td class="num"><span class="${pos.realisedPL >= 0 ? 'pos' : 'neg'}">${fmt(toSGD(pos.realisedPL, ccy))}</span></td>
+            <td class="tl muted">realised P&amp;L</td><td></td>
+          </tr>`
+        : '';
+      return `<tr class="ledger-group-row"><td colspan="9" class="tl"><strong>${kjrEscape(sym)}</strong> <span class="muted">— ${grpTxns.length} trade${grpTxns.length!==1?'s':''}</span></td></tr>
+        ${grpTxns.map(t => txnRow(t, false)).join('')}
+        ${subtotal}`;
+    }).join('');
+  }
+
+  el.innerHTML = head + `<div class="tbl-wrap"><table class="holdings">${colHead}<tbody>${bodyHTML}</tbody></table></div></div>`;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
