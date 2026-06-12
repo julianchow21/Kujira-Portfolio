@@ -4,7 +4,7 @@ Candidate features, not started. Pick from here when ready. Full specs for the t
 drafts live in `~/Claude Projects/Claude/tasks/todo.md` under "feature drafts". Each item
 has rough priority and effort so picking is fast. Update status as things move.
 
-Last updated: 11/06/2026. App at v1.2.
+Last updated: 12/06/2026. App at v1.3.
 
 ## Priority view
 
@@ -22,14 +22,13 @@ Last updated: 11/06/2026. App at v1.2.
 | 10 | Fundamentals columns (P/E, P/B, mkt cap, beta) | High | Medium | Done (v1.2, needs Apps Script redeploy) |
 | 11 | Momentum stats (52w position, vs 200d MA) | Medium | Low | Done (v1.2) |
 | 12 | Watchlist tab (tickers not yet owned) | Medium | Medium | Done (v1.2) |
-| 13 | Holdings search / filter | Medium | Medium | Backlog |
-| 14 | Totals row in holdings table | Low | Low | Backlog |
+| 13 | Holdings search / filter | Medium | Medium | Done (v1.3) |
+| 14 | Totals row in holdings table | Low | Low | Done (v1.3) |
 | 15 | Dividend ex-date field + upcoming payments | Medium | Medium | Backlog |
 | 16 | Per-lot view in trade ledger | Low | Medium | Backlog |
-| 17 | CSV export (holdings + ledger) | Low | Low | Backlog |
-| 18 | Watchlist column sort / column manager | Low | Low | Backlog |
-| 19 | 50d MA column | Low | Low | Backlog |
-| 20 | Net-of-withholding dividend toggle (US 30% WHT) | Medium | Low | Backlog |
+| 17 | CSV export (holdings + ledger) | Low | Low | Done (v1.3) |
+| 18 | Watchlist column sort / column manager | Low | Low | Done (v1.3) |
+| 19 | 50d MA column | Low | Low | Done (v1.3) |
 | 21 | Sector auto-fill from Yahoo assetProfile | Low | Medium | Backlog |
 
 ## Items
@@ -69,4 +68,4 @@ Overlaps the existing MU Day Trading app; draft proposes reusing that code, not 
 ## Notes
 - Anything picked from here follows plan-first: confirm scope, snapshot, build, browser-verify, commit.
 - New features must pass the relevant sections of `Docs/QA Runbook (4 Jun).md` before done.
-- Still no cloud sync configured and nothing deployed live; both are separate open items.
+- Cloud sync configured via Apps Script. App deployed live on GitHub Pages.

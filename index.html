@@ -301,6 +301,11 @@ a.btn,a.btn:hover{text-decoration:none}
 /* Watchlist */
 .wl-note{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wl-hit{display:inline-block;font-size:11px;font-weight:700;color:var(--green);background:var(--green-soft);border:1px solid var(--green-border);border-radius:8px;padding:1px 7px;margin-left:5px}
+/* Filter bar */
+.filter-bar{display:flex;gap:.5rem;flex-wrap:wrap;padding:.5rem 1rem;align-items:center;border-bottom:1px solid var(--border)}
+input.fi-sm,select.fi-sm{padding:.25rem .5rem;font-size:.85rem;height:2rem;min-width:0;width:auto}
+/* Totals row */
+tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 .col-mgr-row{display:flex;align-items:center;gap:10px;padding:6px 2px;border-bottom:1px solid var(--border)}
 .col-mgr-row:last-child{border-bottom:none}
 .col-mgr-move{display:inline-flex;gap:2px;flex-shrink:0}
@@ -401,12 +406,14 @@ a.btn,a.btn:hover{text-decoration:none}
       <div><div class="page-title">Stocks</div><div class="page-sub">SGX and US equities, live prices via Yahoo Finance.</div></div>
       <div class="h-toolbar">
         <button class="btn btn-primary" onclick="openEntityModal('stocks')">＋ Add stock</button>
+        <button class="btn" onclick="exportHoldingsCSV()">Export CSV</button>
         <button class="btn" onclick="refreshStockPrices()" id="btn-refresh-stocks">↻ Refresh prices</button>
         <button class="btn" onclick="openStockColumns()" id="btn-stock-cols">⚙ Columns</button>
         <span class="freshness" id="freshness-stocks">No prices yet</span>
       </div>
     </div>
     <div id="stocks-summary"></div>
+    <div id="stocks-filterbar" style="display:none"></div>
     <div id="stocks-body"></div>
     <div id="stocks-watchlist"></div>
     <div id="stocks-ledger"></div>
@@ -898,7 +905,7 @@ a.btn,a.btn:hover{text-decoration:none}
    ═══════════════════════════════════════════════════════════════════════ */
 
 const APP_VERSION = 'v1.0';
-const APP_DISPLAY_VERSION = 'v1.2.1 (11 Jun)';
+const APP_DISPLAY_VERSION = 'v1.3 (12 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1172,6 +1179,12 @@ const STOCK_COLUMNS = [
       const v = f ? vsBaseline(r.px.price, f.sma200) : null;
       return v!=null ? `<span class="${v>=0?'pos':'neg'}">${v>=0?'▲':'▼'} ${Math.abs(v*100).toFixed(1)}%</span>` : '—';
     } },
+  { key:'vs50d', label:()=>'vs 50d avg', cls:'num', defVis:false, backend:true,
+    render:r => {
+      const f = r.px && r.px.fund;
+      const v = f ? vsBaseline(r.px.price, f.sma50) : null;
+      return v!=null ? `<span class="${v>=0?'pos':'neg'}">${v>=0?'▲':'▼'} ${Math.abs(v*100).toFixed(1)}%</span>` : '—';
+    } },
   { key:'volume', label:()=>'Volume', cls:'num', defVis:false, backend:true,
     render:r => (r.px&&r.px.volume!=null) ? Number(r.px.volume).toLocaleString('en-SG') : '—' },
   { key:'mv', label:dc=>`Market value (${dc})`, cls:'num', defVis:true,
@@ -1213,7 +1226,7 @@ const STOCK_COL_LABEL = {
   market:'Market', sector:'Sector', shares:'Shares', avgCost:'Avg cost', price:'Price',
   dayChange:'Day P&L (position change)', dayChangePct:'Day change %', prevClose:'Prev close',
   dayRange:'Day range', week52:'52-week range', pos52w:'52-week range position',
-  vs200d:'Price vs 200-day average', volume:'Volume',
+  vs200d:'Price vs 200-day average', vs50d:'Price vs 50-day average', volume:'Volume',
   mv:'Market value', cost:'Cost basis', pl:'Unrealised P&L', plPct:'P&L %',
   realised:'Realised P&L', weight:'Portfolio weight %', divIncome:'Dividend income / yr',
   divYoc:'Dividend yield on cost', divYield:'Current dividend yield',
@@ -1270,6 +1283,7 @@ const STOCK_SORT_VALS = {
   sector:       r => r.s.sector ? ((sectorClass(r.s.sector) || 'z') + '·' + r.s.sector) : null,
   pos52w:       r => r.px ? rangePosition(r.px.price, r.px.week52Low, r.px.week52High) : null,
   vs200d:       r => (r.px && r.px.fund) ? vsBaseline(r.px.price, r.px.fund.sma200) : null,
+  vs50d:        r => (r.px && r.px.fund) ? vsBaseline(r.px.price, r.px.fund.sma50)  : null,
   peTtm:        r => (r.px && r.px.fund && r.px.fund.trailingPE  != null) ? r.px.fund.trailingPE  : null,
   peFwd:        r => (r.px && r.px.fund && r.px.fund.forwardPE   != null) ? r.px.fund.forwardPE   : null,
   pb:           r => (r.px && r.px.fund && r.px.fund.priceToBook != null) ? r.px.fund.priceToBook : null,
@@ -1287,6 +1301,13 @@ function setStockSort(key){
     : cur.dir === 'asc' ? { key, dir:'desc' }
     : { key:null, dir:null };
   saveData(); renderStocks();
+}
+function setWatchlistSort(key){
+  const cur = DB.settings.watchlistSort || {};
+  DB.settings.watchlistSort = cur.key !== key ? { key, dir:'asc' }
+    : cur.dir === 'asc' ? { key, dir:'desc' }
+    : { key:null, dir:null };
+  saveData(); renderWatchlist();
 }
 
 function freshDB(){
@@ -1311,7 +1332,8 @@ function freshDB(){
       baseCurrency: 'SGD',
       tabCurrency:  {},   // per-tab display overrides; defaults: stocks=USD, rest=SGD
       stocksColumns: defaultStockColumns(),  // holdings table columns: order + visibility
-      stocksSort:   { key:null, dir:null },  // holdings table sort: column + asc|desc
+      stocksSort:    { key:null, dir:null },  // holdings table sort: column + asc|desc
+      watchlistSort: { key:null, dir:null },  // watchlist sort: column + asc|desc
       fxRates:      { USDSGD: null, lastUpdated: null },
       fxOverrides:  { USDSGD: null },
       birthYear:    null,
@@ -3512,6 +3534,101 @@ function sharesHeldAsOf(stockId, asOfDate, excludeTxnId){
 /* ═══════════════════════════════════════════════════════════════════════
    STOCKS — render
    ═══════════════════════════════════════════════════════════════════════ */
+/* ─── Holdings filter state (ephemeral, not persisted) ─────────────────── */
+let _stocksFilter  = { q:'', sector:'', market:'' };
+let _lastStockRows = [];  // cache for CSV export — always reflects what's on screen
+
+function renderStocksFilterBar(){
+  const bar = document.getElementById('stocks-filterbar');
+  if (!bar || bar.dataset.ready) return;
+  bar.dataset.ready = '1';
+  const sectorOpts = GICS_SECTOR_OPTIONS
+    .filter(o => o[0])  // skip the empty "— Untagged —" entry
+    .map(o => `<option value="${kjrEscape(o[0])}">${kjrEscape(o[1])}</option>`)
+    .join('');
+  bar.innerHTML = `<div class="filter-bar">
+    <input id="sf-q" class="fi fi-sm" type="search" placeholder="Search symbol…"
+      style="flex:1;min-width:120px"
+      oninput="_stocksFilter.q=this.value.trim(); renderStocks()">
+    <select id="sf-market" class="fi fi-sm" onchange="_stocksFilter.market=this.value; renderStocks()">
+      <option value="">All markets</option>
+      <option value="SGX">SGX</option>
+      <option value="US">US</option>
+    </select>
+    <select id="sf-sector" class="fi fi-sm" onchange="_stocksFilter.sector=this.value; renderStocks()">
+      <option value="">All sectors</option>
+      ${sectorOpts}
+    </select>
+    <button class="btn btn-sm btn-ghost" onclick="_stocksFilter={q:'',sector:'',market:''};
+      const q=document.getElementById('sf-q'); if(q)q.value='';
+      const m=document.getElementById('sf-market'); if(m)m.value='';
+      const s=document.getElementById('sf-sector'); if(s)s.value='';
+      renderStocks()">Clear</button>
+  </div>`;
+}
+
+/* ─── CSV helpers ─────────────────────────────────────────────────────── */
+function downloadCSV(filename, headers, rows){
+  const esc = v => {
+    const s = v == null ? '' : String(v).replace(/"/g,'""');
+    return /[",\n]/.test(s) ? '"'+s+'"' : s;
+  };
+  const lines = [headers.map(esc).join(',')].concat(rows.map(r => r.map(esc).join(',')));
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' });
+  const a = Object.assign(document.createElement('a'), { href:URL.createObjectURL(blob), download:filename });
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+function exportHoldingsCSV(){
+  if (!_lastStockRows.length){ showToast('No holdings to export'); return; }
+  const headers = ['Symbol','Market','Sector','Shares','Avg Cost (SGD)','Cost Basis (SGD)','Price (SGD)','Market Value (SGD)','P&L (SGD)','P&L %','Dividend/yr (SGD)','Yield on Cost %','Weight %'];
+  const rows = _lastStockRows.map(r => [
+    r.s.symbol,
+    r.s.market,
+    r.s.sector || '',
+    r.shares,
+    r.avgCost != null ? toSGD(r.avgCost, r.ccy) : '',
+    r.cost != null ? r.cost : '',
+    r.priceSgd != null ? r.priceSgd : '',
+    r.mv != null ? r.mv : '',
+    r.pl != null ? r.pl : '',
+    r.plPct != null ? r.plPct.toFixed(2) : '',
+    r.divAnnualSgd != null ? r.divAnnualSgd : '',
+    r.divYoc != null ? r.divYoc.toFixed(2) : '',
+    r.weight != null ? r.weight.toFixed(2) : ''
+  ]);
+  downloadCSV('kujira-holdings-' + _isoDateSG(new Date()) + '.csv', headers, rows);
+}
+
+function exportLedgerCSV(){
+  const stocks = DB.stocks || [];
+  const txns = (DB.stockTxns || []).slice().sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
+  if (!txns.length){ showToast('No trades to export'); return; }
+  const symbolOf = id => { const s = stocks.find(x => x.id === id); return s ? s.symbol : ''; };
+  const ccyOf    = id => { const s = stocks.find(x => x.id === id); return s ? (s.currency || (s.market === 'SGX' ? 'SGD' : 'USD')) : 'SGD'; };
+  const headers = ['Date','Symbol','Side','Shares','Price (SGD)','Fees (SGD)','Value (SGD)','Notes'];
+  const rows = txns.map(t => {
+    const ccy   = ccyOf(t.stockId);
+    const qty   = Number(t.shares) || 0;
+    const px    = Number(t.price)  || 0;
+    const fees  = Number(t.fees)   || 0;
+    const gross = px * qty;
+    const value = t.side === 'sell' ? gross - fees : gross + fees;
+    return [
+      t.date,
+      symbolOf(t.stockId),
+      t.side,
+      qty,
+      toSGD(px, ccy),
+      fees ? toSGD(fees, ccy) : '',
+      toSGD(value, ccy),
+      t.notes || ''
+    ];
+  });
+  downloadCSV('kujira-trades-' + _isoDateSG(new Date()) + '.csv', headers, rows);
+}
+
 function renderStocks(){
   setRenderCcy('stocks');
   const list = DB.stocks || [];
@@ -3525,6 +3642,9 @@ function renderStocks(){
     sumEl.innerHTML = '';
     bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">📈</div><div class="empty-title">No stocks yet</div><div class="empty-sub">Click <b>Add stock</b> to record your first position. SGX tickers are auto-suffixed with .SI for Yahoo Finance.</div></div></div></div>`;
     if (fresh) fresh.textContent = 'No prices yet';
+    const fbEl = document.getElementById('stocks-filterbar');
+    if (fbEl) fbEl.style.display = 'none';
+    _lastStockRows = [];
     renderWatchlist(); // the watchlist stands on its own, even with no holdings
     return;
   }
@@ -3589,6 +3709,30 @@ function renderStocks(){
   // Second pass: portfolio weight needs the total market value.
   rows.forEach(r => { if (r.mv != null && totMv > 0) r.weight = safeRatio(r.mv, totMv); });
 
+  // Show + populate filter bar (idempotent — only builds the DOM once).
+  renderStocksFilterBar();
+  const fbEl = document.getElementById('stocks-filterbar');
+  if (fbEl) fbEl.style.display = '';
+
+  // Apply filter — summary cards always use the FULL rows (portfolio-wide).
+  let filteredRows = rows;
+  if (_stocksFilter.q)      filteredRows = filteredRows.filter(r => r.s.symbol.toLowerCase().includes(_stocksFilter.q.toLowerCase()));
+  if (_stocksFilter.market) filteredRows = filteredRows.filter(r => r.s.market === _stocksFilter.market);
+  if (_stocksFilter.sector) filteredRows = filteredRows.filter(r => r.s.sector === _stocksFilter.sector);
+
+  // Filtered totals — used by the tfoot row so the footer always matches the visible set.
+  let fTotCost=0, fTotMv=0, fTotRealised=0, fTotDiv=0, fAnyMv=false;
+  filteredRows.forEach(r => {
+    fTotCost += r.cost;
+    if (r.mv != null){ fTotMv += r.mv; fAnyMv = true; }
+    if (r.realisedSgd != null) fTotRealised += r.realisedSgd;
+    if (r.divAnnualSgd != null) fTotDiv += r.divAnnualSgd;
+  });
+  fTotCost = roundMoney(fTotCost); fTotMv = roundMoney(fTotMv);
+  fTotRealised = roundMoney(fTotRealised); fTotDiv = roundMoney(fTotDiv);
+  const fTotPl    = roundMoney(fTotMv - fTotCost);
+  const fTotPlPct = safeRatio(fTotPl, fTotCost);
+
   const showPl = anyPriced && !anyPriceMissing;
   const totPl = roundMoney(totMv - totCost);
   const totPlPct = safeRatio(totPl, totCost);
@@ -3618,12 +3762,12 @@ function renderStocks(){
   }
   sumEl.innerHTML = renderSummary(summaryItems) + renderSectorAllocation(rows, anyPriceMissing);
 
-  // Apply the persisted sort. Null values sort last in both directions.
+  // Apply the persisted sort to the filtered set. Null values sort last in both directions.
   const sortPref = DB.settings.stocksSort || {};
   const sortFn = (sortPref.key && sortPref.dir) ? STOCK_SORT_VALS[sortPref.key] : null;
   if (sortFn){
     const dir = sortPref.dir === 'desc' ? -1 : 1;
-    rows.sort((a, b) => {
+    filteredRows.sort((a, b) => {
       const va = sortFn(a), vb = sortFn(b);
       if (va == null && vb == null) return 0;
       if (va == null) return 1;
@@ -3633,6 +3777,9 @@ function renderStocks(){
         : dir * (va - vb);
     });
   }
+
+  // Cache for CSV export.
+  _lastStockRows = filteredRows;
 
   const dc = displayCcy();
   const cols = orderedStockCols().filter(c => c.visible);
@@ -3649,24 +3796,52 @@ function renderStocks(){
     const tl  = (c.cls && c.cls.indexOf('tl') > -1) ? ' tl' : '';
     return thSort(c.key, lbl, tl);
   }).join('');
-  bodyEl.innerHTML = `
-    <div class="card"><div class="tbl-wrap"><table class="holdings"><thead><tr>
-      ${thSort('symbol', 'Symbol', ' tl sticky-col')}${headCells}<th></th>
-    </tr></thead><tbody>
-      ${rows.map(r => {
-        const cells = cols.map(c => `<td class="${c.cls}">${c.render(r, ctx)}</td>`).join('');
-        const ax = encodeURIComponent(r.ysym);
-        return `<tr>
-          <td class="tl cell-sym sticky-col">${kjrEscape(r.s.symbol)}</td>
-          ${cells}
-          <td class="row-actions">
-            <a class="btn btn-sm btn-ghost" href="MU%20Day%20Trading/index.html?symbol=${ax}" target="_blank" rel="noopener" title="Open chart analysis for ${kjrEscape(r.s.symbol)}">Analyse</a>
-            <button class="btn btn-sm btn-ghost btn-edit" data-edit-table="stocks" data-edit-id="${kjrEscape(r.s.id)}">Edit</button>
-          </td>
-        </tr>`;
-      }).join('')}
-    </tbody></table></div></div>
-  `;
+
+  // Empty filtered state — show a designed empty state so Clear is reachable.
+  if (!filteredRows.length){
+    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty">
+      <div class="empty-title">No holdings match your filter.</div>
+      <div class="empty-sub"><button class="btn btn-sm btn-ghost" onclick="_stocksFilter={q:'',sector:'',market:''};
+        const q=document.getElementById('sf-q');if(q)q.value='';
+        const m=document.getElementById('sf-market');if(m)m.value='';
+        const s=document.getElementById('sf-sector');if(s)s.value='';
+        renderStocks()">Clear filter</button></div>
+    </div></div></div>`;
+  } else {
+    // Tfoot totals aligned to the visible column set.
+    const totCells = cols.map(c => {
+      switch(c.key){
+        case 'mv':       return `<td class="num">${fAnyMv?fmt(fTotMv):'—'}</td>`;
+        case 'cost':     return `<td class="num">${fmt(fTotCost)}</td>`;
+        case 'pl':       return `<td class="num">${fAnyMv?`<span class="${fTotPl>=0?'pos':'neg'}">${fmt(fTotPl)}</span>`:'—'}</td>`;
+        case 'plPct':    return `<td class="num">${fAnyMv&&fTotPlPct!=null?`<span class="${fTotPl>=0?'pos':'neg'}">${fmtPct(fTotPlPct)}</span>`:'—'}</td>`;
+        case 'realised': return `<td class="num">${fTotRealised?`<span class="${fTotRealised>=0?'pos':'neg'}">${fmt(fTotRealised)}</span>`:'—'}</td>`;
+        case 'divIncome':return `<td class="num">${fTotDiv?fmt(fTotDiv):'—'}</td>`;
+        default:         return `<td></td>`;
+      }
+    }).join('');
+
+    bodyEl.innerHTML = `
+      <div class="card"><div class="tbl-wrap"><table class="holdings"><thead><tr>
+        ${thSort('symbol', 'Symbol', ' tl sticky-col')}${headCells}<th></th>
+      </tr></thead><tbody>
+        ${filteredRows.map(r => {
+          const cells = cols.map(c => `<td class="${c.cls}">${c.render(r, ctx)}</td>`).join('');
+          const ax = encodeURIComponent(r.ysym);
+          return `<tr>
+            <td class="tl cell-sym sticky-col">${kjrEscape(r.s.symbol)}</td>
+            ${cells}
+            <td class="row-actions">
+              <a class="btn btn-sm btn-ghost" href="MU%20Day%20Trading/index.html?symbol=${ax}" target="_blank" rel="noopener" title="Open chart analysis for ${kjrEscape(r.s.symbol)}">Analyse</a>
+              <button class="btn btn-sm btn-ghost btn-edit" data-edit-table="stocks" data-edit-id="${kjrEscape(r.s.id)}">Edit</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody><tfoot><tr class="totals-row">
+        <td class="tl sticky-col"><strong>Total</strong></td>${totCells}<td></td>
+      </tr></tfoot></table></div></div>
+    `;
+  }
 
   // Freshness chip
   if (fresh){
@@ -3777,15 +3952,60 @@ function renderWatchlist(){
     return;
   }
 
-  const sorted = list.slice().sort((a, b) => String(a.symbol || '').localeCompare(String(b.symbol || '')));
+  // Map to rows so sort accessors can reference computed quote data.
+  const wlRows = list.map(w => {
+    const px  = priceFor('watchlist', w);
+    const ccy = (px && px.currency) || (w.market === 'SGX' ? 'SGD' : 'USD');
+    return { w, px, ccy };
+  });
+
+  // Sort accessors — price/target convert to SGD for consistent ordering across currencies.
+  const WL_SORT_VALS = {
+    symbol: r => r.w.symbol || '',
+    market: r => r.w.market || '',
+    sector: r => r.w.sector || '',
+    price:  r => (r.px && r.px.price != null) ? toSGD(r.px.price, r.ccy) : null,
+    dayPct: r => (r.px && r.px.changePct != null) ? r.px.changePct : null,
+    pos52w: r => r.px ? rangePosition(r.px.price, r.px.week52Low, r.px.week52High) : null,
+    peTtm:  r => (r.px && r.px.fund && r.px.fund.trailingPE  != null) ? r.px.fund.trailingPE  : null,
+    pb:     r => (r.px && r.px.fund && r.px.fund.priceToBook != null) ? r.px.fund.priceToBook : null,
+    target: r => r.w.targetPrice != null ? toSGD(Number(r.w.targetPrice), r.ccy) : null
+  };
+
+  const wlSort = DB.settings.watchlistSort || {};
+  const wlSortFn = (wlSort.key && wlSort.dir && WL_SORT_VALS[wlSort.key]) ? WL_SORT_VALS[wlSort.key] : null;
+  if (wlSortFn){
+    const dir = wlSort.dir === 'desc' ? -1 : 1;
+    wlRows.sort((a, b) => {
+      const va = wlSortFn(a), vb = wlSortFn(b);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return (typeof va === 'string' || typeof vb === 'string')
+        ? dir * String(va).localeCompare(String(vb))
+        : dir * (va - vb);
+    });
+  } else {
+    // Default: alpha by symbol.
+    wlRows.sort((a, b) => String(a.w.symbol || '').localeCompare(String(b.w.symbol || '')));
+  }
+
+  // Sortable header for watchlist — uses data-wl-sort-key to avoid routing to setStockSort.
+  const wlTh = (key, lbl, extraCls) => {
+    const active = wlSort.key === key && wlSort.dir;
+    const glyph  = active ? `<span class="sort-glyph">${wlSort.dir === 'asc' ? '▲' : '▼'}</span>` : '';
+    const aria   = active ? ` aria-sort="${wlSort.dir === 'asc' ? 'ascending' : 'descending'}"` : '';
+    return `<th class="sortable${extraCls||''}" data-wl-sort-key="${key}" tabindex="0"${aria}>${lbl}${glyph}</th>`;
+  };
+
   el.innerHTML = head + `
     <div class="tbl-wrap"><table class="holdings"><thead><tr>
-      <th class="tl">Symbol</th><th class="tl">Market</th><th class="tl">Sector</th>
-      <th>Price</th><th>Day %</th><th>52w pos</th><th>P/E</th><th>P/B</th><th>Target</th><th class="tl">Notes</th><th></th>
+      ${wlTh('symbol','Symbol',' tl')}${wlTh('market','Market',' tl')}${wlTh('sector','Sector',' tl')}
+      ${wlTh('price','Price')}${wlTh('dayPct','Day %')}${wlTh('pos52w','52w pos')}
+      ${wlTh('peTtm','P/E')}${wlTh('pb','P/B')}${wlTh('target','Target')}
+      <th class="tl">Notes</th><th></th>
     </tr></thead><tbody>
-      ${sorted.map(w => {
-        const px  = priceFor('watchlist', w);
-        const ccy = (px && px.currency) || (w.market === 'SGX' ? 'SGD' : 'USD');
+      ${wlRows.map(({ w, px, ccy }) => {
         const f   = px && px.fund;
         const priceCell = (px && px.price != null)
           ? fmt(toSGD(px.price, ccy)) + (isStale(px.fetchedAt, 24) ? ' <span class="hint">(stale)</span>' : '')
@@ -3915,7 +4135,10 @@ function renderStockTxns(){
     <div class="card">
       <div class="card-head">
         <h3>Trade history</h3>
-        <button class="btn btn-primary btn-sm" onclick="openEntityModal('stockTxns')">＋ Add trade</button>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <button class="btn btn-sm btn-ghost" onclick="exportLedgerCSV()">Export CSV</button>
+          <button class="btn btn-primary btn-sm" onclick="openEntityModal('stockTxns')">＋ Add trade</button>
+        </div>
       </div>`;
 
   if (!txns.length){
@@ -5091,6 +5314,8 @@ function renderAll(){
    This listener attaches once at boot and survives every re-render. */
 function installEventDelegation(){
   document.addEventListener('click', (e) => {
+    const wlTh = e.target.closest('th[data-wl-sort-key]');
+    if (wlTh){ setWatchlistSort(wlTh.getAttribute('data-wl-sort-key')); return; }
     const th = e.target.closest('th[data-sort-key]');
     if (th){ setStockSort(th.getAttribute('data-sort-key')); return; }
     const btn = e.target.closest('[data-edit-table][data-edit-id]');
@@ -5104,6 +5329,8 @@ function installEventDelegation(){
   // Keyboard sort: sortable headers are tabbable, Enter/Space toggles.
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
+    const wlTh = e.target && e.target.closest ? e.target.closest('th[data-wl-sort-key]') : null;
+    if (wlTh){ e.preventDefault(); setWatchlistSort(wlTh.getAttribute('data-wl-sort-key')); return; }
     const th = e.target && e.target.closest ? e.target.closest('th[data-sort-key]') : null;
     if (!th) return;
     e.preventDefault();
