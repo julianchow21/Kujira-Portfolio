@@ -99,6 +99,10 @@ button{font-family:inherit;cursor:pointer}
 .tgl.on.rpane{border-color:var(--purple);background:rgba(156,39,176,.12)} .tgl.on.rpane .sw{background:var(--purple)}
 .tgl.on.mpane{border-color:var(--accent-border);background:var(--accent-soft)} .tgl.on.mpane .sw{background:var(--accent)}
 #chart{width:100%;height:360px;position:relative}
+#chartCard.fs{position:fixed;inset:0;z-index:300;margin:0;border-radius:0;display:flex;flex-direction:column;background:var(--bg)}
+#chartCard.fs .chart-head{flex-shrink:0}
+#chartCard.fs #chartHolder{flex:1;min-height:0}
+#chartCard.fs #chart{height:100%!important}
 .chart-cross{position:absolute;top:8px;left:8px;font-size:11px;color:var(--text2);background:rgba(15,15,15,.7);padding:4px 8px;border-radius:6px;pointer-events:none;display:none;z-index:5}
 .chart-cross b{color:var(--text);font-weight:600}
 .chart-empty{display:flex;align-items:center;justify-content:center;height:360px;color:var(--text3);font-size:13px;text-align:center}
@@ -265,11 +269,11 @@ input[type=number]{width:96px}
   </div>
 
   <!-- Chart -->
-  <div class="card">
+  <div class="card" id="chartCard">
     <div class="chart-head">
       <div class="seg" id="rangeSeg">
-        <button data-tf="1m" class="on">1m</button>
-        <button data-tf="5m">5m</button>
+        <button data-tf="1m">1m</button>
+        <button data-tf="5m" class="on">5m</button>
         <button data-tf="15m">15m</button>
         <button data-tf="1h">1h</button>
         <button data-tf="1D">1D</button>
@@ -277,6 +281,7 @@ input[type=number]{width:96px}
       <div class="spacer"></div>
       <div class="toggles">
         <button class="tgl" id="autoFitBtn" title="Fit all data to screen" style="color:var(--text2);padding:5px 9px"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><path d="M1 5V1h4M9 1h4v4M1 9v4h4M9 13h4V9"/></svg></button>
+        <button class="tgl" id="fsBtn" title="Fullscreen" style="color:var(--text2);padding:5px 9px"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><path d="M5 1H1v4M9 1h4v4M1 9v4h4M13 9v4H9"/></svg></button>
         <button class="tgl vwap" data-ov="vwap"><span class="sw"></span>VWAP</button>
         <button class="tgl" data-ov="vwapsd"><span class="sw"></span>SD Bands</button>
         <button class="tgl e9" data-ov="ema9"><span class="sw"></span>EMA 9</button>
@@ -466,7 +471,7 @@ input[type=number]{width:96px}
   <span class="warn">For information only, not financial advice.</span>
   Live MU data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v2.9 (12 Jun)</span>
+  <span style="margin-left:8px;color:var(--text3)">v3.0 (12 Jun)</span>
 
 </div>
 
@@ -477,6 +482,8 @@ input[type=number]{width:96px}
 /* ====================== Config & state ====================== */
 const SYMBOL = (function(){
   try { var p = new URLSearchParams(location.search).get("symbol"); if (p && p.trim()) return p.trim().toUpperCase(); } catch(e){}
+  try { var c = JSON.parse(localStorage.getItem("mu_cfg") || "{}");
+    if (c.defaultSymbol && /^[A-Z.\-]{1,12}$/.test(c.defaultSymbol)) return c.defaultSymbol; } catch(e){}
   return "MU";
 })();
 const YF_HOST = "https://query1.finance.yahoo.com";
@@ -496,15 +503,19 @@ const DEFAULT_CFG = {
   tgEnabled: false,
   tgChatId: "",
   watchlist: ["MU"],
+  defaultSymbol: "",
   overlays: { vwap:false, ema9:false, ema20:false, vwapsd:false, rs:false, rsiPane:false, macdPane:false },
+  pinnedOverlays: ["vwap","ema9","ema20"],
   gridOn: false,
   customLevels: [],
+  levelLines: {},
+  tickerMeta: {},
 };
 let cfg = loadCfg();
 let alerts = loadAlerts();
 let alertLog = loadJSON(LS.log, []);
 
-let curTf = "1m";
+let curTf = "5m";
 let overlays = Object.assign({ vwap:false, ema9:false, ema20:false, vwapsd:false, rs:false, rsiPane:false, macdPane:false }, cfg.overlays||{});
 let gridOn = !!cfg.gridOn;
 let lastCore = null;        // today's 1d dataset: drives header, indicators, alerts, age, pill
@@ -628,8 +639,8 @@ const PUBLIC_PROXIES = [
 const TIMEFRAMES = {
   "1m":  { interval:"1m",  range:"1d",  pre:true,  intraday:true  },
   "5m":  { interval:"5m",  range:"5d",  pre:false, intraday:true  },
-  "15m": { interval:"15m", range:"1mo", pre:false, intraday:true  },
-  "1h":  { interval:"60m", range:"3mo", pre:false, intraday:true  },
+  "15m": { interval:"15m", range:"1mo", pre:false, intraday:true,  fitBars:135 },
+  "1h":  { interval:"60m", range:"3mo", pre:false, intraday:true,  fitBars:105 },
   "1D":  { interval:"1d",  range:"6mo", pre:false, intraday:false },
 };
 // The header, indicators, and alerts always run off today's 1m session, regardless of chart timeframe.
@@ -797,7 +808,7 @@ let sVwapU1=null, sVwapD1=null, sVwapU2=null, sVwapD2=null; // VWAP SD bands
 let sRS=null;                                                 // RS overlay (left scale)
 let rsiPane=null, macdPane=null;                              // pane objects (v5)
 let sRsiLine=null, sMacdLine=null, sMacdSig=null, sMacdHist=null;
-let barByTime={}, _pulseState=true, _pulseTick=null;
+let barByTime={}, _pulseTick=null, dayBands=null;
 let customPriceLines=[];   // price lines for user-placed custom levels
 let lastRS=null, lastRSFetchTime=0; // RS (SMH) data
 const RS_SYMBOL="SMH";
@@ -830,6 +841,7 @@ function initChart(){
     topColor:'rgba(45,212,191,0.12)', bottomColor:'rgba(45,212,191,0.01)',
     lineColor:'#2dd4bf', lineWidth:2,
     priceLineVisible:true, priceLineColor:'#2dd4bf',
+    priceLineStyle:LightweightCharts.LineStyle.Solid, priceLineWidth:1,
     lastValueVisible:true,
     crosshairMarkerVisible:true, crosshairMarkerRadius:4,
     crosshairMarkerBorderColor:'#2dd4bf', crosshairMarkerBackgroundColor:'#2dd4bf',
@@ -871,13 +883,15 @@ function initChart(){
   chartReady=true;
   applyOverlayVisibility();
   applyGrid();
-  // Pulse the current-price line in Kujira teal
+  // Pulse the current-price line — slow sine breathe over 3.2s
   if(_pulseTick) clearInterval(_pulseTick);
+  const PULSE_MS=3200;
   _pulseTick=setInterval(()=>{
-    if(!sLine) return;
-    _pulseState=!_pulseState;
-    sLine.applyOptions({priceLineColor:_pulseState?'#2dd4bf':'rgba(45,212,191,0.18)'});
-  },550);
+    if(!sLine||document.hidden) return;
+    const ph=(Date.now()%PULSE_MS)/PULSE_MS;
+    const a=0.30+0.70*(0.5+0.5*Math.sin(ph*2*Math.PI));
+    sLine.applyOptions({priceLineColor:"rgba(45,212,191,"+a.toFixed(3)+")"});
+  },120);
   // Tap-to-place custom levels
   const tapPop=document.getElementById("tapPop");
   const tapPxEl=document.getElementById("tapPx");
@@ -923,6 +937,8 @@ function applyGrid(){
 }
 function applyChartHeight(){
   const el=document.getElementById("chart"); if(!el) return;
+  const card=document.getElementById("chartCard");
+  if(card&&card.classList.contains("fs")){ el.style.height="100%"; return; }
   const panes=(overlays.rsiPane?1:0)+(overlays.macdPane?1:0);
   const base=window.innerWidth<=560?300:360;
   el.style.height=(base+panes*100)+"px";
@@ -995,11 +1011,19 @@ function paintChart(d){
   applyOverlayVisibility();
   refitChart();
 }
+function fitForTf(){
+  if(!chartReady||!chart) return;
+  chart.priceScale("right").applyOptions({autoScale:true});
+  const fb=TIMEFRAMES[curTf]&&TIMEFRAMES[curTf].fitBars;
+  const n=lastChart&&lastChart.bars?lastChart.bars.length:0;
+  if(fb&&n>fb) chart.timeScale().setVisibleLogicalRange({from:n-fb-0.5,to:n-1+3});
+  else chart.timeScale().fitContent();
+}
 function refitChart(){
   if(!chartReady || !chart) return;
   // Defer to next frame so the new series data extent is applied before fitting,
   // otherwise a timeframe switch fits against the previous timeframe's layout.
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{ if(chart) chart.timeScale().fitContent(); }));
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{ if(chart) fitForTf(); }));
 }
 
 /* ====================== Render ====================== */
@@ -1094,12 +1118,12 @@ function renderMarketPill(d){
     cls="open";
     const d=etDateStr(), closeMin=regularCloseMin(d), {mod}=etNow();
     const closeMs=Date.now()+(closeMin-mod)*60000;
-    label="Open · closes in "+countdown(closeMs);
+    label="Closes in "+countdown(closeMs);
   } else if(ms==="PRE"||ms==="PREPRE"){ cls="pre"; label="Pre-market"; }
   else if(ms==="POST"||ms==="POSTPOST"){ cls="post"; label="After-hours"; }
   else {
     const no=nextOpenMs();
-    label = no?("Closed · opens in "+countdown(no)):"Closed";
+    label = no?("Opens in "+countdown(no)):"Closed";
   }
   pill.className="pill "+cls;
   txt.textContent=label;
@@ -1108,10 +1132,11 @@ function countdown(targetMs){
   let s=Math.max(0,Math.floor((targetMs-Date.now())/1000));
   const d=Math.floor(s/86400); s-=d*86400;
   const h=Math.floor(s/3600); s-=h*3600;
-  const m=Math.floor(s/60); s-=m*60;
+  const m=Math.floor(s/60);
   if(d>0) return d+"d "+h+"h";
-  if(h>0) return h+"h "+m+"m";
-  return m+"m "+s+"s";
+  if(h>0) return h+"h";
+  if(m>0) return m+"m";
+  return "<1m";
 }
 function renderAge(d){
   const t=d&&d.marketTime;
@@ -1668,9 +1693,12 @@ function saveSettingsFromDrawer(){
 const TICKER_RE = /^[A-Z.\-]{1,12}$/;
 function renderWatchlist(){
   const drop=$("#wlDrop");
+  const dflt=cfg.defaultSymbol||"";
   const items=(cfg.watchlist||[]).map(s=>{
     const cur=s===SYMBOL;
-    return '<div class="wl-item'+(cur?" cur":"")+'"'+(cur?"":" data-sw=\""+esc(s)+"\"")+'>'+esc(s)+
+    const isDflt=s===dflt;
+    const star='<button class="wl-star" data-star="'+esc(s)+'" title="Default on launch" style="background:none;border:none;cursor:pointer;font-size:11px;padding:0 3px;color:'+(isDflt?"var(--amber)":"var(--text3)")+'">'+(isDflt?"★":"☆")+'</button>';
+    return '<div class="wl-item'+(cur?" cur":"")+'"'+(cur?"":" data-sw=\""+esc(s)+"\"")+'>'+star+esc(s)+
       (cur?'<span style="margin-left:auto;font-size:9px">●</span>':
            '<button class="wl-del" data-del="'+esc(s)+'" title="Remove">×</button>')+
       '</div>';
@@ -1683,6 +1711,14 @@ function renderWatchlist(){
   const inp=document.getElementById("wlInput");
   document.getElementById("wlAddBtn").addEventListener("click",()=>addTicker((inp.value||"").trim().toUpperCase()));
   inp.addEventListener("keydown",e=>{ if(e.key==="Enter") addTicker((e.target.value||"").trim().toUpperCase()); });
+  drop.querySelectorAll(".wl-star").forEach(btn=>{
+    btn.addEventListener("click",e=>{
+      e.stopPropagation();
+      const s=btn.dataset.star;
+      cfg.defaultSymbol=(cfg.defaultSymbol===s)?"":s;
+      saveCfg(); renderWatchlist();
+    });
+  });
 }
 function addTicker(sym){
   if(!sym||!TICKER_RE.test(sym)) return;
@@ -1693,6 +1729,7 @@ function addTicker(sym){
 }
 function removeTicker(sym){
   if(sym===SYMBOL) return;
+  if(sym===cfg.defaultSymbol){ cfg.defaultSymbol=""; }
   cfg.watchlist=cfg.watchlist.filter(s=>s!==sym); saveCfg(); renderWatchlist();
 }
 function switchTicker(sym){
@@ -1743,7 +1780,7 @@ function wire(){
       t.classList.toggle("on",overlays[k]); applyOverlayVisibility();
       cfg.overlays=Object.assign({},overlays); saveCfg();
       // When RSI/MACD panes toggled, refit after height change
-      if(k==="rsiPane"||k==="macdPane") requestAnimationFrame(()=>requestAnimationFrame(()=>{ if(chart) chart.timeScale().fitContent(); }));
+      if(k==="rsiPane"||k==="macdPane") refitChart();
     });
   });
   // Tap-to-place Place / Cancel buttons
@@ -1767,7 +1804,23 @@ function wire(){
     cfg.gridOn=gridOn; saveCfg();
   });
   const _afBtn=$("#autoFitBtn");
-  if(_afBtn) _afBtn.addEventListener("click",()=>{ if(chart) chart.timeScale().fitContent(); });
+  if(_afBtn) _afBtn.addEventListener("click",()=>{ if(chart){ chart.priceScale("right").applyOptions({autoScale:true}); chart.timeScale().fitContent(); } });
+  const _fsBtn=$("#fsBtn");
+  if(_fsBtn){
+    const _card=document.getElementById("chartCard");
+    function toggleFs(enter){
+      const on=(enter!==undefined)?enter:!(_card&&_card.classList.contains("fs"));
+      if(_card){ _card.classList.toggle("fs",on); }
+      document.body.style.overflow=on?"hidden":"";
+      _fsBtn.title=on?"Exit fullscreen":"Fullscreen";
+      _fsBtn.innerHTML=on
+        ?'<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><path d="M1 5h4V1M9 1v4h4M1 9h4v4M13 9h-4v4"/></svg>'
+        :'<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><path d="M5 1H1v4M9 1h4v4M1 9v4h4M13 9v4H9"/></svg>';
+      applyChartHeight(); refitChart();
+    }
+    _fsBtn.addEventListener("click",()=>toggleFs());
+    document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&_card&&_card.classList.contains("fs")) toggleFs(false); });
+  }
   // alerts
   $("#alAdd").addEventListener("click",addAlert);
   $("#alType").addEventListener("change",()=>{

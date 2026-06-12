@@ -197,6 +197,19 @@ export default {
       return new Response(null, { headers: corsHeaders("GET, POST, OPTIONS") });
     }
 
+    // GET /test-telegram — send a test message to the stored chatId to verify the bot is working
+    if (request.method === "GET" && url.pathname === "/test-telegram") {
+      if (!env.TELEGRAM_TOKEN) return jsonResp({ok:false,error:"TELEGRAM_TOKEN secret not set"},503);
+      if (!env.MU_ALERTS)      return jsonResp({ok:false,error:"KV not configured"},503);
+      const data = await env.MU_ALERTS.get("alerts:MU",{type:"json"});
+      const chatId = data?.chatId;
+      if (!chatId) return jsonResp({ok:false,error:"No chatId stored — sync alerts from the dashboard first"},400);
+      try {
+        const r = await sendTelegram(env.TELEGRAM_TOKEN, chatId, "🔔 <b>MU Dashboard</b>\nTelegram connection test — alerts are wired up correctly.");
+        return jsonResp({ok:true,chatId});
+      } catch(e) { return jsonResp({ok:false,error:String(e)},502); }
+    }
+
     // POST /alerts — receive alert config from the dashboard
     if (request.method === "POST" && url.pathname === "/alerts") {
       let body;

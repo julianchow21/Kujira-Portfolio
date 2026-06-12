@@ -19,7 +19,7 @@ One Yahoo v8 chart call per refresh: `query1.finance.yahoo.com/v8/finance/chart/
 Browser cannot hit Yahoo directly. `cfg.proxyMode` in Settings:
 - `public` (default): trial-only public CORS proxies, fallback chain in `PUBLIC_PROXIES`. Flaky, flagged in-UI, not for real-money decisions.
 - `worker`: Cloudflare Worker, code in `Worker/`. Recommended for real use (Julian chose this).
-- `appsscript`: Kujira Portfolio `/exec` after adding the `chart` action, see `Docs/Apps Script Chart Action`.
+- `appsscript`: Kujira Portfolio `/exec` after adding the `chart` action, see `Worker/Apps Script Chart Action`.
 - `direct`: raw Yahoo, usually CORS-blocked, falls back to public.
 
 All proxies return Yahoo's native JSON so `parseResult` is unchanged.
@@ -50,7 +50,8 @@ Ported from Investment Tracker: `--bg/bg2/bg3/bg4`, `--green` (gains) / `--red` 
 
 - `index.html` — the dashboard (canonical runtime name, no date prefix).
 - `Worker/` — Cloudflare Worker proxy code (the chosen data path).
-- `Docs/` — user guide and the optional Apps Script chart-action snippet.
+- `Worker/` — Cloudflare Worker proxy code and the optional Apps Script chart-action snippet.
+- `Docs/` — point-in-time reports and implementation specs (disposable once actioned).
 - `Backups/` — dated `index.html` snapshots taken before significant changes.
 
 ## Hosting
