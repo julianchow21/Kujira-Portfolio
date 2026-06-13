@@ -49,7 +49,7 @@ Warm light theme default (`--bg:#faf9f6`, `--accent:#c15f3c` terracotta). Dark o
 - `apps-script.gs` — Google Apps Script backend (runtime name)
 - `sw.js`, `manifest.webmanifest`, `whale-icon.png` — PWA assets (runtime names)
 - `tests/tests.html` — unit test runner, open locally
-- `Docs/` — Backlog (active), QA SOP (operational reference)
+- `Docs/` — QA SOP (operational reference). Feature backlog lives in `~/Claude Projects/Claude/tasks/todo.md`, never in a local file
 - `Backups/` — newest one snapshot per file, gitignored
 - `../Trading/` — sibling app (MU day-trading dashboard), own CLAUDE.md. Cross-linked both ways with relative paths (`../Trading/`, `../Portfolio/`)
 - `../index.html` + `../sw.js` (repo root) — redirect stub and sw kill switch from the pre-restructure root URL. Do not delete

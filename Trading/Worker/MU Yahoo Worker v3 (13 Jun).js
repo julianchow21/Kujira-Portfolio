@@ -1,33 +1,21 @@
-// MU Yahoo Worker v2 (11 Jun)
-// Cloudflare Worker: CORS proxy + KV-backed server-side Telegram alerts.
+// MU Yahoo Worker v3 (13 Jun)
+// Cloudflare Worker: CORS proxy + KV-backed Telegram alerts + fundamentals quote cache.
 //
-// New in v2 vs v1:
-//   POST /alerts   — dashboard syncs enabled alerts + Telegram chat ID into KV
-//   GET  /alerts   — read current alert state (for debugging)
-//   scheduled()    — cron fires every minute, evaluates conditions, pushes to Telegram
+// New in v3 vs v2:
+//   GET /quote?symbol=X  — crumb-authenticated Yahoo quoteSummary with 15-min KV cache.
+//                          Returns flat JSON: trailingPE, forwardPE, trailingEps,
+//                          marketCap, fiftyTwoWeekHigh, fiftyTwoWeekLow.
 //
-// Deployment steps (requires Wrangler CLI, not the paste-and-deploy UI):
-//   1. Create the KV namespace:
-//        wrangler kv:namespace create "MU_ALERTS"
-//      Copy the printed id into wrangler.toml under [[kv_namespaces]].
-//   2. Set the Telegram bot token as a Worker secret (never commit it):
-//        wrangler secret put TELEGRAM_TOKEN
-//      Create a bot first via @BotFather on Telegram if you haven't already.
-//   3. Deploy:
-//        wrangler deploy
-//   4. In the dashboard Settings:
-//      - Set proxy mode to "Cloudflare Worker" and paste the Worker URL.
-//      - Enter your Telegram Chat ID (message @userinfobot to find it).
-//      - Click "Sync alerts to Worker now".
-//
-// The Worker evaluates the same alert conditions as the dashboard and tracks
-// edge-triggered state (prevCond) in KV so it only fires on transitions.
+// Deployment:
+//   1. wrangler deploy   (KV namespace and secrets already configured from v2)
+//   2. curl "<worker-url>/quote?symbol=MU" — should return {ok:true,...}
 
 const ALLOWED_ORIGIN = "*"; // tighten to "https://<you>.github.io" once hosted
 const INTERVALS = new Set(["1m","2m","5m","15m","30m","60m","90m","1h","1d","1wk","1mo"]);
 const RANGES    = new Set(["1d","5d","1mo","3mo","6mo","1y","2y","5y","max"]);
 const SYMBOL_RE = /^[A-Z.\-]{1,12}$/;
 const CROSS_TYPES = new Set(["rsi_above","rsi_below","price_vwap_above","price_vwap_below","ema_bull","ema_bear"]);
+const DESKTOP_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 function corsHeaders(methods = "GET, OPTIONS") {
   return {
@@ -47,7 +35,85 @@ function err(status, description) {
   return jsonResp({ chart: { result: null, error: { description } } }, status);
 }
 
-// ---- Yahoo fetch + parse ----
+// ---- Crumb acquisition ----
+
+async function acquireCrumb(env) {
+  // Step 1: hit fc.yahoo.com to get a cookie
+  const fcResp = await fetch("https://fc.yahoo.com/", {
+    headers: { "User-Agent": DESKTOP_UA },
+    redirect: "manual",
+  });
+  const setCookie = fcResp.headers.get("set-cookie") || "";
+  const cookieVal = setCookie.split(";")[0]; // "B=..." or similar
+
+  // Step 2: exchange cookie for crumb
+  const crumbResp = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
+    headers: { "User-Agent": DESKTOP_UA, "Cookie": cookieVal },
+  });
+  const crumb = (await crumbResp.text()).trim();
+  if (!crumb || crumb.length < 3) throw new Error("empty crumb");
+
+  const entry = JSON.stringify({ cookie: cookieVal, crumb });
+  await env.MU_ALERTS.put("yh:crumb", entry, { expirationTtl: 43200 }); // 12h
+  return { cookie: cookieVal, crumb };
+}
+
+async function getCrumb(env) {
+  try {
+    const cached = await env.MU_ALERTS.get("yh:crumb", { type: "json" });
+    if (cached?.crumb) return cached;
+  } catch (e) {}
+  return await acquireCrumb(env);
+}
+
+// Unwrap Yahoo raw/fmt value objects
+function raw(v) { return (v != null && typeof v === "object" && "raw" in v) ? v.raw : v; }
+
+// ---- Quote fetch ----
+
+async function fetchQuoteSummary(sym, env, retry = true) {
+  let { cookie, crumb } = await getCrumb(env);
+
+  const url = "https://query1.finance.yahoo.com/v10/finance/quoteSummary/"
+    + encodeURIComponent(sym)
+    + "?modules=summaryDetail,defaultKeyStatistics&crumb=" + encodeURIComponent(crumb);
+
+  let resp = await fetch(url, {
+    headers: { "User-Agent": DESKTOP_UA, "Cookie": cookie, "Accept": "application/json" },
+  });
+
+  if ((resp.status === 401 || resp.status === 403) && retry) {
+    // Invalidate cached crumb and retry once
+    await env.MU_ALERTS.delete("yh:crumb").catch(() => {});
+    ({ cookie, crumb } = await acquireCrumb(env));
+    resp = await fetch(
+      "https://query1.finance.yahoo.com/v10/finance/quoteSummary/"
+        + encodeURIComponent(sym)
+        + "?modules=summaryDetail,defaultKeyStatistics&crumb=" + encodeURIComponent(crumb),
+      { headers: { "User-Agent": DESKTOP_UA, "Cookie": cookie, "Accept": "application/json" } },
+    );
+  }
+
+  if (!resp.ok) throw new Error("Yahoo quoteSummary HTTP " + resp.status);
+  const j = await resp.json();
+  const result = j?.quoteSummary?.result?.[0];
+  if (!result) throw new Error("empty quoteSummary result");
+
+  const sd  = result.summaryDetail || {};
+  const dks = result.defaultKeyStatistics || {};
+
+  return {
+    ok: true,
+    trailingPE:       raw(sd.trailingPE)        ?? null,
+    forwardPE:        raw(dks.forwardPE)         ?? null,
+    trailingEps:      raw(dks.trailingEps)       ?? null,
+    marketCap:        raw(sd.marketCap)          ?? null,
+    fiftyTwoWeekHigh: raw(sd.fiftyTwoWeekHigh)   ?? null,
+    fiftyTwoWeekLow:  raw(sd.fiftyTwoWeekLow)    ?? null,
+  };
+}
+
+// ---- Yahoo chart fetch + parse ----
 
 async function fetchYahoo(symbol, interval, range, pre = false) {
   const url = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol)
@@ -68,7 +134,7 @@ function isRegularSession(unixSec) {
   const h  = parseInt(parts.find(p => p.type === "hour").value);
   const mn = parseInt(parts.find(p => p.type === "minute").value);
   const total = h * 60 + mn;
-  return total >= 570 && total < 960; // 09:30–16:00 ET
+  return total >= 570 && total < 960;
 }
 
 function etDateKey(unixSec) {
@@ -90,11 +156,9 @@ function parseAndSnap(result) {
       volume: q.volume?.[i] ?? 0,
     });
   }
-
   const price = m.regularMarketPrice ?? bars.at(-1)?.close ?? null;
   const closes = bars.map(b => b.close);
 
-  // EMA 9 + 20
   function ema(values, period) {
     if (values.length < period) return null;
     const k = 2 / (period + 1);
@@ -103,7 +167,6 @@ function parseAndSnap(result) {
     return prev;
   }
 
-  // RSI 14 (Wilder)
   function rsiLast(values, period = 14) {
     if (values.length <= period) return null;
     let ag = 0, al = 0;
@@ -119,7 +182,6 @@ function parseAndSnap(result) {
     return al === 0 ? 100 : 100 - 100 / (1 + ag / al);
   }
 
-  // VWAP — today's regular-session bars only
   const today = bars.length ? etDateKey(bars[bars.length - 1].time) : null;
   let cumTP = 0, cumVol = 0;
   for (const b of bars) {
@@ -150,8 +212,8 @@ function evalCond(a, snap) {
 function alertDesc(a) {
   const v = a.value != null ? Number(a.value).toFixed(2) : "";
   switch (a.type) {
-    case "price_above":      return "Price ≥ $" + v;
-    case "price_below":      return "Price ≤ $" + v;
+    case "price_above":      return "Price >= $" + v;
+    case "price_below":      return "Price <= $" + v;
     case "rsi_above":        return "RSI rose above " + v;
     case "rsi_below":        return "RSI fell below " + v;
     case "price_vwap_above": return "Price crossed above VWAP";
@@ -170,8 +232,6 @@ async function sendTelegram(token, chatId, text) {
   });
 }
 
-// ---- Market hours check (ET) ----
-// Returns true if cron should run (09:25–16:05 ET covers open and close transitions).
 function isMarketWindow() {
   const now = new Date();
   const fmt = new Intl.DateTimeFormat("en-US", {
@@ -184,7 +244,7 @@ function isMarketWindow() {
   const h  = parseInt(parts.find(p => p.type === "hour").value);
   const mn = parseInt(parts.find(p => p.type === "minute").value);
   const total = h * 60 + mn;
-  return total >= 565 && total <= 965; // 09:25–16:05
+  return total >= 565 && total <= 965;
 }
 
 // ---- Main export ----
@@ -197,20 +257,42 @@ export default {
       return new Response(null, { headers: corsHeaders("GET, POST, OPTIONS") });
     }
 
-    // GET /test-telegram — send a test message to the stored chatId to verify the bot is working
-    if (request.method === "GET" && url.pathname === "/test-telegram") {
-      if (!env.TELEGRAM_TOKEN) return jsonResp({ok:false,error:"TELEGRAM_TOKEN secret not set"},503);
-      if (!env.MU_ALERTS)      return jsonResp({ok:false,error:"KV not configured"},503);
-      const data = await env.MU_ALERTS.get("alerts:MU",{type:"json"});
-      const chatId = data?.chatId;
-      if (!chatId) return jsonResp({ok:false,error:"No chatId stored — sync alerts from the dashboard first"},400);
+    // GET /quote?symbol=X — fundamentals via Yahoo quoteSummary with crumb + KV cache
+    if (request.method === "GET" && url.pathname === "/quote") {
+      if (!env.MU_ALERTS) return jsonResp({ ok: false, error: "KV not configured" }, 503);
+      const sym = (url.searchParams.get("symbol") || "MU").toUpperCase();
+      if (!SYMBOL_RE.test(sym)) return jsonResp({ ok: false, error: "bad symbol" }, 400);
+
+      const cacheKey = "quote:" + sym;
+      const TTL_MS = 15 * 60 * 1000;
       try {
-        const r = await sendTelegram(env.TELEGRAM_TOKEN, chatId, "🔔 <b>MU Dashboard</b>\nTelegram connection test — alerts are wired up correctly.");
-        return jsonResp({ok:true,chatId});
-      } catch(e) { return jsonResp({ok:false,error:String(e)},502); }
+        const cached = await env.MU_ALERTS.get(cacheKey, { type: "json" });
+        if (cached?.ts && Date.now() - cached.ts < TTL_MS) return jsonResp(cached.data);
+      } catch (e) {}
+
+      try {
+        const data = await fetchQuoteSummary(sym, env);
+        await env.MU_ALERTS.put(cacheKey, JSON.stringify({ ts: Date.now(), data }), { expirationTtl: 3600 });
+        return jsonResp(data);
+      } catch (e) {
+        return jsonResp({ ok: false, error: String(e) }, 502);
+      }
     }
 
-    // POST /alerts — receive alert config from the dashboard
+    // GET /test-telegram
+    if (request.method === "GET" && url.pathname === "/test-telegram") {
+      if (!env.TELEGRAM_TOKEN) return jsonResp({ ok: false, error: "TELEGRAM_TOKEN secret not set" }, 503);
+      if (!env.MU_ALERTS)      return jsonResp({ ok: false, error: "KV not configured" }, 503);
+      const data = await env.MU_ALERTS.get("alerts:MU", { type: "json" });
+      const chatId = data?.chatId;
+      if (!chatId) return jsonResp({ ok: false, error: "No chatId stored — sync alerts from the dashboard first" }, 400);
+      try {
+        await sendTelegram(env.TELEGRAM_TOKEN, chatId, "MU Dashboard\nTelegram connection test.");
+        return jsonResp({ ok: true, chatId });
+      } catch (e) { return jsonResp({ ok: false, error: String(e) }, 502); }
+    }
+
+    // POST /alerts
     if (request.method === "POST" && url.pathname === "/alerts") {
       let body;
       try { body = await request.json(); } catch (e) { return err(400, "bad JSON"); }
@@ -220,7 +302,6 @@ export default {
       if (!Array.isArray(alerts)) return err(400, "alerts must be array");
       if (!env.MU_ALERTS) return err(503, "KV binding MU_ALERTS not configured");
       const sym = symbol.toUpperCase();
-      // Reset edge-trigger state on sync so cron initialises cleanly on first run.
       const stored = {
         chatId, symbol: sym,
         alerts: alerts.map(a => ({
@@ -234,7 +315,7 @@ export default {
       return jsonResp({ ok: true, count: alerts.length });
     }
 
-    // GET /alerts?symbol=X — inspect current state (debugging only)
+    // GET /alerts?symbol=X
     if (request.method === "GET" && url.pathname === "/alerts") {
       if (!env.MU_ALERTS) return err(503, "KV binding MU_ALERTS not configured");
       const sym = (url.searchParams.get("symbol") || "MU").toUpperCase();
@@ -242,7 +323,7 @@ export default {
       return jsonResp(data || { alerts: [] });
     }
 
-    // GET / — Yahoo proxy (unchanged from v1)
+    // GET / — Yahoo chart proxy
     const symbol   = (url.searchParams.get("symbol") || "MU").toUpperCase();
     const interval = url.searchParams.get("interval") || "1m";
     const range    = url.searchParams.get("range") || "1d";
@@ -270,9 +351,8 @@ export default {
     }
   },
 
-  // ---- Cron: evaluate alerts every minute during market hours ----
   async scheduled(event, env, ctx) {
-    if (!env.MU_ALERTS || !env.TELEGRAM_TOKEN) return; // secrets not configured
+    if (!env.MU_ALERTS || !env.TELEGRAM_TOKEN) return;
     if (!isMarketWindow()) return;
 
     const list = await env.MU_ALERTS.list({ prefix: "alerts:" });
@@ -302,7 +382,7 @@ export default {
 
         if (CROSS_TYPES.has(a.type)) {
           if (a.prevCond === null || a.prevCond === undefined) {
-            a.prevCond = cond; stateChanged = true; continue; // first run: initialise only
+            a.prevCond = cond; stateChanged = true; continue;
           }
           const prev = !!a.prevCond;
           if (cond && !prev) {

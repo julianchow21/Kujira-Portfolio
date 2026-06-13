@@ -1,9 +1,9 @@
-# wrangler.toml — MU Yahoo Worker v2
+# wrangler.toml — MU Yahoo Worker v3
 # Deploy with: wrangler deploy
 # (requires Wrangler CLI: npm install -g wrangler && wrangler login)
 
 name = "mu-yahoo-worker"
-main = "MU Yahoo Worker v2 (11 Jun).js"
+main = "MU Yahoo Worker v3 (13 Jun).js"
 compatibility_date = "2024-01-01"
 
 # KV namespace for alert storage.

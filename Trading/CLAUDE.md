@@ -32,6 +32,18 @@ Client-side from the series: `ema()`, `rsi()` (Wilder), `macd()` (12/26/9), `vwa
 
 `alerts[]` in localStorage, edge-triggered: fire once when the condition becomes true, re-arm when it goes false (`armed` flag). Types: price above/below, RSI above/below, price x VWAP, EMA9 x EMA20. Visual flash + toast + optional Notification + optional beep. Evaluated every refresh from the core snapshot.
 
+## v3.1 additions (13 Jun)
+
+- **Branding + static tab title:** Kujira whale logo + KUJIRA/Trading wordmark in topbar; `<title>` is always "Kujira Trading", whale PNG favicon; dynamic title/favicon rewrite in `renderHeader` removed
+- **SGT chart display (ET internals untouched):** `fmtClockSG`/`fmtDateSG` swap in `tickMarkFormatter`, `localization.timeFormatter`, and crosshair tooltip only; 1D tab keeps ET date to avoid off-by-one daily labels; `DayBands` and all session logic stay ET
+- **`cfg.chartStyle`:** `"area"` (default) or `"candles"`. `applyChartStyle()` styles sLine transparent in candle mode instead of hiding it (hiding breaks price lines and DayBands). `sCandle` is a separate `CandlestickSeries` created at init
+- **Level-line defaults:** `cfg.lvDefaultsV31` one-time migration hides Prev Close, Prev Day Hi/Lo, PM High/Low, OR15/OR30 Hi/Lo by default; Today Open/Hi/Lo stay visible. `updateChartLevels` title = `l.lbl + " " + Math.round(l.px)` renders in-pane
+- **Listener stacking fix:** `renderToggles` changed `dyn.addEventListener` to `dyn.onclick` (idempotent assignment). Root cause: `renderToggles` is re-entrant from every click branch on the persistent `#togglesDyn` element; stacked listeners doubled on each click, making unpin appear as no-op
+- **Fundamentals card:** below chart card, 6 cells (P/E, Fwd P/E, EPS, Mkt Cap, 52W Hi/Lo). `fetchQuote()` at boot + 15-min interval; Worker `/quote` route with crumb+KV cache. Non-worker mode shows "needs Worker proxy" note
+- **Alert bar:** fixed bottom bar, chips per enabled alert with status dot + cancel. Cancel = delete with 5s UNDO toast. `autoSyncAlerts()` debounces TG sync 1.5s after any mutation; preview guard skips sync on localhost/file://
+- **Stats strip removed:** `renderHeader` no longer writes sOpen/sPrev/sHigh/sLow/sRange/sVol/sGap/sFromOpen. RVOL (`computeRvol`, `fetchRvolSeries`, `RVOL_PARAMS`) deleted; `renderRS` deleted, `fetchRSSeries` kept for chart RS overlay
+- **Worker v3:** `GET /quote?symbol=X` with crumb acquisition (fc.yahoo.com + getcrumb), quoteSummary v10, KV cache `quote:<SYM>` 15 min. `wrangler.toml main` updated to v3 filename
+
 ## v3.0 additions (12 Jun)
 
 - **Default ticker:** `cfg.defaultSymbol` — resolution order: `?symbol=` URL param → `cfg.defaultSymbol` → `"MU"`. The `SYMBOL` IIFE reads localStorage directly (cannot use `cfg` or `TICKER_RE` — both are in TDZ at that point)
@@ -58,8 +70,7 @@ Ported from Investment Tracker: `--bg/bg2/bg3/bg4`, `--green` (gains) / `--red` 
 ## Files
 
 - `index.html` — the dashboard (canonical runtime name, no date prefix).
-- `Worker/` — Cloudflare Worker proxy code (the chosen data path).
-- `Worker/` — Cloudflare Worker proxy code and the optional Apps Script chart-action snippet.
+- `Worker/` — Cloudflare Worker proxy code (`MU Yahoo Worker v3 (13 Jun).js`) and the optional Apps Script chart-action snippet.
 - `Docs/` — point-in-time reports and implementation specs (disposable once actioned).
 - `Backups/` — dated `index.html` snapshots taken before significant changes.
 
