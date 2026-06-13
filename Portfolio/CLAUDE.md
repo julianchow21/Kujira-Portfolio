@@ -40,7 +40,9 @@ To unblock a Phase 2 tab: remove its key from `PHASE_2_TABS`.
 
 ## Design tokens
 
-Warm light theme default (`--bg:#faf9f6`, `--accent:#c15f3c` terracotta). Dark opt-in (`--accent:#2dd4bf` teal). Tokens: `--bg/bg2/bg3/bg4`, `--text/text2/text3`, `--red/green/blue/amber/purple`, `--radius/radius-lg`.
+Warm light theme default (`--bg:#faf9f6`, `--accent:#c15f3c` terracotta). Dark opt-in (`--accent:#2dd4bf` teal). Base tokens: `--bg/bg2/bg3/bg4`, `--text/text2/text3`, `--red/green/blue/amber/purple`, `--radius/radius-lg`.
+
+Glass layer (v1.7, both themes): `--glass`, `--glass-strong`, `--glass-border`, `--glass-hi`, `--glass-blur`, `--glass-shadow`, `--surface-solid` (opaque backing for dense tables), `--glow1/--glow2` (ambient radial glows), `--tx/--tx2/--tx3` (aliases for text tokens, fix latent bug). Surfaces use `--glass` + `backdrop-filter:blur(--glass-blur)`. Dense table `td/th` and sticky columns use `--surface-solid`. `@supports not (backdrop-filter)` fallback applies `--surface-solid` to all glass surfaces.
 
 ## Files
 
