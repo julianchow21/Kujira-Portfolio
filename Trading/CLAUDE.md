@@ -32,6 +32,16 @@ Client-side from the series: `ema()`, `rsi()` (Wilder), `macd()` (12/26/9), `vwa
 
 `alerts[]` in localStorage, edge-triggered: fire once when the condition becomes true, re-arm when it goes false (`armed` flag). Types: price above/below, RSI above/below, price x VWAP, EMA9 x EMA20. Visual flash + toast + optional Notification + optional beep. Evaluated every refresh from the core snapshot.
 
+## v3.2 additions (14 Jun)
+
+- **Topbar declutter:** topbar now holds logo + ⬡/↻/⚙ only. Ticker identity (MU button, company name, market/stale pills) moved into a new `.px-head` row inside the hero price card, above the price line
+- **MU as an obvious button:** `#sym` restyled as a bordered pill (filled bg, hover state, cursor pointer). `⇆` glyph via `::after`. `#wlBtn` ▾ removed; `#sym` click directly toggles `#wlDrop`
+- **Launch pin in switcher:** `#pinBtn` ☆ removed from topbar. `renderWatchlist` prepends a `.wl-head` with `#wlPinCur` ("☆ Open MU on launch") and `#wlEditInfo` ("✎ Edit ticker info") rows inside the dropdown. `toggleLaunchPin()` flips `cfg.defaultSymbol`. `renderPinBtn` is a no-op stub
+- **Age pill removed:** `#agePill` element gone. `renderAge` no longer sets the age text; stale detection and `#stalePill` logic unchanged
+- **Sector/cap chips hidden:** `renderSymMeta` removes `#symMeta` (no chips on the card). "Edit ticker info" still opens `openSymPop` from the switcher dropdown
+- **Short chart level labels:** `SHORT_LVL` map converts long labels to single-letter codes (O/H/L/PC/PDH/PDL/PMH/PML/ORH/ORL/OR30H/OR30L) in `updateChartLevels`. Custom lines show `C`. Numeric axis labels (`axisLabelVisible:true`) unchanged
+- **Slim Key Levels strip:** `renderLevels` keeps gauge strip only (no per-level eye/alert rows). Slim legend below: O/H/L colour key + removable × chips per `cfg.customLevels` entry (`data-delcustom`). Key Levels card repositioned between `#chartCard` and `#fundCard`
+
 ## v3.1 additions (13 Jun)
 
 - **Branding + static tab title:** Kujira whale logo + KUJIRA/Trading wordmark in topbar; `<title>` is always "Kujira Trading", whale PNG favicon; dynamic title/favicon rewrite in `renderHeader` removed

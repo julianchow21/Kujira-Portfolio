@@ -33,9 +33,13 @@ button{font-family:inherit;cursor:pointer}
 /* Topbar */
 .topbar{position:sticky;top:0;z-index:100;background:rgba(19,23,34,.95);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
 .topbar-in{max-width:1100px;margin:0 auto;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.tick{display:flex;align-items:baseline;gap:8px;position:relative}
-.tick .sym{font-size:18px;font-weight:700;letter-spacing:.5px;cursor:pointer}
-.tick .nm{font-size:12px;color:var(--text2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.px-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.tick{display:flex;align-items:center;gap:10px;position:relative}
+.tick .sym{font-size:19px;font-weight:700;letter-spacing:.5px;cursor:pointer;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:var(--radius);padding:4px 11px;display:inline-flex;align-items:center;gap:7px;line-height:1.1;font-family:inherit}
+.tick .sym:hover{background:var(--bg4);border-color:var(--accent-border);color:var(--accent)}
+.tick .sym::after{content:"⇆";font-size:12px;font-weight:400;color:var(--text3)}
+.tick .sym:hover::after{color:var(--accent)}
+.tick .nm{font-size:13px;color:var(--text2);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wl-btn{background:none;border:none;color:var(--text3);font-size:13px;padding:0 1px;cursor:pointer;line-height:1;align-self:center}
 .wl-btn:hover{color:var(--text)}
 .wl-drop{display:none;position:absolute;top:calc(100% + 8px);left:0;min-width:170px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:6px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,.6)}
@@ -45,6 +49,9 @@ button{font-family:inherit;cursor:pointer}
 .wl-item.cur{color:var(--accent);cursor:default}
 .wl-del{margin-left:auto;background:none;border:none;color:var(--text3);font-size:15px;line-height:1;cursor:pointer;padding:0 2px}
 .wl-del:hover{color:var(--red)}
+.wl-head{display:flex;flex-direction:column;gap:2px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.wl-actrow{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text2);font-size:12px;font-weight:600;padding:6px 8px;border-radius:6px;cursor:pointer;font-family:inherit}
+.wl-actrow:hover{background:var(--bg4);color:var(--text)}
 .wl-add{display:flex;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)}
 .wl-add input{flex:1;min-width:0;padding:5px 8px;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
 .spacer{flex:1 1 auto}
@@ -216,6 +223,12 @@ input[type=number]{width:96px}
 .lev-pin{position:absolute;top:-7px;width:4px;height:20px;background:#2dd4bf;border-radius:2px;transform:translateX(-50%);z-index:3;box-shadow:0 0 8px rgba(45,212,191,.8)}
 .lev-pin-px{position:absolute;bottom:-22px;transform:translateX(-50%);font-size:11px;font-weight:700;white-space:nowrap;color:#2dd4bf;z-index:4}
 .lev-tip{position:absolute;bottom:calc(100% + 6px);background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);font-size:11px;padding:4px 8px;white-space:nowrap;pointer-events:none;z-index:10;color:var(--text)}
+.lev-legend{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:11px;color:var(--text3)}
+.lev-key b{font-weight:800;margin-right:3px}
+.lev-cust{display:inline-flex;align-items:center;gap:5px;padding:2px 4px 2px 8px;border:1px solid var(--border2);border-radius:999px;background:var(--bg3);color:var(--text2);font-variant-numeric:tabular-nums}
+.lev-cust b{font-weight:800;color:var(--text3);margin-right:1px}
+.lev-cust-x{background:none;border:none;color:var(--text3);font-size:14px;line-height:1;cursor:pointer;padding:0 3px}
+.lev-cust-x:hover{color:var(--red)}
 .lev-row{display:flex;align-items:center;gap:7px;padding:4px 0;border-bottom:1px solid var(--border)}
 .lev-row:last-child{border-bottom:none}
 .lev-dot{width:7px;height:7px;border-radius:50%;flex:none}
@@ -242,11 +255,6 @@ input[type=number]{width:96px}
   .tick .nm{display:none}
   .calc-grid{grid-template-columns:1fr 1fr}
 }
-
-/* Pin button */
-#pinBtn{background:none;border:none;color:var(--text3);font-size:14px;padding:0 2px;cursor:pointer;line-height:1;align-self:center}
-#pinBtn:hover{color:var(--amber)}
-#pinBtn.pinned{color:var(--amber)}
 
 /* Bottom alert bar */
 #alertBar{position:fixed;bottom:0;left:0;right:0;z-index:150;background:rgba(19,23,34,.97);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-top:1px solid var(--border2);padding:8px 14px;display:none;align-items:center;gap:8px;flex-wrap:wrap}
@@ -278,17 +286,7 @@ body.has-alertbar{padding-bottom:56px}
       <img class="logo-whale" src="../Portfolio/whale-icon.png" alt="Kujira">
       <div class="logo-name"><span>KUJIRA</span><span>Trading</span></div>
     </a>
-    <div class="tick" id="tickWrap">
-      <span class="sym" id="sym">MU</span>
-      <button class="wl-btn" id="wlBtn" title="Switch ticker">▾</button>
-      <button id="pinBtn" title="Open this ticker on launch">☆</button>
-      <div class="wl-drop" id="wlDrop"></div>
-      <span class="nm" id="nm">Micron Technology</span>
-    </div>
-    <span class="pill" id="mktPill"><span class="dot"></span><span id="mktTxt">Loading</span></span>
-    <span class="pill stale" id="stalePill" style="display:none"><span class="dot"></span><span id="staleTxt">stale</span></span>
     <div class="tb-right">
-      <span class="pill" id="agePill" title="Data timestamp from Yahoo"><span id="ageTxt">—</span></span>
       <a href="../Portfolio/" class="iconbtn" title="Kujira Portfolio" style="text-decoration:none;font-size:12px;font-weight:600">⬡</a>
       <button class="iconbtn" id="refreshBtn" title="Refresh now">&#x21bb;</button>
       <button class="iconbtn" id="gearBtn" title="Settings">&#9881;</button>
@@ -302,6 +300,15 @@ body.has-alertbar{padding-bottom:56px}
 
   <!-- Hero -->
   <div class="card">
+    <div class="px-head">
+      <div class="tick" id="tickWrap">
+        <button class="sym" id="sym" title="Click to change ticker">MU</button>
+        <div class="wl-drop" id="wlDrop"></div>
+        <span class="nm" id="nm">Micron Technology</span>
+      </div>
+      <span class="pill" id="mktPill"><span class="dot"></span><span id="mktTxt">Loading</span></span>
+      <span class="pill stale" id="stalePill" style="display:none"><span class="dot"></span><span id="staleTxt">stale</span></span>
+    </div>
     <div class="hero">
       <div class="price mono" id="px">—</div>
       <div class="chg mono flat" id="chg"><span class="arr"></span> <span id="chgAbs">—</span> <span id="chgPct"></span></div>
@@ -339,6 +346,12 @@ body.has-alertbar{padding-bottom:56px}
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Key Levels -->
+  <div class="card">
+    <h3>Key Levels</h3>
+    <div id="levelsList"><div class="al-empty">Waiting for data…</div></div>
   </div>
 
   <!-- Fundamentals -->
@@ -384,12 +397,6 @@ body.has-alertbar{padding-bottom:56px}
         <div class="sub" id="atrSub">14-day ATR</div>
       </div>
     </div>
-  </div>
-
-  <!-- Key Levels -->
-  <div class="card">
-    <h3>Key Levels</h3>
-    <div id="levelsList"><div class="al-empty">Waiting for data…</div></div>
   </div>
 
   <!-- Position Calculator -->
@@ -524,7 +531,7 @@ body.has-alertbar{padding-bottom:56px}
   <span class="warn">For information only, not financial advice.</span>
   Live MU data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v3.1 (13 Jun)</span>
+  <span style="margin-left:8px;color:var(--text3)">v3.2 (13 Jun)</span>
 
 </div>
 
@@ -1343,8 +1350,7 @@ function renderAge(d){
   const barTime = d&&d.bars&&d.bars.length ? d.bars[d.bars.length-1].time : null;
   const mt = d&&d.marketTime;
   const t = (barTime && (!mt || barTime > mt)) ? barTime : mt;
-  setText("ageTxt", t?fmtAge(t):"—");
-  const pill=$("#agePill"); if(pill) pill.title="Time since last trade (incl. pre/post)";
+  // Age pill removed in v3.2; keep the stale-data warning (separate safety signal).
   const stale = (marketStateFromClock()==="REGULAR") && t && (Date.now()/1000 - t > 180);
   $("#stalePill").style.display = stale?"inline-flex":"none";
   if(stale) setText("staleTxt","data "+fmtAge(t));
@@ -1647,11 +1653,16 @@ function applyCustomLevels(){
   (cfg.customLevels||[]).forEach(l=>{
     try{
       customPriceLines.push(sLine.createPriceLine({
-        price:l.px,color:'#787b86',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:l.label||'Custom',
+        price:l.px,color:'#787b86',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:l.label||'C',
       }));
     }catch(e){}
   });
 }
+// Short coloured in-pane tags so the labels stop crowding the chart. The axis
+// label background is the level colour, so O/H/L read as amber/green/red.
+const SHORT_LVL={"Today Open":"O","Day Hi":"H","Day Lo":"L","Prev Close":"PC",
+  "Prev Day Hi":"PDH","Prev Day Lo":"PDL","PM High":"PMH","PM Low":"PML",
+  "OR15 Hi":"ORH","OR15 Lo":"ORL","OR30 Hi":"OR30H","OR30 Lo":"OR30L"};
 function updateChartLevels(levels){
   if(!chartReady||!sLine) return;
   priceLines.forEach(l=>{try{sLine.removePriceLine(l);}catch(e){}});
@@ -1661,7 +1672,7 @@ function updateChartLevels(levels){
       priceLines.push(sLine.createPriceLine({
         price:l.px, color:l.hex, lineWidth:1,
         lineStyle:1,
-        axisLabelVisible:true, title:l.lbl+" "+Math.round(l.px),
+        axisLabelVisible:true, title:SHORT_LVL[l.lbl]||l.lbl,
       }));
     }catch(e){}
   });
@@ -1700,43 +1711,23 @@ function renderLevels(core){
   const pinHtml=price!=null?`<span class="lev-pin" data-tip="${esc('Price · '+fmtPx(price))}" style="left:${priceP}%"><span class="lev-pin-px">${fmtPx(price)}</span></span>`:"";
   const gaugeHtml=`<div class="lev-gauge"><div class="lev-track" style="background:${trackBg}">${ticks}${pinHtml}</div><div id="levTip" class="lev-tip" style="display:none"></div></div>`;
 
-  // --- Compact rows ---
-  const eyeOpen='<svg viewBox="0 0 14 10" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><path d="M1 5c1.5-3.5 10.5-3.5 12 0M1 5c1.5 3.5 10.5 3.5 12 0"/><circle cx="7" cy="5" r="2"/></svg>';
-  const eyeOff='<svg viewBox="0 0 14 10" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12" style="opacity:.35"><path d="M1 5c1.5-3.5 10.5-3.5 12 0M1 5c1.5 3.5 10.5 3.5 12 0"/><circle cx="7" cy="5" r="2"/><line x1="2" y1="1" x2="12" y2="9"/></svg>';
-  const rowsHtml=levels.map(l=>{
-    const hidden=ll[l.lbl]===false;
-    return `<div class="lev-row">
-    <span class="lev-dot" style="background:${l.hex}"></span>
-    <span class="lev-lbl">${esc(l.lbl)}</span>
-    <span class="lev-px mono">$${l.px.toFixed(2)}</span>
-    <button class="btn ghost lev-eye" data-lbl="${esc(l.lbl)}" title="Toggle on chart" style="padding:2px 5px">${hidden?eyeOff:eyeOpen}</button>
-    <button class="btn ghost lev-alert" data-px="${l.px}" data-above="${price!=null&&l.px>price?1:0}">Alert</button>
-  </div>`;
-  }).join("");
-
-  function wireAlert(btn){
+  // --- Small legend: O/H/L colour key + removable custom chips ---
+  const KEY=[["O","Open","#FF9800","Today Open"],["H","High","#26a69a","Day Hi"],["L","Low","#ef5350","Day Lo"]];
+  const keyHtml=KEY.filter(k=>levels.some(l=>l.lbl===k[3]))
+    .map(k=>`<span class="lev-key"><b style="color:${k[2]}">${k[0]}</b> ${k[1]}</span>`).join("");
+  const custom=(cfg.customLevels||[]).slice().sort((a,b)=>b.px-a.px);
+  const custHtml=custom.map(l=>
+    `<span class="lev-cust"><b>C</b> ${esc(fmtPx(l.px))}<button class="lev-cust-x" data-delcustom="${esc(l.id)}" title="Remove this custom line">×</button></span>`
+  ).join("");
+  list.innerHTML=gaugeHtml+`<div class="lev-legend">${keyHtml}${custHtml}</div>`;
+  // Remove a custom line from its legend chip
+  list.querySelectorAll("[data-delcustom]").forEach(btn=>{
     btn.onclick=()=>{
-      const px=parseFloat(btn.dataset.px);
-      if(!isNaN(px)){
-        const type=btn.dataset.above==="1"?"price_above":"price_below";
-        alerts.push({id:"a"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),type,value:px,enabled:true,armed:true});
-        saveAlerts(); renderAlerts(); toast("Alert set at "+fmtPx(px));
-      }
-    };
-  }
-  function wireEye(btn){
-    btn.onclick=()=>{
-      const lbl=btn.dataset.lbl;
-      cfg.levelLines=cfg.levelLines||{};
-      if(cfg.levelLines[lbl]===false) delete cfg.levelLines[lbl];
-      else cfg.levelLines[lbl]=false;
-      saveCfg();
+      cfg.customLevels=(cfg.customLevels||[]).filter(l=>l.id!==btn.dataset.delcustom);
+      saveCfg(); applyCustomLevels();
       if(lastCore) renderLevels(lastCore);
     };
-  }
-  list.innerHTML=gaugeHtml+rowsHtml;
-  list.querySelectorAll(".lev-alert").forEach(wireAlert);
-  list.querySelectorAll(".lev-eye").forEach(wireEye);
+  });
   // Gauge hover tooltip (delegated, wired once)
   if(!list._levTipWired){ list._levTipWired=true;
   list.addEventListener("mouseenter",e=>{
@@ -1755,30 +1746,6 @@ function renderLevels(core){
     tip.textContent=el.dataset.tip; tip.style.display="block";
     setTimeout(()=>{ tip.style.display="none"; },2000);
   },{passive:true}); }
-  // Custom levels section
-  const custom=(cfg.customLevels||[]).slice().sort((a,b)=>b.px-a.px);
-  if(custom.length){
-    let ch='<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)"><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Custom</div>';
-    custom.forEach(l=>{
-      ch+=`<div class="lev-row">
-        <span class="lev-dot" style="background:#787b86"></span>
-        <span class="lev-lbl">${esc(l.label||'Custom')}</span>
-        <span class="lev-px mono">$${l.px.toFixed(2)}</span>
-        <button class="btn ghost lev-alert" data-px="${l.px}" data-above="${price!=null&&l.px>price?1:0}">Alert</button>
-        <button class="al-x" data-delcustom="${esc(l.id)}" title="Remove">×</button>
-      </div>`;
-    });
-    ch+='</div>';
-    list.innerHTML+=ch;
-    list.querySelectorAll("[data-delcustom]").forEach(btn=>{
-      btn.onclick=()=>{
-        cfg.customLevels=(cfg.customLevels||[]).filter(l=>l.id!==btn.dataset.delcustom);
-        saveCfg(); applyCustomLevels();
-        if(lastCore) renderLevels(lastCore);
-      };
-    });
-    list.querySelectorAll(".lev-row:has([data-delcustom]) .lev-alert").forEach(wireAlert);
-  }
   updateChartLevels(levels);
   applyCustomLevels();
 }
@@ -2044,7 +2011,12 @@ function renderWatchlist(){
            '<button class="wl-del" data-del="'+esc(s)+'" title="Remove">×</button>')+
       '</div>';
   }).join("");
-  drop.innerHTML=items+
+  const curPinned=cfg.defaultSymbol===SYMBOL;
+  const head='<div class="wl-head">'+
+    '<button class="wl-actrow" id="wlPinCur" title="Open this ticker when the dashboard loads">'+(curPinned?"★":"☆")+' Open '+esc(SYMBOL)+' on launch</button>'+
+    '<button class="wl-actrow" id="wlEditInfo" title="Edit sector / style / tier">✎ Edit ticker info</button>'+
+    '</div>';
+  drop.innerHTML=head+items+
     '<div class="wl-add">'+
     '<input type="text" id="wlInput" placeholder="Add ticker" maxlength="12">'+
     '<button class="btn" id="wlAddBtn" style="padding:5px 10px;font-size:12px">+</button>'+
@@ -2052,6 +2024,10 @@ function renderWatchlist(){
   const inp=document.getElementById("wlInput");
   document.getElementById("wlAddBtn").addEventListener("click",()=>addTicker((inp.value||"").trim().toUpperCase()));
   inp.addEventListener("keydown",e=>{ if(e.key==="Enter") addTicker((e.target.value||"").trim().toUpperCase()); });
+  const pinCur=document.getElementById("wlPinCur");
+  if(pinCur) pinCur.addEventListener("click",e=>{ e.stopPropagation(); toggleLaunchPin(); });
+  const editInfo=document.getElementById("wlEditInfo");
+  if(editInfo) editInfo.addEventListener("click",e=>{ e.stopPropagation(); drop.classList.remove("open"); openSymPop($("#tickWrap"), (cfg.tickerMeta||{})[SYMBOL]||TICKER_META[SYMBOL]); });
   drop.querySelectorAll(".wl-star").forEach(btn=>{
     btn.addEventListener("click",e=>{
       e.stopPropagation();
@@ -2073,12 +2049,12 @@ function removeTicker(sym){
   if(sym===cfg.defaultSymbol){ cfg.defaultSymbol=""; }
   cfg.watchlist=cfg.watchlist.filter(s=>s!==sym); saveCfg(); renderWatchlist();
 }
-function renderPinBtn(){
-  const btn=$("#pinBtn"); if(!btn) return;
-  const pinned=cfg.defaultSymbol===SYMBOL;
-  btn.textContent=pinned?"★":"☆";
-  btn.classList.toggle("pinned",pinned);
-  btn.title=pinned?"Remove launch pin for "+SYMBOL:"Open "+SYMBOL+" on launch";
+function renderPinBtn(){ /* launch pin now lives in the ticker switcher dropdown (renderWatchlist) */ }
+function toggleLaunchPin(){
+  const now=cfg.defaultSymbol===SYMBOL;
+  cfg.defaultSymbol=now?"":SYMBOL;
+  saveCfg(); renderWatchlist();
+  toast(now?"Launch pin removed":SYMBOL+" opens on launch");
 }
 function switchTicker(sym){
   const u=new URL(location.href); u.searchParams.set("symbol",sym); location.href=u.toString();
@@ -2201,10 +2177,8 @@ function wire(){
   });
 
   // watchlist dropdown
-  $("#wlBtn").addEventListener("click",e=>{ e.stopPropagation(); $("#wlDrop").classList.toggle("open"); if($("#wlDrop").classList.contains("open")){ const i=document.getElementById("wlInput"); if(i) setTimeout(()=>i.focus(),40); } });
+  const _symEl=$("#sym"); if(_symEl) _symEl.addEventListener("click",e=>{ e.stopPropagation(); const d=$("#wlDrop"); d.classList.toggle("open"); if(d.classList.contains("open")){ const i=document.getElementById("wlInput"); if(i) setTimeout(()=>i.focus(),40); } });
   document.addEventListener("click",e=>{ if(!document.getElementById("tickWrap").contains(e.target)) $("#wlDrop").classList.remove("open"); });
-  const _symEl=$("#sym"); if(_symEl) _symEl.addEventListener("click",e=>{ e.stopPropagation(); $("#wlBtn").click(); });
-  const _pinBtnEl=$("#pinBtn"); if(_pinBtnEl) _pinBtnEl.addEventListener("click",e=>{ e.stopPropagation(); const now=cfg.defaultSymbol===SYMBOL; cfg.defaultSymbol=now?"":SYMBOL; saveCfg(); renderPinBtn(); renderWatchlist(); toast(now?"Launch pin removed":SYMBOL+" opens on launch"); });
   $("#wlDrop").addEventListener("click",e=>{
     const sw=e.target.closest("[data-sw]"); if(sw){ switchTicker(sw.dataset.sw); return; }
     const del=e.target.closest("[data-del]"); if(del){ removeTicker(del.dataset.del); return; }
@@ -2228,17 +2202,9 @@ function wire(){
 
 /* ====================== Sym Meta ====================== */
 function renderSymMeta(){
-  const wrap=$("#sym"); if(!wrap) return;
-  let el=document.getElementById("symMeta");
-  if(!el){ el=document.createElement("span"); el.id="symMeta"; wrap.insertAdjacentElement("afterend",el); }
-  const meta=(cfg.tickerMeta||{})[SYMBOL] || TICKER_META[SYMBOL];
-  if(meta){
-    const style=meta.s?"<span class='chip a'>"+esc(meta.s+" · "+meta.t)+"</span>":"<span class='chip'>"+esc(meta.t)+"</span>";
-    el.innerHTML="<span class='chip b'>"+esc(meta.i)+"</span>"+style;
-  } else {
-    el.innerHTML="<span class='chip-ghost'>+ info</span>";
-  }
-  el.onclick=e=>{ e.stopPropagation(); openSymPop(el, meta); };
+  /* Sector/style/tier chips are no longer shown on the card (trimmed header).
+     The meta stays editable via "Edit ticker info" in the switcher dropdown. */
+  const el=document.getElementById("symMeta"); if(el) el.remove();
 }
 let _symPopOpen=false;
 function openSymPop(anchor, meta){
