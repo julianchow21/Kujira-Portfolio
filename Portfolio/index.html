@@ -160,6 +160,7 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-solid) 85%,var(--ac
 label.lbl{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.4px;font-weight:500}
 input.fi,select.fi,textarea.fi{padding:8px 11px;border:1px solid var(--glass-border);border-radius:var(--radius);background:var(--glass);color:var(--text);font-size:13px;font-family:inherit;width:100%}
 input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(45,212,191,0.15)}
+input[type=checkbox],input[type=radio]{accent-color:var(--accent)}
 textarea.fi{resize:vertical;min-height:70px}
 .hint{font-size:11px;color:var(--text3);line-height:1.5}
 
@@ -352,10 +353,14 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 /* MOBILE BOTTOM TABS */
 .bottom-tab-bar{display:none}
 @media (max-width: 768px){
-  .topbar{padding:0 12px}
+  .topbar{padding:0 10px}
   .logo-name{display:none}
+  .logo{margin-right:8px}
+  .logo-whale{height:34px;width:34px}
+  .tb-trading-label{display:none}
   .nav{display:none}
-  .topbar-actions{margin-left:auto}
+  .topbar-actions{margin-left:auto;gap:6px}
+  .ccy-toggle button{padding:5px 9px}
   .main{padding:14px;padding-bottom:88px}
   .bottom-tab-bar{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border-top:1px solid var(--glass-border);padding:6px 4px;justify-content:space-around;z-index:90;overflow-x:auto;scrollbar-width:none}
   .bottom-tab-bar::-webkit-scrollbar{display:none}
@@ -383,7 +388,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     <!-- nav buttons injected by JS -->
   </nav>
   <a href="../Trading/" class="nav-btn" style="text-decoration:none;border-left:1px solid var(--border);margin-left:4px;padding-left:14px;border-radius:0" title="Kujira Trading dashboard">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/></svg>Trading
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/></svg><span class="tb-trading-label">Trading</span>
   </a>
   <div class="topbar-actions">
     <div class="ccy-toggle" role="group" aria-label="Display currency">
@@ -938,7 +943,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
    ═══════════════════════════════════════════════════════════════════════ */
 
 const APP_VERSION = 'v1.0';
-const APP_DISPLAY_VERSION = 'v1.7 (13 Jun)';
+const APP_DISPLAY_VERSION = 'v1.8 (13 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
