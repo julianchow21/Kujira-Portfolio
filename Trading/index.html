@@ -73,11 +73,18 @@ button{font-family:inherit;cursor:pointer}
 
 /* Kujira brand logo */
 .logo{font-weight:800;font-size:16px;letter-spacing:0.2px;margin-right:14px;display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--text);cursor:pointer;flex-shrink:0}
-.logo-whale{height:30px;width:30px;flex-shrink:0;border-radius:6px;object-fit:cover}
+.logo-whale{height:42px;width:42px;flex-shrink:0;border-radius:8px;object-fit:cover}
 .logo-name{display:flex;flex-direction:column;line-height:1.1}
-.logo-name span:first-child{font-size:13px;font-weight:800;letter-spacing:0.5px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.logo-name span:last-child{font-size:9px;font-weight:400;letter-spacing:0.3px;color:var(--text3);-webkit-text-fill-color:var(--text3);opacity:0.85}
+.logo-name span:first-child{font-size:14px;font-weight:800;letter-spacing:0.5px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.logo-name span:last-child{font-size:10px;font-weight:400;letter-spacing:0.3px;color:var(--text3);-webkit-text-fill-color:var(--text3);opacity:0.85}
 @media(max-width:560px){.logo-name{display:none}}
+/* App switch tabs */
+.tb-tabs{display:flex;gap:4px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);padding:3px;flex-shrink:0}
+.tb-tab{font-size:12px;font-weight:600;color:var(--text3);text-decoration:none;padding:5px 13px;border-radius:6px;line-height:1.1;display:inline-flex;align-items:center}
+.tb-tab:hover{color:var(--text);background:var(--bg4)}
+.tb-tab.active{color:var(--text);background:var(--bg);box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.tb-ver{font-size:11px;color:var(--text3);font-weight:500;letter-spacing:0.2px;white-space:nowrap}
+@media(max-width:560px){.tb-ver{display:none}}
 
 /* Cards */
 .card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px;margin-top:14px}
@@ -286,8 +293,12 @@ body.has-alertbar{padding-bottom:56px}
       <img class="logo-whale" src="../Portfolio/whale-icon.png" alt="Kujira">
       <div class="logo-name"><span>KUJIRA</span><span>Trading</span></div>
     </a>
+    <nav class="tb-tabs">
+      <span class="tb-tab active">Trading</span>
+      <a class="tb-tab" href="../Portfolio/" title="Kujira Portfolio">Portfolio</a>
+    </nav>
     <div class="tb-right">
-      <a href="../Portfolio/" class="iconbtn" title="Kujira Portfolio" style="text-decoration:none;font-size:12px;font-weight:600">⬡</a>
+      <span class="tb-ver">v3.3 (14 Jun)</span>
       <button class="iconbtn" id="refreshBtn" title="Refresh now">&#x21bb;</button>
       <button class="iconbtn" id="gearBtn" title="Settings">&#9881;</button>
     </div>
@@ -531,7 +542,7 @@ body.has-alertbar{padding-bottom:56px}
   <span class="warn">For information only, not financial advice.</span>
   Live MU data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v3.2 (13 Jun)</span>
+  <span style="margin-left:8px;color:var(--text3)">v3.3 (14 Jun)</span>
 
 </div>
 

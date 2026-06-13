@@ -32,6 +32,12 @@ Client-side from the series: `ema()`, `rsi()` (Wilder), `macd()` (12/26/9), `vwa
 
 `alerts[]` in localStorage, edge-triggered: fire once when the condition becomes true, re-arm when it goes false (`armed` flag). Types: price above/below, RSI above/below, price x VWAP, EMA9 x EMA20. Visual flash + toast + optional Notification + optional beep. Evaluated every refresh from the core snapshot.
 
+## v3.3 additions (14 Jun)
+
+- **App-switch tabs:** topbar now has a `.tb-tabs` segmented control after the logo: `Trading` (active, current page) + `Portfolio` (link to `../Portfolio/`). Replaces the old ⬡ icon cross-link that sat in `.tb-right`
+- **Bigger whale logo:** `.logo-whale` 30px → 42px, radius 6→8. Wordmark font bumped one step
+- **Version badge in topbar:** `.tb-ver` chip (`v3.3 (14 Jun)`) added to `.tb-right` before the refresh/gear buttons, matching the footer badge. Hidden under 560px (footer badge still shows)
+
 ## v3.2 additions (14 Jun)
 
 - **Topbar declutter:** topbar now holds logo + ⬡/↻/⚙ only. Ticker identity (MU button, company name, market/stale pills) moved into a new `.px-head` row inside the hero price card, above the price line
