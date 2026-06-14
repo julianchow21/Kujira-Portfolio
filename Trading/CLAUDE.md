@@ -32,6 +32,13 @@ Client-side from the series: `ema()`, `rsi()` (Wilder), `macd()` (12/26/9), `vwa
 
 `alerts[]` in localStorage, edge-triggered: fire once when the condition becomes true, re-arm when it goes false (`armed` flag). Types: price above/below, RSI above/below, price x VWAP, EMA9 x EMA20. Visual flash + toast + optional Notification + optional beep. Evaluated every refresh from the core snapshot.
 
+## v3.4 additions (14 Jun)
+
+- **Gauge labels on the bar:** `renderLevels` now draws the O/H/L letter above each anchor pin (coloured by `l.hex`) and the level price below it (`.lev-tick-lbl` / `.lev-tick-px`). The separate O/H/L word-key is gone (redundant). Current-price pin label (`.lev-pin-px`) bumped to 12px/800 so the live price stays the most prominent. Custom × chips legend unchanged. Minor ticks stay unlabelled (tooltip on hover/touch)
+- **Stale-MU fixes:** company-name fallback in `parseResult` was hardcoded `"Micron Technology"`, so any ticker whose Yahoo chart meta lacked `shortName` showed Micron. Now falls back to `m.symbol||SYMBOL`. Footer disclaimer "Live MU data" was literal; wrapped the symbol in `#footSym`, set to `SYMBOL` at boot
+- **Snap-to-open refresh:** `scheduleNext` now, while closed, shortens the next fetch to land ~3s after `nextOpenMs()` so live data appears at the bell instead of up to 5 min later. The 1s clock tick already flips the market pill live
+- **Price pulse:** `renderHeader` flashes `#px` green on an up-tick / red on a down-tick (`.px-up` / `.px-down`, 1.1s ease-out) by comparing against `_lastShownPx`. Skips the cold-start cache paint (only pulses on real changes)
+
 ## v3.3 additions (14 Jun)
 
 - **App-switch tabs:** topbar now has a `.tb-tabs` segmented control after the logo: `Trading` (active, current page) + `Portfolio` (link to `../Portfolio/`). Replaces the old ⬡ icon cross-link that sat in `.tb-right`

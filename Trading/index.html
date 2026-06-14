@@ -93,6 +93,10 @@ button{font-family:inherit;cursor:pointer}
 /* Hero readout */
 .hero{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
 .price{font-size:46px;font-weight:700;letter-spacing:-1px;line-height:1}
+.price.px-up{animation:pxPulseUp 1.1s ease-out}
+.price.px-down{animation:pxPulseDown 1.1s ease-out}
+@keyframes pxPulseUp{0%{color:var(--green);text-shadow:0 0 18px rgba(38,166,154,.6)}100%{color:var(--text);text-shadow:none}}
+@keyframes pxPulseDown{0%{color:var(--red);text-shadow:0 0 18px rgba(239,83,80,.6)}100%{color:var(--text);text-shadow:none}}
 .chg{font-size:17px;font-weight:600;padding-bottom:4px}
 .up{color:var(--green)}.down{color:var(--red)}.flat{color:var(--text2)}
 .chg .arr{font-size:13px}
@@ -223,12 +227,14 @@ input[type=number]{width:96px}
 .foot a{color:var(--text2)}
 
 /* Key Levels gauge */
-.lev-gauge{position:relative;margin:20px 4px 28px}
+.lev-gauge{position:relative;margin:28px 8px 32px}
 .lev-track{height:6px;border-radius:3px;background:var(--bg3);position:relative}
 .lev-tick{position:absolute;top:-3px;width:2px;height:12px;border-radius:1px;transform:translateX(-50%);z-index:1}
 .lev-tick-a{width:3px!important;height:16px!important;top:-5px!important}
+.lev-tick-lbl{position:absolute;bottom:calc(100% + 3px);left:50%;transform:translateX(-50%);font-size:11px;font-weight:800;line-height:1;white-space:nowrap;z-index:2}
+.lev-tick-px{position:absolute;top:calc(100% + 3px);left:50%;transform:translateX(-50%);font-size:9px;font-weight:600;line-height:1;white-space:nowrap;color:var(--text3);z-index:2}
 .lev-pin{position:absolute;top:-7px;width:4px;height:20px;background:#2dd4bf;border-radius:2px;transform:translateX(-50%);z-index:3;box-shadow:0 0 8px rgba(45,212,191,.8)}
-.lev-pin-px{position:absolute;bottom:-22px;transform:translateX(-50%);font-size:11px;font-weight:700;white-space:nowrap;color:#2dd4bf;z-index:4}
+.lev-pin-px{position:absolute;bottom:-24px;transform:translateX(-50%);font-size:12px;font-weight:800;white-space:nowrap;color:#2dd4bf;z-index:4}
 .lev-tip{position:absolute;bottom:calc(100% + 6px);background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);font-size:11px;padding:4px 8px;white-space:nowrap;pointer-events:none;z-index:10;color:var(--text)}
 .lev-legend{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:11px;color:var(--text3)}
 .lev-key b{font-weight:800;margin-right:3px}
@@ -298,7 +304,7 @@ body.has-alertbar{padding-bottom:56px}
       <a class="tb-tab" href="../Portfolio/" title="Kujira Portfolio">Portfolio</a>
     </nav>
     <div class="tb-right">
-      <span class="tb-ver">v3.3 (14 Jun)</span>
+      <span class="tb-ver">v3.4 (14 Jun)</span>
       <button class="iconbtn" id="refreshBtn" title="Refresh now">&#x21bb;</button>
       <button class="iconbtn" id="gearBtn" title="Settings">&#9881;</button>
     </div>
@@ -540,9 +546,9 @@ body.has-alertbar{padding-bottom:56px}
 
 <div class="foot">
   <span class="warn">For information only, not financial advice.</span>
-  Live MU data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
+  Live <span id="footSym">MU</span> data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v3.3 (14 Jun)</span>
+  <span style="margin-left:8px;color:var(--text3)">v3.4 (14 Jun)</span>
 
 </div>
 
@@ -692,6 +698,7 @@ let curTf = "5m";
 let overlays = Object.assign({ vwap:false, ema9:false, ema20:false, vwapsd:false, rs:false, rsiPane:false, macdPane:false }, cfg.overlays||{});
 let gridOn = !!cfg.gridOn;
 let lastCore = null;        // today's 1d dataset: drives header, indicators, alerts, age, pill
+let _lastShownPx = null;    // last price painted into the hero, for the up/down pulse
 let lastChart = null;       // dataset currently painted on the chart (1d / 5d / 3mo)
 let lastSnap = null;        // {price,rsi,vwap,ema9,ema20} for alert edge-detection
 let inFlight = false;
@@ -891,7 +898,7 @@ function parseResult(result){
     dayHigh:m.regularMarketDayHigh, dayLow:m.regularMarketDayLow,
     volume:m.regularMarketVolume!=null?m.regularMarketVolume:(bars.reduce((s,b)=>s+(b.volume||0),0)),
     marketState:m.marketState, marketTime:m.regularMarketTime,
-    name:m.shortName||m.longName||"Micron Technology",
+    name:m.shortName||m.longName||m.symbol||SYMBOL,
     fiftyTwoWeekHigh:m.fiftyTwoWeekHigh!=null?m.fiftyTwoWeekHigh:null,
     fiftyTwoWeekLow:m.fiftyTwoWeekLow!=null?m.fiftyTwoWeekLow:null,
   };
@@ -1272,6 +1279,13 @@ function setText(id,t){ const e=document.getElementById(id); if(e) e.textContent
 function renderHeader(d){
   setText("nm", d.name);
   setText("px", fmtPx(d.price));
+  // Pulse the price green on an up-tick, red on a down-tick (skip the cold-start paint).
+  if(_lastShownPx!=null && d.price!=null && d.price!==_lastShownPx){
+    const pe=$("#px"), up=d.price>_lastShownPx;
+    pe.classList.remove("px-up","px-down"); void pe.offsetWidth;
+    pe.classList.add(up?"px-up":"px-down");
+  }
+  if(d.price!=null) _lastShownPx=d.price;
   const chg = (d.price!=null && d.prevClose!=null) ? d.price-d.prevClose : null;
   const pct = (chg!=null && d.prevClose) ? chg/d.prevClose*100 : null;
   const chgEl=$("#chg");
@@ -1718,19 +1732,21 @@ function renderLevels(core){
   const pct=v=>Math.max(0,Math.min(100,(v-gLo)/(gHi-gLo)*100)).toFixed(2);
   const priceP=price!=null?pct(price):50;
   const trackBg=`linear-gradient(90deg,rgba(38,166,154,.38) 0%,rgba(38,166,154,.38) ${priceP}%,rgba(239,83,80,.3) ${priceP}%,rgba(239,83,80,.3) 100%)`;
-  const ticks=levels.map(l=>`<span class="lev-tick${ANCHORS.has(l.lbl)?" lev-tick-a":""}" data-tip="${esc(l.lbl+' · '+fmtPx(l.px))}" style="left:${pct(l.px)}%;background:${l.hex}"></span>`).join("");
+  const SHORT_KEY={"Today Open":"O","Day Hi":"H","Day Lo":"L"};
+  const ticks=levels.map(l=>{
+    const isA=ANCHORS.has(l.lbl);
+    const tag=isA?`<span class="lev-tick-lbl" style="color:${l.hex}">${SHORT_KEY[l.lbl]}</span><span class="lev-tick-px">${esc(fmtPx(l.px))}</span>`:"";
+    return `<span class="lev-tick${isA?" lev-tick-a":""}" data-tip="${esc(l.lbl+' · '+fmtPx(l.px))}" style="left:${pct(l.px)}%;background:${l.hex}">${tag}</span>`;
+  }).join("");
   const pinHtml=price!=null?`<span class="lev-pin" data-tip="${esc('Price · '+fmtPx(price))}" style="left:${priceP}%"><span class="lev-pin-px">${fmtPx(price)}</span></span>`:"";
   const gaugeHtml=`<div class="lev-gauge"><div class="lev-track" style="background:${trackBg}">${ticks}${pinHtml}</div><div id="levTip" class="lev-tip" style="display:none"></div></div>`;
 
-  // --- Small legend: O/H/L colour key + removable custom chips ---
-  const KEY=[["O","Open","#FF9800","Today Open"],["H","High","#26a69a","Day Hi"],["L","Low","#ef5350","Day Lo"]];
-  const keyHtml=KEY.filter(k=>levels.some(l=>l.lbl===k[3]))
-    .map(k=>`<span class="lev-key"><b style="color:${k[2]}">${k[0]}</b> ${k[1]}</span>`).join("");
+  // --- Legend: only the removable custom chips now (O/H/L key lives on the bar) ---
   const custom=(cfg.customLevels||[]).slice().sort((a,b)=>b.px-a.px);
   const custHtml=custom.map(l=>
     `<span class="lev-cust"><b>C</b> ${esc(fmtPx(l.px))}<button class="lev-cust-x" data-delcustom="${esc(l.id)}" title="Remove this custom line">×</button></span>`
   ).join("");
-  list.innerHTML=gaugeHtml+`<div class="lev-legend">${keyHtml}${custHtml}</div>`;
+  list.innerHTML=gaugeHtml+(custHtml?`<div class="lev-legend">${custHtml}</div>`:"");
   // Remove a custom line from its legend chip
   list.querySelectorAll("[data-delcustom]").forEach(btn=>{
     btn.onclick=()=>{
@@ -1882,6 +1898,11 @@ function scheduleNext(){
   if(document.hidden) return; // resume on visibility
   let delay=currentIntervalMs();
   if(failCount>0) delay=Math.min(300000, Math.max(delay, 15000*Math.pow(2,failCount-1)));
+  // While closed, snap the next fetch to a few seconds past the open so live data appears at the bell.
+  if(failCount===0 && marketStateFromClock()!=="REGULAR"){
+    const no=nextOpenMs();
+    if(no){ const toOpen=no-Date.now()+3000; if(toOpen>0 && toOpen<delay) delay=toOpen; }
+  }
   refreshTimer=setTimeout(()=>refresh(false), delay);
 }
 
@@ -2286,6 +2307,7 @@ function boot(){
   }
   if($("#notifyBtn") && "Notification" in window && Notification.permission==="granted"){ $("#notifyBtn").textContent="Notifications on"; }
   var symEl=$("#sym"); if(symEl) symEl.textContent=SYMBOL;
+  var footSymEl=$("#footSym"); if(footSymEl) footSymEl.textContent=SYMBOL;
   if(SYMBOL!=="MU"){ var nmEl=$("#nm"); if(nmEl) nmEl.textContent=""; }
   renderSymMeta();
   document.addEventListener("click",()=>{ if(_symPopOpen){ const p=document.getElementById("symPop"); if(p){p.remove();_symPopOpen=false;} } });
