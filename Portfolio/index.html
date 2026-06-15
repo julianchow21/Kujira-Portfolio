@@ -135,15 +135,17 @@ a:hover{text-decoration:underline}
 .tbl-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{text-align:left;padding:10px 12px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.4px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--surface-solid);position:sticky;top:0}
-td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle;background:var(--surface-solid)}
+td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle;background:var(--surface-solid);transition:background 0.12s ease}
 tr:last-child td{border-bottom:none}
-tbody tr:hover td{background:color-mix(in srgb,var(--surface-solid) 85%,var(--accent) 15%)}
+tbody tr:hover td{background:color-mix(in srgb,var(--surface-solid) 93%,var(--text) 7%)}
 .num{font-variant-numeric:tabular-nums;font-family:'SF Mono','Fira Code',monospace;font-size:12px;text-align:right}
 .num-cell{text-align:right}
 
 /* BUTTONS */
-.btn{padding:7px 14px;border-radius:var(--radius);border:1px solid var(--glass-border);background:var(--glass);cursor:pointer;font-size:13px;color:var(--text);transition:all 0.15s;display:inline-flex;align-items:center;gap:6px;font-family:inherit;white-space:nowrap}
+.btn{padding:7px 14px;border-radius:var(--radius);border:1px solid var(--glass-border);background:var(--glass);cursor:pointer;font-size:13px;color:var(--text);transition:background 0.15s ease,border-color 0.15s ease,color 0.15s ease,box-shadow 0.15s ease;display:inline-flex;align-items:center;gap:6px;font-family:inherit;white-space:nowrap}
 .btn:hover{background:var(--glass-strong)}
+.btn:focus{outline:none}
+.btn:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 .btn:disabled{opacity:0.5;cursor:not-allowed}
 .btn-primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
 .btn-primary:hover{background:var(--accent2);border-color:var(--accent2);color:var(--on-accent)}
@@ -151,7 +153,7 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-solid) 85%,var(--ac
 .btn-danger:hover{background:var(--red);color:#fff}
 .btn-sm{padding:4px 10px;font-size:12px}
 .btn-ghost{background:transparent;border-color:transparent}
-.btn-ghost:hover{background:var(--bg3);border-color:var(--border)}
+.btn-ghost:hover{background:rgba(255,255,255,0.07);border-color:transparent}
 
 /* FORMS */
 .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
@@ -244,8 +246,8 @@ textarea.fi{resize:vertical;min-height:70px}
 .warn-row td{background:color-mix(in srgb,var(--amber-soft) 30%,transparent)}
 .alert-warn{background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);padding:.5rem .75rem;border-radius:var(--radius);font-size:.85rem}
 .integrity-bar{margin-top:14px;border-radius:var(--radius-lg);padding:12px 16px;font-size:13px;border:1px solid var(--border)}
-.integrity-bar.ok{background:var(--green-soft);border-color:var(--green-border);color:var(--green);font-weight:600}
 .integrity-bar.bad{background:var(--amber-soft);border-color:var(--amber-border)}
+.integrity-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid var(--green-border);background:var(--green-soft);color:var(--green);white-space:nowrap}
 .integrity-title{font-weight:700;color:var(--amber);margin-bottom:6px}
 .integrity-list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
 .integrity-list li{color:var(--text2);line-height:1.5}
@@ -364,7 +366,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   .main{padding:14px;padding-bottom:88px}
   .bottom-tab-bar{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border-top:1px solid var(--glass-border);padding:6px 4px;justify-content:space-around;z-index:90;overflow-x:auto;scrollbar-width:none}
   .bottom-tab-bar::-webkit-scrollbar{display:none}
-  .bottom-tab-bar .nav-btn{flex-direction:column;gap:2px;font-size:10px;padding:6px 8px;min-width:60px}
+  .bottom-tab-bar .nav-btn{flex-direction:column;gap:2px;font-size:10px;padding:6px 8px;min-width:68px}
   .bottom-tab-bar .nav-btn svg{width:18px;height:18px}
 }
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
@@ -387,7 +389,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <nav class="nav" id="nav-host">
     <!-- nav buttons injected by JS -->
   </nav>
-  <a href="../Trading/" class="nav-btn" style="text-decoration:none;border-left:1px solid var(--border);margin-left:4px;padding-left:14px;border-radius:0" title="Kujira Trading dashboard">
+  <a href="../Trading/" class="nav-btn" style="text-decoration:none;border-left:1px solid var(--border);margin-left:4px;padding-left:14px" title="Kujira Trading dashboard">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/></svg><span class="tb-trading-label">Trading</span>
   </a>
   <div class="topbar-actions">
@@ -410,7 +412,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
   <!-- DASHBOARD -->
   <section class="page" id="page-dashboard">
-    <div class="page-head"><div><div class="page-title">Dashboard</div><div class="page-sub">Net worth at a glance.</div></div></div>
+    <div class="page-head"><div><div class="page-title">Dashboard</div></div><div id="dash-integrity-pill"></div></div>
     <div id="dash-networth"></div>
     <div id="dash-integrity"></div>
     <div id="dash-assets"></div>
@@ -447,11 +449,22 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       </div>
     </div>
     <div id="stocks-summary"></div>
-    <div id="stocks-filterbar" style="display:none"></div>
     <div id="stocks-body"></div>
     <div id="stocks-watchlist"></div>
     <div id="stocks-dividends"></div>
     <div id="stocks-ledger"></div>
+  </section>
+
+  <!-- WATCHLIST+ BOARD — Yahoo-style customisable view over the watchlist tickers -->
+  <section class="page" id="page-board">
+    <div class="page-head">
+      <div><div class="page-title">Watchlist+</div><div class="page-sub">Your watchlist tickers in a customisable board. Pick and reorder columns with ⚙ Columns.</div></div>
+      <div class="h-toolbar">
+        <button class="btn" onclick="refreshStockPrices()">↻ Refresh prices</button>
+        <button class="btn" onclick="openColumns('board')" id="btn-board-cols">⚙ Columns</button>
+      </div>
+    </div>
+    <div id="board-list"></div>
   </section>
 
   <!-- CRYPTO -->
@@ -902,6 +915,21 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   </div>
 </div>
 
+<!-- WATCHLIST+ BOARD COLUMN MANAGER -->
+<div class="overlay" id="board-cols-modal" role="dialog" aria-modal="true" aria-label="Manage board columns">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-head">
+      <h3>Columns</h3>
+      <button class="btn btn-ghost btn-sm" onclick="closeColumns('board')" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="board-cols-body"></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" onclick="resetColumns('board')">Reset to default</button>
+      <button class="btn btn-primary btn-sm" onclick="closeColumns('board')">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- SETUP WIZARD — 4-step onboarding for first-time users -->
 <div class="overlay" id="setup-wizard">
   <div class="modal" style="max-width:620px">
@@ -943,7 +971,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
    ═══════════════════════════════════════════════════════════════════════ */
 
 const APP_VERSION = 'v1.0';
-const APP_DISPLAY_VERSION = 'v1.9 (14 Jun)';
+const APP_DISPLAY_VERSION = 'v2.0 (15 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1124,6 +1152,7 @@ function runSalaryEngine(opts){
 const TABS = [
   { key:'dashboard',   label:'Dashboard',   icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>' },
   { key:'stocks',      label:'Stocks',      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>' },
+  { key:'board',       label:'Watchlist+',  icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h18M3 12h18M3 19h18"/><circle cx="7" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="14" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="10" cy="19" r="1.6" fill="currentColor" stroke="none"/></svg>' },
   { key:'crypto',      label:'Crypto',      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 8h4a2 2 0 1 1 0 4H9zm0 4h4.5a2 2 0 1 1 0 4H9zM10 6v2M10 16v2M13 6v2M13 16v2"/></svg>' },
   { key:'realestate',  label:'Real Estate', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>' },
   { key:'cash',        label:'Cash',        icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 10v4M18 10v4"/></svg>' },
@@ -1271,25 +1300,113 @@ const STOCK_COL_LABEL = {
   peTtm:'P/E (trailing)', peFwd:'P/E (forward)', pb:'Price / book', beta:'Beta',
   payout:'Dividend payout %', mktCap:'Market cap', updated:'Updated'
 };
-function defaultStockColumns(){ return STOCK_COLUMNS.map(c => ({ key:c.key, visible: !!c.defVis })); }
+/* ═══════════════════════════════════════════════════════════════════════
+   WATCHLIST+ BOARD COLUMNS — a Yahoo-style customisable view over the same
+   watchlist tickers. Cells read the watchlist row (w + px quote + px.fund).
+   `backend:true` marks columns that need the widened Apps Script price fields.
+   ═══════════════════════════════════════════════════════════════════════ */
+const BOARD_COLUMNS = [
+  { key:'companyName', label:()=>'Name', cls:'tl', defVis:false,
+    render:r => (r.px && r.px.shortName) ? kjrEscape(r.px.shortName) : '—' },
+  { key:'market', label:()=>'Market', cls:'tl', defVis:true,
+    render:r => `<span class="tag ${r.w.market==='SGX'?'sgx':'us'}">${kjrEscape(r.w.market||'')}</span>` },
+  { key:'sector', label:()=>'Sector', cls:'tl', defVis:true,
+    render:r => {
+      if (!r.w.sector) return '—';
+      const cl = sectorClass(r.w.sector);
+      const chip = cl ? ` <span class="sec-chip sec-${cl}" title="${cl} sector">${cl==='cyclical'?'Cycl':cl==='defensive'?'Def':'Sens'}</span>` : '';
+      return kjrEscape(r.w.sector) + chip;
+    } },
+  { key:'price', label:()=>'Price', cls:'num', defVis:true,
+    render:r => (r.px && r.px.price!=null)
+      ? fmt(toSGD(r.px.price, r.ccy)) + (isStale(r.px.fetchedAt,24)?' <span class="hint">(stale)</span>':'')
+      : '<span class="price-stale">—</span>' },
+  { key:'change', label:()=>'Change', cls:'num', defVis:true,
+    render:r => (r.px && r.px.change!=null)
+      ? `<span class="${r.px.change>=0?'pos':'neg'}">${fmt(toSGD(r.px.change, r.ccy))}</span>` : '—' },
+  { key:'changePct', label:()=>'Change %', cls:'num', defVis:true,
+    render:r => (r.px && r.px.changePct!=null)
+      ? `<span class="${r.px.changePct>=0?'pos':'neg'}">${fmtPct(r.px.changePct)}</span>` : '—' },
+  { key:'prevClose', label:()=>'Prev close', cls:'num', defVis:false,
+    render:r => (r.px && r.px.previousClose!=null) ? fmt(toSGD(r.px.previousClose, r.ccy)) : '—' },
+  { key:'dayRange', label:()=>'Day range', cls:'num', defVis:true, backend:true,
+    render:r => (r.px && r.px.dayLow!=null && r.px.dayHigh!=null)
+      ? `${fmt(toSGD(r.px.dayLow, r.ccy))}–${fmt(toSGD(r.px.dayHigh, r.ccy))}` : '—' },
+  { key:'week52', label:()=>'52w range', cls:'num', defVis:true, backend:true,
+    render:r => (r.px && r.px.week52Low!=null && r.px.week52High!=null)
+      ? `${fmt(toSGD(r.px.week52Low, r.ccy))}–${fmt(toSGD(r.px.week52High, r.ccy))}` : '—' },
+  { key:'pos52w', label:()=>'52w pos', cls:'num', defVis:false, backend:true,
+    render:r => { const v = r.px ? rangePosition(r.px.price, r.px.week52Low, r.px.week52High) : null;
+      return v!=null ? `<span title="0% = 52w low, 100% = 52w high">${(v*100).toFixed(0)}%</span>` : '—'; } },
+  { key:'volume', label:()=>'Volume', cls:'num', defVis:true, backend:true,
+    render:r => (r.px && r.px.volume!=null) ? Number(r.px.volume).toLocaleString('en-SG') : '—' },
+  { key:'mktCap', label:()=>'Mkt cap', cls:'num', defVis:true, backend:true,
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.marketCap!=null) ? fmtCompact(toSGD(f.marketCap, f.currency||r.px.currency||r.ccy)) : '—'; } },
+  { key:'peTtm', label:()=>'P/E', cls:'num', defVis:false, backend:true,
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.trailingPE!=null) ? f.trailingPE.toFixed(1) : '—'; } },
+  { key:'peFwd', label:()=>'Fwd P/E', cls:'num', defVis:false, backend:true,
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.forwardPE!=null) ? f.forwardPE.toFixed(1) : '—'; } },
+  { key:'pb', label:()=>'P/B', cls:'num', defVis:false, backend:true,
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.priceToBook!=null) ? f.priceToBook.toFixed(2) : '—'; } },
+  { key:'beta', label:()=>'Beta', cls:'num', defVis:false, backend:true,
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.beta!=null) ? f.beta.toFixed(2) : '—'; } },
+  { key:'payout', label:()=>'Payout', cls:'num', defVis:false, backend:true,
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.payoutRatio!=null) ? (f.payoutRatio*100).toFixed(0)+'%' : '—'; } },
+  { key:'exchange', label:()=>'Exchange', cls:'tl', defVis:false,
+    render:r => (r.px && r.px.exchange) ? kjrEscape(r.px.exchange) : '—' },
+  { key:'target', label:()=>'Target', cls:'num', defVis:true,
+    render:r => {
+      if (r.w.targetPrice == null) return '—';
+      const atTarget = (r.px && r.px.price!=null && r.px.price <= Number(r.w.targetPrice));
+      return fmt(toSGD(Number(r.w.targetPrice), r.ccy)) + (atTarget ? ' <span class="wl-hit">✓ At target</span>' : '');
+    } },
+  { key:'notes', label:()=>'Notes', cls:'tl', defVis:true,
+    render:r => r.w.notes ? `<span class="wl-note" title="${kjrEscape(r.w.notes)}">${kjrEscape(r.w.notes)}</span>` : '' },
+  { key:'updated', label:()=>'Updated', cls:'num muted', defVis:true,
+    render:r => (r.px && r.px.fetchedAt) ? relTime(r.px.fetchedAt) : '—' }
+];
+const BOARD_COL_LABEL = {
+  companyName:'Company name', market:'Market', sector:'Sector', price:'Price', change:'Day change',
+  changePct:'Day change %', prevClose:'Prev close', dayRange:'Day range', week52:'52-week range',
+  pos52w:'52-week range position', volume:'Volume', mktCap:'Market cap', peTtm:'P/E (trailing)',
+  peFwd:'P/E (forward)', pb:'Price / book', beta:'Beta', payout:'Dividend payout %',
+  exchange:'Exchange', target:'Target price', notes:'Notes', updated:'Updated'
+};
+
+/* ── Generic column manager ──────────────────────────────────────────────
+   One tested code path drives both the Holdings table and the Watchlist+
+   board. Each surface is a descriptor in COLSETS. Holdings keeps its old
+   function names as thin wrappers so renderStocks/mergeDefaults stay intact. */
+const COLSETS = {
+  stocks: { reg: STOCK_COLUMNS, labels: STOCK_COL_LABEL, key:'stocksColumns',
+            body:'stock-cols-body', modal:'stock-cols-modal', rerender:()=>renderStocks() },
+  board:  { reg: BOARD_COLUMNS, labels: BOARD_COL_LABEL, key:'boardColumns',
+            body:'board-cols-body', modal:'board-cols-modal', rerender:()=>renderBoard() }
+};
+function defaultCols(reg){ return reg.map(c => ({ key:c.key, visible: !!c.defVis })); }
 /* Reconcile a stored column preference against the current registry: keep known
    keys in their saved order + visibility, append any new columns at their default,
    drop unknown keys. Mirrors how mergeDefaults de-risks schema evolution. */
-function reconcileStockColumns(stored){
-  const valid = new Set(STOCK_COLUMNS.map(c => c.key));
+function reconcileCols(stored, reg){
+  const valid = new Set(reg.map(c => c.key));
   const out = [], seen = new Set();
   if (Array.isArray(stored)) stored.forEach(e => {
     if (e && valid.has(e.key) && !seen.has(e.key)){ out.push({ key:e.key, visible: e.visible !== false }); seen.add(e.key); }
   });
-  STOCK_COLUMNS.forEach(c => { if (!seen.has(c.key)){ out.push({ key:c.key, visible: !!c.defVis }); seen.add(c.key); } });
+  reg.forEach(c => { if (!seen.has(c.key)){ out.push({ key:c.key, visible: !!c.defVis }); seen.add(c.key); } });
   return out;
 }
 /* Registry defs in the user's saved order, each carrying its current visibility. */
-function orderedStockCols(){
-  const pref = reconcileStockColumns(DB.settings && DB.settings.stocksColumns);
-  const byKey = {}; STOCK_COLUMNS.forEach(c => byKey[c.key] = c);
+function orderedCols(setKey){
+  const cs = COLSETS[setKey];
+  const pref = reconcileCols(DB.settings && DB.settings[cs.key], cs.reg);
+  const byKey = {}; cs.reg.forEach(c => byKey[c.key] = c);
   return pref.map(p => Object.assign({}, byKey[p.key], { visible: p.visible })).filter(c => c.key);
 }
+/* Holdings wrappers — preserve existing call sites (renderStocks, mergeDefaults, freshDB). */
+function defaultStockColumns(){ return defaultCols(STOCK_COLUMNS); }
+function reconcileStockColumns(stored){ return reconcileCols(stored, STOCK_COLUMNS); }
+function orderedStockCols(){ return orderedCols('stocks'); }
 
 /* Sort accessors, kept separate so the registry stays presentation-only.
    Each returns a raw comparable (number, string, or null). Money values
@@ -1372,6 +1489,8 @@ function freshDB(){
       stocksColumns: defaultStockColumns(),  // holdings table columns: order + visibility
       stocksSort:    { key:null, dir:null },  // holdings table sort: column + asc|desc
       watchlistSort: { key:null, dir:null },  // watchlist sort: column + asc|desc
+      boardColumns:  defaultCols(BOARD_COLUMNS), // Watchlist+ board: column order + visibility
+      boardSort:     { key:null, dir:null },  // Watchlist+ board sort: column + asc|desc
       fxRates:      { USDSGD: null, lastUpdated: null },
       fxOverrides:  { USDSGD: null },
       birthYear:    null,
@@ -1635,6 +1754,12 @@ function mergeDefaults(loaded){
   out.settings.stocksSort = {
     key: typeof _ss.key === 'string' ? _ss.key : null,
     dir: (_ss.dir === 'asc' || _ss.dir === 'desc') ? _ss.dir : null
+  };
+  out.settings.boardColumns = reconcileCols(safe.settings && safe.settings.boardColumns, BOARD_COLUMNS);
+  const _bs = (safe.settings && safe.settings.boardSort) || {};
+  out.settings.boardSort = {
+    key: typeof _bs.key === 'string' ? _bs.key : null,
+    dir: (_bs.dir === 'asc' || _bs.dir === 'desc') ? _bs.dir : null
   };
   out.settings.targets     = Object.assign({}, base.settings.targets,     (safe.settings && safe.settings.targets)     || {});
   // salaryRules is an array; keep loaded value if it is one, else default.
@@ -2909,6 +3034,30 @@ function fxFreshnessText(){
 let _autoRefreshTimer = null;
 let _autoTickInFlight = false;
 
+/* ── Undo / Redo ─────────────────────────────────────────────────────────
+   Snapshots of DB taken before each user-initiated mutation (modal save,
+   delete). Auto-refresh price updates are intentionally excluded — you
+   can't "undo" a market price. Stack capped at 20 to bound memory. */
+const UNDO_MAX = 20;
+let _undoStack = [], _redoStack = [];
+function pushUndo(){
+  _undoStack.push(JSON.stringify(DB));
+  if (_undoStack.length > UNDO_MAX) _undoStack.shift();
+  _redoStack = [];
+}
+function undoAction(){
+  if (!_undoStack.length){ showToast('Nothing to undo'); return; }
+  _redoStack.push(JSON.stringify(DB));
+  DB = JSON.parse(_undoStack.pop());
+  saveData(); renderAll(); showToast('Undone', 'success');
+}
+function redoAction(){
+  if (!_redoStack.length){ showToast('Nothing to redo'); return; }
+  _undoStack.push(JSON.stringify(DB));
+  DB = JSON.parse(_redoStack.pop());
+  saveData(); renderAll(); showToast('Redone', 'success');
+}
+
 function autoRefreshEnabled(){
   // Default ON. User can disable via Settings → "Auto-refresh prices" toggle.
   return localStorage.getItem(LK_AUTO_REFRESH) !== '0';
@@ -2949,7 +3098,7 @@ async function autoRefreshTick(){
     }
     if (isStockMarketDaySGT()) {
       if ((DB.stocks || []).length) {
-        promises.push(refreshStockPrices().catch(err => console.warn('[auto] stocks', err.message)));
+        promises.push(refreshStockPrices({ silent: true }).catch(err => console.warn('[auto] stocks', err.message)));
       }
       // FX refresh only if we have any non-SGD position (cash, stocks priced USD, etc.)
       const needFx = (DB.stocks || []).some(s => (s.currency || (s.market === 'US' ? 'USD' : 'SGD')) !== 'SGD')
@@ -3031,9 +3180,9 @@ function priceFor(table, item){
   return null;
 }
 
-async function refreshStockPrices(){
-  if (!DB.stocks.length && !(DB.watchlist || []).length){ showToast('No stocks to refresh'); return; }
-  if (!getSyncUrl()){ showToast('Set the Apps Script URL first', 'error'); return; }
+async function refreshStockPrices(opts = {}){
+  if (!DB.stocks.length && !(DB.watchlist || []).length){ if (!opts.silent) showToast('No stocks to refresh'); return; }
+  if (!getSyncUrl()){ if (!opts.silent) showToast('Set the Apps Script URL first', 'error'); return; }
   const btn = document.getElementById('btn-refresh-stocks');
   if (btn) btn.disabled = true;
   try {
@@ -3058,7 +3207,7 @@ async function refreshStockPrices(){
     }
     saveData();
     renderStocks();
-    showToast('Prices: ' + ok + ' refreshed' + (fail ? ', ' + fail + ' failed' : ''), fail ? 'error' : 'success');
+    if (!opts.silent) showToast('Prices: ' + ok + ' refreshed' + (fail ? ', ' + fail + ' failed' : ''), fail ? 'error' : 'success');
     // Fundamentals ride behind the price refresh, fire-and-forget: the cells
     // fill in when they land, and a miss leaves the '—' tokens (non-fatal).
     refreshFundamentals(symbols);
@@ -3089,7 +3238,6 @@ async function refreshFundamentals(symbols){
       ok++;
     });
     if (ok){ renderStocks(); }
-    else if (symbols.length){ showToast('Fundamentals unavailable (Yahoo declined the request)', 'error'); }
   } catch (_) { /* nice-to-have columns; quotes and money maths are unaffected */ }
 }
 
@@ -3448,6 +3596,7 @@ function closeEntityModal(){
 
 function entityModalSave(){
   if (!_modalState) return;
+  pushUndo();
   const { table, item, isNew } = _modalState;
   const schema = ENTITY_SCHEMAS[table];
 
@@ -3573,6 +3722,7 @@ function entityModalDelete(){
 
   const prompt = refWarning + 'Move this entry to trash? You can restore it from Settings → Recently deleted.';
   if (!confirm(prompt)) return;
+  pushUndo();
   sendToTrash(table, item.id);
   closeEntityModal();
   renderAll();
@@ -3613,38 +3763,10 @@ function sharesHeldAsOf(stockId, asOfDate, excludeTxnId){
    STOCKS — render
    ═══════════════════════════════════════════════════════════════════════ */
 /* ─── Holdings filter state (ephemeral, not persisted) ─────────────────── */
-let _stocksFilter  = { q:'', sector:'', market:'' };
+let _stocksFilter  = { sector:'', market:'' };
 let _lastStockRows = [];  // cache for CSV export — always reflects what's on screen
 let _ledgerView    = 'flat'; // 'flat' or 'by-stock'
 
-function renderStocksFilterBar(){
-  const bar = document.getElementById('stocks-filterbar');
-  if (!bar || bar.dataset.ready) return;
-  bar.dataset.ready = '1';
-  const sectorOpts = GICS_SECTOR_OPTIONS
-    .filter(o => o[0])  // skip the empty "— Untagged —" entry
-    .map(o => `<option value="${kjrEscape(o[0])}">${kjrEscape(o[1])}</option>`)
-    .join('');
-  bar.innerHTML = `<div class="filter-bar">
-    <input id="sf-q" class="fi fi-sm" type="search" placeholder="Search symbol…"
-      style="flex:1;min-width:120px"
-      oninput="_stocksFilter.q=this.value.trim(); renderStocks()">
-    <select id="sf-market" class="fi fi-sm" onchange="_stocksFilter.market=this.value; renderStocks()">
-      <option value="">All markets</option>
-      <option value="SGX">SGX</option>
-      <option value="US">US</option>
-    </select>
-    <select id="sf-sector" class="fi fi-sm" onchange="_stocksFilter.sector=this.value; renderStocks()">
-      <option value="">All sectors</option>
-      ${sectorOpts}
-    </select>
-    <button class="btn btn-sm btn-ghost" onclick="_stocksFilter={q:'',sector:'',market:''};
-      const q=document.getElementById('sf-q'); if(q)q.value='';
-      const m=document.getElementById('sf-market'); if(m)m.value='';
-      const s=document.getElementById('sf-sector'); if(s)s.value='';
-      renderStocks()">Clear</button>
-  </div>`;
-}
 
 /* ─── CSV helpers ─────────────────────────────────────────────────────── */
 function downloadCSV(filename, headers, rows){
@@ -3857,10 +3979,9 @@ function renderStocks(){
     sumEl.innerHTML = '';
     bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">📈</div><div class="empty-title">No stocks yet</div><div class="empty-sub">Click <b>Add stock</b> to record your first position. SGX tickers are auto-suffixed with .SI for Yahoo Finance.</div></div></div></div>`;
     if (fresh) fresh.textContent = 'No prices yet';
-    const fbEl = document.getElementById('stocks-filterbar');
-    if (fbEl) fbEl.style.display = 'none';
     _lastStockRows = [];
     renderWatchlist(); // the watchlist stands on its own, even with no holdings
+    renderBoard();     // Watchlist+ board mirrors the same tickers
     renderDividendTimeline([]);
     return;
   }
@@ -3925,14 +4046,15 @@ function renderStocks(){
   // Second pass: portfolio weight needs the total market value.
   rows.forEach(r => { if (r.mv != null && totMv > 0) r.weight = safeRatio(r.mv, totMv); });
 
-  // Show + populate filter bar (idempotent — only builds the DOM once).
-  renderStocksFilterBar();
-  const fbEl = document.getElementById('stocks-filterbar');
-  if (fbEl) fbEl.style.display = '';
+  // Build sector options with current selection marked — used in the Holdings card-head.
+  const sectorOpts = GICS_SECTOR_OPTIONS
+    .filter(o => o[0])
+    .map(o => `<option value="${kjrEscape(o[0])}"${_stocksFilter.sector===o[0]?' selected':''}>${kjrEscape(o[1])}</option>`)
+    .join('');
+  const anyFilter = _stocksFilter.market || _stocksFilter.sector;
 
   // Apply filter — summary cards always use the FULL rows (portfolio-wide).
   let filteredRows = rows;
-  if (_stocksFilter.q)      filteredRows = filteredRows.filter(r => r.s.symbol.toLowerCase().includes(_stocksFilter.q.toLowerCase()));
   if (_stocksFilter.market) filteredRows = filteredRows.filter(r => r.s.market === _stocksFilter.market);
   if (_stocksFilter.sector) filteredRows = filteredRows.filter(r => r.s.sector === _stocksFilter.sector);
 
@@ -4013,16 +4135,27 @@ function renderStocks(){
     return thSort(c.key, lbl, tl);
   }).join('');
 
+  const filterHtml = `
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="sf-market" class="fi fi-sm" onchange="_stocksFilter.market=this.value; renderStocks()">
+        <option value="">All markets</option>
+        <option value="SGX"${_stocksFilter.market==='SGX'?' selected':''}>SGX</option>
+        <option value="US"${_stocksFilter.market==='US'?' selected':''}>US</option>
+      </select>
+      <select id="sf-sector" class="fi fi-sm" onchange="_stocksFilter.sector=this.value; renderStocks()">
+        <option value="">All sectors</option>
+        ${sectorOpts}
+      </select>
+      ${anyFilter ? `<button class="btn btn-sm btn-ghost" onclick="_stocksFilter={sector:'',market:''}; renderStocks()">Clear</button>` : ''}
+    </div>`;
+
   // Empty filtered state — show a designed empty state so Clear is reachable.
   if (!filteredRows.length){
-    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty">
-      <div class="empty-title">No holdings match your filter.</div>
-      <div class="empty-sub"><button class="btn btn-sm btn-ghost" onclick="_stocksFilter={q:'',sector:'',market:''};
-        const q=document.getElementById('sf-q');if(q)q.value='';
-        const m=document.getElementById('sf-market');if(m)m.value='';
-        const s=document.getElementById('sf-sector');if(s)s.value='';
-        renderStocks()">Clear filter</button></div>
-    </div></div></div>`;
+    bodyEl.innerHTML = `<div class="card">
+      <div class="card-head"><h3>Holdings</h3>${filterHtml}</div>
+      <div class="card-body"><div class="empty">
+        <div class="empty-title">No holdings match your filter.</div>
+      </div></div></div>`;
   } else {
     // Tfoot totals aligned to the visible column set.
     const totCells = cols.map(c => {
@@ -4038,7 +4171,9 @@ function renderStocks(){
     }).join('');
 
     bodyEl.innerHTML = `
-      <div class="card"><div class="tbl-wrap"><table class="holdings"><thead><tr>
+      <div class="card">
+        <div class="card-head"><h3>Holdings</h3>${filterHtml}</div>
+        <div class="tbl-wrap"><table class="holdings"><thead><tr>
         ${thSort('symbol', 'Symbol', ' tl sticky-col')}${headCells}<th></th>
       </tr></thead><tbody>
         ${filteredRows.map(r => {
@@ -4067,6 +4202,7 @@ function renderStocks(){
   }
 
   renderWatchlist();
+  renderBoard();     // Watchlist+ board mirrors the same tickers
   renderDividendTimeline(rows);
   renderStockTxns();
 }
@@ -4262,24 +4398,139 @@ function renderWatchlist(){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   STOCK COLUMN MANAGER — toggle visibility + reorder. Arrow-based reorder
-   works on desktop and touch alike (HTML5 drag is dead on touch, lessons.md).
-   Changes persist to settings.stocksColumns and re-render immediately.
+   WATCHLIST+ BOARD — a standalone Yahoo-style view over the watchlist
+   tickers (DB.watchlist), with fully customisable columns. Tickers are
+   still managed on the Stocks tab; this board is read + column choice only.
+   Same price pipeline as holdings, so quotes are already fetched + cached.
    ═══════════════════════════════════════════════════════════════════════ */
-function renderStockColsPanel(){
-  const body = document.getElementById('stock-cols-body');
+function renderBoard(){
+  const el = document.getElementById('board-list');
+  if (!el) return;
+  const list = DB.watchlist || [];
+
+  if (!list.length){
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">📊</div><div class="empty-title">No tickers yet</div><div class="empty-sub">This board mirrors your Watchlist. Add tickers on the Stocks tab (under Watchlist), then shape the columns here with ⚙ Columns. Symbols refresh together with your holdings.</div></div></div></div>`;
+    return;
+  }
+
+  // Same row prep as the Watchlist, so quotes/fundamentals are shared.
+  const rows = list.map(w => {
+    const px  = priceFor('watchlist', w);
+    const ccy = (px && px.currency) || (w.market === 'SGX' ? 'SGD' : 'USD');
+    return { w, px, ccy };
+  });
+
+  // Sort accessors — money values compare in SGD for consistent ordering.
+  const BOARD_SORT_VALS = {
+    symbol:     r => r.w.symbol || '',
+    companyName:r => (r.px && r.px.shortName) || '',
+    market:     r => r.w.market || '',
+    sector:     r => r.w.sector || '',
+    price:      r => (r.px && r.px.price != null) ? toSGD(r.px.price, r.ccy) : null,
+    change:     r => (r.px && r.px.change != null) ? toSGD(r.px.change, r.ccy) : null,
+    changePct:  r => (r.px && r.px.changePct != null) ? r.px.changePct : null,
+    prevClose:  r => (r.px && r.px.previousClose != null) ? toSGD(r.px.previousClose, r.ccy) : null,
+    dayRange:   r => (r.px && r.px.dayHigh != null) ? toSGD(r.px.dayHigh, r.ccy) : null,
+    week52:     r => (r.px && r.px.week52High != null) ? toSGD(r.px.week52High, r.ccy) : null,
+    pos52w:     r => r.px ? rangePosition(r.px.price, r.px.week52Low, r.px.week52High) : null,
+    volume:     r => (r.px && r.px.volume != null) ? r.px.volume : null,
+    mktCap:     r => (r.px && r.px.fund && r.px.fund.marketCap  != null) ? toSGD(r.px.fund.marketCap, r.px.fund.currency || r.px.currency || r.ccy) : null,
+    peTtm:      r => (r.px && r.px.fund && r.px.fund.trailingPE != null) ? r.px.fund.trailingPE : null,
+    peFwd:      r => (r.px && r.px.fund && r.px.fund.forwardPE  != null) ? r.px.fund.forwardPE : null,
+    pb:         r => (r.px && r.px.fund && r.px.fund.priceToBook!= null) ? r.px.fund.priceToBook : null,
+    beta:       r => (r.px && r.px.fund && r.px.fund.beta       != null) ? r.px.fund.beta : null,
+    payout:     r => (r.px && r.px.fund && r.px.fund.payoutRatio!= null) ? r.px.fund.payoutRatio : null,
+    exchange:   r => (r.px && r.px.exchange) || '',
+    target:     r => r.w.targetPrice != null ? toSGD(Number(r.w.targetPrice), r.ccy) : null,
+    updated:    r => (r.px && r.px.fetchedAt) || null
+  };
+
+  const sort = DB.settings.boardSort || {};
+  const sortFn = (sort.key && sort.dir && BOARD_SORT_VALS[sort.key]) ? BOARD_SORT_VALS[sort.key] : null;
+  if (sortFn){
+    const dir = sort.dir === 'desc' ? -1 : 1;
+    rows.sort((a, b) => {
+      const va = sortFn(a), vb = sortFn(b);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return (typeof va === 'string' || typeof vb === 'string')
+        ? dir * String(va).localeCompare(String(vb))
+        : dir * (va - vb);
+    });
+  } else {
+    rows.sort((a, b) => String(a.w.symbol || '').localeCompare(String(b.w.symbol || '')));
+  }
+
+  const cols = orderedCols('board').filter(c => c.visible);
+  // Sortable header — data-board-sort-key keeps it off the holdings/watchlist routers.
+  const th = (key, lbl, extraCls) => {
+    const active = sort.key === key && sort.dir;
+    const glyph  = active ? `<span class="sort-glyph">${sort.dir === 'asc' ? '▲' : '▼'}</span>` : '';
+    const aria   = active ? ` aria-sort="${sort.dir === 'asc' ? 'ascending' : 'descending'}"` : '';
+    return `<th class="sortable${extraCls || ''}" data-board-sort-key="${key}" tabindex="0"${aria}>${lbl}${glyph}</th>`;
+  };
+  const headCells = cols.map(c => {
+    const lbl = typeof c.label === 'function' ? c.label() : c.label;
+    const tl  = (c.cls && c.cls.indexOf('tl') > -1) ? ' tl' : '';
+    return BOARD_SORT_VALS[c.key] ? th(c.key, lbl, tl) : `<th class="${tl ? 'tl' : ''}">${lbl}</th>`;
+  }).join('');
+
+  // fmt() converts SGD into the active display currency. Render in this tab's
+  // own currency, then restore: renderBoard also runs inside renderStocks,
+  // which keeps the stocks currency for the rest of its work.
+  const _prevCcy = _renderCcy;
+  setRenderCcy('board');
+  el.innerHTML = `
+    <div class="card"><div class="tbl-wrap"><table class="holdings"><thead><tr>
+      ${th('symbol', 'Symbol', ' tl sticky-col')}${headCells}<th></th>
+    </tr></thead><tbody>
+      ${rows.map(r => {
+        const cells = cols.map(c => `<td class="${c.cls}">${c.render(r)}</td>`).join('');
+        const ax = encodeURIComponent(yahooSymbol(r.w));
+        return `<tr>
+          <td class="tl cell-sym sticky-col">${kjrEscape(r.w.symbol)}</td>
+          ${cells}
+          <td class="row-actions">
+            <a class="btn btn-sm btn-ghost" href="../Trading/index.html?symbol=${ax}" target="_blank" rel="noopener" title="Open chart analysis for ${kjrEscape(r.w.symbol)}">Analyse</a>
+            <button class="btn btn-sm btn-ghost btn-edit" data-edit-table="watchlist" data-edit-id="${kjrEscape(r.w.id)}">Edit</button>
+          </td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div></div>
+  `;
+  _renderCcy = _prevCcy;
+}
+/* Header click cycle: asc → desc → clear. Mirrors setWatchlistSort. */
+function setBoardSort(key){
+  const cur = DB.settings.boardSort || {};
+  DB.settings.boardSort = cur.key !== key ? { key, dir:'asc' }
+    : cur.dir === 'asc' ? { key, dir:'desc' }
+    : { key:null, dir:null };
+  saveData(); renderBoard();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   COLUMN MANAGER (generic) — toggle visibility + reorder for any COLSETS
+   surface (Holdings, Watchlist+ board). Arrow-based reorder works on desktop
+   and touch alike (HTML5 drag is dead on touch, lessons.md). Changes persist
+   to the surface's settings key and re-render immediately.
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderColsPanel(setKey){
+  const cs = COLSETS[setKey];
+  const body = document.getElementById(cs.body);
   if (!body) return;
-  const cols = orderedStockCols();
+  const cols = orderedCols(setKey);
   const anyBackend = cols.some(c => c.backend);
   body.innerHTML = cols.map((c, i) => {
-    const lbl = STOCK_COL_LABEL[c.key] || c.key;
+    const lbl = cs.labels[c.key] || c.key;
     const warn = c.backend ? ' <span class="hint" title="Populated on price refresh. Requires apps-script.gs v1.2 or later deployed.">⚠</span>' : '';
     return `<div class="col-mgr-row">
       <span class="col-mgr-move">
-        <button class="btn btn-ghost btn-xs" title="Move up" aria-label="Move ${lbl} up" onclick="moveStockCol('${c.key}',-1)" ${i===0?'disabled':''}>↑</button>
-        <button class="btn btn-ghost btn-xs" title="Move down" aria-label="Move ${lbl} down" onclick="moveStockCol('${c.key}',1)" ${i===cols.length-1?'disabled':''}>↓</button>
+        <button class="btn btn-ghost btn-xs" title="Move up" aria-label="Move ${lbl} up" onclick="moveCol('${setKey}','${c.key}',-1)" ${i===0?'disabled':''}>↑</button>
+        <button class="btn btn-ghost btn-xs" title="Move down" aria-label="Move ${lbl} down" onclick="moveCol('${setKey}','${c.key}',1)" ${i===cols.length-1?'disabled':''}>↓</button>
       </span>
-      <label class="col-mgr-lbl"><input type="checkbox" ${c.visible?'checked':''} onchange="toggleStockCol('${c.key}')"> <span>${lbl}${warn}</span></label>
+      <label class="col-mgr-lbl"><input type="checkbox" ${c.visible?'checked':''} onchange="toggleCol('${setKey}','${c.key}')"> <span>${lbl}${warn}</span></label>
     </div>`;
   }).join('') + (anyBackend
     ? `<div class="hint" style="margin-top:10px;font-size:11px">⚠ Day range, 52-week range and volume need the updated Apps Script. Redeploy the backend (see README) to fill them, otherwise they show the empty token.</div>`
@@ -4288,15 +4539,16 @@ function renderStockColsPanel(){
 /* Same focus-trap pattern as openEntityModal: keydown scoped to the overlay
    (not document), Tab wraps, Escape closes, focus returns to the opener. */
 let _colsOpener = null, _colsKeyTrap = null;
-function openStockColumns(){
-  DB.settings.stocksColumns = reconcileStockColumns(DB.settings.stocksColumns);
-  renderStockColsPanel();
-  const ov = document.getElementById('stock-cols-modal');
+function openColumns(setKey){
+  const cs = COLSETS[setKey];
+  DB.settings[cs.key] = reconcileCols(DB.settings[cs.key], cs.reg);
+  renderColsPanel(setKey);
+  const ov = document.getElementById(cs.modal);
   if (!ov) return;
   _colsOpener = document.activeElement;
   if (_colsKeyTrap) ov.removeEventListener('keydown', _colsKeyTrap);
   _colsKeyTrap = function(e){
-    if (e.key === 'Escape'){ e.preventDefault(); closeStockColumns(); return; }
+    if (e.key === 'Escape'){ e.preventDefault(); closeColumns(setKey); return; }
     if (e.key !== 'Tab') return;
     const focusable = Array.from(ov.querySelectorAll('input:not([disabled]),button:not([disabled])'))
       .filter(el => el.offsetParent !== null);
@@ -4309,30 +4561,37 @@ function openStockColumns(){
   ov.classList.add('open');
   setTimeout(() => { const first = ov.querySelector('input,button'); if (first) first.focus(); }, 50);
 }
-function closeStockColumns(){
-  const ov = document.getElementById('stock-cols-modal');
+function closeColumns(setKey){
+  const ov = document.getElementById(COLSETS[setKey].modal);
   if (!ov) return;
   if (_colsKeyTrap){ ov.removeEventListener('keydown', _colsKeyTrap); _colsKeyTrap = null; }
   ov.classList.remove('open');
   if (_colsOpener && typeof _colsOpener.focus === 'function'){ try { _colsOpener.focus(); } catch (_){} }
   _colsOpener = null;
 }
-function _persistStockCols(){ saveData(); renderStocks(); renderStockColsPanel(); }
-function toggleStockCol(key){
-  const arr = reconcileStockColumns(DB.settings.stocksColumns);
-  const e = arr.find(x => x.key === key); if (e) e.visible = !e.visible;
-  DB.settings.stocksColumns = arr; _persistStockCols();
+function _persistCols(setKey){ saveData(); COLSETS[setKey].rerender(); renderColsPanel(setKey); }
+function toggleCol(setKey, colKey){
+  const cs = COLSETS[setKey];
+  const arr = reconcileCols(DB.settings[cs.key], cs.reg);
+  const e = arr.find(x => x.key === colKey); if (e) e.visible = !e.visible;
+  DB.settings[cs.key] = arr; _persistCols(setKey);
 }
-function moveStockCol(key, dir){
-  const arr = reconcileStockColumns(DB.settings.stocksColumns);
-  const i = arr.findIndex(x => x.key === key); if (i < 0) return;
+function moveCol(setKey, colKey, dir){
+  const cs = COLSETS[setKey];
+  const arr = reconcileCols(DB.settings[cs.key], cs.reg);
+  const i = arr.findIndex(x => x.key === colKey); if (i < 0) return;
   const j = i + dir; if (j < 0 || j >= arr.length) return;
   const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
-  DB.settings.stocksColumns = arr; _persistStockCols();
+  DB.settings[cs.key] = arr; _persistCols(setKey);
 }
-function resetStockColumns(){
-  DB.settings.stocksColumns = defaultStockColumns(); _persistStockCols();
+function resetColumns(setKey){
+  const cs = COLSETS[setKey];
+  DB.settings[cs.key] = defaultCols(cs.reg); _persistCols(setKey);
 }
+/* Holdings modal wrappers — keep the existing #stock-cols-modal markup working. */
+function openStockColumns(){ openColumns('stocks'); }
+function closeStockColumns(){ closeColumns('stocks'); }
+function resetStockColumns(){ resetColumns('stocks'); }
 
 /* Upcoming dividend payments — shows holdings with ex-dates in the next 90 days.
    Takes the full (unfiltered) rows array from renderStocks so share counts and
@@ -5297,26 +5556,27 @@ function renderDashboard(){
 
   // Net worth hero
   nwEl.innerHTML = `<div class="dash-hero">
-    <div><div class="dash-hero-label">Total net worth</div><div class="dash-hero-value">${fmt(net)}</div></div>
-    <div class="dash-hero-sub">${classes.filter(c => c.val > 0).length} asset class${classes.filter(c => c.val > 0).length === 1 ? '' : 'es'} · as of ${fmtDateSG(new Date())}</div>
+    <div><div class="dash-hero-label">Total net worth</div><div class="dash-hero-value">${fmt(net, {dp:0})}</div></div>
   </div>`;
 
-  // Data integrity / reconciliation
-  const intEl = document.getElementById('dash-integrity');
-  if (intEl){
-    const rec = runReconciliation();
-    if (rec.ok){
-      intEl.innerHTML = `<div class="integrity-bar ok">✓ Books balanced, every movement is accounted for.</div>`;
-    } else {
-      intEl.innerHTML = `<div class="integrity-bar bad">
-        <div class="integrity-title">⚠ ${rec.issues.length} thing${rec.issues.length > 1 ? 's' : ''} to check</div>
-        <ul class="integrity-list">${rec.issues.map(i =>
-          `<li class="${i.level}">${kjrEscape(i.msg)}${i.fixFn
-            ? ` <button class="btn btn-sm btn-danger" style="margin-left:8px;padding:1px 8px;font-size:11px" onclick="${kjrEscape(i.fixFn)}()">Remove orphaned</button>`
-            : ''}</li>`
-        ).join('')}</ul>
-      </div>`;
-    }
+  // Data integrity / reconciliation — ok state is a pill in the page-head,
+  // bad state is a full bar below the hero (needs room for the issues list).
+  const intPill = document.getElementById('dash-integrity-pill');
+  const intEl   = document.getElementById('dash-integrity');
+  const rec = runReconciliation();
+  if (rec.ok){
+    if (intPill) intPill.innerHTML = `<span class="integrity-pill">✓ Books balanced</span>`;
+    if (intEl)   intEl.innerHTML   = '';
+  } else {
+    if (intPill) intPill.innerHTML = '';
+    if (intEl)   intEl.innerHTML   = `<div class="integrity-bar bad">
+      <div class="integrity-title">⚠ ${rec.issues.length} thing${rec.issues.length > 1 ? 's' : ''} to check</div>
+      <ul class="integrity-list">${rec.issues.map(i =>
+        `<li class="${i.level}">${kjrEscape(i.msg)}${i.fixFn
+          ? ` <button class="btn btn-sm btn-danger" style="margin-left:8px;padding:1px 8px;font-size:11px" onclick="${kjrEscape(i.fixFn)}()">Remove orphaned</button>`
+          : ''}</li>`
+      ).join('')}</ul>
+    </div>`;
   }
 
   // Asset-class KPI row
@@ -5327,8 +5587,8 @@ function renderDashboard(){
     } else {
       assetsEl.innerHTML = renderSummary(classes.map(c => ({
         label: c.key,
-        value: fmt(c.val),
-        sub: net > 0 ? (c.val / net * 100).toFixed(1) + '% of net worth' : '',
+        value: fmt(c.val, {dp:0}),
+        sub: net > 0 ? (c.val / net * 100).toFixed(0) + '% of net worth' : '',
         accent: c.val > 0 ? 'accent' : ''
       })));
     }
@@ -5344,10 +5604,10 @@ function renderDashboard(){
     if (cpfTotal > 0){
       cpfEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head"><h3>CPF breakdown</h3><span class="hint">${fromHist ? 'computed from history' : 'from saved balances'}</span></div><div class="card-body">` +
         renderSummary([
-          { label:'OA', value: fmt(Number(bal.OA)||0), accent:'accent' },
-          { label:'SA', value: fmt(Number(bal.SA)||0) },
-          { label:'MA', value: fmt(Number(bal.MA)||0) },
-          { label:'RA', value: fmt(Number(bal.RA)||0) }
+          { label:'OA', value: fmt(Number(bal.OA)||0, {dp:0}), accent:'accent' },
+          { label:'SA', value: fmt(Number(bal.SA)||0, {dp:0}) },
+          { label:'MA', value: fmt(Number(bal.MA)||0, {dp:0}) },
+          { label:'RA', value: fmt(Number(bal.RA)||0, {dp:0}) }
         ]) + `</div></div>`;
     } else {
       cpfEl.innerHTML = '';
@@ -5384,11 +5644,11 @@ function renderEmergencyFund(){
   const barColor = done ? 'var(--green)' : (pct >= 50 ? 'var(--amber)' : 'var(--red)');
   el.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head">
       <h3>Emergency fund</h3>
-      <span class="hint">${done ? 'fully funded' : fmt(target - cash) + ' to go'}</span>
+      <span class="hint">${done ? 'fully funded' : fmt(target - cash, {dp:0}) + ' to go'}</span>
     </div><div class="card-body">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
-        <span style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(cash)}</span>
-        <span class="hint">of ${fmt(target)} target · ${pct.toFixed(0)}%</span>
+        <span style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(cash, {dp:0})}</span>
+        <span class="hint">of ${fmt(target, {dp:0})} target · ${pct.toFixed(0)}%</span>
       </div>
       <div style="height:10px;background:var(--bg3);border-radius:6px;overflow:hidden">
         <div style="height:100%;width:${pct}%;background:${barColor};transition:width .3s"></div>
@@ -5424,7 +5684,7 @@ function renderTargetAllocation(classes, net){
   if (!rows.length){ el.innerHTML = ''; return; }
 
   const bars = rows.map(r => {
-    const driftTxt = (r.drift >= 0 ? '+' : '') + r.drift.toFixed(1) + ' pts';
+    const driftTxt = (r.drift >= 0 ? '+' : '') + r.drift.toFixed(0) + ' pts';
     const driftCls = r.off ? (r.drift > 0 ? 'neg' : 'pos') : '';
     return `<div class="alloc-row">
       <div style="font-weight:600">${kjrEscape(r.key)}</div>
@@ -5432,7 +5692,7 @@ function renderTargetAllocation(classes, net){
         <div class="alloc-fill" style="width:${Math.min(100,r.cur)}%;background:${_cssVar(r.color)}"></div>
         <div class="alloc-target" style="left:${Math.min(100,r.tgt)}%" title="target ${r.tgt.toFixed(0)}%"></div>
       </div>
-      <div class="num" style="min-width:54px">${r.cur.toFixed(1)}%</div>
+      <div class="num" style="min-width:54px">${r.cur.toFixed(0)}%</div>
       <div class="hint" style="min-width:64px;text-align:right">tgt ${r.tgt.toFixed(0)}%</div>
       <div class="num ${driftCls}" style="min-width:64px">${driftTxt}</div>
     </div>`;
@@ -5440,7 +5700,7 @@ function renderTargetAllocation(classes, net){
 
   const alertHtml = alerts.length
     ? `<div class="rebal-alerts">${alerts.map(a =>
-        `<div class="rebal-alert"><b>${kjrEscape(a.key)}</b> is ${Math.abs(a.drift).toFixed(1)} pts ${a.drift>0?'over':'under'} target, consider ${a.action === 'trim' ? 'trimming' : 'topping up'}.</div>`
+        `<div class="rebal-alert"><b>${kjrEscape(a.key)}</b> is ${Math.abs(a.drift).toFixed(0)} pts ${a.drift>0?'over':'under'} target, consider ${a.action === 'trim' ? 'trimming' : 'topping up'}.</div>`
       ).join('')}</div>`
     : `<div class="integrity-bar ok" style="margin-top:12px">✓ Allocation is within ${thr} pts of every target.</div>`;
 
@@ -5479,8 +5739,8 @@ function renderTopMovers(){
     const arrow = up ? '▲' : '▼';
     return `<div class="mover">
       <div class="mover-sym">${kjrEscape(m.label)} <span class="hint">${m.sub}</span></div>
-      <div class="mover-px num">${fmt(m.price, { currency: m.ccy })}</div>
-      <div class="mover-chg num ${cls}">${arrow} ${(up?'+':'')}${m.chgPct.toFixed(2)}%</div>
+      <div class="mover-px num">${fmt(m.price, { currency: m.ccy, dp:0 })}</div>
+      <div class="mover-chg num ${cls}">${arrow} ${(up?'+':'')}${m.chgPct.toFixed(1)}%</div>
     </div>`;
   }).join('');
   el.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head">
@@ -5524,7 +5784,7 @@ function drawNetWorthChart(){
       },
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: (c) => fmt(c.parsed.y, { noConvert: true }) } }
+        tooltip: { callbacks: { label: (c) => fmt(c.parsed.y, { noConvert: true, dp:0 }) } }
       }
     }
   });
@@ -5534,9 +5794,18 @@ function drawAllocationChart(classes, net){
   const ctx = document.getElementById('dash-alloc-chart');
   const meta = document.getElementById('dash-alloc-meta');
   if (!ctx) return;
-  if (_allocChart){ _allocChart.destroy(); _allocChart = null; }
-  if (!classes.length){ if (meta) meta.textContent = 'no data'; return; }
+  if (!classes.length){ if (meta) meta.textContent = 'no data'; if (_allocChart){ _allocChart.destroy(); _allocChart = null; } return; }
   if (meta) meta.textContent = '';
+  if (_allocChart){
+    // Update in place — skip destroy+recreate so the chart doesn't re-animate
+    // every time prices auto-refresh.
+    _allocChart.data.labels = classes.map(c => c.key);
+    _allocChart.data.datasets[0].data = classes.map(c => c.val);
+    _allocChart.data.datasets[0].backgroundColor = classes.map(c => _cssVar(c.color));
+    _allocChart.options.plugins.tooltip.callbacks.label = (c) => c.label + ': ' + fmt(c.parsed, {dp:0}) + (net > 0 ? ' (' + (c.parsed / net * 100).toFixed(0) + '%)' : '');
+    _allocChart.update('none');
+    return;
+  }
   _allocChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
@@ -5547,7 +5816,7 @@ function drawAllocationChart(classes, net){
       responsive: true, maintainAspectRatio: false, cutout: '62%',
       plugins: {
         legend: { position: 'bottom', labels: { color: _cssVar('--text2'), font: { size: 11 }, boxWidth: 12, padding: 12 } },
-        tooltip: { callbacks: { label: (c) => c.label + ': ' + fmt(c.parsed) + (net > 0 ? ' (' + (c.parsed / net * 100).toFixed(1) + '%)' : '') } }
+        tooltip: { callbacks: { label: (c) => c.label + ': ' + fmt(c.parsed, {dp:0}) + (net > 0 ? ' (' + (c.parsed / net * 100).toFixed(0) + '%)' : '') } }
       }
     }
   });
@@ -5637,6 +5906,8 @@ function renderAll(){
    This listener attaches once at boot and survives every re-render. */
 function installEventDelegation(){
   document.addEventListener('click', (e) => {
+    const bTh = e.target.closest('th[data-board-sort-key]');
+    if (bTh){ setBoardSort(bTh.getAttribute('data-board-sort-key')); return; }
     const wlTh = e.target.closest('th[data-wl-sort-key]');
     if (wlTh){ setWatchlistSort(wlTh.getAttribute('data-wl-sort-key')); return; }
     const th = e.target.closest('th[data-sort-key]');
@@ -5649,9 +5920,20 @@ function installEventDelegation(){
     if (!kjrSafeId(id)) { showToast('Invalid entry id', 'error'); return; }
     openEntityModal(table, id);
   });
+  // Undo / Redo — skip when focus is inside a text field (let browser handle).
+  document.addEventListener('keydown', (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    const inField = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable);
+    if (mod && !inField){
+      if (e.key === 'z' && !e.shiftKey){ e.preventDefault(); undoAction(); return; }
+      if (e.key === 'y' || (e.key === 'z' && e.shiftKey)){ e.preventDefault(); redoAction(); return; }
+    }
+  });
   // Keyboard sort: sortable headers are tabbable, Enter/Space toggles.
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
+    const bTh = e.target && e.target.closest ? e.target.closest('th[data-board-sort-key]') : null;
+    if (bTh){ e.preventDefault(); setBoardSort(bTh.getAttribute('data-board-sort-key')); return; }
     const wlTh = e.target && e.target.closest ? e.target.closest('th[data-wl-sort-key]') : null;
     if (wlTh){ e.preventDefault(); setWatchlistSort(wlTh.getAttribute('data-wl-sort-key')); return; }
     const th = e.target && e.target.closest ? e.target.closest('th[data-sort-key]') : null;
