@@ -275,6 +275,12 @@ textarea.fi{resize:vertical;min-height:70px}
 .mover-chg{font-size:13px;font-weight:700}
 /* Salary allocation rules */
 .rule-row{display:grid;grid-template-columns:1fr 90px 1fr auto;gap:10px;align-items:center;margin-bottom:8px}
+/* Recently deleted (trash) */
+.trash-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--glass-border);border-radius:var(--radius);background:var(--glass);margin-bottom:8px}
+.trash-info{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.trash-label{font-weight:600;font-size:14px}
+.trash-actions{display:flex;gap:6px;flex-shrink:0}
+@media(max-width:640px){.trash-row{flex-direction:column;align-items:stretch}.trash-actions{justify-content:flex-end}}
 .bucket-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:6px}
 .bucket{background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius);box-shadow:var(--glass-shadow);padding:10px 12px}
 .bucket-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.4px;font-weight:600}
@@ -670,6 +676,15 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     </div>
 
     <div class="card">
+      <div class="card-head"><h3>Recently deleted</h3><span class="hint" id="trash-meta"></span></div>
+      <div class="card-body">
+        <p class="hint" style="margin-bottom:12px">Deleted entries are kept here so you can put them back. Restoring an item returns it to its tab and its figures to your totals. Emptying is permanent. Keeps the last 100 deletions.</p>
+        <div id="trash-list"></div>
+        <div style="margin-top:12px"><button class="btn btn-danger" id="trash-empty-btn" onclick="emptyTrash()" style="display:none">Empty recently deleted</button></div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-head"><h3>Base currency &amp; FX</h3></div>
       <div class="card-body">
         <div class="form-grid">
@@ -970,8 +985,10 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
    Architecture mirrors Kujira Collectibles + Send Ops conventions.
    ═══════════════════════════════════════════════════════════════════════ */
 
-const APP_VERSION = 'v1.0';
-const APP_DISPLAY_VERSION = 'v2.0 (15 Jun)';
+// Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
+// backups/diagnostics/_meta, the second is the friendly topbar badge.
+const APP_VERSION = 'v2.1';
+const APP_DISPLAY_VERSION = 'v2.1 (15 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -2362,6 +2379,8 @@ function loadSettingsForm(){
   renderTaxEstimate();
   // Salary allocation rules
   renderSalaryRulesEditor();
+  // Recently deleted (trash)
+  renderTrash();
 }
 
 /* Live sum hint for the target allocation inputs. */
@@ -3275,8 +3294,9 @@ async function refreshCryptoPrices(){
 
 /* ═══════════════════════════════════════════════════════════════════════
    SOFT DELETE — Kujira convention: never hard-delete, push to trash.
-   Trash UI lives under Settings (Phase 2+).
+   Trash UI ("Recently deleted") lives in Settings: restore, purge, empty.
    ═══════════════════════════════════════════════════════════════════════ */
+const TRASH_MAX = 100; // bound the synced payload; oldest deletions drop first
 function sendToTrash(table, id){
   if (!DB[table]) return false;
   const idx = DB[table].findIndex(x => x.id === id);
@@ -3285,8 +3305,108 @@ function sendToTrash(table, id){
   DB[table].splice(idx, 1);
   if (!DB.trash) DB.trash = [];
   DB.trash.push({ id: uid('tr'), table, ts: new Date().toISOString(), data: item });
+  if (DB.trash.length > TRASH_MAX) DB.trash = DB.trash.slice(-TRASH_MAX);
   saveData();
   return true;
+}
+
+/* Human label for a trashed entry, by table. Used by the Recently deleted UI. */
+const TRASH_TABLE_NAMES = { stocks:'Stock', stockTxns:'Trade', watchlist:'Watchlist', crypto:'Crypto', realestate:'Property', cash:'Cash account', cashTxns:'Cash movement', cpfHistory:'CPF entry', income:'Income', expenses:'Expense' };
+function trashLabel(table, data){
+  data = data || {};
+  const d = data.date ? (' · ' + fmtDateSG(data.date)) : '';
+  switch (table){
+    case 'stocks':     return (data.symbol || '?') + (data.market ? ' · ' + data.market : '');
+    case 'watchlist':  return (data.symbol || '?');
+    case 'crypto':     return (data.symbol || '?');
+    case 'realestate': return data.name || 'property';
+    case 'cash':       return (data.name || 'account') + ' · ' + (data.currency || 'SGD');
+    case 'stockTxns': {
+      const sym = ((DB.stocks||[]).find(s => s.id === data.stockId) || {}).symbol || '?';
+      return (data.side === 'sell' ? 'Sell ' : 'Buy ') + (Math.abs(Number(data.shares)||0)) + ' ' + sym + d;
+    }
+    case 'cashTxns':   return (data.type || 'movement') + ' ' + (Number(data.amount)||0) + d;
+    case 'cpfHistory': return (data.type || 'entry') + ' ' + (data.account || '') + ' ' + (Number(data.amount)||0) + d;
+    case 'income':     return 'Gross ' + (Number(data.gross)||0) + d;
+    case 'expenses':   return (data.category || 'expense') + ' ' + (Number(data.amount)||0) + d;
+    default:           return table;
+  }
+}
+
+/* Render the Recently deleted list (Settings). Newest first. */
+function renderTrash(){
+  const host = document.getElementById('trash-list');
+  if (!host) return;
+  const trash = (DB.trash || []).slice().sort((a,b) => String(b.ts||'').localeCompare(String(a.ts||'')));
+  const meta  = document.getElementById('trash-meta');
+  if (meta) meta.textContent = trash.length ? (trash.length + ' item' + (trash.length > 1 ? 's' : '')) : '';
+  const emptyBtn = document.getElementById('trash-empty-btn');
+  if (emptyBtn) emptyBtn.style.display = trash.length ? '' : 'none';
+  if (!trash.length){
+    host.innerHTML = '<div class="hint">Nothing here. Deleted entries land here so you can restore them.</div>';
+    return;
+  }
+  host.innerHTML = trash.map(e => `
+    <div class="trash-row">
+      <div class="trash-info">
+        <span class="tag">${kjrEscape(TRASH_TABLE_NAMES[e.table] || e.table)}</span>
+        <span class="trash-label">${kjrEscape(trashLabel(e.table, e.data))}</span>
+        <span class="hint">deleted ${kjrEscape(relTime(e.ts))}</span>
+      </div>
+      <div class="trash-actions">
+        <button class="btn btn-sm" onclick="restoreFromTrash('${kjrEscape(e.id)}')">Restore</button>
+        <button class="btn btn-sm btn-danger" onclick="purgeTrashItem('${kjrEscape(e.id)}')" title="Delete permanently">✕</button>
+      </div>
+    </div>`).join('');
+}
+
+/* Put a trashed entry back into its table. Restores its contribution to all
+   derived totals (balances, P&L). Regenerates the id only if it would collide. */
+function restoreFromTrash(trashId){
+  const trash = DB.trash || [];
+  const idx = trash.findIndex(e => e.id === trashId);
+  if (idx < 0) return;
+  const entry = trash[idx];
+  if (!ENTITY_SCHEMAS[entry.table] && !_LIST_TABLES.includes(entry.table)){
+    showToast('Cannot restore this entry', 'error'); return;
+  }
+  pushUndo();
+  const item = Object.assign({}, entry.data);
+  if (!kjrSafeId(item.id)) item.id = uid(entry.table);
+  if (!DB[entry.table]) DB[entry.table] = [];
+  if (DB[entry.table].some(x => x.id === item.id)) item.id = uid(entry.table);
+  item.updatedAt = new Date().toISOString();
+  DB[entry.table].push(item);
+  trash.splice(idx, 1);
+  saveData();
+  renderAll();
+  renderTrash();
+  showToast('Restored', 'success');
+}
+
+/* Permanently remove one trashed entry. */
+function purgeTrashItem(trashId){
+  const trash = DB.trash || [];
+  const idx = trash.findIndex(e => e.id === trashId);
+  if (idx < 0) return;
+  if (!confirm('Permanently delete this entry? This cannot be undone.')) return;
+  pushUndo();
+  trash.splice(idx, 1);
+  saveData();
+  renderTrash();
+  showToast('Deleted permanently', 'success');
+}
+
+/* Empty the whole Recently deleted list. */
+function emptyTrash(){
+  const n = (DB.trash || []).length;
+  if (!n) return;
+  if (!confirm('Permanently delete all ' + n + ' item' + (n > 1 ? 's' : '') + ' in Recently deleted? This cannot be undone.')) return;
+  pushUndo();
+  DB.trash = [];
+  saveData();
+  renderTrash();
+  showToast('Recently deleted emptied', 'success');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
