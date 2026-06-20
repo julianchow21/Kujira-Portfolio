@@ -466,6 +466,9 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-body"><div class="dash-chart-wrap"><canvas id="dash-cf-chart"></canvas></div></div>
     </div>
     <div id="dash-cpf"></div>
+    <!-- Custom Chart Builder — build, name and pin your own finance charts -->
+    <div id="stocks-builder"></div>
+    <div id="saved-charts-container"></div>
   </section>
 
   <!-- STOCKS -->
@@ -485,8 +488,6 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     <div id="stocks-watchlist"></div>
     <div id="stocks-dividends"></div>
     <div id="stocks-ledger"></div>
-    <div id="stocks-builder"></div>
-    <div id="saved-charts-container"></div>
   </section>
 
   <!-- WATCHLIST+ BOARD — Yahoo-style customisable view over the watchlist tickers -->
@@ -1015,8 +1016,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.2';
-const APP_DISPLAY_VERSION = 'v2.2 (20 Jun)';
+const APP_VERSION = 'v2.4';
+const APP_DISPLAY_VERSION = 'v2.4 (20 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1681,15 +1682,27 @@ function relTime(d){
   return Math.round(s/86400) + 'd ago';
 }
 
-function showToast(msg, kind){
+function showToast(msg, kind, action){
   const host = document.getElementById('toast-host');
   if (!host) return;
   const el = document.createElement('div');
   el.className = 'toast' + (kind ? ' ' + kind : '');
-  el.textContent = msg;
+  // Optional inline action (e.g. Undo). Built from nodes, never innerHTML, so
+  // the message stays text-safe. An action toast lingers longer (8s) so the
+  // affordance is actually reachable.
+  if (action && action.label && typeof action.fn === 'function'){
+    const span = document.createElement('span'); span.textContent = msg;
+    const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = action.label;
+    btn.style.cssText = 'margin-left:12px;background:none;border:none;color:inherit;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer;padding:0';
+    btn.onclick = () => { try{ action.fn(); } finally { el.remove(); } };
+    el.append(span, btn);
+  } else {
+    el.textContent = msg;
+  }
   host.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; }, 3000);
-  setTimeout(() => el.remove(), 3400);
+  const ttl = action ? 8000 : 3000;
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; }, ttl);
+  setTimeout(() => el.remove(), ttl + 400);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -4114,6 +4127,61 @@ function ibkrConfirmImport(){
   showToast(`Imported ${addedTrades} trade${addedTrades !== 1 ? 's' : ''}${addedStocks ? ' + ' + addedStocks + ' new stock' + (addedStocks !== 1 ? 's' : '') : ''}`);
 }
 
+/* Compute the per-holding rows that BOTH the Holdings table and the Custom
+   Chart Builder read, so the two always agree on every number. Pure over
+   DB.stocks plus the price/FX caches (no DOM), sets _stockChartRows, and
+   returns the rows. Safe to call from any tab — the builder now lives on the
+   Dashboard, so it cannot rely on renderStocks having run first. */
+function buildStockChartRows(){
+  const list = DB.stocks || [];
+  let totMv = 0;
+  const rows = list.map(s => {
+    const ysym  = yahooSymbol(s);
+    const px    = DB._priceCache[ysym] || null;
+    const ccy   = s.currency || (s.market === 'SGX' ? 'SGD' : 'USD');
+    const derived = deriveStockPosition(s.id);
+    const shares  = derived ? derived.shares  : (s.shares  || 0);
+    const avgCost = derived ? derived.avgCost : (s.avgCost || 0);
+    let realisedSgd = null;
+    if (derived){ realisedSgd = roundMoney(toSGD(derived.realisedPL, ccy)); }
+    const cost  = roundMoney(toSGD(shares * avgCost, ccy));
+    let priceSgd = null, mv = null, pl = null, plPct = null, stale = true, priceCcy = null;
+    let changeSgd = null, prevCloseSgd = null;
+    if (px && px.price != null){
+      const pxCcy = px.currency || ccy;
+      priceSgd = toSGD(px.price, pxCcy);
+      mv  = roundMoney(priceSgd * shares);
+      pl  = roundMoney(mv - cost);
+      plPct = safeRatio(pl, cost);
+      stale = isStale(px.fetchedAt, 24);
+      priceCcy = pxCcy;
+      if (px.change != null) changeSgd = roundMoney(toSGD(px.change, pxCcy) * shares);
+      if (px.previousClose != null) prevCloseSgd = toSGD(px.previousClose, pxCcy);
+    }
+    const dps = Number(s.divPerShare) || 0;
+    let divAnnualSgd = null, divYoc = null, divYieldCur = null;
+    if (dps > 0 && shares){
+      divAnnualSgd = roundMoney(toSGD(shares * dps, ccy));
+      divYoc = safeRatio(divAnnualSgd, cost);
+      if (mv != null) divYieldCur = safeRatio(divAnnualSgd, mv);
+    }
+    let extLine = '';
+    if (px && px.extendedKind && px.extendedPrice != null){
+      const extCls = (px.extendedChange || 0) >= 0 ? 'pos' : 'neg';
+      const elabel = px.extendedKind === 'pre' ? 'Pre' : 'Post';
+      const pctTxt = px.extendedChangePct != null ? ' ' + fmtPct(px.extendedChangePct) : '';
+      extLine = `<div class="px-ext"><span class="px-ext-tag">${elabel}</span> ${fmt(toSGD(px.extendedPrice, priceCcy))}<span class="${extCls}">${pctTxt}</span></div>`;
+    }
+    if (mv != null) totMv += mv;
+    return { s, ysym, px, ccy, cost, mv, pl, plPct, stale, priceCcy, priceSgd, shares, avgCost, derived,
+             realisedSgd, changeSgd, prevCloseSgd, divAnnualSgd, divYoc, divYieldCur, extLine, weight:null };
+  });
+  totMv = roundMoney(totMv);
+  rows.forEach(r => { if (r.mv != null && totMv > 0) r.weight = safeRatio(r.mv, totMv); });
+  _stockChartRows = rows;
+  return rows;
+}
+
 function renderStocks(){
   setRenderCcy('stocks');
   const list = DB.stocks || [];
@@ -4132,72 +4200,25 @@ function renderStocks(){
     renderWatchlist(); // the watchlist stands on its own, even with no holdings
     renderBoard();     // Watchlist+ board mirrors the same tickers
     renderDividendTimeline([]);
-    renderStockChartBuilder();
     return;
   }
 
-  // Compute rows. When a stock has logged trades, shares + avg cost are
-  // derived from the ledger; otherwise the manual entry is used.
+  // Rows are built by the shared builder so the Holdings table and the Custom
+  // Chart Builder always read identical numbers. Summary totals + state flags
+  // are then derived from those rows in a single pass.
+  const rows = buildStockChartRows();
   let totCost = 0, totMv = 0, totRealised = 0, totDivAnnual = 0,
       anyPriceMissing = false, anyFxMissing = false, anyPriced = false, anyDerived = false, anyDiv = false;
-  const rows = list.map(s => {
-    const ysym  = yahooSymbol(s);
-    const px    = DB._priceCache[ysym] || null;
-    const ccy   = s.currency || (s.market === 'SGX' ? 'SGD' : 'USD');
-    if (fxMissingFor(ccy)) anyFxMissing = true;
-    const derived = deriveStockPosition(s.id);
-    const shares  = derived ? derived.shares  : (s.shares  || 0);
-    const avgCost = derived ? derived.avgCost : (s.avgCost || 0);
-    let realisedSgd = null;
-    if (derived){ anyDerived = true; realisedSgd = roundMoney(toSGD(derived.realisedPL, ccy)); totRealised += realisedSgd; }
-    const cost  = roundMoney(toSGD(shares * avgCost, ccy));
-    let priceSgd = null, mv = null, pl = null, plPct = null, stale = true, priceCcy = null;
-    let changeSgd = null, prevCloseSgd = null;
-    if (px && px.price != null){
-      anyPriced = true;
-      const pxCcy = px.currency || ccy;
-      if (fxMissingFor(pxCcy)) anyFxMissing = true;
-      priceSgd = toSGD(px.price, pxCcy);
-      mv  = roundMoney(priceSgd * shares);
-      pl  = roundMoney(mv - cost);
-      plPct = safeRatio(pl, cost);
-      stale = isStale(px.fetchedAt, 24);
-      priceCcy = pxCcy;
-      if (px.change != null) changeSgd = roundMoney(toSGD(px.change, pxCcy) * shares);
-      if (px.previousClose != null) prevCloseSgd = toSGD(px.previousClose, pxCcy);
-    } else { anyPriceMissing = true; }
-    // Dividend projection (yield-only model): annual income = shares × annual div per share.
-    const dps = Number(s.divPerShare) || 0;
-    let divAnnualSgd = null, divYoc = null, divYieldCur = null;
-    if (dps > 0 && shares){
-      anyDiv = true;
-      divAnnualSgd = roundMoney(toSGD(shares * dps, ccy));
-      totDivAnnual += divAnnualSgd;
-      divYoc = safeRatio(divAnnualSgd, cost);
-      if (mv != null) divYieldCur = safeRatio(divAnnualSgd, mv);
-    }
-    // Pre-rendered extended-hours line for the price cell.
-    let extLine = '';
-    if (px && px.extendedKind && px.extendedPrice != null){
-      const extCls = (px.extendedChange || 0) >= 0 ? 'pos' : 'neg';
-      const elabel = px.extendedKind === 'pre' ? 'Pre' : 'Post';
-      const pctTxt = px.extendedChangePct != null ? ' ' + fmtPct(px.extendedChangePct) : '';
-      extLine = `<div class="px-ext"><span class="px-ext-tag">${elabel}</span> ${fmt(toSGD(px.extendedPrice, priceCcy))}<span class="${extCls}">${pctTxt}</span></div>`;
-    }
-    totCost += cost;
-    if (mv != null) totMv += mv;
-    return { s, ysym, px, ccy, cost, mv, pl, plPct, stale, priceCcy, priceSgd, shares, avgCost, derived,
-             realisedSgd, changeSgd, prevCloseSgd, divAnnualSgd, divYoc, divYieldCur, extLine, weight:null };
+  rows.forEach(r => {
+    totCost += r.cost;
+    if (r.mv != null){ totMv += r.mv; anyPriced = true; } else { anyPriceMissing = true; }
+    if (r.realisedSgd != null) totRealised += r.realisedSgd;
+    if (r.derived) anyDerived = true;
+    if (r.divAnnualSgd != null){ totDivAnnual += r.divAnnualSgd; anyDiv = true; }
+    if (fxMissingFor(r.ccy) || (r.priceCcy && fxMissingFor(r.priceCcy))) anyFxMissing = true;
   });
-  // Round the accumulated totals once (Phase-1 convention: round at accumulation).
   totCost = roundMoney(totCost); totMv = roundMoney(totMv);
   totRealised = roundMoney(totRealised); totDivAnnual = roundMoney(totDivAnnual);
-
-  // Second pass: portfolio weight needs the total market value.
-  rows.forEach(r => { if (r.mv != null && totMv > 0) r.weight = safeRatio(r.mv, totMv); });
-  // Cache the full (unfiltered, weighted) rows so the chart builder aggregates
-  // the SAME numbers the Holdings table shows.
-  _stockChartRows = rows;
 
   // Build sector options with current selection marked — used in the Holdings card-head.
   const sectorOpts = GICS_SECTOR_OPTIONS
@@ -4358,7 +4379,6 @@ function renderStocks(){
   renderBoard();     // Watchlist+ board mirrors the same tickers
   renderDividendTimeline(rows);
   renderStockTxns();
-  renderStockChartBuilder();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -4435,11 +4455,12 @@ function _pbEnsureUI(){
   const host = document.getElementById('stocks-builder');
   if (!host || host.dataset.ready) return;
   host.dataset.ready = '1';
+  const rl = 'font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600';
   host.innerHTML = `
   <div class="card" style="margin-bottom:16px">
     <div class="card-head cb-builder-head">
       <h3><svg width="15" height="15" viewBox="0 0 15 15" fill="none" style="vertical-align:-2px;margin-right:5px"><rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/><rect x="6" y="4" width="3" height="10" rx="0.5" fill="currentColor"/><rect x="11" y="1" width="3" height="13" rx="0.5" fill="currentColor"/></svg>Custom Chart Builder</h3>
-      <div class="cb-head-actions" style="display:flex;gap:8px;align-items:center">
+      <div class="cb-head-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <div class="btns" style="display:flex;gap:4px">
           <button class="cb-period-btn" id="pb-mode-crosssec" onclick="pbSetMode('crosssec')">By holding</button>
           <button class="cb-period-btn" id="pb-mode-timeseries" onclick="pbSetMode('timeseries')">Price history</button>
@@ -4453,85 +4474,78 @@ function _pbEnsureUI(){
       </div>
     </div>
 
-    <!-- Cross-sectional builder -->
-    <div id="pb-crosssec" class="cb-layout" style="display:grid;grid-template-columns:220px 1fr;gap:0;min-height:360px">
-      <div class="cb-palette-col" style="border-right:1px solid var(--border);padding:14px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:520px">
-        <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600">Available Fields</div>
-        <input id="pb-palette-search" class="fi fi-sm" placeholder="Search fields..." oninput="pbFilterPalette(this.value)">
-        <div id="pb-palette" style="display:flex;flex-direction:column;gap:5px"></div>
-      </div>
-      <div style="display:flex;flex-direction:column">
-        <div class="cb-axes-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:14px;border-bottom:1px solid var(--border)">
-          <div>
-            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:5px">Group by (X)</div>
-            <div id="pb-drop-x" class="cb-drop-zone cb-multi-zone" ondragover="pbDragOver(event)" ondragleave="pbDragLeave(event)" ondrop="pbDrop(event,'x')">
-              <div id="pb-x-chips" style="display:flex;flex-wrap:wrap;gap:4px;width:100%"></div>
-              <span id="pb-x-placeholder" class="cb-drop-label">Tap or drag a dimension</span>
-            </div>
-          </div>
-          <div>
-            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:5px">Measure (Y)</div>
-            <div id="pb-drop-y" class="cb-drop-zone cb-multi-zone" ondragover="pbDragOver(event)" ondragleave="pbDragLeave(event)" ondrop="pbDrop(event,'y')">
-              <div id="pb-y-chips" style="display:flex;flex-wrap:wrap;gap:4px;width:100%"></div>
-              <span id="pb-y-placeholder" class="cb-drop-label">Tap or drag a measure</span>
-            </div>
-          </div>
-          <div>
-            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:5px">Filter</div>
-            <input id="pb-kw" class="cb-drop-zone" style="font-size:12px;width:100%;min-height:42px;padding:11px 12px" placeholder="symbol / sector…" oninput="pbRenderChart()">
-          </div>
-        </div>
-        <div style="display:flex;gap:10px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
-          <span style="font-size:11px;color:var(--text3)">Top N:</span>
-          <select class="fi fi-sm" id="pb-topn" onchange="pbRenderChart()" style="width:auto">
-            <option value="all" selected>All</option><option value="5">5</option><option value="10">10</option><option value="20">20</option>
-          </select>
-          <span style="font-size:11px;color:var(--text3)">Sort:</span>
-          <select class="fi fi-sm" id="pb-sort" onchange="pbRenderChart()" style="width:auto">
-            <option value="desc">Highest first</option><option value="asc">Lowest first</option><option value="alpha">A → Z</option>
-          </select>
-          <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer"><input type="checkbox" id="pb-dual" onchange="pbRenderChart()"> Dual axis</label>
-        </div>
-      </div>
-    </div>
+    <div id="pb-layout" class="cb-layout" style="display:grid;grid-template-columns:220px 1fr;gap:0;min-height:380px">
 
-    <!-- Time-series builder -->
-    <div id="pb-timeseries" style="display:none">
-      <div style="display:flex;gap:14px;align-items:flex-start;padding:14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
-        <div style="min-width:160px">
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:6px">Symbols</div>
-          <div id="pb-ts-symbols" style="display:flex;flex-direction:column;gap:4px;max-height:150px;overflow-y:auto"></div>
+      <!-- Left rail: field palette (by holding) OR symbol controls (price history) -->
+      <div class="cb-palette-col" style="border-right:1px solid var(--border);padding:14px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:560px">
+        <div id="pb-palette-pane" style="display:flex;flex-direction:column;gap:8px">
+          <div style="${rl}">Available Fields</div>
+          <input id="pb-palette-search" class="fi fi-sm" placeholder="Search fields..." oninput="pbFilterPalette(this.value)">
+          <div id="pb-palette" style="display:flex;flex-direction:column;gap:5px"></div>
         </div>
-        <div>
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:6px">Value</div>
-          <select class="fi fi-sm" id="pb-ts-value" onchange="pbState.tsValue=this.value;_pbSaveState();pbRenderChart()" style="width:auto">
+        <div id="pb-ts-pane" style="display:none;flex-direction:column;gap:6px">
+          <div style="${rl}">Symbols</div>
+          <div id="pb-ts-symbols" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto"></div>
+          <div style="${rl};margin-top:8px">Value</div>
+          <select class="fi fi-sm" id="pb-ts-value" onchange="pbState.tsValue=this.value;_pbSaveState();pbRenderChart()">
             <option value="price">Close price</option><option value="positionValue">Position value</option>
           </select>
-        </div>
-        <div>
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:6px">Period</div>
-          <div class="btns" id="pb-ts-periods" style="display:flex;gap:4px"></div>
-        </div>
-        <div>
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:6px">Options</div>
-          <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer"><input type="checkbox" id="pb-ts-avgcost" onchange="pbState.tsAvgCost=this.checked;_pbSaveState();pbRenderChart()"> Show avg cost</label>
+          <div style="${rl};margin-top:8px">Period</div>
+          <div class="btns" id="pb-ts-periods" style="display:flex;gap:4px;flex-wrap:wrap"></div>
+          <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;margin-top:8px"><input type="checkbox" id="pb-ts-avgcost" onchange="pbState.tsAvgCost=this.checked;_pbSaveState();pbRenderChart()"> Show avg cost</label>
         </div>
       </div>
-    </div>
 
-    <!-- Shared chart area -->
-    <div style="padding:14px;position:relative">
-      <div id="pb-empty" class="empty" style="padding:40px 20px">
-        <div class="empty-icon">📊</div>
-        <div class="empty-title">Build a chart</div>
-        <div class="empty-sub">Pick a dimension and a measure, or switch to Price history.</div>
+      <!-- Right: cross-sectional axes/controls (above) + shared chart (fills) -->
+      <div style="display:flex;flex-direction:column;min-width:0">
+        <div id="pb-crosssec-controls">
+          <div class="cb-axes-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:14px;border-bottom:1px solid var(--border)">
+            <div>
+              <div style="${rl};margin-bottom:5px">Group by (X)</div>
+              <div id="pb-drop-x" class="cb-drop-zone cb-multi-zone" ondragover="pbDragOver(event)" ondragleave="pbDragLeave(event)" ondrop="pbDrop(event,'x')">
+                <div id="pb-x-chips" style="display:flex;flex-wrap:wrap;gap:4px;width:100%"></div>
+                <span id="pb-x-placeholder" class="cb-drop-label">Tap or drag a dimension</span>
+              </div>
+            </div>
+            <div>
+              <div style="${rl};margin-bottom:5px">Measure (Y)</div>
+              <div id="pb-drop-y" class="cb-drop-zone cb-multi-zone" ondragover="pbDragOver(event)" ondragleave="pbDragLeave(event)" ondrop="pbDrop(event,'y')">
+                <div id="pb-y-chips" style="display:flex;flex-wrap:wrap;gap:4px;width:100%"></div>
+                <span id="pb-y-placeholder" class="cb-drop-label">Tap or drag a measure</span>
+              </div>
+            </div>
+            <div>
+              <div style="${rl};margin-bottom:5px">Filter</div>
+              <input id="pb-kw" class="cb-drop-zone" style="font-size:12px;width:100%;min-height:42px;padding:11px 12px" placeholder="symbol / sector…" oninput="pbRenderChart()">
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+            <span style="font-size:11px;color:var(--text3)">Top N:</span>
+            <select class="fi fi-sm" id="pb-topn" onchange="pbRenderChart()" style="width:auto">
+              <option value="all" selected>All</option><option value="5">5</option><option value="10">10</option><option value="20">20</option>
+            </select>
+            <span style="font-size:11px;color:var(--text3)">Sort:</span>
+            <select class="fi fi-sm" id="pb-sort" onchange="pbRenderChart()" style="width:auto">
+              <option value="desc">Highest first</option><option value="asc">Lowest first</option><option value="alpha">A → Z</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer"><input type="checkbox" id="pb-dual" onchange="pbRenderChart()"> Dual axis</label>
+          </div>
+        </div>
+
+        <div style="padding:14px;flex:1;min-height:300px;position:relative;display:flex;flex-direction:column">
+          <div id="pb-empty" class="empty" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:260px">
+            <div class="empty-icon">📊</div>
+            <div class="empty-title">Build a chart</div>
+            <div class="empty-sub">Pick a dimension and a measure, or switch to Price history.</div>
+          </div>
+          <div id="pb-chart-wrap" style="display:none;height:320px;position:relative"><canvas id="pb-live-canvas"></canvas></div>
+          <div id="pb-summary" style="font-size:11px;color:var(--text3);margin-top:8px;display:flex;gap:14px;flex-wrap:wrap"></div>
+        </div>
       </div>
-      <div id="pb-chart-wrap" style="display:none;height:300px"><canvas id="pb-live-canvas"></canvas></div>
-      <div id="pb-summary" style="font-size:11px;color:var(--text3);margin-top:8px;display:flex;gap:14px;flex-wrap:wrap"></div>
     </div>
   </div>`;
 
-  // Period buttons
+  // Period buttons (live in the time-series rail)
   const pBox = document.getElementById('pb-ts-periods');
   pBox.innerHTML = Object.keys(PB_PERIODS).map(k =>
     `<button class="cb-period-btn" data-period="${k}" onclick="pbSetPeriod('${k}')">${PB_PERIOD_LABELS[k]}</button>`).join('');
@@ -4539,7 +4553,8 @@ function _pbEnsureUI(){
 
 /* ── Entry point (called from renderStocks) ── */
 function renderStockChartBuilder(){
-  setRenderCcy('stocks');
+  buildStockChartRows();        // builder lives on the Dashboard; ensure rows are fresh
+  setRenderCcy('dashboard');
   _pbEnsureUI();
   // Restore control values from state
   const ct = document.getElementById('pb-chart-type'); // chart-type is per-session, not persisted
@@ -4555,13 +4570,17 @@ function renderStockChartBuilder(){
 }
 
 function _pbApplyModeUI(){
-  const cs = document.getElementById('pb-crosssec');
-  const ts = document.getElementById('pb-timeseries');
+  const palettePane = document.getElementById('pb-palette-pane');
+  const tsPane = document.getElementById('pb-ts-pane');
+  const csControls = document.getElementById('pb-crosssec-controls');
   const ctype = document.getElementById('pb-chart-type');
-  if (!cs || !ts) return;
+  if (!palettePane || !tsPane || !csControls) return;
   const isTs = pbState.mode === 'timeseries';
-  cs.style.display = isTs ? 'none' : 'grid';
-  ts.style.display = isTs ? 'block' : 'none';
+  // By holding: palette on the left, axes/controls + chart on the right.
+  // Price history: symbol controls on the left, chart fills the right.
+  palettePane.style.display = isTs ? 'none' : 'flex';
+  tsPane.style.display = isTs ? 'flex' : 'none';
+  csControls.style.display = isTs ? 'none' : '';
   if (ctype) ctype.style.display = isTs ? 'none' : '';
   document.getElementById('pb-mode-crosssec').classList.toggle('active', !isTs);
   document.getElementById('pb-mode-timeseries').classList.toggle('active', isTs);
@@ -4793,27 +4812,42 @@ async function _pbDrawTimeSeries(host, cfg, showEmpty, showChart){
   catch(e){ showEmpty('History unavailable', 'Could not load price history. Try again after a price refresh.'); return false; }
 
   const curSym = _pbCurSym();
-  const datasets = []; const dropped = []; let labels = null;
+  const dropped = [];
+  // Build a per-symbol date→value map, then plot every series against one
+  // shared, sorted date axis. SGX and US trade on different days, so aligning
+  // by date (not array index) is the only way the lines line up. Missing days
+  // become gaps that spanGaps joins across. p.t is a ms epoch — format it to a
+  // YYYY-MM-DD label (a raw slice of the number is not a date).
+  const series = [];
   chosen.forEach((r, i) => {
     const h = hist[r.ysym];
     if (!h || !h.points || !h.points.length){ dropped.push(r.s.symbol); return; }
-    const color = PB_PALETTE[i % PB_PALETTE.length];
     const pxCcy = h.ccy || r.priceCcy || r.ccy;
-    const pts = h.points.map(p => {
+    const map = {};
+    h.points.forEach(p => {
+      const t = Number(p.t); if (!isFinite(t)) return;
+      const d = new Date(t).toISOString().slice(0,10);
       const base = cfg.tsValue === 'positionValue' ? (p.c * (r.shares||0)) : p.c;
-      return { x: String(p.t).slice(0,10), y: +toDisplay(base, pxCcy).toFixed(2) };
+      map[d] = +toDisplay(base, pxCcy).toFixed(2);
     });
-    if (!labels || pts.length > labels.length) labels = pts.map(p => p.x);
-    datasets.push({ label:r.s.symbol, data:pts.map(p=>p.y), borderColor:color, backgroundColor:'transparent',
-                    borderWidth:2, pointRadius:0, tension:0.15 });
+    if (Object.keys(map).length) series.push({ r, i, map }); else dropped.push(r.s.symbol);
+  });
+  if (!series.length){ showEmpty('History unavailable', 'No price history returned for the selected symbols.'); return false; }
+
+  const labels = [...new Set(series.flatMap(s => Object.keys(s.map)))].sort();
+  const datasets = [];
+  series.forEach(({ r, i, map }) => {
+    const color = PB_PALETTE[i % PB_PALETTE.length];
+    datasets.push({ label:r.s.symbol, data: labels.map(d => d in map ? map[d] : null), spanGaps:true,
+                    borderColor:color, backgroundColor:'transparent', borderWidth:2, pointRadius:0, tension:0.15 });
     if (cfg.tsAvgCost && r.avgCost){
       const ac = cfg.tsValue === 'positionValue' ? r.avgCost * (r.shares||0) : r.avgCost;
       const acVal = +toDisplay(ac, r.ccy).toFixed(2);
-      datasets.push({ label:r.s.symbol + ' avg cost', data:pts.map(()=>acVal), borderColor:color,
-                      borderDash:[6,4], borderWidth:1, pointRadius:0, _avgCost:true });
+      // Avg-cost reference line only spans the dates where this symbol has data.
+      datasets.push({ label:r.s.symbol + ' avg cost', data: labels.map(d => d in map ? acVal : null), spanGaps:true,
+                      borderColor:color, borderDash:[6,4], borderWidth:1, pointRadius:0, _avgCost:true });
     }
   });
-  if (!datasets.length){ showEmpty('History unavailable', 'No price history returned for the selected symbols.'); return false; }
 
   showChart();
   const axisColor = _cssVar('--text3'), gridColor = _cssVar('--border');
@@ -4828,7 +4862,7 @@ async function _pbDrawTimeSeries(host, cfg, showEmpty, showChart){
     }
   });
   if (host.summaryEl){
-    const note = dropped.length ? ` · <span style="color:var(--amber,#f59e0b)">no data: ${dropped.join(', ')}</span>` : '';
+    const note = dropped.length ? ` · <span style="color:var(--amber,#f59e0b)">no data: ${dropped.map(kjrEscape).join(', ')}</span>` : '';
     host.summaryEl.innerHTML = `<span style="color:var(--text3)">${datasets.filter(d=>!d._avgCost).length} symbols · ${PB_PERIOD_LABELS[cfg.range]} · ${cfg.tsValue==='positionValue'?'position value':'close price'}${note}</span>`;
   }
   return true;
@@ -4988,11 +5022,11 @@ function pbDeleteSaved(id){
     pbPersistSaved(charts.filter(c => c.id !== id));
     const inst = _pbCharts['pb-sc-canvas-'+id]; if (inst){ try{ inst.destroy(); }catch(e){} delete _pbCharts['pb-sc-canvas-'+id]; }
     pbRenderAllSaved();
-    // brief undo
-    showToast('Chart deleted');
+    // Soft-delete: keep the config in memory for 8s and offer an Undo on the
+    // toast (matches the toast's own 8s lifetime).
     _pbUndoChart = cfg; clearTimeout(_pbUndoTimer);
     _pbUndoTimer = setTimeout(() => { _pbUndoChart = null; }, 8000);
-    const sumHost = document.getElementById('pb-summary');
+    showToast('Chart deleted', '', { label:'Undo', fn: pbUndoDelete });
   });
 }
 let _pbUndoChart = null, _pbUndoTimer = null;
@@ -6439,6 +6473,7 @@ function renderDashboard(){
     drawNetWorthChart();
     drawAllocationChart(classes.filter(c => c.val > 0), net);
     drawCashflowChart();
+    renderStockChartBuilder();   // Custom Chart Builder card + saved charts
   }
 }
 
