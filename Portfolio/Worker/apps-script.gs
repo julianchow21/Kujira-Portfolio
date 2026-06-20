@@ -73,6 +73,7 @@ function doGet(e) {
     if (action === 'profile') return json_(fetchYahooProfile_(e.parameter.symbol || ''));
     if (action === 'crypto') return json_(fetchCoinGecko_(e.parameter.ids || '', e.parameter.vs || 'sgd,usd'));
     if (action === 'fx')     return json_(fetchYahooFx_(e.parameter.pairs || ''));
+    if (action === 'history') return json_(fetchYahooHistory_(e.parameter.symbols || '', e.parameter.range || '1y'));
 
     const sh  = getSheet_();
     const raw = sh.getRange(CELL).getValue();
@@ -644,6 +645,94 @@ function writeSettings_(tabName, settings) {
   flatten('', s);
   if (rows.length) sh.getRange(2, 1, rows.length, headers.length).setValues(rows);
   sh.autoResizeColumns(1, headers.length);
+}
+
+/** Fetch daily-close history for one or more symbols from Yahoo Finance.
+    Returns { history: { SYM: { ccy, points:[{t,c}] } } }.
+    Points use ms timestamps. Adjusted close is preferred over raw close.
+    Per-symbol failures return { symbol, error } so the batch never throws.
+    Results are cached for 6 h — history changes at most once per trading day. */
+function fetchYahooHistory_(symbolsCsv, range) {
+  const VALID_RANGES = { '1mo': true, '3mo': true, '6mo': true, '1y': true };
+  const r = VALID_RANGES[range] ? range : '1y';
+  const symbols = String(symbolsCsv || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!symbols.length) return { history: {} };
+
+  const cache = CacheService.getScriptCache();
+  const out = {};
+  const missing = [];
+
+  symbols.forEach(s => {
+    const hit = cache.get('yh:' + s + ':' + r);
+    if (hit) {
+      try { out[s] = JSON.parse(hit); return; } catch (_) {}
+    }
+    missing.push(s);
+  });
+
+  if (missing.length) {
+    const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+               '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+    const requests = missing.map(s => ({
+      url: 'https://query1.finance.yahoo.com/v8/finance/chart/' +
+           encodeURIComponent(s) + '?interval=1d&range=' + r,
+      muteHttpExceptions: true,
+      followRedirects: true,
+      headers: { 'User-Agent': UA, 'Accept': 'application/json' }
+    }));
+
+    let responses;
+    try {
+      responses = UrlFetchApp.fetchAll(requests);
+    } catch (err) {
+      return { error: 'Yahoo history fetchAll failed: ' + err.message, partial: out };
+    }
+
+    const toCache = {};
+    responses.forEach((resp, i) => {
+      const symbol = missing[i];
+      const code = resp.getResponseCode();
+      if (code !== 200) {
+        out[symbol] = { symbol: symbol, error: 'HTTP ' + code };
+        return;
+      }
+      try {
+        const j = JSON.parse(resp.getContentText());
+        const res = j.chart && j.chart.result && j.chart.result[0];
+        if (!res || !res.timestamp) {
+          const errMsg = (j.chart && j.chart.error && j.chart.error.description) || 'No data';
+          out[symbol] = { symbol: symbol, error: errMsg };
+          return;
+        }
+        const timestamps = res.timestamp;
+        const adjArr = res.indicators && res.indicators.adjclose &&
+                       res.indicators.adjclose[0] && res.indicators.adjclose[0].adjclose;
+        const rawArr = res.indicators && res.indicators.quote &&
+                       res.indicators.quote[0] && res.indicators.quote[0].close;
+        const closes = adjArr || rawArr || [];
+        const ccy = (res.meta && res.meta.currency) || 'USD';
+
+        const points = [];
+        for (let k = 0; k < timestamps.length; k++) {
+          const c = closes[k];
+          if (c == null || isNaN(c)) continue;
+          points.push({ t: timestamps[k] * 1000, c: +c.toFixed(4) });
+        }
+
+        const entry = { ccy: ccy, points: points };
+        out[symbol] = entry;
+        toCache['yh:' + symbol + ':' + r] = JSON.stringify(entry);
+      } catch (err) {
+        out[symbol] = { symbol: symbol, error: err.message };
+      }
+    });
+
+    if (Object.keys(toCache).length) {
+      try { cache.putAll(toCache, FUND_CACHE_TTL_SEC); } catch (_) {}
+    }
+  }
+
+  return { history: out };
 }
 
 /** Run once after pasting to grant scopes (Sheets + UrlFetch + Cache). */

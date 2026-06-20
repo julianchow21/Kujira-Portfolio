@@ -1005,7 +1005,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=1.6"></script>
+<script src="Worker/kjr-core.js?v=1.7"></script>
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
    KUJIRA PORTFOLIO — Finance Tracker
@@ -1015,8 +1015,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.1';
-const APP_DISPLAY_VERSION = 'v2.1 (15 Jun)';
+const APP_VERSION = 'v2.2';
+const APP_DISPLAY_VERSION = 'v2.2 (20 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -4358,6 +4358,665 @@ function renderStocks(){
   renderBoard();     // Watchlist+ board mirrors the same tickers
   renderDividendTimeline(rows);
   renderStockTxns();
+  renderStockChartBuilder();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CUSTOM CHART BUILDER (Stocks tab)
+   A modular drag-and-drop chart builder over the holdings, ported from the
+   Collectibles app. Two modes share one surface:
+     • cross-sectional — group holdings by a dimension, aggregate a measure
+     • time-series     — daily close (or position value) per symbol over a
+                         period, with an optional dashed avg-cost line
+   Aggregation + formatting live in kjr-core.js (kjrChartAggregate /
+   kjrFmtMeasure / kjrFmtAxis) so the live chart and saved cards never drift.
+   Builds on _stockChartRows, the SAME rows the Holdings table renders.
+   ═══════════════════════════════════════════════════════════════════════ */
+let _stockChartRows = [];
+let _pbHistCache = {};                 // memory-only: { ysym: { range: {ccy, points, fetchedAt} } }
+const _pbCharts = {};                  // canvasId -> Chart instance
+const PB_PALETTE = ['#a78bfa','#2dd4bf','#f59e0b','#f87171','#60a5fa','#34d399','#fb923c','#c084fc','#38bdf8','#4ade80','#facc15','#e879f9'];
+const PB_STATE_KEY = 'kjr_pb_cb_state_v1';
+const PB_SAVED_KEY = 'kjr_portfolio_saved_charts';
+const PB_PERIODS = { ONE_MONTH:'1mo', THREE_MONTHS:'3mo', SIX_MONTHS:'6mo', ONE_YEAR:'1y' };
+const PB_PERIOD_LABELS = { ONE_MONTH:'1M', THREE_MONTHS:'3M', SIX_MONTHS:'6M', ONE_YEAR:'1Y' };
+
+/* Field schema. Money measures return raw SGD (converted to the display
+   currency at draw time); pct measures are already in percent. */
+const PB_FIELDS = {
+  symbol:   { label:'Symbol',   icon:'🔖', type:'dim', get: r => r.s.symbol || '?' },
+  market:   { label:'Market',   icon:'🏛️', type:'dim', get: r => r.s.market || '?' },
+  currency: { label:'Currency', icon:'💱', type:'dim', get: r => r.ccy || '?' },
+  sector:   { label:'Sector',   icon:'🏷️', type:'dim', get: r => r.s.sector || 'Unclassified' },
+  marketValue:{ label:'Market Value',    icon:'📈', type:'meas', agg:'sum', unit:'money', get: r => r.mv ?? 0 },
+  costBasis:  { label:'Cost Basis',      icon:'💵', type:'meas', agg:'sum', unit:'money', get: r => r.cost ?? 0 },
+  unrealPnl:  { label:'Unrealised P&L',  icon:'💹', type:'meas', agg:'sum', unit:'money', get: r => r.pl ?? 0 },
+  pnlPct:     { label:'P&L %',           icon:'📊', type:'meas', agg:'avg', unit:'pct',   get: r => (r.plPct ?? 0) * 100 },
+  shares:     { label:'Shares',          icon:'🔢', type:'meas', agg:'sum', unit:'count', get: r => r.shares ?? 0 },
+  divIncome:  { label:'Annual Dividend', icon:'💰', type:'meas', agg:'sum', unit:'money', get: r => r.divAnnualSgd ?? 0 },
+  divYield:   { label:'Dividend Yield',  icon:'🪙', type:'meas', agg:'avg', unit:'pct',   get: r => (r.divYieldCur ?? 0) * 100 },
+  weightPct:  { label:'Portfolio Weight',icon:'⚖️', type:'meas', agg:'sum', unit:'pct',   get: r => (r.weight ?? 0) * 100 },
+  posCount:   { label:'Position Count',  icon:'#️⃣', type:'meas', agg:'sum', unit:'count', get: () => 1 },
+};
+
+function _pbCurSym(){ const dc = displayCcy(); return dc === 'USD' ? 'US$' : dc === 'SGD' ? 'S$' : (dc + ' '); }
+function _pbVal(raw, field){ return (field && field.unit === 'money') ? toDisplay(Number(raw)||0, 'SGD') : (Number(raw)||0); }
+function _pbRows(){ return _stockChartRows || []; }
+function _pbFilteredRows(kw){
+  const rows = _pbRows();
+  const term = (kw || '').toLowerCase().trim();
+  if (!term) return rows;
+  return rows.filter(r =>
+    ((r.s.symbol||'') + ' ' + (r.s.market||'') + ' ' + (r.ccy||'') + ' ' + (r.s.sector||'')).toLowerCase().includes(term));
+}
+
+function _pbLoadState(){
+  try{
+    const raw = JSON.parse(localStorage.getItem(PB_STATE_KEY) || 'null');
+    if (raw && Array.isArray(raw.x) && Array.isArray(raw.y))
+      return {
+        x: raw.x.filter(k => PB_FIELDS[k] && PB_FIELDS[k].type === 'dim'),
+        y: raw.y.filter(k => PB_FIELDS[k] && PB_FIELDS[k].type === 'meas'),
+        mode: raw.mode === 'timeseries' ? 'timeseries' : 'crosssec',
+        range: PB_PERIODS[raw.range] ? raw.range : 'SIX_MONTHS',
+        tsValue: raw.tsValue === 'positionValue' ? 'positionValue' : 'price',
+        tsAvgCost: !!raw.tsAvgCost,
+        tsSymbols: Array.isArray(raw.tsSymbols) ? raw.tsSymbols : [],
+        customItems: null
+      };
+  }catch(e){}
+  return { x:[], y:[], mode:'crosssec', range:'SIX_MONTHS', tsValue:'price', tsAvgCost:false, tsSymbols:[], customItems:null };
+}
+function _pbSaveState(){ try{ localStorage.setItem(PB_STATE_KEY, JSON.stringify(pbState)); }catch(e){} }
+let pbState = _pbLoadState();
+
+/* ── Builder UI injection (once) ── */
+function _pbEnsureUI(){
+  const host = document.getElementById('stocks-builder');
+  if (!host || host.dataset.ready) return;
+  host.dataset.ready = '1';
+  host.innerHTML = `
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-head cb-builder-head">
+      <h3><svg width="15" height="15" viewBox="0 0 15 15" fill="none" style="vertical-align:-2px;margin-right:5px"><rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/><rect x="6" y="4" width="3" height="10" rx="0.5" fill="currentColor"/><rect x="11" y="1" width="3" height="13" rx="0.5" fill="currentColor"/></svg>Custom Chart Builder</h3>
+      <div class="cb-head-actions" style="display:flex;gap:8px;align-items:center">
+        <div class="btns" style="display:flex;gap:4px">
+          <button class="cb-period-btn" id="pb-mode-crosssec" onclick="pbSetMode('crosssec')">By holding</button>
+          <button class="cb-period-btn" id="pb-mode-timeseries" onclick="pbSetMode('timeseries')">Price history</button>
+        </div>
+        <select class="fi fi-sm" style="width:auto" id="pb-chart-type" onchange="pbRenderChart()">
+          <option value="bar">Bar</option><option value="line">Line</option>
+          <option value="doughnut">Doughnut</option><option value="scatter">Scatter</option>
+        </select>
+        <button class="btn btn-sm btn-primary" onclick="pbSaveChart()" id="pb-save-btn" disabled>＋ Add to Dashboard</button>
+        <button class="btn btn-sm btn-ghost" onclick="pbResetChart()">Reset</button>
+      </div>
+    </div>
+
+    <!-- Cross-sectional builder -->
+    <div id="pb-crosssec" class="cb-layout" style="display:grid;grid-template-columns:220px 1fr;gap:0;min-height:360px">
+      <div class="cb-palette-col" style="border-right:1px solid var(--border);padding:14px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:520px">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600">Available Fields</div>
+        <input id="pb-palette-search" class="fi fi-sm" placeholder="Search fields..." oninput="pbFilterPalette(this.value)">
+        <div id="pb-palette" style="display:flex;flex-direction:column;gap:5px"></div>
+      </div>
+      <div style="display:flex;flex-direction:column">
+        <div class="cb-axes-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:14px;border-bottom:1px solid var(--border)">
+          <div>
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:5px">Group by (X)</div>
+            <div id="pb-drop-x" class="cb-drop-zone cb-multi-zone" ondragover="pbDragOver(event)" ondragleave="pbDragLeave(event)" ondrop="pbDrop(event,'x')">
+              <div id="pb-x-chips" style="display:flex;flex-wrap:wrap;gap:4px;width:100%"></div>
+              <span id="pb-x-placeholder" class="cb-drop-label">Tap or drag a dimension</span>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:5px">Measure (Y)</div>
+            <div id="pb-drop-y" class="cb-drop-zone cb-multi-zone" ondragover="pbDragOver(event)" ondragleave="pbDragLeave(event)" ondrop="pbDrop(event,'y')">
+              <div id="pb-y-chips" style="display:flex;flex-wrap:wrap;gap:4px;width:100%"></div>
+              <span id="pb-y-placeholder" class="cb-drop-label">Tap or drag a measure</span>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:5px">Filter</div>
+            <input id="pb-kw" class="cb-drop-zone" style="font-size:12px;width:100%;min-height:42px;padding:11px 12px" placeholder="symbol / sector…" oninput="pbRenderChart()">
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--text3)">Top N:</span>
+          <select class="fi fi-sm" id="pb-topn" onchange="pbRenderChart()" style="width:auto">
+            <option value="all" selected>All</option><option value="5">5</option><option value="10">10</option><option value="20">20</option>
+          </select>
+          <span style="font-size:11px;color:var(--text3)">Sort:</span>
+          <select class="fi fi-sm" id="pb-sort" onchange="pbRenderChart()" style="width:auto">
+            <option value="desc">Highest first</option><option value="asc">Lowest first</option><option value="alpha">A → Z</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer"><input type="checkbox" id="pb-dual" onchange="pbRenderChart()"> Dual axis</label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Time-series builder -->
+    <div id="pb-timeseries" style="display:none">
+      <div style="display:flex;gap:14px;align-items:flex-start;padding:14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+        <div style="min-width:160px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:6px">Symbols</div>
+          <div id="pb-ts-symbols" style="display:flex;flex-direction:column;gap:4px;max-height:150px;overflow-y:auto"></div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:6px">Value</div>
+          <select class="fi fi-sm" id="pb-ts-value" onchange="pbState.tsValue=this.value;_pbSaveState();pbRenderChart()" style="width:auto">
+            <option value="price">Close price</option><option value="positionValue">Position value</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:6px">Period</div>
+          <div class="btns" id="pb-ts-periods" style="display:flex;gap:4px"></div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.6px;font-weight:600;margin-bottom:6px">Options</div>
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer"><input type="checkbox" id="pb-ts-avgcost" onchange="pbState.tsAvgCost=this.checked;_pbSaveState();pbRenderChart()"> Show avg cost</label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Shared chart area -->
+    <div style="padding:14px;position:relative">
+      <div id="pb-empty" class="empty" style="padding:40px 20px">
+        <div class="empty-icon">📊</div>
+        <div class="empty-title">Build a chart</div>
+        <div class="empty-sub">Pick a dimension and a measure, or switch to Price history.</div>
+      </div>
+      <div id="pb-chart-wrap" style="display:none;height:300px"><canvas id="pb-live-canvas"></canvas></div>
+      <div id="pb-summary" style="font-size:11px;color:var(--text3);margin-top:8px;display:flex;gap:14px;flex-wrap:wrap"></div>
+    </div>
+  </div>`;
+
+  // Period buttons
+  const pBox = document.getElementById('pb-ts-periods');
+  pBox.innerHTML = Object.keys(PB_PERIODS).map(k =>
+    `<button class="cb-period-btn" data-period="${k}" onclick="pbSetPeriod('${k}')">${PB_PERIOD_LABELS[k]}</button>`).join('');
+}
+
+/* ── Entry point (called from renderStocks) ── */
+function renderStockChartBuilder(){
+  setRenderCcy('stocks');
+  _pbEnsureUI();
+  // Restore control values from state
+  const ct = document.getElementById('pb-chart-type'); // chart-type is per-session, not persisted
+  const tv = document.getElementById('pb-ts-value'); if (tv) tv.value = pbState.tsValue;
+  const ac = document.getElementById('pb-ts-avgcost'); if (ac) ac.checked = pbState.tsAvgCost;
+  _pbApplyModeUI();
+  pbInitPalette();
+  pbRenderChips('x'); pbRenderChips('y');
+  _pbRenderSymbolList();
+  _pbMarkPeriodBtns();
+  pbRenderChart();
+  pbRenderAllSaved();
+}
+
+function _pbApplyModeUI(){
+  const cs = document.getElementById('pb-crosssec');
+  const ts = document.getElementById('pb-timeseries');
+  const ctype = document.getElementById('pb-chart-type');
+  if (!cs || !ts) return;
+  const isTs = pbState.mode === 'timeseries';
+  cs.style.display = isTs ? 'none' : 'grid';
+  ts.style.display = isTs ? 'block' : 'none';
+  if (ctype) ctype.style.display = isTs ? 'none' : '';
+  document.getElementById('pb-mode-crosssec').classList.toggle('active', !isTs);
+  document.getElementById('pb-mode-timeseries').classList.toggle('active', isTs);
+}
+
+function pbSetMode(mode){
+  pbState.mode = mode === 'timeseries' ? 'timeseries' : 'crosssec';
+  _pbSaveState();
+  _pbApplyModeUI();
+  pbRenderChart();
+}
+
+function pbSetPeriod(k){
+  if (!PB_PERIODS[k]) return;
+  pbState.range = k; _pbSaveState();
+  _pbMarkPeriodBtns();
+  pbRenderChart();
+}
+function _pbMarkPeriodBtns(){
+  document.querySelectorAll('#pb-ts-periods .cb-period-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.period === pbState.range));
+}
+
+/* ── Palette (cross-sectional) ── */
+function pbInitPalette(){
+  const palette = document.getElementById('pb-palette');
+  if (!palette) return;
+  const groups = [
+    ['Dimensions (Group by)', Object.entries(PB_FIELDS).filter(([,f]) => f.type === 'dim')],
+    ['Measures (Values)',     Object.entries(PB_FIELDS).filter(([,f]) => f.type === 'meas')]
+  ];
+  palette.innerHTML = groups.map(([heading, fields]) =>
+    `<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-top:8px">${heading}</div>` +
+    fields.map(([key, f]) =>
+      `<div class="cb-field-pill" draggable="true" data-field="${key}" data-label="${kjrEscape(f.label)}"
+            ondragstart="event.dataTransfer.setData('text/plain','${key}')" onclick="pbAssignField('${key}')">
+        <span class="pill-icon">${f.icon}</span><span>${f.label}</span>
+        <span class="pill-type">${f.type === 'dim' ? 'Group' : 'Value'}</span>
+      </div>`).join('')
+  ).join('');
+}
+function pbFilterPalette(q){
+  document.querySelectorAll('#pb-palette .cb-field-pill').forEach(el => {
+    el.style.display = q && !el.dataset.label.toLowerCase().includes(q.toLowerCase()) ? 'none' : '';
+  });
+}
+function pbDragOver(e){ e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function pbDragLeave(e){ e.currentTarget.classList.remove('drag-over'); }
+function pbDrop(e, axis){
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const key = e.dataTransfer.getData('text/plain');
+  const f = PB_FIELDS[key];
+  if (!f) return;
+  if (axis === 'x' && f.type !== 'dim'){ showToast('"' + f.label + '" is a measure — drop it on Y'); return; }
+  if (axis === 'y' && f.type !== 'meas'){ showToast('"' + f.label + '" is a dimension — drop it on X'); return; }
+  _pbCommitField(key, axis);
+}
+function pbAssignField(key){
+  const f = PB_FIELDS[key];
+  if (!f) return;
+  _pbCommitField(key, f.type === 'dim' ? 'x' : 'y');
+}
+function _pbCommitField(key, axis){
+  if (!pbState[axis].includes(key)){
+    pbState[axis].push(key);
+    _pbSaveState();
+    pbRenderChips(axis);
+    pbRenderChart();
+  }
+}
+function pbRemoveField(axis, key){
+  pbState[axis] = pbState[axis].filter(k => k !== key);
+  _pbSaveState();
+  pbRenderChips(axis);
+  pbRenderChart();
+}
+function pbRenderChips(axis){
+  const chipsEl = document.getElementById('pb-' + axis + '-chips');
+  const ph = document.getElementById('pb-' + axis + '-placeholder');
+  if (!chipsEl) return;
+  chipsEl.innerHTML = pbState[axis].map(key => {
+    const f = PB_FIELDS[key] || { icon:'⚠️', label:key };
+    return `<span class="cb-axis-chip">${f.icon} ${f.label}<button onclick="pbRemoveField('${axis}','${key}')" title="Remove">×</button></span>`;
+  }).join('');
+  if (ph) ph.style.display = pbState[axis].length ? 'none' : '';
+}
+
+/* ── Time-series symbol list ── */
+function _pbStockRows(){ return _pbRows().filter(r => r.s && r.s.market); }
+function _pbRenderSymbolList(){
+  const box = document.getElementById('pb-ts-symbols');
+  if (!box) return;
+  const rows = _pbStockRows();
+  if (!rows.length){ box.innerHTML = '<div style="font-size:11px;color:var(--text3)">No holdings</div>'; return; }
+  // Default selection = all symbols when none chosen yet
+  if (!pbState.tsSymbols || !pbState.tsSymbols.length) pbState.tsSymbols = rows.map(r => r.ysym);
+  box.innerHTML = rows.map(r => {
+    const checked = pbState.tsSymbols.includes(r.ysym) ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+      <input type="checkbox" value="${kjrEscape(r.ysym)}" ${checked} onchange="pbToggleSymbol(this.value,this.checked)"> ${kjrEscape(r.s.symbol)}</label>`;
+  }).join('');
+}
+function pbToggleSymbol(ysym, on){
+  const set = new Set(pbState.tsSymbols || []);
+  if (on) set.add(ysym); else set.delete(ysym);
+  pbState.tsSymbols = [...set];
+  _pbSaveState();
+  pbRenderChart();
+}
+
+/* ── Live config + render dispatch ── */
+function _pbLiveConfig(){
+  return {
+    mode: pbState.mode,
+    xFields: [...pbState.x], yFields: [...pbState.y],
+    chartType: (document.getElementById('pb-chart-type')||{}).value || 'bar',
+    topN: (document.getElementById('pb-topn')||{}).value || 'all',
+    sort: (document.getElementById('pb-sort')||{}).value || 'desc',
+    dualAxis: !!(document.getElementById('pb-dual')||{}).checked,
+    kwFilter: (document.getElementById('pb-kw')||{}).value || '',
+    range: pbState.range, tsSymbols: [...(pbState.tsSymbols||[])],
+    tsValue: pbState.tsValue, tsAvgCost: pbState.tsAvgCost
+  };
+}
+function pbRenderChart(){
+  const cfg = _pbLiveConfig();
+  const host = { canvasId:'pb-live-canvas', wrapEl: document.getElementById('pb-chart-wrap'),
+                 emptyEl: document.getElementById('pb-empty'), summaryEl: document.getElementById('pb-summary') };
+  const saveBtn = document.getElementById('pb-save-btn');
+  _pbDrawInto(host, cfg).then(ok => { if (saveBtn) saveBtn.disabled = !ok; });
+}
+
+/* Toggle empty/chart, draw, return whether a chart rendered. */
+function _pbDrawInto(host, cfg){
+  const showEmpty = (title, sub) => {
+    if (host.wrapEl) host.wrapEl.style.display = 'none';
+    if (host.emptyEl){
+      host.emptyEl.style.display = 'flex';
+      if (title) host.emptyEl.innerHTML = `<div class="empty-icon">📊</div><div class="empty-title">${title}</div><div class="empty-sub">${sub||''}</div>`;
+    }
+    if (host.summaryEl) host.summaryEl.innerHTML = '';
+    const inst = _pbCharts[host.canvasId]; if (inst){ try{ inst.destroy(); }catch(e){} delete _pbCharts[host.canvasId]; }
+  };
+  const showChart = () => { if (host.emptyEl) host.emptyEl.style.display = 'none'; if (host.wrapEl) host.wrapEl.style.display = 'block'; };
+
+  if (cfg.mode === 'timeseries') return _pbDrawTimeSeries(host, cfg, showEmpty, showChart);
+  return Promise.resolve(_pbDrawCrossSectional(host, cfg, showEmpty, showChart));
+}
+
+/* ── Cross-sectional draw ── */
+function _pbDrawCrossSectional(host, cfg, showEmpty, showChart){
+  if (!cfg.xFields.length || !cfg.yFields.length){ showEmpty('Build a chart', 'Pick a dimension and a measure, or switch to Price history.'); return false; }
+  const rows = _pbFilteredRows(cfg.kwFilter);
+  if (!rows.length){ showEmpty('No matching holdings', 'Clear the filter to see your positions.'); return false; }
+  const entries = kjrChartAggregate(rows, cfg.xFields, cfg.yFields, PB_FIELDS, cfg.sort, cfg.topN);
+  if (!entries.length){ showEmpty('Nothing to plot', 'No groups for this configuration.'); return false; }
+
+  const curSym = _pbCurSym();
+  const isRound = cfg.chartType === 'doughnut' || cfg.chartType === 'pie';
+  const labels = entries.map(([k]) => k.length > 28 ? k.slice(0,28)+'…' : k);
+  const datasets = cfg.yFields.map((yKey, yi) => {
+    const f = PB_FIELDS[yKey];
+    const color = PB_PALETTE[yi % PB_PALETTE.length];
+    const values = entries.map(([,v]) => +(_pbVal(v[yKey]||0, f)).toFixed(2));
+    const ds = {
+      label: f.label, data: values,
+      backgroundColor: isRound ? entries.map((_,i) => PB_PALETTE[i % PB_PALETTE.length]) : color + '55',
+      borderColor: isRound ? _cssVar('--bg2') : color,
+      borderWidth: isRound ? 2 : 1.5,
+      borderRadius: cfg.chartType === 'bar' ? 4 : 0,
+      fill: cfg.chartType === 'line', tension: 0.3,
+      pointRadius: cfg.chartType === 'line' ? 4 : 0
+    };
+    if (cfg.dualAxis && yi === 1) ds.yAxisID = 'y2';
+    return ds;
+  });
+
+  showChart();
+  const axisColor = _cssVar('--text3'), gridColor = _cssVar('--border');
+  const yK1 = cfg.yFields[0], yK2 = cfg.yFields[1];
+  const scales = isRound ? {} : {
+    x: { ticks:{ color:axisColor, font:{size:10}, maxRotation:40 }, grid:{ display:false } },
+    y: { ticks:{ color:axisColor, font:{size:10}, callback:v => kjrFmtAxis(v, PB_FIELDS[yK1], curSym) }, grid:{ color:gridColor },
+         title:{ display:true, text:PB_FIELDS[yK1]?.label||'', color:axisColor, font:{size:10} } }
+  };
+  if (cfg.dualAxis && cfg.yFields.length > 1){
+    scales.y2 = { position:'right', grid:{ display:false },
+      ticks:{ color:PB_PALETTE[1], font:{size:10}, callback:v => kjrFmtAxis(v, PB_FIELDS[yK2], curSym) },
+      title:{ display:true, text:PB_FIELDS[yK2]?.label||'', color:PB_PALETTE[1], font:{size:10} } };
+  }
+  _pbMountChart(host.canvasId, {
+    type: cfg.chartType, data:{ labels, datasets },
+    options:{ responsive:true, maintainAspectRatio:false, animation:{duration:300}, interaction:{mode:'index',intersect:false},
+      plugins:{ legend:{ display: datasets.length>1 || isRound, position: isRound?'bottom':'top', labels:{ color:_cssVar('--text2'), font:{size:11}, padding:12, usePointStyle:true } },
+        tooltip:{ callbacks:{ label: t => {
+          const yKey = cfg.yFields[t.datasetIndex] || cfg.yFields[0];
+          const raw = (t.parsed && typeof t.parsed.y === 'number') ? t.parsed.y : t.parsed;
+          return ' ' + t.dataset.label + ': ' + kjrFmtMeasure(raw, PB_FIELDS[yKey], curSym);
+        } } } },
+      scales }
+  });
+
+  if (host.summaryEl){
+    const parts = cfg.yFields.map((yKey, yi) => {
+      const f = PB_FIELDS[yKey] || { label:yKey };
+      const vals = entries.map(([,v]) => _pbVal(v[yKey]||0, f));
+      const tot = vals.reduce((s,v)=>s+v,0), avg = vals.length?tot/vals.length:0;
+      const mx = vals.length?Math.max(...vals):0, mn = vals.length?Math.min(...vals):0;
+      const fm = v => kjrFmtMeasure(v, f, curSym);
+      return `<span><strong style="color:${PB_PALETTE[yi%PB_PALETTE.length]}">${f.label}</strong>` +
+             (f.agg === 'avg' ? '' : ` · Total: ${fm(tot)}`) + ` · Avg: ${fm(avg)} · Min: ${fm(mn)} · Max: ${fm(mx)}</span>`;
+    });
+    host.summaryEl.innerHTML = `<span style="color:var(--text3)">${entries.length} groups · ${rows.length} holdings</span>` + parts.join('');
+  }
+  return true;
+}
+
+/* ── Time-series draw ── */
+async function _pbDrawTimeSeries(host, cfg, showEmpty, showChart){
+  const rows = _pbStockRows();
+  const chosen = (cfg.tsSymbols && cfg.tsSymbols.length) ? rows.filter(r => cfg.tsSymbols.includes(r.ysym)) : rows;
+  if (!chosen.length){ showEmpty('Pick a symbol', 'Tick one or more holdings to chart their price history.'); return false; }
+  if (!getSyncUrl()){ showEmpty('Backend needed', 'Set the Apps Script URL in Settings, then Refresh prices, to load history.'); return false; }
+
+  if (host.summaryEl) host.summaryEl.innerHTML = '<span style="color:var(--text3)">Loading price history…</span>';
+  let hist = {};
+  try { hist = await fetchStockHistory(chosen.map(r => r.ysym), cfg.range); }
+  catch(e){ showEmpty('History unavailable', 'Could not load price history. Try again after a price refresh.'); return false; }
+
+  const curSym = _pbCurSym();
+  const datasets = []; const dropped = []; let labels = null;
+  chosen.forEach((r, i) => {
+    const h = hist[r.ysym];
+    if (!h || !h.points || !h.points.length){ dropped.push(r.s.symbol); return; }
+    const color = PB_PALETTE[i % PB_PALETTE.length];
+    const pxCcy = h.ccy || r.priceCcy || r.ccy;
+    const pts = h.points.map(p => {
+      const base = cfg.tsValue === 'positionValue' ? (p.c * (r.shares||0)) : p.c;
+      return { x: String(p.t).slice(0,10), y: +toDisplay(base, pxCcy).toFixed(2) };
+    });
+    if (!labels || pts.length > labels.length) labels = pts.map(p => p.x);
+    datasets.push({ label:r.s.symbol, data:pts.map(p=>p.y), borderColor:color, backgroundColor:'transparent',
+                    borderWidth:2, pointRadius:0, tension:0.15 });
+    if (cfg.tsAvgCost && r.avgCost){
+      const ac = cfg.tsValue === 'positionValue' ? r.avgCost * (r.shares||0) : r.avgCost;
+      const acVal = +toDisplay(ac, r.ccy).toFixed(2);
+      datasets.push({ label:r.s.symbol + ' avg cost', data:pts.map(()=>acVal), borderColor:color,
+                      borderDash:[6,4], borderWidth:1, pointRadius:0, _avgCost:true });
+    }
+  });
+  if (!datasets.length){ showEmpty('History unavailable', 'No price history returned for the selected symbols.'); return false; }
+
+  showChart();
+  const axisColor = _cssVar('--text3'), gridColor = _cssVar('--border');
+  _pbMountChart(host.canvasId, {
+    type:'line', data:{ labels, datasets },
+    options:{ responsive:true, maintainAspectRatio:false, animation:{duration:300}, interaction:{mode:'index',intersect:false},
+      plugins:{ legend:{ position:'top', labels:{ color:_cssVar('--text2'), font:{size:11}, padding:10, usePointStyle:true,
+                  filter: it => !/ avg cost$/.test(it.text) } },
+        tooltip:{ callbacks:{ label: t => ' ' + t.dataset.label + ': ' + curSym + (Number(t.parsed.y)||0).toLocaleString('en-SG',{maximumFractionDigits:2}) } } },
+      scales:{ x:{ ticks:{ color:axisColor, font:{size:10}, maxTicksLimit:8 }, grid:{ display:false } },
+               y:{ ticks:{ color:axisColor, font:{size:10}, callback:v => curSym + kjrFmtAxis(v, {unit:'count'}, curSym) }, grid:{ color:gridColor } } }
+    }
+  });
+  if (host.summaryEl){
+    const note = dropped.length ? ` · <span style="color:var(--amber,#f59e0b)">no data: ${dropped.join(', ')}</span>` : '';
+    host.summaryEl.innerHTML = `<span style="color:var(--text3)">${datasets.filter(d=>!d._avgCost).length} symbols · ${PB_PERIOD_LABELS[cfg.range]} · ${cfg.tsValue==='positionValue'?'position value':'close price'}${note}</span>`;
+  }
+  return true;
+}
+
+function _pbMountChart(canvasId, spec){
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const old = _pbCharts[canvasId]; if (old){ try{ old.destroy(); }catch(e){} }
+  _pbCharts[canvasId] = new Chart(canvas.getContext('2d'), spec);
+}
+
+/* ── History fetch (memory cached, routes through the Apps Script proxy) ── */
+async function fetchStockHistory(ysyms, range){
+  const rangeParam = PB_PERIODS[range] || '6mo';
+  const need = ysyms.filter(s => {
+    const c = _pbHistCache[s] && _pbHistCache[s][range];
+    return !c || isStale(c.fetchedAt, 12);
+  });
+  if (need.length && getSyncUrl()){
+    const base = getSyncUrl();
+    const url = base + (base.includes('?') ? '&' : '?') + 'action=history&symbols=' +
+                encodeURIComponent(need.join(',')) + '&range=' + rangeParam;
+    const resp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
+    const data = await resp.json();
+    if (data.error && !data.history) throw new Error(data.error);
+    const now = new Date().toISOString();
+    Object.entries(data.history || {}).forEach(([sym, h]) => {
+      if (!h || h.error) return;
+      if (!_pbHistCache[sym]) _pbHistCache[sym] = {};
+      _pbHistCache[sym][range] = { ccy: h.ccy, points: h.points || [], fetchedAt: now };
+    });
+  }
+  const out = {};
+  ysyms.forEach(s => { const c = _pbHistCache[s] && _pbHistCache[s][range]; if (c) out[s] = c; });
+  return out;
+}
+
+function pbResetChart(){
+  pbState.x = []; pbState.y = []; pbState.customItems = null;
+  _pbSaveState();
+  pbRenderChips('x'); pbRenderChips('y');
+  const kw = document.getElementById('pb-kw'); if (kw) kw.value = '';
+  pbRenderChart();
+}
+
+/* ═══════ SAVED CHARTS ═══════ */
+function pbLoadSaved(){
+  let raw = [];
+  try { raw = JSON.parse(localStorage.getItem(PB_SAVED_KEY) || '[]'); } catch(e){ raw = []; }
+  if (!Array.isArray(raw)) return [];
+  // Validate / sanitise — drop configs that reference fields no longer in the
+  // schema, coerce missing knobs, never throw on a corrupt entry.
+  return raw.filter(c => c && typeof c === 'object').map(c => {
+    const mode = c.mode === 'timeseries' ? 'timeseries' : 'crosssec';
+    return {
+      id: c.id || ('sc_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)),
+      title: typeof c.title === 'string' ? c.title : 'Chart',
+      mode,
+      xFields: Array.isArray(c.xFields) ? c.xFields.filter(k => PB_FIELDS[k] && PB_FIELDS[k].type==='dim') : [],
+      yFields: Array.isArray(c.yFields) ? c.yFields.filter(k => PB_FIELDS[k] && PB_FIELDS[k].type==='meas') : [],
+      chartType: ['bar','line','doughnut','scatter'].includes(c.chartType) ? c.chartType : 'bar',
+      topN: ['all','5','10','20'].includes(String(c.topN)) ? String(c.topN) : 'all',
+      sort: ['desc','asc','alpha'].includes(c.sort) ? c.sort : 'desc',
+      dualAxis: !!c.dualAxis,
+      kwFilter: typeof c.kwFilter === 'string' ? c.kwFilter : '',
+      range: PB_PERIODS[c.range] ? c.range : 'SIX_MONTHS',
+      tsSymbols: Array.isArray(c.tsSymbols) ? c.tsSymbols : [],
+      tsValue: c.tsValue === 'positionValue' ? 'positionValue' : 'price',
+      tsAvgCost: !!c.tsAvgCost,
+      pinned: !!c.pinned
+    };
+  }).filter(c => c.mode === 'timeseries' ? true : (c.xFields.length && c.yFields.length));
+}
+function pbPersistSaved(charts){ try{ localStorage.setItem(PB_SAVED_KEY, JSON.stringify(charts)); }catch(e){} }
+
+function pbSaveChart(){
+  const cfg = _pbLiveConfig();
+  const ready = cfg.mode === 'timeseries' ? (cfg.tsSymbols.length > 0) : (cfg.xFields.length && cfg.yFields.length);
+  if (!ready){ showToast('Build a chart first'); return; }
+  const defTitle = cfg.mode === 'timeseries'
+    ? 'Price history · ' + PB_PERIOD_LABELS[cfg.range]
+    : cfg.xFields.map(k => PB_FIELDS[k]?.label).join(' + ') + ' vs ' + cfg.yFields.map(k => PB_FIELDS[k]?.label).join(' + ');
+  const title = prompt('Name this chart:', defTitle);
+  if (title === null) return;
+  const charts = pbLoadSaved();
+  charts.push(Object.assign({ id:'sc_' + Date.now(), title: title || 'Chart', pinned:false }, cfg));
+  pbPersistSaved(charts);
+  pbRenderAllSaved();
+  showToast('Chart added to dashboard', 'success');
+}
+
+function pbRenderAllSaved(){
+  const container = document.getElementById('saved-charts-container');
+  if (!container) return;
+  const charts = pbLoadSaved();
+  container.innerHTML = charts.length ? '' : '';
+  charts.forEach(cfg => _pbRenderOneSaved(cfg));
+}
+function _pbRenderOneSaved(cfg){
+  const container = document.getElementById('saved-charts-container');
+  if (!container) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'saved-chart-card card';
+  wrap.id = 'pb-sc-' + cfg.id;
+  const meta = cfg.mode === 'timeseries'
+    ? `Price history · ${PB_PERIOD_LABELS[cfg.range]} · ${cfg.tsValue==='positionValue'?'Position value':'Close price'}`
+    : `X: ${cfg.xFields.map(k=>PB_FIELDS[k]?.label||k).join(' · ')} · Y: ${cfg.yFields.map(k=>PB_FIELDS[k]?.label||k).join(' · ')} · Top ${cfg.topN} · ${cfg.chartType}`;
+  wrap.innerHTML = `
+    <div class="card-head" style="flex-direction:column;align-items:flex-start;gap:4px">
+      <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
+        <h3 style="font-size:14px;display:flex;align-items:center;gap:6px">${cfg.pinned?'<span title="Pinned" style="color:#f59e0b">📌</span>':''}${kjrEscape(cfg.title)}</h3>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="btn btn-sm btn-ghost" onclick="pbTogglePin('${cfg.id}')">${cfg.pinned?'📌 Pinned':'📍 Pin'}</button>
+          <button class="btn btn-sm btn-ghost" onclick="pbRefreshSaved('${cfg.id}')">⟳</button>
+          ${cfg.pinned?'':`<button class="btn btn-sm btn-ghost" onclick="pbDeleteSaved('${cfg.id}')" title="Delete">×</button>`}
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--text3)">${meta}</div>
+    </div>
+    <div class="card-body" style="padding:12px 18px">
+      <div id="pb-sc-empty-${cfg.id}" class="empty" style="display:none;padding:30px 10px"></div>
+      <div id="pb-sc-wrap-${cfg.id}" style="height:260px"><canvas id="pb-sc-canvas-${cfg.id}"></canvas></div>
+      <div id="pb-sc-summary-${cfg.id}" style="font-size:11px;color:var(--text3);margin-top:8px;display:flex;gap:14px;flex-wrap:wrap"></div>
+    </div>`;
+  container.appendChild(wrap);
+  const host = { canvasId:'pb-sc-canvas-'+cfg.id, wrapEl: wrap.querySelector('#pb-sc-wrap-'+cfg.id),
+                 emptyEl: wrap.querySelector('#pb-sc-empty-'+cfg.id), summaryEl: wrap.querySelector('#pb-sc-summary-'+cfg.id) };
+  _pbDrawInto(host, cfg);
+}
+function pbRefreshSaved(id){
+  const cfg = pbLoadSaved().find(c => c.id === id);
+  if (!cfg) return;
+  if (cfg.mode === 'timeseries'){ // bust cache so a refresh re-fetches
+    (cfg.tsSymbols||[]).forEach(s => { if (_pbHistCache[s]) delete _pbHistCache[s][cfg.range]; });
+  }
+  const wrap = document.getElementById('pb-sc-' + id);
+  const host = { canvasId:'pb-sc-canvas-'+id, wrapEl: wrap.querySelector('#pb-sc-wrap-'+id),
+                 emptyEl: wrap.querySelector('#pb-sc-empty-'+id), summaryEl: wrap.querySelector('#pb-sc-summary-'+id) };
+  _pbDrawInto(host, cfg).then(()=>showToast('Chart refreshed'));
+}
+function pbTogglePin(id){
+  const charts = pbLoadSaved();
+  const cfg = charts.find(c => c.id === id);
+  if (!cfg) return;
+  cfg.pinned = !cfg.pinned;
+  pbPersistSaved(charts);
+  pbRenderAllSaved();
+  showToast(cfg.pinned ? 'Chart pinned — protected from delete' : 'Chart unpinned');
+}
+function pbDeleteSaved(id){
+  const charts = pbLoadSaved();
+  const cfg = charts.find(c => c.id === id);
+  if (!cfg) return;
+  if (cfg.pinned){ showToast('Pinned — unpin first to delete'); return; }
+  _pbConfirm('Delete "' + kjrEscape(cfg.title) + '"?', () => {
+    pbPersistSaved(charts.filter(c => c.id !== id));
+    const inst = _pbCharts['pb-sc-canvas-'+id]; if (inst){ try{ inst.destroy(); }catch(e){} delete _pbCharts['pb-sc-canvas-'+id]; }
+    pbRenderAllSaved();
+    // brief undo
+    showToast('Chart deleted');
+    _pbUndoChart = cfg; clearTimeout(_pbUndoTimer);
+    _pbUndoTimer = setTimeout(() => { _pbUndoChart = null; }, 8000);
+    const sumHost = document.getElementById('pb-summary');
+  });
+}
+let _pbUndoChart = null, _pbUndoTimer = null;
+function pbUndoDelete(){
+  if (!_pbUndoChart) { showToast('Nothing to undo'); return; }
+  const charts = pbLoadSaved(); charts.push(_pbUndoChart); pbPersistSaved(charts);
+  _pbUndoChart = null; pbRenderAllSaved(); showToast('Chart restored', 'success');
+}
+function _pbConfirm(msg, onYes){
+  document.getElementById('pb-confirm-ov')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'pb-confirm-ov';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9900;display:flex;align-items:center;justify-content:center';
+  ov.innerHTML = `<div class="card" style="padding:20px 22px;max-width:300px;width:88%">
+    <div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:16px">${msg}</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-sm" id="pb-cf-no">Cancel</button>
+      <button class="btn btn-sm" id="pb-cf-yes" style="background:var(--red);color:#fff;border-color:var(--red)">Delete</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.querySelector('#pb-cf-no').onclick = close;
+  ov.querySelector('#pb-cf-yes').onclick = () => { close(); onYes(); };
+  ov.addEventListener('click', e => { if (e.target === ov) close(); });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
