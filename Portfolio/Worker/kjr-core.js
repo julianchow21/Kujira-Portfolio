@@ -389,6 +389,97 @@ function ibkrMatchTrades(parsed, stocks, existingTxns){
   });
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   CUSTOM CHART BUILDER — pure aggregation + formatting
+   Used by the Stocks-tab chart builder. Kept here (pure, no DOM) so the same
+   {xFields, yFields} config always yields identical numbers in the live
+   builder and any saved-chart card, and so the maths is unit-testable.
+   The field dictionary is passed in (not closed over) so this stays generic.
+   Each field is { type:'dim'|'meas', agg?:'sum'|'avg', unit?:'money'|'pct'|
+   'count', get:item=>value }.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Group `items` by the chosen dimension(s), aggregate each measure per its
+   `agg` (sum default, avg for ratios), then sort + slice to topN.
+   Returns [[xKey, { yKey:scalar, … }], …]. No qty weighting — a finance row
+   is already one aggregated position. */
+function kjrChartAggregate(items, xFields, yFields, fields, sort, topN){
+  const getXKey = item => xFields.map(k => {
+    const f = fields[k];
+    if (!f) return '?';
+    const v = f.get(item);
+    return (v === undefined || v === null || v === '') ? '?' : String(v);
+  }).join(' · ');
+
+  const grouped = {}; // grouped[xKey][yKey] = { sum, n }
+  (items || []).forEach(item => {
+    const xKey = getXKey(item);
+    if (!grouped[xKey]){
+      grouped[xKey] = {};
+      yFields.forEach(k => grouped[xKey][k] = { sum: 0, n: 0 });
+    }
+    yFields.forEach(k => {
+      const f = fields[k];
+      if (!f) return;
+      const v = parseFloat(f.get(item)) || 0;
+      grouped[xKey][k].sum += v;
+      grouped[xKey][k].n   += 1;
+    });
+  });
+
+  Object.keys(grouped).forEach(xKey => {
+    yFields.forEach(k => {
+      const f = fields[k];
+      const cell = grouped[xKey][k];
+      if (!f) grouped[xKey][k] = 0;
+      else if (f.agg === 'avg') grouped[xKey][k] = cell.n > 0 ? cell.sum / cell.n : 0;
+      else grouped[xKey][k] = cell.sum;
+    });
+  });
+
+  const firstY = yFields[0];
+  let entries = Object.entries(grouped);
+  if (sort === 'desc')      entries.sort((a,b) => (b[1][firstY]||0) - (a[1][firstY]||0));
+  else if (sort === 'asc')  entries.sort((a,b) => (a[1][firstY]||0) - (b[1][firstY]||0));
+  else                       entries.sort((a,b) => a[0].localeCompare(b[0]));
+  if (topN && topN !== 'all'){
+    const n = parseInt(topN);
+    if (n > 0) entries = entries.slice(0, n);
+  }
+  return entries;
+}
+
+/* Format a measure value per its unit. `curSym` is the active display-currency
+   symbol (e.g. 'S$' / 'US$') used only for the 'money' unit. Centralised so
+   axis labels, tooltips, and summary stats stay consistent. */
+function kjrFmtMeasure(val, field, curSym){
+  const u = (field && field.unit) || 'money';
+  const n = (typeof val === 'number' && isFinite(val)) ? val : 0;
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  const fmt0 = v => v.toLocaleString('en-SG', { maximumFractionDigits: 0 });
+  const fmt1 = v => v.toLocaleString('en-SG', { maximumFractionDigits: 1 });
+  if (u === 'pct')   return sign + fmt1(abs) + '%';
+  if (u === 'count') return sign + fmt0(abs);
+  return sign + (curSym || '$') + fmt0(abs);
+}
+
+/* Short axis-tick formatter — same units, k/M suffix above 1000 so the y-axis
+   stays legible on busy charts. */
+function kjrFmtAxis(val, field, curSym){
+  const u = (field && field.unit) || 'money';
+  const n = (typeof val === 'number' && isFinite(val)) ? val : 0;
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  let body;
+  if (abs >= 1e6)       body = (abs/1e6).toFixed(1).replace(/\.0$/,'') + 'M';
+  else if (abs >= 1000) body = (abs/1000).toFixed(1).replace(/\.0$/,'') + 'k';
+  else                  body = (u === 'pct' ? abs.toFixed(abs<10?1:0) : Math.round(abs).toString());
+  if (u === 'pct')   return sign + body + '%';
+  if (u === 'count') return sign + body;
+  return sign + (curSym || '$') + body;
+}
+
 /* node/test shim — harmless in the browser (no `module` global there). */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -402,6 +493,7 @@ if (typeof module !== 'undefined' && module.exports) {
     roundMoney, safeRatio,
     rangePosition, vsBaseline, SECTOR_CLASS, sectorClass,
     computeStockPosition,
-    parseCSV, ibkrNum, ibkrExtractTrades, ibkrMatchTrades
+    parseCSV, ibkrNum, ibkrExtractTrades, ibkrMatchTrades,
+    kjrChartAggregate, kjrFmtMeasure, kjrFmtAxis
   };
 }

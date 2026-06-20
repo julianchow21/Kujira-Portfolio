@@ -10,9 +10,9 @@
      future hardening could move to script hashes for stricter CSP. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://script.google.com https://*.googleusercontent.com https://script.googleusercontent.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none';">
 <title>Kujira Portfolio</title>
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" type="image/png" href="whale-icon.png">
-<link rel="apple-touch-icon" href="whale-icon.png">
+<link rel="manifest" href="Worker/manifest.webmanifest">
+<link rel="icon" type="image/png" href="Worker/whale-icon.png">
+<link rel="apple-touch-icon" href="Worker/whale-icon.png">
 <meta name="theme-color" content="#0f0f0f">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -378,6 +378,32 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
   .topbar,.card,.metric,.stat-box,.modal,.toast,.dash-hero,.h-summary,.mover,.bucket,.hint-block,.bottom-tab-bar,.freshness,.icon-btn,.sync-pill,.ccy-toggle,.theme-toggle{background:var(--surface-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
 }
+
+/* ── Custom Chart Builder (Stocks tab) ── */
+.cb-drop-zone{border:1.5px dashed var(--border2);border-radius:var(--radius);padding:8px 10px;font-size:12px;color:var(--text3);transition:all 0.15s;cursor:default;min-height:42px;display:flex;align-items:flex-start;gap:4px;background:var(--bg2);flex-wrap:wrap}
+.cb-multi-zone{min-height:52px;align-items:flex-start;flex-direction:column;gap:6px}
+.cb-drop-zone.drag-over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.cb-drop-zone.has-value{border-style:solid;border-color:var(--accent);background:var(--accent-soft)}
+.cb-drop-label{font-size:12px}
+.cb-field-pill{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;font-size:12px;color:var(--text2);cursor:grab;transition:all 0.15s;user-select:none}
+.cb-field-pill:hover{border-color:var(--accent);color:var(--text);background:var(--bg4)}
+.cb-field-pill:active{cursor:grabbing;opacity:0.7}
+.cb-field-pill .pill-icon{font-size:13px}
+.cb-field-pill .pill-type{font-size:10px;color:var(--text3);margin-left:auto}
+.cb-pill-dragging{opacity:0.4;border-style:dashed !important}
+.cb-axis-chip{display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:var(--on-accent);border-radius:20px;padding:3px 10px 3px 8px;font-size:12px;font-weight:500}
+.cb-axis-chip button{background:none;border:none;color:var(--on-accent);cursor:pointer;font-size:14px;line-height:1;padding:0 0 0 2px;opacity:0.7}
+.cb-axis-chip button:hover{opacity:1}
+.cb-head-actions{flex-wrap:wrap}
+.cb-period-btn{font-size:11px;padding:3px 9px;border:1px solid var(--border2);background:var(--bg2);color:var(--text2);border-radius:6px;cursor:pointer}
+.cb-period-btn.active{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.saved-chart-card{position:relative;margin-bottom:16px}
+@media (max-width:720px){
+  .cb-builder-head{flex-direction:column;align-items:flex-start}
+  .cb-layout{grid-template-columns:1fr !important;min-height:0 !important}
+  .cb-palette-col{border-right:none !important;border-bottom:1px solid var(--border);max-height:200px !important}
+  .cb-axes-row{grid-template-columns:1fr !important}
+}
 </style>
 </head>
 <body>
@@ -385,7 +411,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- TOPBAR -->
 <header class="topbar">
   <a class="logo" onclick="showPage('dashboard');return false">
-    <img class="logo-whale" src="whale-icon.png" alt="Kujira">
+    <img class="logo-whale" src="Worker/whale-icon.png" alt="Kujira">
     <div class="logo-name">
       <span>KUJIRA</span>
       <span>Portfolio</span>
@@ -459,6 +485,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     <div id="stocks-watchlist"></div>
     <div id="stocks-dividends"></div>
     <div id="stocks-ledger"></div>
+    <div id="stocks-builder"></div>
+    <div id="saved-charts-container"></div>
   </section>
 
   <!-- WATCHLIST+ BOARD — Yahoo-style customisable view over the watchlist tickers -->
@@ -977,7 +1005,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="kjr-core.js?v=1.5"></script>
+<script src="Worker/kjr-core.js?v=1.6"></script>
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
    KUJIRA PORTFOLIO — Finance Tracker
@@ -4100,9 +4128,11 @@ function renderStocks(){
     bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">📈</div><div class="empty-title">No stocks yet</div><div class="empty-sub">Click <b>Add stock</b> to record your first position. SGX tickers are auto-suffixed with .SI for Yahoo Finance.</div></div></div></div>`;
     if (fresh) fresh.textContent = 'No prices yet';
     _lastStockRows = [];
+    _stockChartRows = [];
     renderWatchlist(); // the watchlist stands on its own, even with no holdings
     renderBoard();     // Watchlist+ board mirrors the same tickers
     renderDividendTimeline([]);
+    renderStockChartBuilder();
     return;
   }
 
@@ -4165,6 +4195,9 @@ function renderStocks(){
 
   // Second pass: portfolio weight needs the total market value.
   rows.forEach(r => { if (r.mv != null && totMv > 0) r.weight = safeRatio(r.mv, totMv); });
+  // Cache the full (unfiltered, weighted) rows so the chart builder aggregates
+  // the SAME numbers the Holdings table shows.
+  _stockChartRows = rows;
 
   // Build sector options with current selection marked — used in the Holdings card-head.
   const sectorOpts = GICS_SECTOR_OPTIONS

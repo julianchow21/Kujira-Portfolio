@@ -1,0 +1,13 @@
+{
+  "name": "Kujira Journal",
+  "short_name": "Journal",
+  "description": "Kujira Journal — trading journal and analytics",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#0f0f0f",
+  "theme_color": "#0f0f0f",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
