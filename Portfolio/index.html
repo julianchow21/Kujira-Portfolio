@@ -5305,24 +5305,11 @@ function renderSectorAllocation(rows, anyPriceMissing){
   if (cls.defensive) splitParts.push('Defensive '   + safeRatio(cls.defensive, total).toFixed(0) + '%');
   if (unclass)       splitParts.push('Unclassified ' + safeRatio(unclass,      total).toFixed(0) + '%');
 
-  const warns = [];
-  const topSector = entries.find(e => e.sector !== 'Untagged' && e.sector !== 'ETF / Fund');
-  if (topSector && topSector.pct > 40) warns.push(kjrEscape(topSector.sector) + ' is ' + topSector.pct.toFixed(0) + '% of stocks');
-  rows.forEach(r => {
-    if (r.s.sector === 'ETF / Fund') return;
-    const p = safeRatio(basisOf(r), total);
-    if (p != null && p > 25) warns.push(kjrEscape(r.s.symbol) + ' alone is ' + p.toFixed(0) + '%');
-  });
-  const warnHtml = warns.length
-    ? `<div class="alloc-warn" title="Concentration flags: one sector above 40%, or one holding above 25%, of your stocks">⚠ Concentration: ${warns.join(' · ')}</div>`
-    : '';
-
   return `<div class="card alloc-card"><div class="card-body">
     <div class="alloc-head">Sector allocation <span class="hint">${useMv ? 'by market value' : 'by cost (prices missing)'}</span></div>
     <div class="alloc-stack">${bar}</div>
     <div class="alloc-legend">${legend}</div>
     ${splitParts.length ? `<div class="alloc-split" title="Cyclical sectors move with the economy, defensive demand holds in a downturn, sensitive sit in between (tech, energy, telecoms)">${splitParts.join(' · ')}</div>` : ''}
-    ${warnHtml}
   </div></div>`;
 }
 
