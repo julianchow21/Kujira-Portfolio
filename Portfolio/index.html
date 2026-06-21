@@ -1061,6 +1061,7 @@ const LK_SYNC_TS   = 'kjr-pf-sync-ts-v1';
 const LK_LAST_PULL = 'kjr-pf-last-pull-v1';
 const LK_LAST_PULL_SRC = 'kjr-pf-last-pull-src-v1';  // 'server' if from doGet._savedAt or doPost.savedAt, else 'client'
 const LK_THEME     = 'kjr-pf-theme-v1';
+const LK_PRICE_CACHE = 'kjr-pf-price-cache-v1'; // persisted separately so first paint uses last-known prices
 
 /* Sync constants */
 const SYNC_DEBOUNCE_MS = 800;
@@ -1876,6 +1877,8 @@ function saveLocal(){
     try {
       localStorage.setItem(LK_DB, attempts[i]());
       if (i > 0) showToast('Saved. Trimmed old history to fit local storage.', 'success');
+      // Persist price cache separately so the first paint on reload uses last-known prices
+      try { localStorage.setItem(LK_PRICE_CACHE, JSON.stringify(DB._priceCache || {})); } catch (_) {}
       return true;
     } catch (e) {
       if (e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || '')) && i < attempts.length - 1) {
@@ -1895,6 +1898,11 @@ function loadLocal(){
     if (!raw) return false;
     const obj = JSON.parse(raw);
     DB = mergeDefaults(obj);
+    // Restore last-known prices so first paint shows market value, not cost basis
+    try {
+      const pc = localStorage.getItem(LK_PRICE_CACHE);
+      if (pc) DB._priceCache = Object.assign({}, JSON.parse(pc), DB._priceCache);
+    } catch (_) {}
     return true;
   } catch (e) {
     console.error('localStorage read failed', e);
