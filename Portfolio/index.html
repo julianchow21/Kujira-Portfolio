@@ -680,7 +680,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
           <div class="form-group full">
             <label class="lbl">Apps Script Web App URL</label>
             <div style="display:flex;gap:6px;align-items:stretch">
-              <input type="password" id="cfg-sync-url" class="fi" placeholder="https://script.google.com/macros/s/.../exec" spellcheck="false" autocomplete="off" style="flex:1">
+              <input type="password" id="cfg-sync-url" class="fi" placeholder="https://script.google.com/macros/s/.../exec" spellcheck="false" autocomplete="off" aria-label="Apps Script Web App URL" style="flex:1">
               <button type="button" class="btn" id="btn-toggle-url" onclick="toggleSyncUrlReveal()" title="Show/hide URL" style="min-width:88px">Show</button>
             </div>
             <div class="hint">Paste the deployed Web App URL. Treat this like a password, anyone with this URL can read and write your sheet. See README for setup steps.</div>
@@ -714,7 +714,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <button class="btn btn-primary" onclick="exportBackup()">Export backup</button>
           <button class="btn" onclick="document.getElementById('import-file-input').click()">Import backup</button>
-          <input type="file" id="import-file-input" accept="application/json,.json" style="display:none" onchange="importBackupFromFile(this)">
+          <input type="file" id="import-file-input" accept="application/json,.json" aria-label="Import backup file" style="display:none" onchange="importBackupFromFile(this)">
           <span class="hint" id="backup-meta"></span>
         </div>
       </div>
@@ -1042,8 +1042,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.7';
-const APP_DISPLAY_VERSION = 'v2.7 (21 Jun)';
+const APP_VERSION = 'v2.8';
+const APP_DISPLAY_VERSION = 'v2.8 (21 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
