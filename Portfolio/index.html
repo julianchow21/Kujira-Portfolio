@@ -291,7 +291,12 @@ textarea.fi{resize:vertical;min-height:70px}
 .px-ext-tag{display:inline-block;padding:0 4px;border-radius:3px;background:var(--bg4);border:1px solid var(--border2);color:var(--text2);font-weight:700;font-size:9px;letter-spacing:0.3px;text-transform:uppercase}
 
 /* ROW ACTION ICONS */
-.row-actions{display:inline-flex;gap:4px;justify-content:flex-end}
+/* Stay a real table-cell. display:flex on a <td> drops it out of the table
+   layout, so the row-hover background only wraps the shrunk button box and
+   leaves the actions looking detached. Right-align + margin gap instead. */
+.row-actions{text-align:right;white-space:nowrap}
+.row-actions .btn{vertical-align:middle}
+.row-actions .btn + .btn{margin-left:4px}
 .row-actions .btn-sm{padding:3px 8px}
 
 /* TABLE TWEAKS */
@@ -430,6 +435,9 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <button type="button" data-ccy="USD" onclick="setDisplayCcy('USD')">USD</button>
     </div>
     <button id="sync-pill" class="sync-pill s-local" onclick="manualSync()" title="Click to sync now">Local only</button>
+    <a class="icon-btn" href="https://app.notion.com/p/3858d0753fdb818083facfd5bef9602e" target="_blank" rel="noopener noreferrer" title="How it works (docs)" aria-label="How it works">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+    </a>
     <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
     </button>
@@ -812,6 +820,16 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
             </select>
             <div class="hint">Bonus auto-entry arrives in a later step. Stored for now.</div>
           </div>
+          <div class="form-group">
+            <label class="lbl">Take-home lands in</label>
+            <select id="cfg-salary-account" class="fi"></select>
+            <div class="hint">Pick an SGD cash account. Each payday the saved share of your take-home is auto-deposited here, starting next payday (no backdating).</div>
+          </div>
+          <div class="form-group">
+            <label class="lbl">Save % each payday</label>
+            <input type="number" step="1" min="0" max="100" id="cfg-salary-savepct" class="fi" placeholder="50">
+            <div class="hint">The rest is logged as a Discretionary expense (what you spend from UOB), so your savings rate stays accurate.</div>
+          </div>
         </div>
         <div style="margin-top:14px"><button class="btn btn-primary" onclick="saveSettingsFromForm()">Save</button></div>
       </div>
@@ -1016,12 +1034,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.4';
-const APP_DISPLAY_VERSION = 'v2.4 (20 Jun)';
+const APP_VERSION = 'v2.6';
+const APP_DISPLAY_VERSION = 'v2.6 (21 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 /* Local storage keys */
 const LK_DB        = 'kjr-pf-db-v1';
@@ -1174,6 +1192,73 @@ function generateAutoCpfEntries(){
   return { changed, skippedSenior };
 }
 
+/* ─── Auto salary deposit + discretionary split ────────────────────────
+   When a salary account is set, each payday on/after salaryCashEnabledAt:
+   deposit the SAVED share of take-home into that account, and log the rest
+   as a 'Discretionary' expense (the part spent via an untracked account).
+   Net worth grows by exactly the saved amount; the P&L savings rate reflects
+   the true split. Idempotent: cash keyed (auto:'salaryCash', period+role),
+   expense keyed (auto:'salaryCash', period). Never backfills before the
+   enable date, so it cannot double-count the typed opening balance. Respects
+   manualOverride on any row the user has since edited. */
+function generateAutoSalaryCashEntries(){
+  const { sal, months } = _salaryPayMonths();
+  if (!sal) return 0;
+  const s = DB.settings;
+  const acctId = s.salaryAccountId;
+  if (!acctId) return 0;                                   // automation off
+  const acct = (DB.cash || []).find(c => c.id === acctId);
+  if (!acct) return 0;                                     // account removed
+  const enabledAt = s.salaryCashEnabledAt;
+  if (!enabledAt) return 0;
+  const savePct = Math.max(0, Math.min(100, Number(s.salarySavePct == null ? 50 : s.salarySavePct)));
+  const acctCcy = acct.currency || 'SGD';
+
+  if (!Array.isArray(DB.cashTxns)) DB.cashTxns = [];
+  if (!Array.isArray(DB.expenses)) DB.expenses = [];
+  const cashByKey = {}; DB.cashTxns.forEach(e => { if (e.auto === 'salaryCash' && e.period && e.role) cashByKey[e.period + '|' + e.role] = e; });
+  const expByKey  = {}; DB.expenses.forEach(e => { if (e.auto === 'salaryCash' && e.period) expByKey[e.period] = e; });
+
+  const today = _isoDate(new Date());
+  let changed = 0;
+  months.forEach(ym => {
+    const [y, m] = ym.split('-').map(Number);
+    const payday = getPayday(y, m);
+    if (payday > today) return;        // payday not reached
+    if (payday < enabledAt) return;    // before opt-in: leave to the opening balance
+
+    const c     = computeCpfContribution(sal.grossMonthly, _ageOnYear(y));
+    const net   = _round2(c.net);
+    const saved = _round2(net * savePct / 100);
+    const disc  = _round2(net - saved);
+
+    // 1) Deposit the saved share into the salary account.
+    if (saved > 0){
+      const key = ym + '|save';
+      const prev = cashByKey[key];
+      if (!(prev && prev.manualOverride)){
+        const fields = { type:'deposit', cashAccountId:acctId, fromAccountId:'', date:payday,
+          amount:saved, currency:acctCcy, notes:'Salary — saved ' + savePct + '% (auto)',
+          auto:'salaryCash', period:ym, role:'save' };
+        if (prev){ const b = JSON.stringify(prev); Object.assign(prev, fields); if (JSON.stringify(prev) !== b) changed++; }
+        else { DB.cashTxns.push(Object.assign({ id: uid('cashTxns') }, fields)); changed++; }
+      }
+    }
+    // 2) Log the spent share as a Discretionary expense (keeps savings rate honest).
+    if (disc > 0){
+      const prev = expByKey[ym];
+      if (!(prev && prev.manualOverride)){
+        const fields = { date:payday, amount:disc, currency:acctCcy, category:'Discretionary',
+          subcategory:'', merchant:'Untracked (e.g. UOB)', notes:'Auto: non-saved share of take-home',
+          auto:'salaryCash', period:ym, role:'disc' };
+        if (prev){ const b = JSON.stringify(prev); Object.assign(prev, fields); if (JSON.stringify(prev) !== b) changed++; }
+        else { DB.expenses.push(Object.assign({ id: uid('expenses') }, fields)); changed++; }
+      }
+    }
+  });
+  return changed;
+}
+
 /* Run both generators, persist if anything changed, and surface a note if
    55+ CPF was skipped. Safe to call on boot and after a salary save. */
 let _seniorCpfNoticeShown = false;
@@ -1181,7 +1266,8 @@ function runSalaryEngine(opts){
   opts = opts || {};
   const incomeChanged = generateAutoSalaryEntries();
   const cpf = generateAutoCpfEntries();
-  if (incomeChanged || cpf.changed){
+  const cashChanged = generateAutoSalaryCashEntries();
+  if (incomeChanged || cpf.changed || cashChanged){
     saveData();
     if (opts.rerender) renderAll();
   }
@@ -1562,6 +1648,13 @@ function freshDB(){
       // Salary allocation rules: how each payday's take-home is earmarked.
       // Each: { id, name, pct, dest }. Should sum to 100%.
       salaryRules:    [],
+      // Salary auto-deposit: each payday, deposit `salarySavePct`% of take-home
+      // into `salaryAccountId` and log the rest as a Discretionary expense.
+      // `salaryCashEnabledAt` is stamped when the account is first set so the
+      // deposits start from the next payday and never backfill the opening balance.
+      salaryAccountId:     '',
+      salarySavePct:       50,
+      salaryCashEnabledAt: '',
       // SG income tax estimate. Annual figure; monthly = annual / 12 (accrual, not PAYE).
       tax: {
         residency:       'resident',  // 'resident' | 'non-resident'
@@ -1768,7 +1861,19 @@ function loadLocal(){
    or removal ships — key is the version being migrated TO.
    Example (not active): _MIGRATIONS[2] = db => { db.newField = db.oldField; delete db.oldField; return db; }
    Currently at v1 — no migrations needed yet; the infrastructure is the deliverable. */
-const _MIGRATIONS = {};
+const _MIGRATIONS = {
+  /* v2: one-time reset of display-currency preferences. The per-tab header
+     toggle persisted a USD override on whichever tab it was tapped on, so
+     non-stock tabs stuck on USD. Clear the overrides and pin the base to SGD
+     so the scheme is: SGD everywhere, USD only on Stocks. The toggle still
+     works afterwards — this just resets the accumulated overrides once. */
+  2: db => {
+    const settings = Object.assign({}, db.settings);
+    settings.tabCurrency = {};
+    settings.baseCurrency = 'SGD';
+    return Object.assign({}, db, { settings });
+  }
+};
 
 function _runMigrations(db){
   const v = Number(db.schemaVersion) || 0;
@@ -2401,6 +2506,14 @@ function loadSettingsForm(){
   setV('cfg-salary-end',       sal.endDate);
   setV('cfg-salary-bonus',     sal.annualBonus);
   setV('cfg-salary-bonus-month', sal.bonusMonth);
+  setV('cfg-salary-savepct',   s.salarySavePct == null ? 50 : s.salarySavePct);
+  // Salary-account dropdown: SGD cash accounts only (take-home is computed in SGD).
+  const salAcctSel = document.getElementById('cfg-salary-account');
+  if (salAcctSel){
+    const sgdAccts = (DB.cash || []).filter(c => (c.currency || 'SGD') === 'SGD');
+    salAcctSel.innerHTML = '<option value="">— none (off) —</option>' +
+      sgdAccts.map(c => `<option value="${kjrEscape(c.id)}"${s.salaryAccountId === c.id ? ' selected' : ''}>${kjrEscape(c.name || '?')}</option>`).join('');
+  }
   // Target allocation + emergency fund
   const tg = s.targets || {};
   setV('cfg-target-stocks',     tg.stocks || '');
@@ -2465,6 +2578,14 @@ function saveSettingsFromForm(){
   s.salary.endDate      = dateOrNull('cfg-salary-end');
   s.salary.annualBonus  = numOrNull('cfg-salary-bonus');
   s.salary.bonusMonth   = numOrNull('cfg-salary-bonus-month');
+  // Salary auto-deposit config.
+  s.salaryAccountId = strOrEmpty('cfg-salary-account');
+  const _savePct = numOrNull('cfg-salary-savepct');
+  s.salarySavePct = _savePct == null ? 50 : Math.max(0, Math.min(100, _savePct));
+  // Stamp the enable date the first time an account is set, so deposits start
+  // from the next payday and never backfill over the typed opening balance.
+  if (s.salaryAccountId && !s.salaryCashEnabledAt) s.salaryCashEnabledAt = _isoDate(new Date());
+  if (!s.salaryAccountId) s.salaryCashEnabledAt = '';   // off resets the boundary
   // Target allocation + emergency fund
   if (!s.targets) s.targets = {};
   const clampPct = (id) => { const v = numOrNull(id); return v == null ? 0 : Math.max(0, Math.min(100, v)); };
@@ -3858,6 +3979,15 @@ function entityModalSave(){
   closeEntityModal();
   renderAll();
   showToast(isNew ? 'Added' : 'Saved', 'success');
+
+  // A stock/watchlist row added (or repointed at a new symbol) has no cached
+  // quote yet, so its price + fundamentals cells render as '—'. Fire a silent
+  // price refresh so the row fills in now instead of waiting for the next
+  // manual/auto refresh. priceFor() is null only when the symbol is unquoted,
+  // so a plain note/target edit on an already-quoted row will not refire.
+  if ((table === 'stocks' || table === 'watchlist') && !priceFor(table, item)){
+    refreshStockPrices({ silent: true });
+  }
 }
 
 function entityModalDelete(){
