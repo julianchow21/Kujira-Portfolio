@@ -484,13 +484,6 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <section class="page" id="page-stocks">
     <div class="page-head">
       <div><div class="page-title">Stocks</div><div class="page-sub">SGX and US equities, live prices via Yahoo Finance.</div></div>
-      <div class="h-toolbar">
-        <button class="btn btn-primary" onclick="openEntityModal('stocks')">＋ Add stock</button>
-        <button class="btn" onclick="exportHoldingsCSV()">Export CSV</button>
-        <button class="btn" onclick="refreshStockPrices()" id="btn-refresh-stocks">↻ Refresh prices</button>
-        <button class="btn" onclick="openStockColumns()" id="btn-stock-cols">⚙ Columns</button>
-        <span class="freshness" id="freshness-stocks">No prices yet</span>
-      </div>
     </div>
     <div id="stocks-summary"></div>
     <div id="stocks-body"></div>
@@ -4115,6 +4108,8 @@ function sharesHeldAsOf(stockId, asOfDate, excludeTxnId){
    ═══════════════════════════════════════════════════════════════════════ */
 /* ─── Holdings filter state (ephemeral, not persisted) ─────────────────── */
 let _stocksFilter  = { sector:'', market:'' };
+let _sfText = 'No prices yet';
+let _sfCls  = '';
 let _lastStockRows = [];  // cache for CSV export — always reflects what's on screen
 let _ledgerView    = 'flat'; // 'flat' or 'by-stock'
 
@@ -4377,14 +4372,15 @@ function renderStocks(){
   const list = DB.stocks || [];
   const bodyEl = document.getElementById('stocks-body');
   const sumEl  = document.getElementById('stocks-summary');
-  const fresh  = document.getElementById('freshness-stocks');
   if (!bodyEl) return;
 
   // Empty state
   if (!list.length){
+    _sfText = 'No prices yet'; _sfCls = '';
     sumEl.innerHTML = '';
-    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">📈</div><div class="empty-title">No stocks yet</div><div class="empty-sub">Click <b>Add stock</b> to record your first position. SGX tickers are auto-suffixed with .SI for Yahoo Finance.</div></div></div></div>`;
-    if (fresh) fresh.textContent = 'No prices yet';
+    bodyEl.innerHTML = `<div class="card">
+      <div class="card-head"><h3>Holdings</h3><button class="btn btn-primary btn-sm" onclick="openEntityModal('stocks')">＋ Add stock</button></div>
+      <div class="card-body"><div class="empty"><div class="empty-icon">📈</div><div class="empty-title">No stocks yet</div><div class="empty-sub">Click <b>Add stock</b> to record your first position. SGX tickers are auto-suffixed with .SI for Yahoo Finance.</div></div></div></div>`;
     _lastStockRows = [];
     _stockChartRows = [];
     renderWatchlist(); // the watchlist stands on its own, even with no holdings
@@ -4499,24 +4495,33 @@ function renderStocks(){
     return thSort(c.key, lbl, tl);
   }).join('');
 
-  const filterHtml = `
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <select id="sf-market" class="fi fi-sm" onchange="_stocksFilter.market=this.value; renderStocks()">
-        <option value="">All markets</option>
-        <option value="SGX"${_stocksFilter.market==='SGX'?' selected':''}>SGX</option>
-        <option value="US"${_stocksFilter.market==='US'?' selected':''}>US</option>
-      </select>
-      <select id="sf-sector" class="fi fi-sm" onchange="_stocksFilter.sector=this.value; renderStocks()">
-        <option value="">All sectors</option>
-        ${sectorOpts}
-      </select>
-      ${anyFilter ? `<button class="btn btn-sm btn-ghost" onclick="_stocksFilter={sector:'',market:''}; renderStocks()">Clear</button>` : ''}
-    </div>`;
+  // Set freshness state before building the card-head so the span renders with correct text/class.
+  _sfCls  = anyPriceMissing ? ' stale' : ' fresh';
+  _sfText = priceFreshnessText('stocks');
+
+  // Combined card-head right: filters + action buttons + freshness — shared by all table states.
+  const cardHeadRight = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <select id="sf-market" class="fi fi-sm" onchange="_stocksFilter.market=this.value; renderStocks()">
+      <option value="">All markets</option>
+      <option value="SGX"${_stocksFilter.market==='SGX'?' selected':''}>SGX</option>
+      <option value="US"${_stocksFilter.market==='US'?' selected':''}>US</option>
+    </select>
+    <select id="sf-sector" class="fi fi-sm" onchange="_stocksFilter.sector=this.value; renderStocks()">
+      <option value="">All sectors</option>
+      ${sectorOpts}
+    </select>
+    ${anyFilter ? `<button class="btn btn-sm btn-ghost" onclick="_stocksFilter={sector:'',market:''}; renderStocks()">Clear</button>` : ''}
+    <button class="btn btn-primary btn-sm" onclick="openEntityModal('stocks')">＋ Add stock</button>
+    <button class="btn btn-sm" onclick="exportHoldingsCSV()">Export CSV</button>
+    <button class="btn btn-sm" onclick="refreshStockPrices()" id="btn-refresh-stocks">↻ Refresh prices</button>
+    <button class="btn btn-sm" onclick="openStockColumns()" id="btn-stock-cols">⚙ Columns</button>
+    <span class="freshness${_sfCls}" id="freshness-stocks">${kjrEscape(_sfText)}</span>
+  </div>`;
 
   // Empty filtered state — show a designed empty state so Clear is reachable.
   if (!filteredRows.length){
     bodyEl.innerHTML = `<div class="card">
-      <div class="card-head"><h3>Holdings</h3>${filterHtml}</div>
+      <div class="card-head"><h3>Holdings</h3>${cardHeadRight}</div>
       <div class="card-body"><div class="empty">
         <div class="empty-title">No holdings match your filter.</div>
       </div></div></div>`;
@@ -4536,7 +4541,7 @@ function renderStocks(){
 
     bodyEl.innerHTML = `
       <div class="card">
-        <div class="card-head"><h3>Holdings</h3>${filterHtml}</div>
+        <div class="card-head"><h3>Holdings</h3>${cardHeadRight}</div>
         <div class="tbl-wrap"><table class="holdings"><thead><tr>
         ${thSort('symbol', 'Symbol', ' tl sticky-col')}${headCells}<th></th>
       </tr></thead><tbody>
@@ -4556,13 +4561,6 @@ function renderStocks(){
         <td class="tl sticky-col"><strong>Total</strong></td>${totCells}<td></td>
       </tr></tfoot></table></div></div>
     `;
-  }
-
-  // Freshness chip
-  if (fresh){
-    const txt = priceFreshnessText('stocks');
-    fresh.className = 'freshness' + (anyPriceMissing ? ' stale' : ' fresh');
-    fresh.textContent = txt;
   }
 
   renderWatchlist();
