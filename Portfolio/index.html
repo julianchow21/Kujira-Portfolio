@@ -573,8 +573,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
         </div>
         <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="saveCpfBalancesFromForm()">Save balances</button>
-          <button class="btn" onclick="recomputeCpfFromHistory()">Recompute from history</button>
-          <div class="hint" style="flex:1;align-self:center">Enter the latest figures from your CPF statement, or recompute from history if you've been logging every line item.</div>
+          <div class="hint" style="flex:1;align-self:center">Enter the figures from your latest CPF statement. From here they grow automatically each payday using your salary (Settings). Only re-enter when a new statement arrives.</div>
         </div>
       </div>
     </div>
@@ -1051,8 +1050,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.12';
-const APP_DISPLAY_VERSION = 'v2.12 (21 Jun)';
+const APP_VERSION = 'v2.13';
+const APP_DISPLAY_VERSION = 'v2.13 (21 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1168,12 +1167,18 @@ function generateAutoCpfEntries(){
   const byKey = {};
   DB.cpfHistory.forEach(e => { if (e.auto === 'cpf' && e.period && e.account) byKey[e.period + '|' + e.account] = e; });
 
+  // The typed CPF balance is an opening anchor that already bakes in every
+  // contribution up to its date. Accrue only for paydays strictly after it,
+  // so net worth grows forward without double-counting the statement figure.
+  const anchor = _cpfAnchorDate();
+
   const today = _isoDate(new Date());
   let changed = 0, skippedSenior = false;
   months.forEach(ym => {
     const [y, m] = ym.split('-').map(Number);
     const payday = getPayday(y, m);
     if (payday > today) return;
+    if (anchor && payday <= anchor) return;    // already inside the opening figure
 
     const c = computeCpfContribution(sal.grossMonthly, _ageOnYear(y));
     if (!c.allocated){ skippedSenior = true; return; }
@@ -1207,6 +1212,16 @@ function generateAutoCpfEntries(){
       }
     });
   });
+
+  // Drop any auto rows on/before the anchor (e.g. after the user re-enters a
+  // newer statement). They are regenerable and already inside the typed
+  // figure, so this is not user data loss. Manual edits are always kept.
+  if (anchor){
+    const before = DB.cpfHistory.length;
+    DB.cpfHistory = DB.cpfHistory.filter(e => !(e.auto === 'cpf' && !e.manualOverride && String(e.date || '') <= anchor));
+    changed += (before - DB.cpfHistory.length);
+  }
+
   return { changed, skippedSenior };
 }
 
@@ -1655,7 +1670,7 @@ function freshDB(){
     realestate:   [],
     cash:         [],
     cashTxns:     [],
-    cpfBalances:  { OA:0, SA:0, MA:0, RA:0, updatedAt:null },
+    cpfBalances:  { OA:0, SA:0, MA:0, RA:0, updatedAt:null, anchorDate:null },
     cpfHistory:   [],
     income:       [],
     expenses:     [],
@@ -1988,6 +2003,9 @@ function mergeDefaults(loaded){
   out.settings.tax = Object.assign({}, base.settings.tax, (safe.settings && safe.settings.tax) || {});
   out.categories = Object.assign({}, base.categories, safe.categories || {});
   out.cpfBalances = Object.assign({}, base.cpfBalances, safe.cpfBalances || {});
+  // Migration: pre-anchor data has updatedAt but no anchorDate. Treat the last
+  // save as the anchor so the typed figure stays put and only grows forward.
+  if (!out.cpfBalances.anchorDate && out.cpfBalances.updatedAt) out.cpfBalances.anchorDate = String(out.cpfBalances.updatedAt).slice(0,10);
   _LIST_TABLES.forEach(t => { out[t] = _sanitiseList(out[t], t); });
   if (!out._priceCache || typeof out._priceCache !== 'object') out._priceCache = {};
   out.schemaVersion = SCHEMA_VERSION;
@@ -6130,11 +6148,24 @@ function renderCashTxns(){
    ═══════════════════════════════════════════════════════════════════════ */
 const CPF_ACCOUNTS = ['OA','SA','MA','RA'];
 
-function cpfComputedFromHistory(){
-  const out = { OA:0, SA:0, MA:0, RA:0 };
+/* The date the typed balances were captured. Everything dated on/before it is
+   assumed already inside those figures; only later movements accrue on top. */
+function _cpfAnchorDate(){
+  const b = DB.cpfBalances || {};
+  return b.anchorDate || (b.updatedAt ? String(b.updatedAt).slice(0,10) : '');
+}
+
+/* Live CPF = the typed opening figure per account, plus every history entry
+   (auto contribution or manual) dated after the anchor. This is what the CPF
+   tab and net worth show, so the balance grows each payday on its own. */
+function cpfEffectiveBalances(){
+  const b = DB.cpfBalances || {};
+  const out = { OA:Number(b.OA)||0, SA:Number(b.SA)||0, MA:Number(b.MA)||0, RA:Number(b.RA)||0 };
+  const anchor = _cpfAnchorDate();
   (DB.cpfHistory || []).forEach(h => {
-    const a = h.account;
-    if (out[a] != null) out[a] += Number(h.amount) || 0;
+    if (out[h.account] == null) return;
+    if (anchor && String(h.date || '') <= anchor) return;   // already in the opening figure
+    out[h.account] += Number(h.amount) || 0;
   });
   return out;
 }
@@ -6149,24 +6180,15 @@ function saveCpfBalancesFromForm(){
   DB.cpfBalances.SA = numOrNull('cpf-bal-SA') ?? 0;
   DB.cpfBalances.MA = numOrNull('cpf-bal-MA') ?? 0;
   DB.cpfBalances.RA = numOrNull('cpf-bal-RA') ?? 0;
-  DB.cpfBalances.updatedAt = new Date().toISOString();
+  // Re-anchor to today: the figure just typed becomes the new opening balance,
+  // and accrual restarts from here. runSalaryEngine then prunes now-stale auto
+  // rows and grows forward from the next payday.
+  DB.cpfBalances.updatedAt  = new Date().toISOString();
+  DB.cpfBalances.anchorDate = _isoDate(new Date());
+  runSalaryEngine();
   saveData();
   renderCpf();
-  showToast('Balances saved', 'success');
-}
-
-function recomputeCpfFromHistory(){
-  if (!DB.cpfHistory || !DB.cpfHistory.length){
-    showToast('No history to recompute from', 'error');
-    return;
-  }
-  setRenderCcy('cpf');
-  const computed = cpfComputedFromHistory();
-  if (!confirm('Overwrite current balances with totals computed from history?\n\nOA: ' + fmt(computed.OA) + '\nSA: ' + fmt(computed.SA) + '\nMA: ' + fmt(computed.MA) + '\nRA: ' + fmt(computed.RA))) return;
-  Object.assign(DB.cpfBalances, computed, { updatedAt: new Date().toISOString() });
-  saveData();
-  renderCpf();
-  showToast('Balances recomputed from history', 'success');
+  showToast('Balances saved. Auto-grows from your salary each payday.', 'success');
 }
 
 function loadCpfBalancesForm(){
@@ -6185,22 +6207,28 @@ function renderCpf(){
   if (!balsEl || !histEl) return;
 
   const bals = DB.cpfBalances || { OA:0, SA:0, MA:0, RA:0 };
-  const total = (bals.OA||0) + (bals.SA||0) + (bals.MA||0) + (bals.RA||0);
-  const computed = cpfComputedFromHistory();
-  const computedTotal = computed.OA + computed.SA + computed.MA + computed.RA;
-  const drift = Math.abs(total - computedTotal);
-  const hasHistory = (DB.cpfHistory || []).length > 0;
+  const opening = (bals.OA||0) + (bals.SA||0) + (bals.MA||0) + (bals.RA||0);
+  const eff = cpfEffectiveBalances();                       // opening + post-anchor accrual
+  const total = eff.OA + eff.SA + eff.MA + eff.RA;
+  const accrued = total - opening;
+  const anchor = _cpfAnchorDate();
+  const accruedMonths = new Set((DB.cpfHistory || [])
+    .filter(h => h.auto === 'cpf' && anchor && String(h.date || '') > anchor)
+    .map(h => h.period)).size;
+  const subLine = accrued > 0.5
+    ? '+' + fmt(accrued, {dp:0}) + ' since ' + (anchor || '—') + (accruedMonths ? ' · ' + accruedMonths + ' mo' : '')
+    : (anchor ? 'Anchored ' + anchor : 'Set your balances below');
 
-  // KPI row
+  // KPI row — live balance (typed figure auto-grown by salary each payday)
   balsEl.innerHTML = `<div class="metrics">
-    <div class="metric"><div class="metric-label">Total CPF</div><div class="metric-value">${fmt(total)}</div>${hasHistory ? `<div class="metric-sub${drift > 1 ? ' neg' : ''}">${drift > 1 ? '⚠ History total: ' + fmt(computedTotal) : 'History reconciles ✓'}</div>` : ''}</div>
-    <div class="metric"><div class="metric-label">OA · ${DB.settings.cpfRates.OA}%</div><div class="metric-value">${fmt(bals.OA||0)}</div></div>
-    <div class="metric"><div class="metric-label">SA · ${DB.settings.cpfRates.SA}%</div><div class="metric-value">${fmt(bals.SA||0)}</div></div>
-    <div class="metric"><div class="metric-label">MA · ${DB.settings.cpfRates.MA}%</div><div class="metric-value">${fmt(bals.MA||0)}</div></div>
-    <div class="metric"><div class="metric-label">RA · ${DB.settings.cpfRates.RA}%</div><div class="metric-value">${fmt(bals.RA||0)}</div></div>
+    <div class="metric"><div class="metric-label">Total CPF</div><div class="metric-value">${fmt(total)}</div><div class="metric-sub${accrued > 0.5 ? ' pos' : ''}">${kjrEscape(subLine)}</div></div>
+    <div class="metric"><div class="metric-label">OA · ${DB.settings.cpfRates.OA}%</div><div class="metric-value">${fmt(eff.OA||0)}</div></div>
+    <div class="metric"><div class="metric-label">SA · ${DB.settings.cpfRates.SA}%</div><div class="metric-value">${fmt(eff.SA||0)}</div></div>
+    <div class="metric"><div class="metric-label">MA · ${DB.settings.cpfRates.MA}%</div><div class="metric-value">${fmt(eff.MA||0)}</div></div>
+    <div class="metric"><div class="metric-label">RA · ${DB.settings.cpfRates.RA}%</div><div class="metric-value">${fmt(eff.RA||0)}</div></div>
   </div>`;
 
-  if (metaEl) metaEl.textContent = bals.updatedAt ? 'Last updated ' + relTime(bals.updatedAt) : 'Not set yet';
+  if (metaEl) metaEl.textContent = anchor ? 'Statement figure as of ' + anchor : 'Not set yet';
 
   loadCpfBalancesForm();
 
@@ -6448,10 +6476,8 @@ function _cashSGD(){
   return (DB.cash || []).reduce((s,c) => s + toSGD(deriveCashBalance(c), c.currency || 'SGD'), 0);
 }
 function _cpfSGD(){
-  const b = DB.cpfBalances || {};
-  const sum = (Number(b.OA)||0)+(Number(b.SA)||0)+(Number(b.MA)||0)+(Number(b.RA)||0);
-  if (sum > 0) return sum;
-  const c = cpfComputedFromHistory(); return c.OA + c.SA + c.MA + c.RA;
+  const e = cpfEffectiveBalances();
+  return e.OA + e.SA + e.MA + e.RA;
 }
 function _realestateSGD(){ return (DB.realestate || []).reduce((s,r) => s + (Number(r.value)||0), 0); }
 function _cryptoSGD(){
@@ -6648,17 +6674,15 @@ function renderDashboard(){
   // CPF breakdown
   const cpfEl = document.getElementById('dash-cpf');
   if (cpfEl){
-    const b = DB.cpfBalances || {};
-    const fromHist = ((Number(b.OA)||0)+(Number(b.SA)||0)+(Number(b.MA)||0)+(Number(b.RA)||0)) <= 0;
-    const bal = fromHist ? cpfComputedFromHistory() : b;
-    const cpfTotal = (Number(bal.OA)||0)+(Number(bal.SA)||0)+(Number(bal.MA)||0)+(Number(bal.RA)||0);
+    const bal = cpfEffectiveBalances();
+    const cpfTotal = bal.OA + bal.SA + bal.MA + bal.RA;
     if (cpfTotal > 0){
-      cpfEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head"><h3>CPF breakdown</h3><span class="hint">${fromHist ? 'computed from history' : 'from saved balances'}</span></div><div class="card-body">` +
+      cpfEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head"><h3>CPF breakdown</h3></div><div class="card-body">` +
         renderSummary([
-          { label:'OA', value: fmt(Number(bal.OA)||0, {dp:0}), accent:'accent' },
-          { label:'SA', value: fmt(Number(bal.SA)||0, {dp:0}) },
-          { label:'MA', value: fmt(Number(bal.MA)||0, {dp:0}) },
-          { label:'RA', value: fmt(Number(bal.RA)||0, {dp:0}) }
+          { label:'OA', value: fmt(bal.OA, {dp:0}), accent:'accent' },
+          { label:'SA', value: fmt(bal.SA, {dp:0}) },
+          { label:'MA', value: fmt(bal.MA, {dp:0}) },
+          { label:'RA', value: fmt(bal.RA, {dp:0}) }
         ]) + `</div></div>`;
     } else {
       cpfEl.innerHTML = '';
