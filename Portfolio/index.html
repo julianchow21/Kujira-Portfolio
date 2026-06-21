@@ -1047,8 +1047,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.9';
-const APP_DISPLAY_VERSION = 'v2.9 (21 Jun)';
+const APP_VERSION = 'v2.10';
+const APP_DISPLAY_VERSION = 'v2.10 (21 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -6581,10 +6581,13 @@ function renderDashboard(){
   const crypto = _cryptoSGD();
   if (crypto > 0) classes.push({ key:'Crypto', val:crypto, color:'--accent2' });
   const net = roundMoney(classes.reduce((s,c) => s + c.val, 0));
+  const netExCpf = roundMoney(net - _cpfSGD());
 
-  // Net worth hero
+  // Net worth hero — two figures: with CPF and liquid (ex-CPF)
   nwEl.innerHTML = `<div class="dash-hero">
-    <div><div class="dash-hero-label">Total net worth</div><div class="dash-hero-value">${fmt(net, {dp:0})}</div></div>
+    <div><div class="dash-hero-label">Net worth (with CPF)</div><div class="dash-hero-value">${fmt(net, {dp:0})}</div></div>
+    <div style="width:1px;height:48px;background:var(--glass-border);align-self:center;flex-shrink:0"></div>
+    <div><div class="dash-hero-label">Liquid (ex-CPF)</div><div class="dash-hero-value" style="font-size:32px">${fmt(netExCpf, {dp:0})}</div></div>
   </div>`;
 
   // Data integrity / reconciliation — ok state is a pill in the page-head,
