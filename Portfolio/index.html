@@ -836,7 +836,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
           <div class="form-group">
             <label class="lbl">Save % each payday</label>
             <input type="number" step="1" min="0" max="100" id="cfg-salary-savepct" class="fi" placeholder="50">
-            <div class="hint">The rest is logged as a Discretionary expense (what you spend from UOB), so your savings rate stays accurate.</div>
+            <div class="hint">The rest is your spending share. It is always logged as a Discretionary expense so your savings rate stays accurate.</div>
+          </div>
+          <div class="form-group">
+            <label class="lbl">Spending half goes to (optional)</label>
+            <select id="cfg-salary-discretionary" class="fi"></select>
+            <div class="hint">Add the account in Cash first (e.g. UOB). When set, the full take-home lands in your salary account, the spending share is transferred here, then assumed spent so it nets to zero. Leave as none to just deposit the saved share.</div>
           </div>
         </div>
         <div style="margin-top:14px"><button class="btn btn-primary" onclick="saveSettingsFromForm()">Save</button></div>
@@ -1042,8 +1047,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.8';
-const APP_DISPLAY_VERSION = 'v2.8 (21 Jun)';
+const APP_VERSION = 'v2.9';
+const APP_DISPLAY_VERSION = 'v2.9 (21 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1222,6 +1227,17 @@ function generateAutoSalaryCashEntries(){
   const savePct = Math.max(0, Math.min(100, Number(s.salarySavePct == null ? 50 : s.salarySavePct)));
   const acctCcy = acct.currency || 'SGD';
 
+  // Optional spending account (e.g. UOB). When set, the FULL take-home lands in
+  // the salary account, the non-saved share is transferred to the spending
+  // account, then immediately withdrawn (assumed spent) so it nets to zero —
+  // the money flow is visible without tracking individual purchases. When
+  // unset, only the saved share is deposited.
+  let discId = s.salaryDiscretionaryAccountId || '';
+  const discAcct = discId ? (DB.cash || []).find(c => c.id === discId) : null;
+  if (!discAcct || discId === acctId) discId = '';
+  const useUob = !!discId;
+  const discCcy = (discAcct && discAcct.currency) || 'SGD';
+
   if (!Array.isArray(DB.cashTxns)) DB.cashTxns = [];
   if (!Array.isArray(DB.expenses)) DB.expenses = [];
   const cashByKey = {}; DB.cashTxns.forEach(e => { if (e.auto === 'salaryCash' && e.period && e.role) cashByKey[e.period + '|' + e.role] = e; });
@@ -1229,41 +1245,61 @@ function generateAutoSalaryCashEntries(){
 
   const today = _isoDate(new Date());
   let changed = 0;
+  const keepKeys = {};   // period|role rows we (re)created this run
+  const processed = {};
+
+  const upsertCash = (ym, role, fields) => {
+    keepKeys[ym + '|' + role] = true;
+    const prev = cashByKey[ym + '|' + role];
+    if (prev && prev.manualOverride) return;
+    if (prev){ const b = JSON.stringify(prev); Object.assign(prev, fields); if (JSON.stringify(prev) !== b) changed++; }
+    else { DB.cashTxns.push(Object.assign({ id: uid('cashTxns'), auto:'salaryCash', period:ym, role }, fields)); changed++; }
+  };
+
   months.forEach(ym => {
     const [y, m] = ym.split('-').map(Number);
     const payday = getPayday(y, m);
     if (payday > today) return;        // payday not reached
     if (payday < enabledAt) return;    // before opt-in: leave to the opening balance
+    processed[ym] = true;
 
     const c     = computeCpfContribution(sal.grossMonthly, _ageOnYear(y));
     const net   = _round2(c.net);
-    const saved = _round2(net * savePct / 100);
-    const disc  = _round2(net - saved);
+    const disc  = _round2(net - _round2(net * savePct / 100));
+    const saved = _round2(net - disc);
 
-    // 1) Deposit the saved share into the salary account.
-    if (saved > 0){
-      const key = ym + '|save';
-      const prev = cashByKey[key];
-      if (!(prev && prev.manualOverride)){
-        const fields = { type:'deposit', cashAccountId:acctId, fromAccountId:'', date:payday,
-          amount:saved, currency:acctCcy, notes:'Salary — saved ' + savePct + '% (auto)',
-          auto:'salaryCash', period:ym, role:'save' };
-        if (prev){ const b = JSON.stringify(prev); Object.assign(prev, fields); if (JSON.stringify(prev) !== b) changed++; }
-        else { DB.cashTxns.push(Object.assign({ id: uid('cashTxns') }, fields)); changed++; }
-      }
+    if (useUob){
+      // 1) Full take-home into the salary account.
+      if (net > 0)  upsertCash(ym, 'dep',   { type:'deposit',    cashAccountId:acctId, fromAccountId:'',     date:payday, amount:net,  currency:acctCcy, notes:'Salary take-home (auto)' });
+      // 2) Move the spending share across to the spending account.
+      if (disc > 0) upsertCash(ym, 'xfer',  { type:'transfer',   cashAccountId:discId, fromAccountId:acctId, date:payday, amount:disc, currency:acctCcy, notes:'To spending account (auto)' });
+      // 3) Assume it is spent immediately, so the spending account nets to zero.
+      if (disc > 0) upsertCash(ym, 'spend', { type:'withdrawal', cashAccountId:discId, fromAccountId:'',     date:payday, amount:disc, currency:discCcy, notes:'Discretionary — assumed spent (auto)' });
+    } else {
+      // No spending account: deposit only the saved share into the salary account.
+      if (saved > 0) upsertCash(ym, 'save', { type:'deposit', cashAccountId:acctId, fromAccountId:'', date:payday, amount:saved, currency:acctCcy, notes:'Salary — saved ' + savePct + '% (auto)' });
     }
-    // 2) Log the spent share as a Discretionary expense (keeps savings rate honest).
+
+    // Discretionary expense (keeps the savings rate honest) — both modes.
     if (disc > 0){
       const prev = expByKey[ym];
       if (!(prev && prev.manualOverride)){
-        const fields = { date:payday, amount:disc, currency:acctCcy, category:'Discretionary',
-          subcategory:'', merchant:'Untracked (e.g. UOB)', notes:'Auto: non-saved share of take-home',
+        const fields = { date:payday, amount:disc, currency:acctCcy, category:'Discretionary', subcategory:'',
+          merchant: useUob ? (discAcct.name || 'Spending') : 'Untracked', notes:'Auto: non-saved share of take-home',
           auto:'salaryCash', period:ym, role:'disc' };
         if (prev){ const b = JSON.stringify(prev); Object.assign(prev, fields); if (JSON.stringify(prev) !== b) changed++; }
         else { DB.expenses.push(Object.assign({ id: uid('expenses') }, fields)); changed++; }
       }
     }
   });
+
+  // Prune stale auto cash rows for processed months whose role we didn't recreate
+  // (e.g. after switching the spending account on/off). Manual edits are kept.
+  const before = DB.cashTxns.length;
+  DB.cashTxns = DB.cashTxns.filter(e =>
+    !(e.auto === 'salaryCash' && processed[e.period] && !e.manualOverride && !keepKeys[e.period + '|' + e.role]));
+  changed += (before - DB.cashTxns.length);
+
   return changed;
 }
 
@@ -1663,6 +1699,7 @@ function freshDB(){
       salaryAccountId:     '',
       salarySavePct:       50,
       salaryCashEnabledAt: '',
+      salaryDiscretionaryAccountId: '',   // optional spending account (e.g. UOB)
       // SG income tax estimate. Annual figure; monthly = annual / 12 (accrual, not PAYE).
       tax: {
         residency:       'resident',  // 'resident' | 'non-resident'
@@ -2516,11 +2553,16 @@ function loadSettingsForm(){
   setV('cfg-salary-bonus-month', sal.bonusMonth);
   setV('cfg-salary-savepct',   s.salarySavePct == null ? 50 : s.salarySavePct);
   // Salary-account dropdown: SGD cash accounts only (take-home is computed in SGD).
+  const sgdAccts = (DB.cash || []).filter(c => (c.currency || 'SGD') === 'SGD');
   const salAcctSel = document.getElementById('cfg-salary-account');
   if (salAcctSel){
-    const sgdAccts = (DB.cash || []).filter(c => (c.currency || 'SGD') === 'SGD');
     salAcctSel.innerHTML = '<option value="">— none (off) —</option>' +
       sgdAccts.map(c => `<option value="${kjrEscape(c.id)}"${s.salaryAccountId === c.id ? ' selected' : ''}>${kjrEscape(c.name || '?')}</option>`).join('');
+  }
+  const salDiscSel = document.getElementById('cfg-salary-discretionary');
+  if (salDiscSel){
+    salDiscSel.innerHTML = '<option value="">— none —</option>' +
+      sgdAccts.map(c => `<option value="${kjrEscape(c.id)}"${s.salaryDiscretionaryAccountId === c.id ? ' selected' : ''}>${kjrEscape(c.name || '?')}</option>`).join('');
   }
   // Target allocation + emergency fund
   const tg = s.targets || {};
@@ -2588,6 +2630,8 @@ function saveSettingsFromForm(){
   s.salary.bonusMonth   = numOrNull('cfg-salary-bonus-month');
   // Salary auto-deposit config.
   s.salaryAccountId = strOrEmpty('cfg-salary-account');
+  s.salaryDiscretionaryAccountId = strOrEmpty('cfg-salary-discretionary');
+  if (s.salaryDiscretionaryAccountId === s.salaryAccountId) s.salaryDiscretionaryAccountId = ''; // can't be the same account
   const _savePct = numOrNull('cfg-salary-savepct');
   s.salarySavePct = _savePct == null ? 50 : Math.max(0, Math.min(100, _savePct));
   // Stamp the enable date the first time an account is set, so deposits start
