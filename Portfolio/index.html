@@ -6596,13 +6596,14 @@ function renderDashboard(){
   const displayClasses = _dashShowCpf ? classes : classes.filter(c => c.key !== 'CPF');
   const displayNet     = _dashShowCpf ? netFull : netExCpf;
 
-  // Net worth hero — primary figure adapts to CPF toggle; secondary shows the other view
-  const heroSecondaryLabel = _dashShowCpf ? 'Liquid (ex-CPF)' : 'CPF (locked)';
-  const heroSecondaryVal   = _dashShowCpf ? netExCpf : cpfVal;
+  // Net worth hero — secondary (ex-CPF) only shown when CPF is on
+  const heroSecondary = _dashShowCpf
+    ? `<div style="width:1px;height:48px;background:var(--glass-border);align-self:center;flex-shrink:0"></div>
+    <div><div class="dash-hero-label">Liquid (ex-CPF)</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${fmt(netExCpf, {dp:0})}</div></div>`
+    : '';
   nwEl.innerHTML = `<div class="dash-hero">
     <div><div class="dash-hero-label">${_dashShowCpf ? 'Net worth (with CPF)' : 'Liquid net worth'}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div></div>
-    <div style="width:1px;height:48px;background:var(--glass-border);align-self:center;flex-shrink:0"></div>
-    <div><div class="dash-hero-label">${heroSecondaryLabel}</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${fmt(heroSecondaryVal, {dp:0})}</div></div>
+    ${heroSecondary}
     <button style="margin-left:auto;flex-shrink:0" class="btn btn-sm${_dashShowCpf ? ' btn-active' : ''}" onclick="_dashShowCpf=!_dashShowCpf;renderDashboard()" title="${_dashShowCpf ? 'Click to exclude CPF from net worth' : 'Click to include CPF in net worth'}">CPF ${_dashShowCpf ? 'on' : 'off'}</button>
   </div>`;
 
