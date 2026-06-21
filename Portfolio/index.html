@@ -373,6 +373,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   .tb-trading-label{display:none}
   .nav{display:none}
   .topbar-actions{margin-left:auto;gap:6px}
+  .docs-link{display:none}  /* topbar too tight on mobile; docs link lives in Settings instead */
   .ccy-toggle button{padding:5px 9px}
   .main{padding:14px;padding-bottom:88px}
   .bottom-tab-bar{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border-top:1px solid var(--glass-border);padding:6px 4px;justify-content:space-around;z-index:90;overflow-x:auto;scrollbar-width:none}
@@ -435,7 +436,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <button type="button" data-ccy="USD" onclick="setDisplayCcy('USD')">USD</button>
     </div>
     <button id="sync-pill" class="sync-pill s-local" onclick="manualSync()" title="Click to sync now">Local only</button>
-    <a class="icon-btn" href="https://app.notion.com/p/3858d0753fdb818083facfd5bef9602e" target="_blank" rel="noopener noreferrer" title="How it works (docs)" aria-label="How it works">
+    <a class="icon-btn docs-link" href="https://app.notion.com/p/3858d0753fdb818083facfd5bef9602e" target="_blank" rel="noopener noreferrer" title="How it works (docs)" aria-label="How it works">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
     </a>
     <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
@@ -654,6 +655,13 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- SETTINGS -->
   <section class="page" id="page-settings">
     <div class="page-head"><div><div class="page-title">Settings</div><div class="page-sub">Sync, assumptions, theme.</div></div></div>
+
+    <div class="card">
+      <div class="card-head"><h3>📖 How it works</h3><span class="hint">Reference for every feature and the logic behind it.</span></div>
+      <div class="card-body">
+        <a class="btn btn-primary" href="https://app.notion.com/p/3858d0753fdb818083facfd5bef9602e" target="_blank" rel="noopener noreferrer">Open the docs ↗</a>
+      </div>
+    </div>
 
     <div class="card">
       <div class="card-head"><h3>Appearance</h3><span class="hint">Switch between the light and dark look.</span></div>
@@ -1034,8 +1042,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.6';
-const APP_DISPLAY_VERSION = 'v2.6 (21 Jun)';
+const APP_VERSION = 'v2.7';
+const APP_DISPLAY_VERSION = 'v2.7 (21 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
