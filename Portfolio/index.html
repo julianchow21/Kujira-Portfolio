@@ -1044,8 +1044,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.11';
-const APP_DISPLAY_VERSION = 'v2.11 (21 Jun)';
+const APP_VERSION = 'v2.12';
+const APP_DISPLAY_VERSION = 'v2.12 (21 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1429,19 +1429,19 @@ const STOCK_COLUMNS = [
   { key:'volume', label:()=>'Volume', cls:'num', defVis:false, backend:true,
     render:r => (r.px&&r.px.volume!=null) ? Number(r.px.volume).toLocaleString('en-SG') : '—' },
   { key:'mv', label:dc=>`Market value (${dc})`, cls:'num', defVis:true,
-    render:r => r.mv!=null ? fmt(r.mv) : '—' },
+    render:r => r.mv!=null ? fmt(r.mv, {dp:0}) : '—' },
   { key:'cost', label:dc=>`Cost basis (${dc})`, cls:'num', defVis:false,
-    render:r => fmt(r.cost) },
+    render:r => fmt(r.cost, {dp:0}) },
   { key:'pl', label:dc=>`P&L (${dc})`, cls:'num', defVis:true,
-    render:r => r.pl!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${fmt(r.pl)}</span>` : '—' },
+    render:r => r.pl!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${fmt(r.pl, {dp:0})}</span>` : '—' },
   { key:'plPct', label:()=>'P&L %', cls:'num', defVis:true,
     render:r => r.plPct!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${fmtPct(r.plPct)}</span>` : '—' },
   { key:'realised', label:dc=>`Realised P&L (${dc})`, cls:'num', defVis:false,
-    render:r => r.realisedSgd!=null ? `<span class="${r.realisedSgd>=0?'pos':'neg'}">${fmt(r.realisedSgd)}</span>` : '—' },
+    render:r => r.realisedSgd!=null ? `<span class="${r.realisedSgd>=0?'pos':'neg'}">${fmt(r.realisedSgd, {dp:0})}</span>` : '—' },
   { key:'weight', label:()=>'Weight %', cls:'num', defVis:false,
     render:r => r.weight!=null ? r.weight.toFixed(1)+'%' : '—' },
   { key:'divIncome', label:dc=>`Dividend/yr (${dc})`, cls:'num', defVis:false,
-    render:r => r.divAnnualSgd!=null ? fmt(r.divAnnualSgd) : '—' },
+    render:r => r.divAnnualSgd!=null ? fmt(r.divAnnualSgd, {dp:0}) : '—' },
   { key:'divYoc', label:()=>'Yield on cost', cls:'num', defVis:false,
     render:r => r.divYoc!=null ? r.divYoc.toFixed(2)+'%' : '—' },
   { key:'divYield', label:()=>'Div yield', cls:'num', defVis:false,
@@ -2742,11 +2742,11 @@ function renderBucketPreview(){
     const amt = takeHome * (Number(r.pct)||0) / 100;
     return `<div class="bucket">
       <div class="bucket-label">${kjrEscape(r.name||'(unnamed)')}</div>
-      <div class="bucket-amt">${fmt(amt)}</div>
+      <div class="bucket-amt">${fmt(amt,{dp:0})}</div>
       <div class="bucket-sub">${(Number(r.pct)||0)}%${r.dest ? ' → ' + kjrEscape(r.dest) : ''}</div>
     </div>`;
   }).join('');
-  el.innerHTML = `<div class="hint" style="margin-bottom:6px">This month on take-home of ${fmt(takeHome)}${cpf.allocated===false&&age==null?' (set birth year for exact CPF)':''}:</div><div class="bucket-grid">${cells}</div>`;
+  el.innerHTML = `<div class="hint" style="margin-bottom:6px">This month on take-home of ${fmt(takeHome,{dp:0})}${cpf.allocated===false&&age==null?' (set birth year for exact CPF)':''}:</div><div class="bucket-grid">${cells}</div>`;
 }
 
 /* ─── SG Income Tax engine ──────────────────────────────────────────────
@@ -4446,20 +4446,20 @@ function renderStocks(){
 
   const summaryItems = [
     { label:'Holdings',     value: String(list.length), accent:'accent' },
-    { label:'Total cost',   value: fmt(totCost), sub: anyFxMissing ? 'approximate (FX missing)' : '' },
-    { label:'Market value', value: anyPriced ? fmt(totMv) : '—', accent:'accent', sub: mvSub },
-    { label:'Unrealised P&L', value: showPl ? fmt(totPl) : '—',
+    { label:'Total cost',   value: fmt(totCost, {dp:0}), sub: anyFxMissing ? 'approximate (FX missing)' : '' },
+    { label:'Market value', value: anyPriced ? fmt(totMv, {dp:0}) : '—', accent:'accent', sub: mvSub },
+    { label:'Unrealised P&L', value: showPl ? fmt(totPl, {dp:0}) : '—',
       sub: showPl && totPlPct != null ? fmtPct(totPlPct) : (anyPriceMissing ? 'refresh prices to compute' : ''),
       accent: showPl ? (totPl >= 0 ? 'pos' : 'neg') : '' }
   ];
   const anySell = (DB.stockTxns || []).some(t => t.side === 'sell');
   if (anyDerived && anySell){
-    summaryItems.push({ label:'Realised P&L', value: fmt(totRealised), sub:'from closed trades',
+    summaryItems.push({ label:'Realised P&L', value: fmt(totRealised, {dp:0}), sub:'from closed trades',
       accent: totRealised >= 0 ? 'pos' : 'neg' });
   }
   if (anyDiv){
     const totDivYoc = safeRatio(totDivAnnual, totCost);
-    summaryItems.push({ label:'Dividend income', value: fmt(totDivAnnual),
+    summaryItems.push({ label:'Dividend income', value: fmt(totDivAnnual, {dp:0}),
       sub: fmt(roundMoney(totDivAnnual/12)) + ' / mo' + (totDivYoc != null ? ' · ' + totDivYoc.toFixed(2) + '% on cost' : ''),
       accent:'accent' });
   }
@@ -4537,12 +4537,12 @@ function renderStocks(){
     // Tfoot totals aligned to the visible column set.
     const totCells = cols.map(c => {
       switch(c.key){
-        case 'mv':       return `<td class="num">${fAnyMv?fmt(fTotMv):'—'}</td>`;
-        case 'cost':     return `<td class="num">${fmt(fTotCost)}</td>`;
-        case 'pl':       return `<td class="num">${fAnyMv?`<span class="${fTotPl>=0?'pos':'neg'}">${fmt(fTotPl)}</span>`:'—'}</td>`;
+        case 'mv':       return `<td class="num">${fAnyMv?fmt(fTotMv,{dp:0}):'—'}</td>`;
+        case 'cost':     return `<td class="num">${fmt(fTotCost,{dp:0})}</td>`;
+        case 'pl':       return `<td class="num">${fAnyMv?`<span class="${fTotPl>=0?'pos':'neg'}">${fmt(fTotPl,{dp:0})}</span>`:'—'}</td>`;
         case 'plPct':    return `<td class="num">${fAnyMv&&fTotPlPct!=null?`<span class="${fTotPl>=0?'pos':'neg'}">${fmtPct(fTotPlPct)}</span>`:'—'}</td>`;
-        case 'realised': return `<td class="num">${fTotRealised?`<span class="${fTotRealised>=0?'pos':'neg'}">${fmt(fTotRealised)}</span>`:'—'}</td>`;
-        case 'divIncome':return `<td class="num">${fTotDiv?fmt(fTotDiv):'—'}</td>`;
+        case 'realised': return `<td class="num">${fTotRealised?`<span class="${fTotRealised>=0?'pos':'neg'}">${fmt(fTotRealised,{dp:0})}</span>`:'—'}</td>`;
+        case 'divIncome':return `<td class="num">${fTotDiv?fmt(fTotDiv,{dp:0}):'—'}</td>`;
         default:         return `<td></td>`;
       }
     }).join('');
@@ -5686,7 +5686,7 @@ function renderDividendTimeline(rows){
       <td class="tl">${r.s.divPayDate ? fmtDateSG(r.s.divPayDate) : '—'}</td>
       <td class="num">${r.shares.toLocaleString('en-SG', {maximumFractionDigits:4})}</td>
       <td class="num">${toSGD(Number(r.s.divPerShare), r.ccy) != null ? fmt(toSGD(Number(r.s.divPerShare), r.ccy)) : '—'}</td>
-      <td class="num">${fmt(estIncome)}</td>
+      <td class="num">${fmt(estIncome, {dp:0})}</td>
     </tr>`;
   }).join('');
 
@@ -5755,7 +5755,7 @@ function renderStockTxns(){
       <td class="num">${qty}</td>
       <td class="num">${fmt(toSGD(px, ccy))}</td>
       <td class="num muted">${fees ? fmt(toSGD(fees, ccy)) : '—'}</td>
-      <td class="num">${fmt(toSGD(value, ccy))}</td>
+      <td class="num">${fmt(toSGD(value, ccy), {dp:0})}</td>
       <td class="tl muted">${kjrEscape(t.notes || '')}</td>
       <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="stockTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
     </tr>`;
@@ -5784,7 +5784,7 @@ function renderStockTxns(){
             <td class="num">${pos.shares}</td>
             <td class="num">${fmt(toSGD(pos.avgCost, ccy))}</td>
             <td></td>
-            <td class="num"><span class="${pos.realisedPL >= 0 ? 'pos' : 'neg'}">${fmt(toSGD(pos.realisedPL, ccy))}</span></td>
+            <td class="num"><span class="${pos.realisedPL >= 0 ? 'pos' : 'neg'}">${fmt(toSGD(pos.realisedPL, ccy), {dp:0})}</span></td>
             <td class="tl muted">realised P&amp;L</td><td></td>
           </tr>`
         : '';
@@ -5846,9 +5846,9 @@ function renderCrypto(){
 
   sumEl.innerHTML = renderSummary([
     { label:'Coins',        value: String(list.length), accent:'accent' },
-    { label:'Total cost',   value: fmt(totCost), sub: anyFxMissing ? 'approximate (FX missing)' : '' },
-    { label:'Market value', value: anyPriced ? fmt(totMv) : '—', accent:'accent', sub: mvSub },
-    { label:'P&L',          value: showPl ? fmt(totPl) : '—',
+    { label:'Total cost',   value: fmt(totCost, {dp:0}), sub: anyFxMissing ? 'approximate (FX missing)' : '' },
+    { label:'Market value', value: anyPriced ? fmt(totMv, {dp:0}) : '—', accent:'accent', sub: mvSub },
+    { label:'P&L',          value: showPl ? fmt(totPl, {dp:0}) : '—',
       sub: showPl && totPlPct != null ? fmtPct(totPlPct) : (anyPriceMissing ? 'refresh prices to compute' : ''),
       accent: showPl ? (totPl >= 0 ? 'pos' : 'neg') : '' }
   ]);
@@ -5873,8 +5873,8 @@ function renderCrypto(){
           <td class="num">${r.c.avgCost ? fmt(toSGD(r.c.avgCost, r.ccy)) : '—'}</td>
           <td class="num">${priceTxt}</td>
           <td class="num ${chg}">${px && px.change24h != null ? fmtPct(px.change24h) : '—'}</td>
-          <td class="num">${r.mv != null ? fmt(r.mv) : '—'}</td>
-          <td class="num ${plClass}">${r.pl != null ? fmt(r.pl) : '—'}</td>
+          <td class="num">${r.mv != null ? fmt(r.mv, {dp:0}) : '—'}</td>
+          <td class="num ${plClass}">${r.pl != null ? fmt(r.pl, {dp:0}) : '—'}</td>
           <td class="num ${plClass}">${r.plPct != null ? fmtPct(r.plPct) : '—'}</td>
           <td class="num muted">${px && px.fetchedAt ? relTime(px.fetchedAt) : '—'}</td>
           <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="crypto" data-edit-id="${kjrEscape(r.c.id)}">Edit</button></td>
@@ -5908,7 +5908,7 @@ function renderRealestate(){
   const total = list.reduce((s,x) => s + Number(x.value || 0), 0);
   sumEl.innerHTML = renderSummary([
     { label:'Properties',  value: String(list.length), accent:'accent' },
-    { label:'Total value', value: fmt(total), accent:'accent' }
+    { label:'Total value', value: fmt(total, {dp:0}), accent:'accent' }
   ]);
 
   bodyEl.innerHTML = `
@@ -5917,7 +5917,7 @@ function renderRealestate(){
     </tr></thead><tbody>
       ${list.map(r => `<tr>
         <td class="tl cell-sym">${kjrEscape(r.name)}</td>
-        <td class="num">${fmt(r.value)}</td>
+        <td class="num">${fmt(r.value, {dp:0})}</td>
         <td class="num muted">${r.updatedAt ? fmtDateSG(r.updatedAt) : '—'}</td>
         <td class="tl muted">${kjrEscape(r.notes || '')}</td>
         <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="realestate" data-edit-id="${kjrEscape(r.id)}">Edit</button></td>
@@ -6037,11 +6037,11 @@ function renderCash(){
 
   const summaryCards = [
     { label:'Accounts',    value: String(list.length), accent:'accent' },
-    { label:'Total (' + displayCcy() + ')', value: fmt(totSgd), accent:'accent', sub: fxMissing ? 'FX missing for some, set in Settings or refresh' : '' },
+    { label:'Total (' + displayCcy() + ')', value: fmt(totSgd, {dp:0}), accent:'accent', sub: fxMissing ? 'FX missing for some, set in Settings or refresh' : '' },
     { label:'By currency', value: '', sub: ccyChips || '—' }
   ];
   if (showApy){
-    summaryCards.push({ label:'Projected annual interest', value: fmt(totInterestSgd), accent:'accent', sub:'Based on APY × current balances' });
+    summaryCards.push({ label:'Projected annual interest', value: fmt(totInterestSgd, {dp:0}), accent:'accent', sub:'Based on APY × current balances' });
   }
   sumEl.innerHTML = renderSummary(summaryCards);
 
@@ -6247,11 +6247,11 @@ function renderCpf(){
   histEl.innerHTML = `
     <div class="h-summary" style="margin-bottom:14px">
       <div class="h-summary-item accent"><div class="h-summary-label">Entries</div><div class="h-summary-value">${filtered.length}</div></div>
-      <div class="h-summary-item ${subTotal >= 0 ? 'pos':'neg'}"><div class="h-summary-label">Filtered net</div><div class="h-summary-value">${fmt(subTotal)}</div></div>
-      <div class="h-summary-item"><div class="h-summary-label">OA</div><div class="h-summary-value">${fmt(subBy.OA)}</div></div>
-      <div class="h-summary-item"><div class="h-summary-label">SA</div><div class="h-summary-value">${fmt(subBy.SA)}</div></div>
-      <div class="h-summary-item"><div class="h-summary-label">MA</div><div class="h-summary-value">${fmt(subBy.MA)}</div></div>
-      <div class="h-summary-item"><div class="h-summary-label">RA</div><div class="h-summary-value">${fmt(subBy.RA)}</div></div>
+      <div class="h-summary-item ${subTotal >= 0 ? 'pos':'neg'}"><div class="h-summary-label">Filtered net</div><div class="h-summary-value">${fmt(subTotal,{dp:0})}</div></div>
+      <div class="h-summary-item"><div class="h-summary-label">OA</div><div class="h-summary-value">${fmt(subBy.OA,{dp:0})}</div></div>
+      <div class="h-summary-item"><div class="h-summary-label">SA</div><div class="h-summary-value">${fmt(subBy.SA,{dp:0})}</div></div>
+      <div class="h-summary-item"><div class="h-summary-label">MA</div><div class="h-summary-value">${fmt(subBy.MA,{dp:0})}</div></div>
+      <div class="h-summary-item"><div class="h-summary-label">RA</div><div class="h-summary-value">${fmt(subBy.RA,{dp:0})}</div></div>
     </div>
     <div class="tbl-wrap"><table class="holdings"><thead><tr>
       <th class="tl">Date</th><th class="tl">Type</th><th class="tl">Account</th><th>Amount</th><th class="tl">Source</th><th class="tl">Notes</th><th></th>
@@ -6342,9 +6342,9 @@ function renderCashflow(){
   const sumEl = document.getElementById('cf-summary');
   if (sumEl){
     sumEl.innerHTML = renderSummary([
-      { label: fYear ? 'Income ' + fYear : 'Income (all years)',  value: fmt(totNet),  accent:'pos', sub: 'gross ' + fmt(totGross) },
-      { label: fYear ? 'Expenses ' + fYear : 'Expenses (all years)', value: fmt(totExp), accent:'neg', sub: expenses.length + ' txns' },
-      { label: 'Net savings', value: fmt(savings), accent: savings >= 0 ? 'pos' : 'neg' },
+      { label: fYear ? 'Income ' + fYear : 'Income (all years)',  value: fmt(totNet,{dp:0}),  accent:'pos', sub: 'gross ' + fmt(totGross,{dp:0}) },
+      { label: fYear ? 'Expenses ' + fYear : 'Expenses (all years)', value: fmt(totExp,{dp:0}), accent:'neg', sub: expenses.length + ' txns' },
+      { label: 'Net savings', value: fmt(savings,{dp:0}), accent: savings >= 0 ? 'pos' : 'neg' },
       { label: 'Savings rate', value: savingsRate != null ? fmtPct(savingsRate) : '—', accent: savingsRate != null && savingsRate >= 0 ? 'pos' : 'neg', sub: 'of take-home' }
     ]);
   }
@@ -6371,10 +6371,10 @@ function renderCashflow(){
       const cls   = ne >= 0 ? 'pos' : 'neg';
       return `<tr>
         <td class="tl cell-sym">${_ymLabel(ym)}</td>
-        <td class="num">${fmt(net)}</td>
-        <td class="num muted">${fmt(gross)}</td>
-        <td class="num">${fmt(exp)}</td>
-        <td class="num ${cls}">${fmt(ne)}</td>
+        <td class="num">${fmt(net,{dp:0})}</td>
+        <td class="num muted">${fmt(gross,{dp:0})}</td>
+        <td class="num">${fmt(exp,{dp:0})}</td>
+        <td class="num ${cls}">${fmt(ne,{dp:0})}</td>
         <td class="num ${cls}">${rate != null ? fmtPct(rate) : '—'}</td>
         <td class="num muted">${mEx.length}</td>
       </tr>`;
@@ -6386,7 +6386,7 @@ function renderCashflow(){
 
   // ─── Income table ───────────────────────────────────────────────────
   const incomeMeta = document.getElementById('cf-income-meta');
-  if (incomeMeta) incomeMeta.textContent = income.length + ' entr' + (income.length === 1 ? 'y' : 'ies') + ' · ' + fmt(totNet) + ' take-home';
+  if (incomeMeta) incomeMeta.textContent = income.length + ' entr' + (income.length === 1 ? 'y' : 'ies') + ' · ' + fmt(totNet,{dp:0}) + ' take-home';
   if (!income.length){
     incomeEl.innerHTML = `<div class="empty"><div class="empty-icon">💰</div><div class="empty-title">No income yet</div><div class="empty-sub">Click <b>＋ Add income</b> to log a salary, bonus, or other inflow.</div></div>`;
   } else {
@@ -6395,10 +6395,10 @@ function renderCashflow(){
       <th class="tl">Date</th><th>Gross</th><th>Take-home</th><th>Employer CPF</th><th>Employee CPF</th><th class="tl">Source</th><th class="tl">Notes</th><th></th>
     </tr></thead><tbody>${sortedIn.map(i => `<tr>
       <td class="tl">${fmtDateSG(i.date)}</td>
-      <td class="num">${fmt(Number(i.gross) || 0)}</td>
-      <td class="num pos">${fmt(Number(i.net) || Number(i.gross) || 0)}</td>
-      <td class="num muted">${i.employerCPF ? fmt(Number(i.employerCPF)) : '—'}</td>
-      <td class="num muted">${i.employeeCPF ? fmt(Number(i.employeeCPF)) : '—'}</td>
+      <td class="num">${fmt(Number(i.gross) || 0,{dp:0})}</td>
+      <td class="num pos">${fmt(Number(i.net) || Number(i.gross) || 0,{dp:0})}</td>
+      <td class="num muted">${i.employerCPF ? fmt(Number(i.employerCPF),{dp:0}) : '—'}</td>
+      <td class="num muted">${i.employeeCPF ? fmt(Number(i.employeeCPF),{dp:0}) : '—'}</td>
       <td class="tl">${kjrEscape(i.source || '')}</td>
       <td class="tl muted">${kjrEscape(i.notes || '')}</td>
       <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="income" data-edit-id="${kjrEscape(i.id)}">Edit</button></td>
