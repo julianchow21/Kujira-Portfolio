@@ -315,6 +315,10 @@ table.holdings th.sortable .sort-glyph{position:absolute;right:6px;top:50%;trans
 .btn-xs{padding:2px 7px;font-size:12px;line-height:1.2}
 a.btn,a.btn:hover{text-decoration:none}
 @media (pointer:coarse){ .col-mgr-move .btn-xs{min-width:36px;min-height:36px;justify-content:center} }
+/* Sector allocation + summary in one row */
+.sum-row{display:flex;gap:10px;align-items:stretch;margin-bottom:14px;flex-wrap:wrap}
+.sum-row .h-summary{margin-bottom:0;flex:1;min-width:260px}
+.sum-row .alloc-card{flex-shrink:0;min-width:220px;max-width:320px;margin-bottom:0}
 /* Sector allocation card (v1.2) */
 .alloc-card .card-body{padding-top:12px;padding-bottom:12px}
 .alloc-head{font-size:13px;font-weight:700;color:var(--text2)}
@@ -483,7 +487,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- STOCKS -->
   <section class="page" id="page-stocks">
     <div class="page-head">
-      <div><div class="page-title">Stocks</div><div class="page-sub">SGX and US equities, live prices via Yahoo Finance.</div></div>
+      <div><div class="page-title">Stocks</div></div>
     </div>
     <div id="stocks-summary"></div>
     <div id="stocks-body"></div>
@@ -1040,8 +1044,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.10';
-const APP_DISPLAY_VERSION = 'v2.10 (21 Jun)';
+const APP_VERSION = 'v2.11';
+const APP_DISPLAY_VERSION = 'v2.11 (21 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -3165,6 +3169,7 @@ function toSGD(amount, currency){
    function sets it via setRenderCcy() at its top, so fmt() converts to the
    right currency even when renderAll() paints every tab in one go. */
 let _currentTab       = 'stocks';
+let _dashShowCpf      = false; // default off on every launch — user toggles to include CPF
 let _navigatingHistory = false; // true while popstate fires, stops showPage re-pushing
 let _renderCcy        = 'SGD';
 
@@ -4458,7 +4463,10 @@ function renderStocks(){
       sub: fmt(roundMoney(totDivAnnual/12)) + ' / mo' + (totDivYoc != null ? ' · ' + totDivYoc.toFixed(2) + '% on cost' : ''),
       accent:'accent' });
   }
-  sumEl.innerHTML = renderSummary(summaryItems) + renderSectorAllocation(rows, anyPriceMissing);
+  const allocHtml = renderSectorAllocation(rows, anyPriceMissing);
+  sumEl.innerHTML = allocHtml
+    ? `<div class="sum-row">${renderSummary(summaryItems)}${allocHtml}</div>`
+    : renderSummary(summaryItems);
 
   // Apply the persisted sort to the filtered set. Null values sort last in both directions.
   const sortPref = DB.settings.stocksSort || {};
@@ -6586,14 +6594,22 @@ function renderDashboard(){
   ];
   const crypto = _cryptoSGD();
   if (crypto > 0) classes.push({ key:'Crypto', val:crypto, color:'--accent2' });
-  const net = roundMoney(classes.reduce((s,c) => s + c.val, 0));
-  const netExCpf = roundMoney(net - _cpfSGD());
+  const netFull   = roundMoney(classes.reduce((s,c) => s + c.val, 0));
+  const cpfVal    = _cpfSGD();
+  const netExCpf  = roundMoney(netFull - cpfVal);
 
-  // Net worth hero — two figures: with CPF and liquid (ex-CPF)
+  // displayClasses + displayNet respect the CPF toggle
+  const displayClasses = _dashShowCpf ? classes : classes.filter(c => c.key !== 'CPF');
+  const displayNet     = _dashShowCpf ? netFull : netExCpf;
+
+  // Net worth hero — primary figure adapts to CPF toggle; secondary shows the other view
+  const heroSecondaryLabel = _dashShowCpf ? 'Liquid (ex-CPF)' : 'CPF (locked)';
+  const heroSecondaryVal   = _dashShowCpf ? netExCpf : cpfVal;
   nwEl.innerHTML = `<div class="dash-hero">
-    <div><div class="dash-hero-label">Net worth (with CPF)</div><div class="dash-hero-value">${fmt(net, {dp:0})}</div></div>
+    <div><div class="dash-hero-label">${_dashShowCpf ? 'Net worth (with CPF)' : 'Liquid net worth'}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div></div>
     <div style="width:1px;height:48px;background:var(--glass-border);align-self:center;flex-shrink:0"></div>
-    <div><div class="dash-hero-label">Liquid (ex-CPF)</div><div class="dash-hero-value" style="font-size:32px">${fmt(netExCpf, {dp:0})}</div></div>
+    <div><div class="dash-hero-label">${heroSecondaryLabel}</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${fmt(heroSecondaryVal, {dp:0})}</div></div>
+    <button style="margin-left:auto;flex-shrink:0" class="btn btn-sm${_dashShowCpf ? ' btn-active' : ''}" onclick="_dashShowCpf=!_dashShowCpf;renderDashboard()" title="${_dashShowCpf ? 'Click to exclude CPF from net worth' : 'Click to include CPF in net worth'}">CPF ${_dashShowCpf ? 'on' : 'off'}</button>
   </div>`;
 
   // Data integrity / reconciliation — ok state is a pill in the page-head,
@@ -6616,18 +6632,21 @@ function renderDashboard(){
     </div>`;
   }
 
-  // Asset-class KPI row
+  // Asset-class KPI row — always shows all classes; % is relative to displayNet
   const assetsEl = document.getElementById('dash-assets');
   if (assetsEl){
-    if (net <= 0){
+    if (netFull <= 0){
       assetsEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">📊</div><div class="empty-title">No holdings yet</div><div class="empty-sub">Add stocks, cash, CPF, or property and your net worth and allocation appear here.</div></div></div></div>`;
     } else {
-      assetsEl.innerHTML = renderSummary(classes.map(c => ({
-        label: c.key,
-        value: fmt(c.val, {dp:0}),
-        sub: net > 0 ? (c.val / net * 100).toFixed(0) + '% of net worth' : '',
-        accent: c.val > 0 ? 'accent' : ''
-      })));
+      assetsEl.innerHTML = renderSummary(classes.map(c => {
+        const excluded = !_dashShowCpf && c.key === 'CPF';
+        return {
+          label: c.key,
+          value: fmt(c.val, {dp:0}),
+          sub: excluded ? 'excluded from view' : (displayNet > 0 ? (c.val / displayNet * 100).toFixed(0) + '% of net worth' : ''),
+          accent: c.val > 0 && !excluded ? 'accent' : ''
+        };
+      }));
     }
   }
 
@@ -6653,8 +6672,8 @@ function renderDashboard(){
 
   // Emergency fund progress
   renderEmergencyFund();
-  // Target allocation vs current + rebalancing
-  renderTargetAllocation(classes, net);
+  // Target allocation: always use full picture (planning tool; CPF is a real asset class)
+  renderTargetAllocation(classes, netFull);
   // Top movers (today's gainers/losers)
   renderTopMovers();
 
@@ -6662,7 +6681,7 @@ function renderDashboard(){
   const visible = document.getElementById('page-dashboard').classList.contains('active');
   if (visible && typeof Chart !== 'undefined'){
     drawNetWorthChart();
-    drawAllocationChart(classes.filter(c => c.val > 0), net);
+    drawAllocationChart(displayClasses.filter(c => c.val > 0), displayNet);
     drawCashflowChart();
     renderStockChartBuilder();   // Custom Chart Builder card + saved charts
   }
