@@ -1034,8 +1034,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.19';
-const APP_DISPLAY_VERSION = 'v2.19 (22 Jun)';
+const APP_VERSION = 'v2.20';
+const APP_DISPLAY_VERSION = 'v2.20 (22 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -4709,6 +4709,7 @@ const _pbCharts = {};                  // canvasId -> Chart instance
 const PB_PALETTE = ['#a78bfa','#2dd4bf','#f59e0b','#f87171','#60a5fa','#34d399','#fb923c','#c084fc','#38bdf8','#4ade80','#facc15','#e879f9'];
 const PB_STATE_KEY = 'kjr_pb_cb_state_v1';
 const PB_SAVED_KEY = 'kjr_portfolio_saved_charts';
+const PB_SEEDED_KEY = 'kjr_pb_defaults_seeded_v1';
 const PB_PERIODS = { ONE_MONTH:'1mo', THREE_MONTHS:'3mo', SIX_MONTHS:'6mo', ONE_YEAR:'1y', ALL:'all' };
 const PB_PERIOD_LABELS = { ONE_MONTH:'1M', THREE_MONTHS:'3M', SIX_MONTHS:'6M', ONE_YEAR:'1Y', ALL:'All' };
 
@@ -5571,6 +5572,12 @@ function pbSetNwMode(mode){
 }
 
 function pbSeedDefaults(){
+  // Seed the three built-in charts ONCE ever. After that the user owns them:
+  // deleting a default keeps it gone across reloads (no re-seeding). Brand-new
+  // installs still get all three on first render.
+  let seeded = false;
+  try { seeded = localStorage.getItem(PB_SEEDED_KEY) === '1'; } catch(e){}
+  if (seeded) return;
   const charts = pbLoadSaved();
   const ids = new Set(charts.map(c => c.id));
   const defaults = [
@@ -5590,6 +5597,8 @@ function pbSeedDefaults(){
     charts.sort((a,b) => (a.order??999) - (b.order??999));
     pbPersistSaved(charts);
   }
+  // Mark seeded so we never re-add a default the user later deletes.
+  try { localStorage.setItem(PB_SEEDED_KEY, '1'); } catch(e){}
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
