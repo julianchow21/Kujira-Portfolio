@@ -1048,8 +1048,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.14';
-const APP_DISPLAY_VERSION = 'v2.14 (21 Jun)';
+const APP_VERSION = 'v2.15';
+const APP_DISPLAY_VERSION = 'v2.15 (22 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1225,15 +1225,21 @@ function generateAutoCpfEntries(){
 
 /* ─── Auto CPF interest ────────────────────────────────────────────────
    Credits monthly interest on the running balance so the typed opening
-   figure keeps growing on its own: base board rate per account, plus the
-   +1% extra on the first $60k of combined balances (OA capped at $20k in
-   that pool), and a further +1% on the first $30k from age 55. Extra
-   interest is paid into SA (under 55) or RA (55+), as CPF does. Rolls
-   forward month by month from the anchor, compounding contributions and
-   prior interest. Fully derived — wiped and rebuilt every run, so a salary
-   or rate change reactively re-flows. Keyed (auto:'cpfInt', period, account).
-   Note: CPF credits interest yearly; we accrue monthly for smooth tracking,
-   which runs a few dollars optimistic versus the annual credit. */
+   figure keeps growing on its own. Matches how CPF actually works: interest
+   is computed MONTHLY on the lowest balance (this month's own contributions
+   earn from next month), but credited ONCE A YEAR and compounded annually —
+   it does NOT compound month to month. So we accumulate each year's monthly
+   interest and post it as a single year-end credit per account, only for
+   years that have fully ended. The current year's interest stays invisible
+   until 31 Dec, exactly like the CPF statement. Base board rate per account,
+   plus +1% on the first $60k of combined balances (OA capped at $20k in the
+   pool) and +1% more on the first $30k from age 55; extra interest is paid
+   into SA (under 55) or RA (55+), as CPF does. Fully derived — wiped and
+   rebuilt each run, so a salary or rate change reactively re-flows. Keyed
+   (auto:'cpfInt', period:'YYYY-12', account). Note: for an anchor set
+   mid-year, that first part-year's credit only counts months after the
+   anchor (pre-anchor monthly balances are unknown); re-anchoring against a
+   fresh annual statement self-corrects. */
 function _nextYM(ym){ let [y,m] = ym.split('-').map(Number); m++; if (m > 12){ m = 1; y++; } return y + '-' + String(m).padStart(2,'0'); }
 function _lastDayOfMonthISO(y, m){ const d = new Date(y, m, 0).getDate(); return y + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0'); }
 
@@ -1252,8 +1258,8 @@ function generateAutoCpfInterest(){
   const anchorYM = anchor.slice(0,7);
   const today    = _isoDate(new Date());
   const firstYM  = _nextYM(anchorYM);
-  // Only credit months that have fully ended (like contributions wait for the
-  // payday to pass), so we never post a future-dated interest row.
+  // Whole months that have fully ended; a year is only credited once its
+  // December is in this list (i.e. the year is genuinely over).
   const months = _monthsBetween(firstYM, today.slice(0,7))
     .filter(ym => { const [yy, mm] = ym.split('-').map(Number); return _lastDayOfMonthISO(yy, mm) <= today; });
   if (!months.length) return changed;
@@ -1264,8 +1270,8 @@ function generateAutoCpfInterest(){
   const e30 = mo(r.extraFirst30kAge55 != null ? r.extraFirst30kAge55 : 1);
 
   // External (non-interest) movements per month after the anchor: auto salary
-  // contributions and any manual top-ups the user logs. These feed the running
-  // balance so interest compounds on them too.
+  // contributions and any manual top-ups. These are real principal and feed
+  // the interest-earning base immediately (they just earn from next month).
   const ext = {};
   DB.cpfHistory.forEach(h => {
     if (h.auto === 'cpfInt') return;
@@ -1276,33 +1282,45 @@ function generateAutoCpfInterest(){
     if (ext[ym][h.account] != null) ext[ym][h.account] += Number(h.amount) || 0;
   });
 
-  const running = Object.assign({}, opening);
-  // Fold post-anchor movements that fall in the anchor month itself, before the
-  // first full interest month, so the first credit sits on the right base.
-  if (ext[anchorYM]) ['OA','SA','MA','RA'].forEach(a => running[a] += ext[anchorYM][a] || 0);
+  // base = interest-earning principal: opening + contributions + interest
+  // credited in PRIOR years. It deliberately excludes the current year's
+  // accruing interest, so there is no month-to-month compounding within a year.
+  const base = Object.assign({}, opening);
+  if (ext[anchorYM]) ['OA','SA','MA','RA'].forEach(a => base[a] += ext[anchorYM][a] || 0);
+
+  let yearAcc = { OA:0, SA:0, MA:0, RA:0 };                 // interest building up this calendar year
 
   months.forEach(ym => {
     const [y, m] = ym.split('-').map(Number);
     const age = _ageOnYear(y);
-    // Interest on the balance carried in (≈ lowest balance: before this month's
-    // own contributions, which CPF excludes from the month's interest).
-    const out = { OA:0, SA:0, MA:0, RA:0 };
-    ['OA','SA','MA','RA'].forEach(a => { out[a] = _round2((running[a]||0) * mo(r[a])); });
-    const pool  = Math.min(running.OA||0, 20000) + (running.SA||0) + (running.MA||0) + (running.RA||0);
+    // Monthly interest on the carried-in base (≈ lowest balance: excludes this
+    // month's own contributions and the current year's accruing interest).
+    ['OA','SA','MA','RA'].forEach(a => { yearAcc[a] = _round2(yearAcc[a] + (base[a]||0) * mo(r[a])); });
+    const pool  = Math.min(base.OA||0, 20000) + (base.SA||0) + (base.MA||0) + (base.RA||0);
     const extra = _round2(Math.min(pool, 60000) * e60 + ((age != null && age >= 55) ? Math.min(pool, 30000) * e30 : 0));
     const extraAcct = (age != null && age >= 55) ? 'RA' : 'SA';
-    out[extraAcct] = _round2(out[extraAcct] + extra);
+    yearAcc[extraAcct] = _round2(yearAcc[extraAcct] + extra);
 
-    const date = _lastDayOfMonthISO(y, m);
-    ['OA','SA','MA','RA'].forEach(a => {
-      if (out[a] <= 0) return;
-      DB.cpfHistory.push({ id: uid('cpfHistory'), date, type:'interest', account:a,
-        amount: out[a], source:'CPF interest', notes:'Auto-generated interest', auto:'cpfInt', period:ym });
-      changed++;
-      running[a] = (running[a]||0) + out[a];               // compound forward
-    });
-    if (ext[ym]) ['OA','SA','MA','RA'].forEach(a => running[a] = (running[a]||0) + (ext[ym][a]||0));
+    // This month's contributions join the principal now (earn from next month).
+    if (ext[ym]) ['OA','SA','MA','RA'].forEach(a => base[a] = (base[a]||0) + (ext[ym][a]||0));
+
+    // Year-end: post the year's accumulated interest as one credit per account,
+    // then fold it into the principal so it compounds into the next year.
+    if (m === 12){
+      const date = y + '-12-31';
+      ['OA','SA','MA','RA'].forEach(a => {
+        const amt = _round2(yearAcc[a]);
+        if (amt <= 0) return;
+        DB.cpfHistory.push({ id: uid('cpfHistory'), date, type:'interest', account:a,
+          amount: amt, source:'CPF interest ' + y, notes:'Auto-generated annual interest', auto:'cpfInt', period: y + '-12' });
+        changed++;
+        base[a] = (base[a]||0) + amt;
+      });
+      yearAcc = { OA:0, SA:0, MA:0, RA:0 };
+    }
   });
+  // Any remaining yearAcc is the current, unfinished year — intentionally not
+  // posted, so the balance only shows interest at year-end, like the statement.
 
   return changed;
 }
@@ -6299,11 +6317,8 @@ function renderCpf(){
   const total = eff.OA + eff.SA + eff.MA + eff.RA;
   const accrued = total - opening;
   const anchor = _cpfAnchorDate();
-  const accruedMonths = new Set((DB.cpfHistory || [])
-    .filter(h => (h.auto === 'cpf' || h.auto === 'cpfInt') && anchor && String(h.date || '') > anchor)
-    .map(h => h.period)).size;
   const subLine = accrued > 0.5
-    ? '+' + fmt(accrued, {dp:0}) + ' since ' + (anchor || '—') + (accruedMonths ? ' · ' + accruedMonths + ' mo salary + interest' : '')
+    ? '+' + fmt(accrued, {dp:0}) + ' since ' + (anchor || '—') + ' (salary + year-end interest)'
     : (anchor ? 'Anchored ' + anchor : 'Set starting balances in Settings');
 
   // KPI row — live balance (typed figure auto-grown by salary each payday)
