@@ -316,10 +316,9 @@ table.holdings th.sortable .sort-glyph{position:absolute;right:6px;top:50%;trans
 a.btn,a.btn:hover{text-decoration:none}
 @media (pointer:coarse){ .col-mgr-move .btn-xs{min-width:36px;min-height:36px;justify-content:center} }
 /* Sector allocation + summary in one row */
-.settings-grid{column-count:2;column-gap:14px}
-.settings-grid>.card{break-inside:avoid}
-.settings-grid>.card.full{column-span:all}
-@media(max-width:768px){.settings-grid{column-count:1}}
+/* Settings: one comfortable, centred column so cards stop stretching wide */
+.settings-grid{max-width:1000px;margin:0 auto}
+#page-settings .page-head{max-width:1000px;margin-left:auto;margin-right:auto}
 .sum-row{display:flex;gap:10px;align-items:stretch;margin-bottom:14px;flex-wrap:wrap}
 .sum-row .h-summary{margin-bottom:0;flex:1;min-width:260px}
 .sum-row .alloc-card{flex-shrink:0;min-width:220px;max-width:320px;margin-bottom:0}
@@ -1049,8 +1048,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.16';
-const APP_DISPLAY_VERSION = 'v2.16 (22 Jun)';
+const APP_VERSION = 'v2.17';
+const APP_DISPLAY_VERSION = 'v2.17 (22 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
