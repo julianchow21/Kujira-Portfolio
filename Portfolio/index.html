@@ -558,25 +558,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div><div class="page-title">CPF</div><div class="page-sub">OA, SA, MA, RA balances with full transaction history.</div></div>
     </div>
     <div id="cpf-balances"></div>
-
-    <div class="card">
-      <div class="card-head">
-        <h3>Balances</h3>
-        <span class="hint" id="cpf-balances-meta"></span>
-      </div>
-      <div class="card-body">
-        <div class="form-row tight">
-          <div class="form-group"><label class="lbl">OA</label><input type="number" step="0.01" id="cpf-bal-OA" class="fi"></div>
-          <div class="form-group"><label class="lbl">SA</label><input type="number" step="0.01" id="cpf-bal-SA" class="fi"></div>
-          <div class="form-group"><label class="lbl">MA</label><input type="number" step="0.01" id="cpf-bal-MA" class="fi"></div>
-          <div class="form-group"><label class="lbl">RA</label><input type="number" step="0.01" id="cpf-bal-RA" class="fi"></div>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
-          <button class="btn btn-primary" onclick="saveCpfBalancesFromForm()">Save balances</button>
-          <div class="hint" style="flex:1;align-self:center">Enter the figures from your latest CPF statement. From here they grow automatically each payday using your salary (Settings). Only re-enter when a new statement arrives.</div>
-        </div>
-      </div>
-    </div>
+    <div class="hint" id="cpf-balances-meta" style="margin:-4px 2px 14px"></div>
 
     <div class="card">
       <div class="card-head">
@@ -877,6 +859,22 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     </div>
 
     <div class="card">
+      <div class="card-head"><h3>CPF starting balances</h3><span class="hint" id="cfg-cpf-anchor-meta"></span></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="form-group"><label class="lbl">OA</label><input type="number" step="0.01" id="cpf-bal-OA" class="fi"></div>
+          <div class="form-group"><label class="lbl">SA</label><input type="number" step="0.01" id="cpf-bal-SA" class="fi"></div>
+          <div class="form-group"><label class="lbl">MA</label><input type="number" step="0.01" id="cpf-bal-MA" class="fi"></div>
+          <div class="form-group"><label class="lbl">RA</label><input type="number" step="0.01" id="cpf-bal-RA" class="fi"></div>
+        </div>
+        <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-primary" onclick="saveCpfBalancesFromForm()">Save starting balances</button>
+          <div class="hint" style="flex:1;min-width:240px">Enter your CPF figures once. From here the balance grows on its own each month from salary contributions and interest (rates below). One-off top-ups go in as a transaction on the CPF tab. Only re-enter here to true-up against a fresh statement.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-head"><h3>CPF interest rates</h3><span class="hint">Defaults follow the official board rates.</span></div>
       <div class="card-body">
         <div class="form-grid">
@@ -1050,8 +1048,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.13';
-const APP_DISPLAY_VERSION = 'v2.13 (21 Jun)';
+const APP_VERSION = 'v2.14';
+const APP_DISPLAY_VERSION = 'v2.14 (21 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1225,6 +1223,90 @@ function generateAutoCpfEntries(){
   return { changed, skippedSenior };
 }
 
+/* ─── Auto CPF interest ────────────────────────────────────────────────
+   Credits monthly interest on the running balance so the typed opening
+   figure keeps growing on its own: base board rate per account, plus the
+   +1% extra on the first $60k of combined balances (OA capped at $20k in
+   that pool), and a further +1% on the first $30k from age 55. Extra
+   interest is paid into SA (under 55) or RA (55+), as CPF does. Rolls
+   forward month by month from the anchor, compounding contributions and
+   prior interest. Fully derived — wiped and rebuilt every run, so a salary
+   or rate change reactively re-flows. Keyed (auto:'cpfInt', period, account).
+   Note: CPF credits interest yearly; we accrue monthly for smooth tracking,
+   which runs a few dollars optimistic versus the annual credit. */
+function _nextYM(ym){ let [y,m] = ym.split('-').map(Number); m++; if (m > 12){ m = 1; y++; } return y + '-' + String(m).padStart(2,'0'); }
+function _lastDayOfMonthISO(y, m){ const d = new Date(y, m, 0).getDate(); return y + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0'); }
+
+function generateAutoCpfInterest(){
+  const anchor = _cpfAnchorDate();
+  if (!anchor) return 0;                                   // need an opening anchor
+  if (!Array.isArray(DB.cpfHistory)) DB.cpfHistory = [];
+  const b = DB.cpfBalances || {};
+  const opening = { OA:Number(b.OA)||0, SA:Number(b.SA)||0, MA:Number(b.MA)||0, RA:Number(b.RA)||0 };
+
+  // Wipe prior auto interest after the anchor; rebuilt from scratch below.
+  const startLen = DB.cpfHistory.length;
+  DB.cpfHistory = DB.cpfHistory.filter(e => !(e.auto === 'cpfInt' && !e.manualOverride && String(e.date || '') > anchor));
+  let changed = startLen - DB.cpfHistory.length;
+
+  const anchorYM = anchor.slice(0,7);
+  const today    = _isoDate(new Date());
+  const firstYM  = _nextYM(anchorYM);
+  // Only credit months that have fully ended (like contributions wait for the
+  // payday to pass), so we never post a future-dated interest row.
+  const months = _monthsBetween(firstYM, today.slice(0,7))
+    .filter(ym => { const [yy, mm] = ym.split('-').map(Number); return _lastDayOfMonthISO(yy, mm) <= today; });
+  if (!months.length) return changed;
+
+  const r   = DB.settings.cpfRates || {};
+  const mo  = x => ((Number(x)||0) / 100) / 12;            // annual % -> monthly fraction
+  const e60 = mo(r.extraFirst60k != null ? r.extraFirst60k : 1);
+  const e30 = mo(r.extraFirst30kAge55 != null ? r.extraFirst30kAge55 : 1);
+
+  // External (non-interest) movements per month after the anchor: auto salary
+  // contributions and any manual top-ups the user logs. These feed the running
+  // balance so interest compounds on them too.
+  const ext = {};
+  DB.cpfHistory.forEach(h => {
+    if (h.auto === 'cpfInt') return;
+    const d = String(h.date || '');
+    if (d <= anchor) return;
+    const ym = d.slice(0,7);
+    (ext[ym] = ext[ym] || { OA:0, SA:0, MA:0, RA:0 });
+    if (ext[ym][h.account] != null) ext[ym][h.account] += Number(h.amount) || 0;
+  });
+
+  const running = Object.assign({}, opening);
+  // Fold post-anchor movements that fall in the anchor month itself, before the
+  // first full interest month, so the first credit sits on the right base.
+  if (ext[anchorYM]) ['OA','SA','MA','RA'].forEach(a => running[a] += ext[anchorYM][a] || 0);
+
+  months.forEach(ym => {
+    const [y, m] = ym.split('-').map(Number);
+    const age = _ageOnYear(y);
+    // Interest on the balance carried in (≈ lowest balance: before this month's
+    // own contributions, which CPF excludes from the month's interest).
+    const out = { OA:0, SA:0, MA:0, RA:0 };
+    ['OA','SA','MA','RA'].forEach(a => { out[a] = _round2((running[a]||0) * mo(r[a])); });
+    const pool  = Math.min(running.OA||0, 20000) + (running.SA||0) + (running.MA||0) + (running.RA||0);
+    const extra = _round2(Math.min(pool, 60000) * e60 + ((age != null && age >= 55) ? Math.min(pool, 30000) * e30 : 0));
+    const extraAcct = (age != null && age >= 55) ? 'RA' : 'SA';
+    out[extraAcct] = _round2(out[extraAcct] + extra);
+
+    const date = _lastDayOfMonthISO(y, m);
+    ['OA','SA','MA','RA'].forEach(a => {
+      if (out[a] <= 0) return;
+      DB.cpfHistory.push({ id: uid('cpfHistory'), date, type:'interest', account:a,
+        amount: out[a], source:'CPF interest', notes:'Auto-generated interest', auto:'cpfInt', period:ym });
+      changed++;
+      running[a] = (running[a]||0) + out[a];               // compound forward
+    });
+    if (ext[ym]) ['OA','SA','MA','RA'].forEach(a => running[a] = (running[a]||0) + (ext[ym][a]||0));
+  });
+
+  return changed;
+}
+
 /* ─── Auto salary deposit + discretionary split ────────────────────────
    When a salary account is set, each payday on/after salaryCashEnabledAt:
    deposit the SAVED share of take-home into that account, and log the rest
@@ -1330,8 +1412,9 @@ function runSalaryEngine(opts){
   opts = opts || {};
   const incomeChanged = generateAutoSalaryEntries();
   const cpf = generateAutoCpfEntries();
+  const cpfIntChanged = generateAutoCpfInterest();   // after contributions: interest compounds on them
   const cashChanged = generateAutoSalaryCashEntries();
-  if (incomeChanged || cpf.changed || cashChanged){
+  if (incomeChanged || cpf.changed || cpfIntChanged || cashChanged){
     saveData();
     if (opts.rerender) renderAll();
   }
@@ -2574,6 +2657,9 @@ function loadSettingsForm(){
   setV('cfg-cpf-ra',           s.cpfRates.RA);
   setV('cfg-cpf-extra60',      s.cpfRates.extraFirst60k);
   setV('cfg-cpf-extra30',      s.cpfRates.extraFirst30kAge55);
+  loadCpfBalancesForm();
+  const cpfAnchorMeta = document.getElementById('cfg-cpf-anchor-meta');
+  if (cpfAnchorMeta){ const an = _cpfAnchorDate(); cpfAnchorMeta.textContent = an ? 'Anchored ' + an : 'Not set yet'; }
   const sal = s.salary || {};
   setV('cfg-salary-employer',  sal.employer);
   setV('cfg-salary-gross',     sal.grossMonthly);
@@ -6187,8 +6273,9 @@ function saveCpfBalancesFromForm(){
   DB.cpfBalances.anchorDate = _isoDate(new Date());
   runSalaryEngine();
   saveData();
-  renderCpf();
-  showToast('Balances saved. Auto-grows from your salary each payday.', 'success');
+  renderAll();
+  loadSettingsForm();
+  showToast('Starting balances saved. CPF now grows on its own from salary + interest.', 'success');
 }
 
 function loadCpfBalancesForm(){
@@ -6213,11 +6300,11 @@ function renderCpf(){
   const accrued = total - opening;
   const anchor = _cpfAnchorDate();
   const accruedMonths = new Set((DB.cpfHistory || [])
-    .filter(h => h.auto === 'cpf' && anchor && String(h.date || '') > anchor)
+    .filter(h => (h.auto === 'cpf' || h.auto === 'cpfInt') && anchor && String(h.date || '') > anchor)
     .map(h => h.period)).size;
   const subLine = accrued > 0.5
-    ? '+' + fmt(accrued, {dp:0}) + ' since ' + (anchor || '—') + (accruedMonths ? ' · ' + accruedMonths + ' mo' : '')
-    : (anchor ? 'Anchored ' + anchor : 'Set your balances below');
+    ? '+' + fmt(accrued, {dp:0}) + ' since ' + (anchor || '—') + (accruedMonths ? ' · ' + accruedMonths + ' mo salary + interest' : '')
+    : (anchor ? 'Anchored ' + anchor : 'Set starting balances in Settings');
 
   // KPI row — live balance (typed figure auto-grown by salary each payday)
   balsEl.innerHTML = `<div class="metrics">
