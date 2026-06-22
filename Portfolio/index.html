@@ -465,24 +465,10 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     <div id="dash-integrity"></div>
     <div id="dash-assets"></div>
     <div id="dash-ef"></div>
-    <div class="dash-grid">
-      <div class="card">
-        <div class="card-head"><h3>Net worth over time</h3><span class="hint" id="dash-nw-meta"></span></div>
-        <div class="card-body"><div class="dash-chart-wrap"><canvas id="dash-nw-chart"></canvas></div></div>
-      </div>
-      <div class="card">
-        <div class="card-head"><h3>Allocation</h3><span class="hint" id="dash-alloc-meta"></span></div>
-        <div class="card-body"><div class="dash-chart-wrap"><canvas id="dash-alloc-chart"></canvas></div></div>
-      </div>
-    </div>
     <div id="dash-targets"></div>
     <div id="dash-movers"></div>
-    <div class="card">
-      <div class="card-head"><h3>Cashflow</h3><span class="hint" id="dash-cf-meta"></span></div>
-      <div class="card-body"><div class="dash-chart-wrap"><canvas id="dash-cf-chart"></canvas></div></div>
-    </div>
     <div id="dash-cpf"></div>
-    <!-- Custom Chart Builder — build, name and pin your own finance charts -->
+    <!-- Chart Builder — buildable dashboard charts -->
     <div id="stocks-builder"></div>
     <div id="saved-charts-container"></div>
   </section>
@@ -1048,8 +1034,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.18';
-const APP_DISPLAY_VERSION = 'v2.18 (22 Jun)';
+const APP_VERSION = 'v2.19';
+const APP_DISPLAY_VERSION = 'v2.19 (22 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -4723,26 +4709,95 @@ const _pbCharts = {};                  // canvasId -> Chart instance
 const PB_PALETTE = ['#a78bfa','#2dd4bf','#f59e0b','#f87171','#60a5fa','#34d399','#fb923c','#c084fc','#38bdf8','#4ade80','#facc15','#e879f9'];
 const PB_STATE_KEY = 'kjr_pb_cb_state_v1';
 const PB_SAVED_KEY = 'kjr_portfolio_saved_charts';
-const PB_PERIODS = { ONE_MONTH:'1mo', THREE_MONTHS:'3mo', SIX_MONTHS:'6mo', ONE_YEAR:'1y' };
-const PB_PERIOD_LABELS = { ONE_MONTH:'1M', THREE_MONTHS:'3M', SIX_MONTHS:'6M', ONE_YEAR:'1Y' };
+const PB_PERIODS = { ONE_MONTH:'1mo', THREE_MONTHS:'3mo', SIX_MONTHS:'6mo', ONE_YEAR:'1y', ALL:'all' };
+const PB_PERIOD_LABELS = { ONE_MONTH:'1M', THREE_MONTHS:'3M', SIX_MONTHS:'6M', ONE_YEAR:'1Y', ALL:'All' };
 
-/* Field schema. Money measures return raw SGD (converted to the display
-   currency at draw time); pct measures are already in percent. */
-const PB_FIELDS = {
-  symbol:   { label:'Symbol',   icon:'🔖', type:'dim', get: r => r.s.symbol || '?' },
-  market:   { label:'Market',   icon:'🏛️', type:'dim', get: r => r.s.market || '?' },
-  currency: { label:'Currency', icon:'💱', type:'dim', get: r => r.ccy || '?' },
-  sector:   { label:'Sector',   icon:'🏷️', type:'dim', get: r => r.s.sector || 'Unclassified' },
-  marketValue:{ label:'Market Value',    icon:'📈', type:'meas', agg:'sum', unit:'money', get: r => r.mv ?? 0 },
-  costBasis:  { label:'Cost Basis',      icon:'💵', type:'meas', agg:'sum', unit:'money', get: r => r.cost ?? 0 },
-  unrealPnl:  { label:'Unrealised P&L',  icon:'💹', type:'meas', agg:'sum', unit:'money', get: r => r.pl ?? 0 },
-  pnlPct:     { label:'P&L %',           icon:'📊', type:'meas', agg:'avg', unit:'pct',   get: r => (r.plPct ?? 0) * 100 },
-  shares:     { label:'Shares',          icon:'🔢', type:'meas', agg:'sum', unit:'count', get: r => r.shares ?? 0 },
-  divIncome:  { label:'Annual Dividend', icon:'💰', type:'meas', agg:'sum', unit:'money', get: r => r.divAnnualSgd ?? 0 },
-  divYield:   { label:'Dividend Yield',  icon:'🪙', type:'meas', agg:'avg', unit:'pct',   get: r => (r.divYieldCur ?? 0) * 100 },
-  weightPct:  { label:'Portfolio Weight',icon:'⚖️', type:'meas', agg:'sum', unit:'pct',   get: r => (r.weight ?? 0) * 100 },
-  posCount:   { label:'Position Count',  icon:'#️⃣', type:'meas', agg:'sum', unit:'count', get: () => 1 },
+/* Field schemas (per-source; money measures return raw SGD). */
+const PB_HOLDINGS_FIELDS = {
+  symbol:   { label:'Symbol',   type:'dim', get: r => r.s.symbol || '?' },
+  market:   { label:'Market',   type:'dim', get: r => r.s.market || '?' },
+  currency: { label:'Currency', type:'dim', get: r => r.ccy || '?' },
+  sector:   { label:'Sector',   type:'dim', get: r => r.s.sector || 'Unclassified' },
+  marketValue:{ label:'Market Value',    type:'meas', agg:'sum', unit:'money', get: r => r.mv ?? 0 },
+  costBasis:  { label:'Cost Basis',      type:'meas', agg:'sum', unit:'money', get: r => r.cost ?? 0 },
+  unrealPnl:  { label:'Unrealised P&L',  type:'meas', agg:'sum', unit:'money', get: r => r.pl ?? 0 },
+  pnlPct:     { label:'P&L %',           type:'meas', agg:'avg', unit:'pct',   get: r => (r.plPct ?? 0) * 100 },
+  shares:     { label:'Shares',          type:'meas', agg:'sum', unit:'count', get: r => r.shares ?? 0 },
+  divIncome:  { label:'Annual Dividend', type:'meas', agg:'sum', unit:'money', get: r => r.divAnnualSgd ?? 0 },
+  divYield:   { label:'Dividend Yield',  type:'meas', agg:'avg', unit:'pct',   get: r => (r.divYieldCur ?? 0) * 100 },
+  weightPct:  { label:'Portfolio Weight',type:'meas', agg:'sum', unit:'pct',   get: r => (r.weight ?? 0) * 100 },
+  posCount:   { label:'Position Count',  type:'meas', agg:'sum', unit:'count', get: () => 1 },
 };
+const PB_ALLOC_FIELDS = {
+  assetClass: { label:'Asset Class', type:'dim',  get: r => r.cls },
+  value:      { label:'Value',       type:'meas', agg:'sum', unit:'money', get: r => r.val },
+  weightPct:  { label:'Weight',      type:'meas', agg:'sum', unit:'pct',   get: r => r.weight * 100 },
+};
+const PB_CASHFLOW_FIELDS = {
+  month:   { label:'Month',    type:'dim',  get: r => r.month },
+  income:  { label:'Income',   type:'meas', agg:'sum', unit:'money', get: r => r.income },
+  expense: { label:'Expenses', type:'meas', agg:'sum', unit:'money', get: r => r.expense },
+  net:     { label:'Net',      type:'meas', agg:'sum', unit:'money', get: r => r.net },
+};
+
+function _pbAllocRows(){
+  const c = _netWorthClassesSGD();
+  const net = c.stocks + c.cash + c.cpf + c.realestate + c.crypto;
+  const defs = [
+    ['Stocks',c.stocks],['Cash',c.cash],['CPF',c.cpf],['Real Estate',c.realestate],['Crypto',c.crypto]
+  ];
+  const rows = defs.filter(([,v]) => v > 0).map(([cls,v]) => ({ cls, val:v, weight:net>0?v/net:0 }));
+  return _dashShowCpf ? rows : rows.filter(r => r.cls !== 'CPF');
+}
+function _pbCashflowRows(){
+  const ms = _recentMonths(12);
+  const incBy = {}, expBy = {};
+  (DB.income   || []).forEach(i => { const ym=String(i.date||'').slice(0,7); if(ym) incBy[ym]=(incBy[ym]||0)+(Number(i.net)||Number(i.gross)||0); });
+  (DB.expenses || []).forEach(x => { const ym=String(x.date||'').slice(0,7); if(ym) expBy[ym]=(expBy[ym]||0)+expenseAmountSgd(x); });
+  return ms.map(m => { const inc=incBy[m]||0, exp=expBy[m]||0; return { month:m, income:inc, expense:exp, net:inc-exp }; });
+}
+function _pbRangeCutoff(rangeKey){
+  if (!rangeKey || rangeKey === 'ALL') return null;
+  const n = {ONE_MONTH:1, THREE_MONTHS:3, SIX_MONTHS:6, ONE_YEAR:12}[rangeKey];
+  if (!n) return null;
+  const d = new Date(); d.setMonth(d.getMonth() - n);
+  return d.toISOString().slice(0,10);
+}
+function _pbNetWorthSeries(cfg){
+  const snaps = (DB.snapshots||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  const cutoff = _pbRangeCutoff(cfg.range);
+  const rows = cutoff ? snaps.filter(s => s.date >= cutoff) : snaps;
+  const labels = rows.map(s => s.date);
+  const netOf = s => _dashShowCpf ? s.net : (s.net - ((s.byClass && s.byClass.cpf) || 0));
+  if (cfg.nwMode === 'byClass'){
+    const classDefs = [['stocks','Stocks',0],['cash','Cash',1],['cpf','CPF',2],['realestate','Real Estate',3],['crypto','Crypto',4]]
+      .filter(([k]) => k !== 'cpf' || _dashShowCpf);
+    return { labels, stacked:true, datasets: classDefs.map(([k,lab,i]) => ({
+      label:lab, data:rows.map(s=>toDisplay((s.byClass&&s.byClass[k])||0,'SGD')),
+      borderColor:PB_PALETTE[i%PB_PALETTE.length], backgroundColor:PB_PALETTE[i%PB_PALETTE.length]+'44',
+      fill:true, borderWidth:1.5, pointRadius:0, tension:0.25, stack:'nw'
+    }))};
+  }
+  return { labels, stacked:false, datasets:[{
+    label:_dashShowCpf?'Net worth':'Net worth (ex-CPF)',
+    data:rows.map(s=>toDisplay(netOf(s),'SGD')),
+    borderColor:_cssVar('--accent'), backgroundColor:'transparent',
+    fill:false, borderWidth:2, pointRadius:rows.length>30?0:2, tension:0.25
+  }]};
+}
+
+const PB_SOURCES = {
+  holdings:   { key:'holdings',   label:'Holdings',   kind:'holdings',
+                fields:PB_HOLDINGS_FIELDS, rows:() => _stockChartRows },
+  allocation: { key:'allocation', label:'Allocation', kind:'crosssec',
+                fields:PB_ALLOC_FIELDS,   rows:() => _pbAllocRows() },
+  cashflow:   { key:'cashflow',   label:'Cashflow',   kind:'crosssec',
+                fields:PB_CASHFLOW_FIELDS, rows:() => _pbCashflowRows() },
+  networth:   { key:'networth',   label:'Net worth',  kind:'series',
+                series:(cfg) => _pbNetWorthSeries(cfg) },
+};
+function pbSource(cfg){ return PB_SOURCES[cfg&&cfg.source] || PB_SOURCES.holdings; }
+function pbFields(cfg){ return pbSource(cfg).fields || {}; }
 
 function _pbCurSym(){ const dc = displayCcy(); return dc === 'USD' ? 'US$' : dc === 'SGD' ? 'S$' : (dc + ' '); }
 function _pbVal(raw, field){ return (field && field.unit === 'money') ? toDisplay(Number(raw)||0, 'SGD') : (Number(raw)||0); }
@@ -4758,19 +4813,24 @@ function _pbFilteredRows(kw){
 function _pbLoadState(){
   try{
     const raw = JSON.parse(localStorage.getItem(PB_STATE_KEY) || 'null');
-    if (raw && Array.isArray(raw.x) && Array.isArray(raw.y))
+    if (raw && Array.isArray(raw.x) && Array.isArray(raw.y)){
+      const srcKey = PB_SOURCES[raw.source] ? raw.source : 'holdings';
+      const flds = PB_SOURCES[srcKey].fields || PB_HOLDINGS_FIELDS;
       return {
-        x: raw.x.filter(k => PB_FIELDS[k] && PB_FIELDS[k].type === 'dim'),
-        y: raw.y.filter(k => PB_FIELDS[k] && PB_FIELDS[k].type === 'meas'),
+        source: srcKey,
+        x: raw.x.filter(k => flds[k] && flds[k].type === 'dim'),
+        y: raw.y.filter(k => flds[k] && flds[k].type === 'meas'),
         mode: raw.mode === 'timeseries' ? 'timeseries' : 'crosssec',
         range: PB_PERIODS[raw.range] ? raw.range : 'SIX_MONTHS',
+        nwMode: raw.nwMode === 'byClass' ? 'byClass' : 'total',
         tsValue: raw.tsValue === 'positionValue' ? 'positionValue' : 'price',
         tsAvgCost: !!raw.tsAvgCost,
         tsSymbols: Array.isArray(raw.tsSymbols) ? raw.tsSymbols : [],
         customItems: null
       };
+    }
   }catch(e){}
-  return { x:[], y:[], mode:'crosssec', range:'SIX_MONTHS', tsValue:'price', tsAvgCost:false, tsSymbols:[], customItems:null };
+  return { source:'holdings', x:[], y:[], mode:'crosssec', range:'SIX_MONTHS', nwMode:'total', tsValue:'price', tsAvgCost:false, tsSymbols:[], customItems:null };
 }
 function _pbSaveState(){ try{ localStorage.setItem(PB_STATE_KEY, JSON.stringify(pbState)); }catch(e){} }
 let pbState = _pbLoadState();
@@ -4784,9 +4844,15 @@ function _pbEnsureUI(){
   host.innerHTML = `
   <div class="card" style="margin-bottom:16px">
     <div class="card-head cb-builder-head">
-      <h3><svg width="15" height="15" viewBox="0 0 15 15" fill="none" style="vertical-align:-2px;margin-right:5px"><rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/><rect x="6" y="4" width="3" height="10" rx="0.5" fill="currentColor"/><rect x="11" y="1" width="3" height="13" rx="0.5" fill="currentColor"/></svg>Custom Chart Builder</h3>
+      <h3><svg width="15" height="15" viewBox="0 0 15 15" fill="none" style="vertical-align:-2px;margin-right:5px"><rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/><rect x="6" y="4" width="3" height="10" rx="0.5" fill="currentColor"/><rect x="11" y="1" width="3" height="13" rx="0.5" fill="currentColor"/></svg>Chart Builder</h3>
       <div class="cb-head-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <div class="btns" style="display:flex;gap:4px">
+        <select class="fi fi-sm" style="width:auto" id="pb-source-select" onchange="pbSetSource(this.value)">
+          <option value="holdings">Holdings</option>
+          <option value="allocation">Allocation</option>
+          <option value="cashflow">Cashflow</option>
+          <option value="networth">Net worth</option>
+        </select>
+        <div id="pb-mode-btns" style="display:flex;gap:4px">
           <button class="cb-period-btn" id="pb-mode-crosssec" onclick="pbSetMode('crosssec')">By holding</button>
           <button class="cb-period-btn" id="pb-mode-timeseries" onclick="pbSetMode('timeseries')">Price history</button>
         </div>
@@ -4801,7 +4867,7 @@ function _pbEnsureUI(){
 
     <div id="pb-layout" class="cb-layout" style="display:grid;grid-template-columns:220px 1fr;gap:0;min-height:380px">
 
-      <!-- Left rail: field palette (by holding) OR symbol controls (price history) -->
+      <!-- Left rail: field palette (crosssec) OR symbol controls (price history) OR nw controls -->
       <div class="cb-palette-col" style="border-right:1px solid var(--border);padding:14px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:560px">
         <div id="pb-palette-pane" style="display:flex;flex-direction:column;gap:8px">
           <div style="${rl}">Available Fields</div>
@@ -4818,6 +4884,15 @@ function _pbEnsureUI(){
           <div style="${rl};margin-top:8px">Period</div>
           <div class="btns" id="pb-ts-periods" style="display:flex;gap:4px;flex-wrap:wrap"></div>
           <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;margin-top:8px"><input type="checkbox" id="pb-ts-avgcost" onchange="pbState.tsAvgCost=this.checked;_pbSaveState();pbRenderChart()"> Show avg cost</label>
+        </div>
+        <div id="pb-nw-controls" style="display:none;flex-direction:column;gap:6px">
+          <div style="${rl}">Period</div>
+          <div class="btns" id="pb-nw-periods" style="display:flex;gap:4px;flex-wrap:wrap"></div>
+          <div style="${rl};margin-top:8px">View</div>
+          <div class="btns" style="display:flex;gap:4px">
+            <button class="cb-period-btn" id="pb-nw-total"   onclick="pbSetNwMode('total')">Total</button>
+            <button class="cb-period-btn" id="pb-nw-byclass" onclick="pbSetNwMode('byClass')">By class</button>
+          </div>
         </div>
       </div>
 
@@ -4859,9 +4934,8 @@ function _pbEnsureUI(){
 
         <div style="padding:14px;flex:1;min-height:300px;position:relative;display:flex;flex-direction:column">
           <div id="pb-empty" class="empty" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:260px">
-            <div class="empty-icon">📊</div>
             <div class="empty-title">Build a chart</div>
-            <div class="empty-sub">Pick a dimension and a measure, or switch to Price history.</div>
+            <div class="empty-sub">Pick a source and fields, or switch to Price history.</div>
           </div>
           <div id="pb-chart-wrap" style="display:none;height:320px;position:relative"><canvas id="pb-live-canvas"></canvas></div>
           <div id="pb-summary" style="font-size:11px;color:var(--text3);margin-top:8px;display:flex;gap:14px;flex-wrap:wrap"></div>
@@ -4870,19 +4944,24 @@ function _pbEnsureUI(){
     </div>
   </div>`;
 
-  // Period buttons (live in the time-series rail)
+  // Period buttons for price-history rail (no ALL)
   const pBox = document.getElementById('pb-ts-periods');
-  pBox.innerHTML = Object.keys(PB_PERIODS).map(k =>
+  if (pBox) pBox.innerHTML = ['ONE_MONTH','THREE_MONTHS','SIX_MONTHS','ONE_YEAR'].map(k =>
+    `<button class="cb-period-btn" data-period="${k}" onclick="pbSetPeriod('${k}')">${PB_PERIOD_LABELS[k]}</button>`).join('');
+  // Period buttons for net-worth rail (includes All)
+  const nwBox = document.getElementById('pb-nw-periods');
+  if (nwBox) nwBox.innerHTML = Object.keys(PB_PERIODS).map(k =>
     `<button class="cb-period-btn" data-period="${k}" onclick="pbSetPeriod('${k}')">${PB_PERIOD_LABELS[k]}</button>`).join('');
 }
 
-/* ── Entry point (called from renderStocks) ── */
-function renderStockChartBuilder(){
-  buildStockChartRows();        // builder lives on the Dashboard; ensure rows are fresh
+/* ── Entry point ── */
+function renderChartBuilder(){
+  buildStockChartRows();
   setRenderCcy('dashboard');
   _pbEnsureUI();
+  pbSeedDefaults();
   // Restore control values from state
-  const ct = document.getElementById('pb-chart-type'); // chart-type is per-session, not persisted
+  const ss = document.getElementById('pb-source-select'); if (ss) ss.value = pbState.source || 'holdings';
   const tv = document.getElementById('pb-ts-value'); if (tv) tv.value = pbState.tsValue;
   const ac = document.getElementById('pb-ts-avgcost'); if (ac) ac.checked = pbState.tsAvgCost;
   _pbApplyModeUI();
@@ -4890,25 +4969,48 @@ function renderStockChartBuilder(){
   pbRenderChips('x'); pbRenderChips('y');
   _pbRenderSymbolList();
   _pbMarkPeriodBtns();
+  _pbMarkNwBtns();
   pbRenderChart();
   pbRenderAllSaved();
 }
 
 function _pbApplyModeUI(){
+  const src = pbSource(pbState);
   const palettePane = document.getElementById('pb-palette-pane');
-  const tsPane = document.getElementById('pb-ts-pane');
-  const csControls = document.getElementById('pb-crosssec-controls');
-  const ctype = document.getElementById('pb-chart-type');
-  if (!palettePane || !tsPane || !csControls) return;
-  const isTs = pbState.mode === 'timeseries';
-  // By holding: palette on the left, axes/controls + chart on the right.
-  // Price history: symbol controls on the left, chart fills the right.
-  palettePane.style.display = isTs ? 'none' : 'flex';
-  tsPane.style.display = isTs ? 'flex' : 'none';
-  csControls.style.display = isTs ? 'none' : '';
-  if (ctype) ctype.style.display = isTs ? 'none' : '';
-  document.getElementById('pb-mode-crosssec').classList.toggle('active', !isTs);
-  document.getElementById('pb-mode-timeseries').classList.toggle('active', isTs);
+  const tsPane      = document.getElementById('pb-ts-pane');
+  const csControls  = document.getElementById('pb-crosssec-controls');
+  const ctype       = document.getElementById('pb-chart-type');
+  const modeBtns    = document.getElementById('pb-mode-btns');
+  const nwControls  = document.getElementById('pb-nw-controls');
+  if (!palettePane) return;
+  if (src.kind === 'series'){
+    palettePane.style.display = 'none';
+    if (tsPane)     tsPane.style.display     = 'none';
+    if (csControls) csControls.style.display = 'none';
+    if (ctype)      ctype.style.display      = 'none';
+    if (modeBtns)   modeBtns.style.display   = 'none';
+    if (nwControls) nwControls.style.display = 'flex';
+    pbState.mode = 'crosssec';
+  } else if (src.kind === 'crosssec'){
+    palettePane.style.display = 'flex';
+    if (tsPane)     tsPane.style.display     = 'none';
+    if (csControls) csControls.style.display = '';
+    if (ctype)      ctype.style.display      = '';
+    if (modeBtns)   modeBtns.style.display   = 'none';
+    if (nwControls) nwControls.style.display = 'none';
+    pbState.mode = 'crosssec';
+  } else {
+    // holdings — show/hide based on crosssec vs timeseries mode
+    const isTs = pbState.mode === 'timeseries';
+    palettePane.style.display = isTs ? 'none' : 'flex';
+    if (tsPane)     tsPane.style.display     = isTs ? 'flex' : 'none';
+    if (csControls) csControls.style.display = isTs ? 'none' : '';
+    if (ctype)      ctype.style.display      = isTs ? 'none' : '';
+    if (modeBtns)   modeBtns.style.display   = '';
+    if (nwControls) nwControls.style.display = 'none';
+    const mcs = document.getElementById('pb-mode-crosssec');   if (mcs)  mcs.classList.toggle('active', !isTs);
+    const mts = document.getElementById('pb-mode-timeseries'); if (mts) mts.classList.toggle('active', isTs);
+  }
 }
 
 function pbSetMode(mode){
@@ -4922,27 +5024,34 @@ function pbSetPeriod(k){
   if (!PB_PERIODS[k]) return;
   pbState.range = k; _pbSaveState();
   _pbMarkPeriodBtns();
+  _pbMarkNwBtns();
   pbRenderChart();
 }
 function _pbMarkPeriodBtns(){
-  document.querySelectorAll('#pb-ts-periods .cb-period-btn').forEach(b =>
+  document.querySelectorAll('#pb-ts-periods .cb-period-btn, #pb-nw-periods .cb-period-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.period === pbState.range));
+}
+function _pbMarkNwBtns(){
+  const isBy = pbState.nwMode === 'byClass';
+  const t = document.getElementById('pb-nw-total');   if (t) t.classList.toggle('active', !isBy);
+  const b = document.getElementById('pb-nw-byclass'); if (b) b.classList.toggle('active', isBy);
 }
 
 /* ── Palette (cross-sectional) ── */
 function pbInitPalette(){
   const palette = document.getElementById('pb-palette');
   if (!palette) return;
+  const flds = pbFields(pbState);
   const groups = [
-    ['Dimensions (Group by)', Object.entries(PB_FIELDS).filter(([,f]) => f.type === 'dim')],
-    ['Measures (Values)',     Object.entries(PB_FIELDS).filter(([,f]) => f.type === 'meas')]
+    ['Dimensions (Group by)', Object.entries(flds).filter(([,f]) => f.type === 'dim')],
+    ['Measures (Values)',     Object.entries(flds).filter(([,f]) => f.type === 'meas')]
   ];
   palette.innerHTML = groups.map(([heading, fields]) =>
     `<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-top:8px">${heading}</div>` +
     fields.map(([key, f]) =>
       `<div class="cb-field-pill" draggable="true" data-field="${key}" data-label="${kjrEscape(f.label)}"
             ondragstart="event.dataTransfer.setData('text/plain','${key}')" onclick="pbAssignField('${key}')">
-        <span class="pill-icon">${f.icon}</span><span>${f.label}</span>
+        <span>${f.label}</span>
         <span class="pill-type">${f.type === 'dim' ? 'Group' : 'Value'}</span>
       </div>`).join('')
   ).join('');
@@ -4958,14 +5067,14 @@ function pbDrop(e, axis){
   e.preventDefault();
   e.currentTarget.classList.remove('drag-over');
   const key = e.dataTransfer.getData('text/plain');
-  const f = PB_FIELDS[key];
+  const f = pbFields(pbState)[key];
   if (!f) return;
   if (axis === 'x' && f.type !== 'dim'){ showToast('"' + f.label + '" is a measure — drop it on Y'); return; }
   if (axis === 'y' && f.type !== 'meas'){ showToast('"' + f.label + '" is a dimension — drop it on X'); return; }
   _pbCommitField(key, axis);
 }
 function pbAssignField(key){
-  const f = PB_FIELDS[key];
+  const f = pbFields(pbState)[key];
   if (!f) return;
   _pbCommitField(key, f.type === 'dim' ? 'x' : 'y');
 }
@@ -4987,9 +5096,10 @@ function pbRenderChips(axis){
   const chipsEl = document.getElementById('pb-' + axis + '-chips');
   const ph = document.getElementById('pb-' + axis + '-placeholder');
   if (!chipsEl) return;
+  const flds = pbFields(pbState);
   chipsEl.innerHTML = pbState[axis].map(key => {
-    const f = PB_FIELDS[key] || { icon:'⚠️', label:key };
-    return `<span class="cb-axis-chip">${f.icon} ${f.label}<button onclick="pbRemoveField('${axis}','${key}')" title="Remove">×</button></span>`;
+    const f = flds[key] || { label:'(?) ' + key };
+    return `<span class="cb-axis-chip">${f.label}<button onclick="pbRemoveField('${axis}','${key}')" title="Remove">×</button></span>`;
   }).join('');
   if (ph) ph.style.display = pbState[axis].length ? 'none' : '';
 }
@@ -5020,7 +5130,9 @@ function pbToggleSymbol(ysym, on){
 /* ── Live config + render dispatch ── */
 function _pbLiveConfig(){
   return {
+    source: pbState.source || 'holdings',
     mode: pbState.mode,
+    nwMode: pbState.nwMode || 'total',
     xFields: [...pbState.x], yFields: [...pbState.y],
     chartType: (document.getElementById('pb-chart-type')||{}).value || 'bar',
     topN: (document.getElementById('pb-topn')||{}).value || 'all',
@@ -5045,30 +5157,44 @@ function _pbDrawInto(host, cfg){
     if (host.wrapEl) host.wrapEl.style.display = 'none';
     if (host.emptyEl){
       host.emptyEl.style.display = 'flex';
-      if (title) host.emptyEl.innerHTML = `<div class="empty-icon">📊</div><div class="empty-title">${title}</div><div class="empty-sub">${sub||''}</div>`;
+      if (title) host.emptyEl.innerHTML = `<div class="empty-title">${title}</div><div class="empty-sub">${sub||''}</div>`;
     }
     if (host.summaryEl) host.summaryEl.innerHTML = '';
     const inst = _pbCharts[host.canvasId]; if (inst){ try{ inst.destroy(); }catch(e){} delete _pbCharts[host.canvasId]; }
   };
   const showChart = () => { if (host.emptyEl) host.emptyEl.style.display = 'none'; if (host.wrapEl) host.wrapEl.style.display = 'block'; };
 
-  if (cfg.mode === 'timeseries') return _pbDrawTimeSeries(host, cfg, showEmpty, showChart);
+  const src = pbSource(cfg);
+  if (src.kind === 'series') return Promise.resolve(_pbDrawInternalSeries(host, cfg, showEmpty, showChart));
+  if (cfg.mode === 'timeseries' && src.kind === 'holdings') return _pbDrawTimeSeries(host, cfg, showEmpty, showChart);
   return Promise.resolve(_pbDrawCrossSectional(host, cfg, showEmpty, showChart));
 }
 
 /* ── Cross-sectional draw ── */
 function _pbDrawCrossSectional(host, cfg, showEmpty, showChart){
-  if (!cfg.xFields.length || !cfg.yFields.length){ showEmpty('Build a chart', 'Pick a dimension and a measure, or switch to Price history.'); return false; }
-  const rows = _pbFilteredRows(cfg.kwFilter);
-  if (!rows.length){ showEmpty('No matching holdings', 'Clear the filter to see your positions.'); return false; }
-  const entries = kjrChartAggregate(rows, cfg.xFields, cfg.yFields, PB_FIELDS, cfg.sort, cfg.topN);
+  const src = pbSource(cfg);
+  const flds = pbFields(cfg);
+  if (!cfg.xFields.length || !cfg.yFields.length){
+    const sub = src.kind === 'holdings' ? 'Pick a dimension and a measure, or switch to Price history.' : 'Select a dimension and a measure.';
+    showEmpty('Build a chart', sub); return false;
+  }
+  const rows = src.kind === 'holdings' ? _pbFilteredRows(cfg.kwFilter) : (src.rows ? src.rows() : []);
+  if (!rows.length){
+    const msg = src.key === 'allocation'
+      ? ['No assets yet',        'Add stocks, cash, or CPF to see your allocation.']
+      : src.key === 'cashflow'
+      ? ['No transactions yet',  'Add income or expenses to see your cashflow.']
+      : ['No matching holdings', 'Clear the filter to see your positions.'];
+    showEmpty(...msg); return false;
+  }
+  const entries = kjrChartAggregate(rows, cfg.xFields, cfg.yFields, flds, cfg.sort, cfg.topN);
   if (!entries.length){ showEmpty('Nothing to plot', 'No groups for this configuration.'); return false; }
 
   const curSym = _pbCurSym();
   const isRound = cfg.chartType === 'doughnut' || cfg.chartType === 'pie';
   const labels = entries.map(([k]) => k.length > 28 ? k.slice(0,28)+'…' : k);
   const datasets = cfg.yFields.map((yKey, yi) => {
-    const f = PB_FIELDS[yKey];
+    const f = flds[yKey];
     const color = PB_PALETTE[yi % PB_PALETTE.length];
     const values = entries.map(([,v]) => +(_pbVal(v[yKey]||0, f)).toFixed(2));
     const ds = {
@@ -5089,13 +5215,13 @@ function _pbDrawCrossSectional(host, cfg, showEmpty, showChart){
   const yK1 = cfg.yFields[0], yK2 = cfg.yFields[1];
   const scales = isRound ? {} : {
     x: { ticks:{ color:axisColor, font:{size:10}, maxRotation:40 }, grid:{ display:false } },
-    y: { ticks:{ color:axisColor, font:{size:10}, callback:v => kjrFmtAxis(v, PB_FIELDS[yK1], curSym) }, grid:{ color:gridColor },
-         title:{ display:true, text:PB_FIELDS[yK1]?.label||'', color:axisColor, font:{size:10} } }
+    y: { ticks:{ color:axisColor, font:{size:10}, callback:v => kjrFmtAxis(v, flds[yK1], curSym) }, grid:{ color:gridColor },
+         title:{ display:true, text:flds[yK1]?.label||'', color:axisColor, font:{size:10} } }
   };
   if (cfg.dualAxis && cfg.yFields.length > 1){
     scales.y2 = { position:'right', grid:{ display:false },
-      ticks:{ color:PB_PALETTE[1], font:{size:10}, callback:v => kjrFmtAxis(v, PB_FIELDS[yK2], curSym) },
-      title:{ display:true, text:PB_FIELDS[yK2]?.label||'', color:PB_PALETTE[1], font:{size:10} } };
+      ticks:{ color:PB_PALETTE[1], font:{size:10}, callback:v => kjrFmtAxis(v, flds[yK2], curSym) },
+      title:{ display:true, text:flds[yK2]?.label||'', color:PB_PALETTE[1], font:{size:10} } };
   }
   _pbMountChart(host.canvasId, {
     type: cfg.chartType, data:{ labels, datasets },
@@ -5104,14 +5230,15 @@ function _pbDrawCrossSectional(host, cfg, showEmpty, showChart){
         tooltip:{ callbacks:{ label: t => {
           const yKey = cfg.yFields[t.datasetIndex] || cfg.yFields[0];
           const raw = (t.parsed && typeof t.parsed.y === 'number') ? t.parsed.y : t.parsed;
-          return ' ' + t.dataset.label + ': ' + kjrFmtMeasure(raw, PB_FIELDS[yKey], curSym);
+          return ' ' + t.dataset.label + ': ' + kjrFmtMeasure(raw, flds[yKey], curSym);
         } } } },
       scales }
   });
 
   if (host.summaryEl){
+    const itemLabel = src.kind === 'holdings' ? 'holdings' : 'items';
     const parts = cfg.yFields.map((yKey, yi) => {
-      const f = PB_FIELDS[yKey] || { label:yKey };
+      const f = flds[yKey] || { label:yKey };
       const vals = entries.map(([,v]) => _pbVal(v[yKey]||0, f));
       const tot = vals.reduce((s,v)=>s+v,0), avg = vals.length?tot/vals.length:0;
       const mx = vals.length?Math.max(...vals):0, mn = vals.length?Math.min(...vals):0;
@@ -5119,7 +5246,7 @@ function _pbDrawCrossSectional(host, cfg, showEmpty, showChart){
       return `<span><strong style="color:${PB_PALETTE[yi%PB_PALETTE.length]}">${f.label}</strong>` +
              (f.agg === 'avg' ? '' : ` · Total: ${fm(tot)}`) + ` · Avg: ${fm(avg)} · Min: ${fm(mn)} · Max: ${fm(mx)}</span>`;
     });
-    host.summaryEl.innerHTML = `<span style="color:var(--text3)">${entries.length} groups · ${rows.length} holdings</span>` + parts.join('');
+    host.summaryEl.innerHTML = `<span style="color:var(--text3)">${entries.length} groups · ${rows.length} ${itemLabel}</span>` + parts.join('');
   }
   return true;
 }
@@ -5193,6 +5320,35 @@ async function _pbDrawTimeSeries(host, cfg, showEmpty, showChart){
   return true;
 }
 
+/* ── Internal time-series draw (net worth from DB.snapshots) ── */
+function _pbDrawInternalSeries(host, cfg, showEmpty, showChart){
+  const ser = _pbNetWorthSeries(cfg);
+  if (!ser.labels.length){ showEmpty('No history yet', 'Net worth is recorded daily. Come back after your first full day of usage.'); return false; }
+  if (ser.labels.length < 2){ showEmpty('Need 2+ days of history', 'One data point recorded so far. Come back tomorrow for the first chart.'); return false; }
+  showChart();
+  const axisColor = _cssVar('--text3'), gridColor = _cssVar('--border');
+  _pbMountChart(host.canvasId, {
+    type: 'line', data: { labels: ser.labels, datasets: ser.datasets },
+    options: {
+      responsive:true, maintainAspectRatio:false, animation:{duration:300},
+      interaction:{ mode:'index', intersect:false },
+      plugins:{
+        legend:{ display:ser.stacked, position:'bottom', labels:{ color:_cssVar('--text2'), font:{size:11}, boxWidth:12, padding:12 } },
+        tooltip:{ callbacks:{ label: c => ' ' + c.dataset.label + ': ' + fmt(c.parsed.y, { noConvert:true, dp:0 }) } }
+      },
+      scales:{
+        x:{ stacked:ser.stacked, ticks:{ color:axisColor, font:{size:10}, maxTicksLimit:6 }, grid:{ display:false } },
+        y:{ stacked:ser.stacked, ticks:{ color:axisColor, font:{size:10} }, grid:{ color:gridColor } }
+      }
+    }
+  });
+  if (host.summaryEl){
+    const rangeLabel = PB_PERIOD_LABELS[cfg.range] || 'All time';
+    host.summaryEl.innerHTML = `<span style="color:var(--text3)">${ser.labels.length} days · ${rangeLabel}</span>`;
+  }
+  return true;
+}
+
 function _pbMountChart(canvasId, spec){
   const canvas = document.getElementById(canvasId);
   if (!canvas) return;
@@ -5239,16 +5395,18 @@ function pbLoadSaved(){
   let raw = [];
   try { raw = JSON.parse(localStorage.getItem(PB_SAVED_KEY) || '[]'); } catch(e){ raw = []; }
   if (!Array.isArray(raw)) return [];
-  // Validate / sanitise — drop configs that reference fields no longer in the
-  // schema, coerce missing knobs, never throw on a corrupt entry.
-  return raw.filter(c => c && typeof c === 'object').map(c => {
+  const result = raw.filter(c => c && typeof c === 'object').map(c => {
+    const srcKey = PB_SOURCES[c.source] ? c.source : 'holdings';
+    const flds = pbFields({ source: srcKey });
     const mode = c.mode === 'timeseries' ? 'timeseries' : 'crosssec';
     return {
       id: c.id || ('sc_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)),
       title: typeof c.title === 'string' ? c.title : 'Chart',
+      source: srcKey,
       mode,
-      xFields: Array.isArray(c.xFields) ? c.xFields.filter(k => PB_FIELDS[k] && PB_FIELDS[k].type==='dim') : [],
-      yFields: Array.isArray(c.yFields) ? c.yFields.filter(k => PB_FIELDS[k] && PB_FIELDS[k].type==='meas') : [],
+      nwMode: c.nwMode === 'byClass' ? 'byClass' : 'total',
+      xFields: Array.isArray(c.xFields) ? c.xFields.filter(k => flds[k] && flds[k].type==='dim') : [],
+      yFields: Array.isArray(c.yFields) ? c.yFields.filter(k => flds[k] && flds[k].type==='meas') : [],
       chartType: ['bar','line','doughnut','scatter'].includes(c.chartType) ? c.chartType : 'bar',
       topN: ['all','5','10','20'].includes(String(c.topN)) ? String(c.topN) : 'all',
       sort: ['desc','asc','alpha'].includes(c.sort) ? c.sort : 'desc',
@@ -5258,23 +5416,36 @@ function pbLoadSaved(){
       tsSymbols: Array.isArray(c.tsSymbols) ? c.tsSymbols : [],
       tsValue: c.tsValue === 'positionValue' ? 'positionValue' : 'price',
       tsAvgCost: !!c.tsAvgCost,
-      pinned: !!c.pinned
+      pinned: !!c.pinned,
+      order: typeof c.order === 'number' ? c.order : 999,
     };
-  }).filter(c => c.mode === 'timeseries' ? true : (c.xFields.length && c.yFields.length));
+  }).filter(c => {
+    const src = pbSource(c);
+    if (src.kind === 'series') return true;
+    if (c.mode === 'timeseries') return true;
+    return c.xFields.length && c.yFields.length;
+  });
+  return result.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
 }
 function pbPersistSaved(charts){ try{ localStorage.setItem(PB_SAVED_KEY, JSON.stringify(charts)); }catch(e){} }
 
 function pbSaveChart(){
   const cfg = _pbLiveConfig();
-  const ready = cfg.mode === 'timeseries' ? (cfg.tsSymbols.length > 0) : (cfg.xFields.length && cfg.yFields.length);
+  const src = pbSource(cfg);
+  const ready = src.kind === 'series'
+    ? true
+    : cfg.mode === 'timeseries' ? (cfg.tsSymbols.length > 0) : (cfg.xFields.length && cfg.yFields.length);
   if (!ready){ showToast('Build a chart first'); return; }
-  const defTitle = cfg.mode === 'timeseries'
+  const flds = pbFields(cfg);
+  const defTitle = src.kind === 'series'
+    ? (cfg.nwMode === 'byClass' ? 'Net worth by class' : 'Net worth over time')
+    : cfg.mode === 'timeseries'
     ? 'Price history · ' + PB_PERIOD_LABELS[cfg.range]
-    : cfg.xFields.map(k => PB_FIELDS[k]?.label).join(' + ') + ' vs ' + cfg.yFields.map(k => PB_FIELDS[k]?.label).join(' + ');
+    : cfg.xFields.map(k => flds[k]?.label).join(' + ') + ' vs ' + cfg.yFields.map(k => flds[k]?.label).join(' + ');
   const title = prompt('Name this chart:', defTitle);
   if (title === null) return;
   const charts = pbLoadSaved();
-  charts.push(Object.assign({ id:'sc_' + Date.now(), title: title || 'Chart', pinned:false }, cfg));
+  charts.push(Object.assign({ id:'sc_' + Date.now(), title: title || 'Chart', pinned:false, order:999 }, cfg));
   pbPersistSaved(charts);
   pbRenderAllSaved();
   showToast('Chart added to dashboard', 'success');
@@ -5293,16 +5464,20 @@ function _pbRenderOneSaved(cfg){
   const wrap = document.createElement('div');
   wrap.className = 'saved-chart-card card';
   wrap.id = 'pb-sc-' + cfg.id;
-  const meta = cfg.mode === 'timeseries'
+  const src = pbSource(cfg);
+  const flds = pbFields(cfg);
+  const meta = src.kind === 'series'
+    ? `Net worth · ${cfg.nwMode === 'byClass' ? 'by class' : 'total'} · ${PB_PERIOD_LABELS[cfg.range] || 'all time'}`
+    : cfg.mode === 'timeseries'
     ? `Price history · ${PB_PERIOD_LABELS[cfg.range]} · ${cfg.tsValue==='positionValue'?'Position value':'Close price'}`
-    : `X: ${cfg.xFields.map(k=>PB_FIELDS[k]?.label||k).join(' · ')} · Y: ${cfg.yFields.map(k=>PB_FIELDS[k]?.label||k).join(' · ')} · Top ${cfg.topN} · ${cfg.chartType}`;
+    : `X: ${cfg.xFields.map(k=>flds[k]?.label||k).join(' · ')} · Y: ${cfg.yFields.map(k=>flds[k]?.label||k).join(' · ')} · Top ${cfg.topN} · ${cfg.chartType}`;
   wrap.innerHTML = `
     <div class="card-head" style="flex-direction:column;align-items:flex-start;gap:4px">
       <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-        <h3 style="font-size:14px;display:flex;align-items:center;gap:6px">${cfg.pinned?'<span title="Pinned" style="color:#f59e0b">📌</span>':''}${kjrEscape(cfg.title)}</h3>
+        <h3 style="font-size:14px">${kjrEscape(cfg.title)}</h3>
         <div style="display:flex;gap:6px;align-items:center">
-          <button class="btn btn-sm btn-ghost" onclick="pbTogglePin('${cfg.id}')">${cfg.pinned?'📌 Pinned':'📍 Pin'}</button>
-          <button class="btn btn-sm btn-ghost" onclick="pbRefreshSaved('${cfg.id}')">⟳</button>
+          <button class="btn btn-sm btn-ghost" onclick="pbTogglePin('${cfg.id}')">${cfg.pinned ? 'Pinned' : 'Pin'}</button>
+          <button class="btn btn-sm btn-ghost" onclick="pbRefreshSaved('${cfg.id}')">↻</button>
           ${cfg.pinned?'':`<button class="btn btn-sm btn-ghost" onclick="pbDeleteSaved('${cfg.id}')" title="Delete">×</button>`}
         </div>
       </div>
@@ -5376,6 +5551,45 @@ function _pbConfirm(msg, onYes){
   ov.querySelector('#pb-cf-no').onclick = close;
   ov.querySelector('#pb-cf-yes').onclick = () => { close(); onYes(); };
   ov.addEventListener('click', e => { if (e.target === ov) close(); });
+}
+
+function pbSetSource(val){
+  if (!PB_SOURCES[val]) return;
+  if (pbState.source !== val){
+    pbState.source = val;
+    pbState.x = []; pbState.y = [];
+    if (PB_SOURCES[val].kind !== 'holdings') pbState.mode = 'crosssec';
+  }
+  _pbSaveState();
+  renderChartBuilder();
+}
+function pbSetNwMode(mode){
+  pbState.nwMode = mode === 'byClass' ? 'byClass' : 'total';
+  _pbSaveState();
+  _pbMarkNwBtns();
+  pbRenderChart();
+}
+
+function pbSeedDefaults(){
+  const charts = pbLoadSaved();
+  const ids = new Set(charts.map(c => c.id));
+  const defaults = [
+    { id:'def_networth',  title:'Net worth over time', source:'networth',  mode:'crosssec', nwMode:'total',
+      range:'ONE_YEAR',    xFields:[], yFields:[], chartType:'line', topN:'all', sort:'alpha',
+      dualAxis:false, kwFilter:'', tsSymbols:[], tsValue:'price', tsAvgCost:false, pinned:true, order:0 },
+    { id:'def_alloc',     title:'Allocation',          source:'allocation', mode:'crosssec', nwMode:'total',
+      range:'SIX_MONTHS', xFields:['assetClass'], yFields:['value'], chartType:'doughnut', topN:'all', sort:'desc',
+      dualAxis:false, kwFilter:'', tsSymbols:[], tsValue:'price', tsAvgCost:false, pinned:true, order:1 },
+    { id:'def_cashflow',  title:'Cashflow',             source:'cashflow',   mode:'crosssec', nwMode:'total',
+      range:'SIX_MONTHS', xFields:['month'], yFields:['income','expense'], chartType:'bar', topN:'all', sort:'alpha',
+      dualAxis:false, kwFilter:'', tsSymbols:[], tsValue:'price', tsAvgCost:false, pinned:true, order:2 },
+  ];
+  let changed = false;
+  defaults.forEach(def => { if (!ids.has(def.id)){ charts.push(def); changed = true; } });
+  if (changed){
+    charts.sort((a,b) => (a.order??999) - (b.order??999));
+    pbPersistSaved(charts);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -6657,8 +6871,6 @@ function _recentMonths(n){
   return out;
 }
 
-let _allocChart = null, _cfChart = null, _nwChart = null;
-
 /* ─── Net-worth snapshots ──────────────────────────────────────────────
    One row per day in DB.snapshots: { date:'YYYY-MM-DD', net, byClass:{...} }.
    takeSnapshot upserts today's row; autoSnapshot fires once per day on boot.
@@ -6799,10 +7011,7 @@ function renderDashboard(){
   // Charts only when the tab is visible (Chart.js needs a sized canvas).
   const visible = document.getElementById('page-dashboard').classList.contains('active');
   if (visible && typeof Chart !== 'undefined'){
-    drawNetWorthChart();
-    drawAllocationChart(displayClasses.filter(c => c.val > 0), displayNet);
-    drawCashflowChart();
-    renderStockChartBuilder();   // Custom Chart Builder card + saved charts
+    renderChartBuilder();   // Chart Builder card + seeded + saved charts
   }
 }
 
@@ -6922,126 +7131,6 @@ function renderTopMovers(){
   el.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head">
       <h3>Top movers</h3><span class="hint">today · by % change</span>
     </div><div class="card-body"><div class="movers-grid">${cells}</div></div></div>`;
-}
-
-function drawNetWorthChart(){
-  const ctx = document.getElementById('dash-nw-chart');
-  const meta = document.getElementById('dash-nw-meta');
-  if (!ctx) return;
-  if (_nwChart){ _nwChart.destroy(); _nwChart = null; }
-  const snaps = (DB.snapshots || []).slice().sort((a,b) => String(a.date).localeCompare(String(b.date)));
-  if (snaps.length < 2){
-    if (meta) meta.textContent = snaps.length === 1 ? 'need 2+ days of history' : 'no history yet';
-    return;
-  }
-  // Respect the CPF toggle: when off, strip CPF from each historical point too
-  // (byClass.cpf is stored on every snapshot) so the line matches the hero.
-  const netOf = s => _dashShowCpf ? s.net : (s.net - ((s.byClass && s.byClass.cpf) || 0));
-  if (meta){
-    const first = netOf(snaps[0]), last = netOf(snaps[snaps.length-1]);
-    const delta = last - first;
-    const pct = first > 0 ? (delta / first * 100) : null;
-    meta.textContent = (delta >= 0 ? '+' : '') + fmt(delta) + (pct != null ? ' (' + fmtPct(pct) + ')' : '') + ' since start';
-  }
-  _nwChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: snaps.map(s => s.date),
-      datasets: [{
-        label: _dashShowCpf ? 'Net worth' : 'Net worth (ex-CPF)',
-        data: snaps.map(s => toDisplay(netOf(s), 'SGD')),
-        borderColor: _cssVar('--accent'),
-        backgroundColor: 'transparent',
-        borderWidth: 2, tension: 0.25, pointRadius: snaps.length > 30 ? 0 : 2, fill: false
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      scales: {
-        x: { ticks: { color: _cssVar('--text3'), font: { size: 10 }, maxTicksLimit: 6 }, grid: { display:false } },
-        y: { ticks: { color: _cssVar('--text3'), font: { size: 10 } }, grid: { color: _cssVar('--border') } }
-      },
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: (c) => fmt(c.parsed.y, { noConvert: true, dp:0 }) } }
-      }
-    }
-  });
-}
-
-function drawAllocationChart(classes, net){
-  const ctx = document.getElementById('dash-alloc-chart');
-  const meta = document.getElementById('dash-alloc-meta');
-  if (!ctx) return;
-  if (!classes.length){ if (meta) meta.textContent = 'no data'; if (_allocChart){ _allocChart.destroy(); _allocChart = null; } return; }
-  if (meta) meta.textContent = '';
-  if (_allocChart){
-    // Update in place — skip destroy+recreate so the chart doesn't re-animate
-    // every time prices auto-refresh.
-    _allocChart.data.labels = classes.map(c => c.key);
-    _allocChart.data.datasets[0].data = classes.map(c => c.val);
-    _allocChart.data.datasets[0].backgroundColor = classes.map(c => _cssVar(c.color));
-    _allocChart.options.plugins.tooltip.callbacks.label = (c) => c.label + ': ' + fmt(c.parsed, {dp:0}) + (net > 0 ? ' (' + (c.parsed / net * 100).toFixed(0) + '%)' : '');
-    _allocChart.update('none');
-    return;
-  }
-  _allocChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: classes.map(c => c.key),
-      datasets: [{ data: classes.map(c => c.val), backgroundColor: classes.map(c => _cssVar(c.color)), borderWidth: 0 }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, cutout: '62%',
-      plugins: {
-        legend: { position: 'bottom', labels: { color: _cssVar('--text2'), font: { size: 11 }, boxWidth: 12, padding: 12 } },
-        tooltip: { callbacks: { label: (c) => c.label + ': ' + fmt(c.parsed, {dp:0}) + (net > 0 ? ' (' + (c.parsed / net * 100).toFixed(0) + '%)' : '') } }
-      }
-    }
-  });
-}
-
-function drawCashflowChart(){
-  const ctx = document.getElementById('dash-cf-chart');
-  const meta = document.getElementById('dash-cf-meta');
-  if (!ctx) return;
-  if (_cfChart){ _cfChart.destroy(); _cfChart = null; }
-
-  const months = _recentMonths(6);
-  const incBy = {}, expBy = {};
-  (DB.income   || []).forEach(i => { const ym = String(i.date||'').slice(0,7); if (ym) incBy[ym] = (incBy[ym]||0) + (Number(i.net)||Number(i.gross)||0); });
-  (DB.expenses || []).forEach(x => { const ym = String(x.date||'').slice(0,7); if (ym) expBy[ym] = (expBy[ym]||0) + expenseAmountSgd(x); });
-  const inc = months.map(m => incBy[m] || 0);
-  const exp = months.map(m => expBy[m] || 0);
-
-  const totIn = inc.reduce((a,b)=>a+b,0), totEx = exp.reduce((a,b)=>a+b,0);
-  if (meta){
-    const rate = totIn > 0 ? ((totIn - totEx) / totIn * 100) : null;
-    meta.textContent = rate != null ? ('savings rate ' + fmtPct(rate)) : 'no income yet';
-  }
-  if (totIn === 0 && totEx === 0){ if (meta) meta.textContent = 'no data'; return; }
-
-  _cfChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: months.map(_ymLabel),
-      datasets: [
-        { label: 'Income',   data: inc.map(v => toDisplay(v, 'SGD')), backgroundColor: _cssVar('--green') },
-        { label: 'Expenses', data: exp.map(v => toDisplay(v, 'SGD')), backgroundColor: _cssVar('--red') }
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      scales: {
-        x: { ticks: { color: _cssVar('--text3'), font: { size: 10 } }, grid: { display: false } },
-        y: { ticks: { color: _cssVar('--text3'), font: { size: 10 } }, grid: { color: _cssVar('--border') } }
-      },
-      plugins: {
-        legend: { position: 'bottom', labels: { color: _cssVar('--text2'), font: { size: 11 }, boxWidth: 12, padding: 12 } },
-        tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + fmt(c.parsed.y, { noConvert: true }) } }
-      }
-    }
-  });
 }
 
 function renderSummary(items){
