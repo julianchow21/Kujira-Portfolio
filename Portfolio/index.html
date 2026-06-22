@@ -1048,8 +1048,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.17';
-const APP_DISPLAY_VERSION = 'v2.17 (22 Jun)';
+const APP_VERSION = 'v2.18';
+const APP_DISPLAY_VERSION = 'v2.18 (22 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -6755,21 +6755,19 @@ function renderDashboard(){
     </div>`;
   }
 
-  // Asset-class KPI row — always shows all classes; % is relative to displayNet
+  // Asset-class KPI row — when CPF is toggled off it is hidden entirely, like
+  // everywhere else on the dashboard. % is relative to displayNet.
   const assetsEl = document.getElementById('dash-assets');
   if (assetsEl){
     if (netFull <= 0){
       assetsEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">📊</div><div class="empty-title">No holdings yet</div><div class="empty-sub">Add stocks, cash, CPF, or property and your net worth and allocation appear here.</div></div></div></div>`;
     } else {
-      assetsEl.innerHTML = renderSummary(classes.map(c => {
-        const excluded = !_dashShowCpf && c.key === 'CPF';
-        return {
-          label: c.key,
-          value: fmt(c.val, {dp:0}),
-          sub: excluded ? 'excluded from view' : (displayNet > 0 ? (c.val / displayNet * 100).toFixed(0) + '% of net worth' : ''),
-          accent: c.val > 0 && !excluded ? 'accent' : ''
-        };
-      }));
+      assetsEl.innerHTML = renderSummary(displayClasses.map(c => ({
+        label: c.key,
+        value: fmt(c.val, {dp:0}),
+        sub: displayNet > 0 ? (c.val / displayNet * 100).toFixed(0) + '% of net worth' : '',
+        accent: c.val > 0 ? 'accent' : ''
+      })));
     }
   }
 
@@ -6778,7 +6776,7 @@ function renderDashboard(){
   if (cpfEl){
     const bal = cpfEffectiveBalances();
     const cpfTotal = bal.OA + bal.SA + bal.MA + bal.RA;
-    if (cpfTotal > 0){
+    if (_dashShowCpf && cpfTotal > 0){
       cpfEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head"><h3>CPF breakdown</h3></div><div class="card-body">` +
         renderSummary([
           { label:'OA', value: fmt(bal.OA, {dp:0}), accent:'accent' },
@@ -6936,8 +6934,11 @@ function drawNetWorthChart(){
     if (meta) meta.textContent = snaps.length === 1 ? 'need 2+ days of history' : 'no history yet';
     return;
   }
+  // Respect the CPF toggle: when off, strip CPF from each historical point too
+  // (byClass.cpf is stored on every snapshot) so the line matches the hero.
+  const netOf = s => _dashShowCpf ? s.net : (s.net - ((s.byClass && s.byClass.cpf) || 0));
   if (meta){
-    const first = snaps[0].net, last = snaps[snaps.length-1].net;
+    const first = netOf(snaps[0]), last = netOf(snaps[snaps.length-1]);
     const delta = last - first;
     const pct = first > 0 ? (delta / first * 100) : null;
     meta.textContent = (delta >= 0 ? '+' : '') + fmt(delta) + (pct != null ? ' (' + fmtPct(pct) + ')' : '') + ' since start';
@@ -6947,8 +6948,8 @@ function drawNetWorthChart(){
     data: {
       labels: snaps.map(s => s.date),
       datasets: [{
-        label: 'Net worth',
-        data: snaps.map(s => toDisplay(s.net, 'SGD')),
+        label: _dashShowCpf ? 'Net worth' : 'Net worth (ex-CPF)',
+        data: snaps.map(s => toDisplay(netOf(s), 'SGD')),
         borderColor: _cssVar('--accent'),
         backgroundColor: 'transparent',
         borderWidth: 2, tension: 0.25, pointRadius: snaps.length > 30 ? 0 : 2, fill: false

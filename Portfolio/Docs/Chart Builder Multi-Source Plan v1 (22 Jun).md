@@ -195,11 +195,18 @@ Fields:
 Seed default (Phase 4): source `allocation`, x=`assetClass`, y=`value`,
 chartType `doughnut`. That reproduces today's Allocation donut.
 
-**Decision (default chosen for you):** the old donut hid CPF when the hero CPF
-toggle was off. The builder source is stateless and returns ALL classes with
-value > 0. Keep it that way (CPF shows in the allocation chart regardless of the
-hero toggle). If Julian wants the donut to keep following the toggle, add a
-boolean to the config later, do not couple the source to `_dashShowCpf`.
+**CPF toggle rule (confirmed by Julian, applies dashboard-wide):** when the hero
+CPF toggle (`_dashShowCpf`) is OFF, CPF must be hidden from EVERYTHING on the
+dashboard, not shown anywhere. The live app already enforces this as of v2.18:
+hero figure, asset KPI cards, allocation donut, net-worth-over-time line, and
+the CPF breakdown card all drop CPF when off. The rebuilt charts must keep this:
+the dashboard layer passes the current `_dashShowCpf` into the allocation rows
+and the net-worth series builders so CPF is excluded when off (filter the CPF
+row out of `_pbAllocRows`; for net worth subtract `byClass.cpf` per point). Do
+this as a dashboard-layer parameter, not by reaching into hero state from inside
+the generic source. The ONE intentional exception is the **Target allocation**
+planner (`renderTargetAllocation`), which stays full-picture because its targets
+must sum to 100% including CPF, confirm with Julian before changing that one.
 
 ### cashflow (`PB_CASHFLOW_FIELDS`)
 Rows: one PRE-AGGREGATED row per recent month (cleanest for the grouped bar and
