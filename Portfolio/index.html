@@ -254,6 +254,15 @@ textarea.fi{resize:vertical;min-height:70px}
 .integrity-list li.error{color:var(--red)}
 .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
 @media (max-width:840px){.dash-grid{grid-template-columns:1fr}}
+/* Allocation proportion bar (asset-class mix) */
+.alloc-bar{display:flex;gap:6px;height:46px;margin-bottom:16px}
+.alloc-seg{display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.2px;border-radius:8px;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:0 10px;transition:flex-grow 0.3s ease,filter 0.15s;cursor:default}
+.alloc-seg:hover{filter:brightness(1.1)}
+.alloc-legend{display:flex;flex-wrap:wrap;gap:8px 18px}
+.alloc-legend-item{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2)}
+.alloc-legend-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+.alloc-legend-amt{color:var(--text);font-weight:600}
+.alloc-legend-pct{color:var(--text3)}
 .dash-chart-wrap{position:relative;height:260px}
 .dash-hero{background:var(--glass-strong);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi);padding:22px 24px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
 .dash-hero-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
@@ -1034,8 +1043,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.22';
-const APP_DISPLAY_VERSION = 'v2.22 (22 Jun)';
+const APP_VERSION = 'v2.23';
+const APP_DISPLAY_VERSION = 'v2.23 (22 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -7057,19 +7066,26 @@ function renderDashboard(){
     </div>`;
   }
 
-  // Asset-class KPI row — when CPF is toggled off it is hidden entirely, like
-  // everywhere else on the dashboard. % is relative to displayNet.
+  // Asset-class allocation bar — a segmented proportion bar (each class sized
+  // by its share of net worth) with a $ + % legend below. When CPF is toggled
+  // off it is excluded entirely, like everywhere else on the dashboard.
   const assetsEl = document.getElementById('dash-assets');
   if (assetsEl){
     if (netFull <= 0){
       assetsEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">📊</div><div class="empty-title">No holdings yet</div><div class="empty-sub">Add stocks, cash, CPF, or property and your net worth and allocation appear here.</div></div></div></div>`;
     } else {
-      assetsEl.innerHTML = renderSummary(displayClasses.map(c => ({
-        label: c.key,
-        value: fmt(c.val, {dp:0}),
-        sub: displayNet > 0 ? (c.val / displayNet * 100).toFixed(0) + '% of net worth' : '',
-        accent: c.val > 0 ? 'accent' : ''
-      })));
+      const segs = displayClasses.filter(c => c.val > 0);
+      const pctOf = c => displayNet > 0 ? (c.val / displayNet * 100) : 0;
+      const bar = segs.map(c => {
+        const p = pctOf(c);
+        const lbl = p >= 9 ? `${kjrEscape(c.key)} ${p.toFixed(0)}%` : '';  // hide label on cramped slivers
+        return `<div class="alloc-seg" style="flex:${c.val};background:var(${c.color})" title="${kjrEscape(c.key)} · ${fmt(c.val,{dp:0})} (${p.toFixed(0)}%)">${lbl}</div>`;
+      }).join('');
+      const legend = segs.map(c => {
+        const p = pctOf(c);
+        return `<div class="alloc-legend-item"><span class="alloc-legend-dot" style="background:var(${c.color})"></span>${kjrEscape(c.key)} <span class="alloc-legend-amt">${fmt(c.val,{dp:0})}</span> <span class="alloc-legend-pct">${p.toFixed(0)}%</span></div>`;
+      }).join('');
+      assetsEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="alloc-bar">${bar}</div><div class="alloc-legend">${legend}</div></div></div>`;
     }
   }
 
