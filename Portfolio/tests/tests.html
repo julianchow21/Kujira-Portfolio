@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Portfolio Tests</title>
+<style>
+  body { font-family: monospace; padding: 1.5rem; background: #111; color: #ddd; }
+  h1   { font-size: 1rem; color: #aaa; margin-bottom: 1rem; }
+  .suite { margin-bottom: 1.5rem; }
+  .suite-name { font-weight: bold; color: #7df; margin-bottom: .4rem; }
+  .pass { color: #4d4; }
+  .fail { color: #f55; }
+  .summary { margin-top: 1rem; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>Portfolio unit tests</h1>
+<div id="output"></div>
+
+<script src="../Worker/kjr-sortable.js"></script>
+<script>
+/* ── tiny test harness ── */
+var _pass = 0, _fail = 0, _lines = [];
+
+function suite(name) { _lines.push('<div class="suite"><div class="suite-name">' + name + '</div>'); }
+function suiteEnd()  { _lines.push('</div>'); }
+function ok(label, cond) {
+  if (cond) { _pass++; _lines.push('<div class="pass">  ✓ ' + label + '</div>'); }
+  else       { _fail++; _lines.push('<div class="fail">  ✗ ' + label + '</div>'); }
+}
+function eq(label, a, b) { ok(label + ' (' + a + ' === ' + b + ')', a === b); }
+
+/* ── KjrSortable.indexForPointer ── */
+suite('KjrSortable.indexForPointer');
+
+var ifp = KjrSortable.indexForPointer;
+
+/* empty list → 0 */
+eq('empty list', ifp(100, []), 0);
+
+/* single item: pointer above midpoint → 0 */
+eq('single item above mid', ifp(10, [{top:0, height:60}]), 0);
+
+/* single item: pointer below midpoint → 1 */
+eq('single item below mid', ifp(50, [{top:0, height:60}]), 1);
+
+/* pointer exactly AT midpoint: should go after (not before), so index = 1 */
+eq('single item at mid (goes after)', ifp(30, [{top:0, height:60}]), 1);
+
+/* three items: pointer above first midpoint → 0 */
+eq('3 items: before first', ifp(5, [
+  {top:0,  height:60},
+  {top:60, height:60},
+  {top:120,height:60}
+]), 0);
+
+/* three items: between first and second midpoints → 1 */
+eq('3 items: between 1st and 2nd', ifp(55, [
+  {top:0,  height:60},
+  {top:60, height:60},
+  {top:120,height:60}
+]), 1);
+
+/* three items: between second and third midpoints → 2 */
+eq('3 items: between 2nd and 3rd', ifp(115, [
+  {top:0,  height:60},
+  {top:60, height:60},
+  {top:120,height:60}
+]), 2);
+
+/* three items: below last midpoint → 3 */
+eq('3 items: after last', ifp(200, [
+  {top:0,  height:60},
+  {top:60, height:60},
+  {top:120,height:60}
+]), 3);
+
+/* pointer above first item top → 0 */
+eq('pointer above first item', ifp(-10, [{top:0, height:60}]), 0);
+
+/* pointer well below last item → n */
+eq('pointer below last item', ifp(9999, [{top:0,height:40},{top:40,height:40}]), 2);
+
+/* variable heights */
+eq('variable heights: first half', ifp(19, [{top:0,height:40},{top:40,height:80}]), 0);
+eq('variable heights: second slot', ifp(25, [{top:0,height:40},{top:40,height:80}]), 1);
+eq('variable heights: after last',  ifp(90, [{top:0,height:40},{top:40,height:80}]), 2);
+
+suiteEnd();
+
+/* ── KjrSortable API smoke test ── */
+suite('KjrSortable.create — null-safe / guards');
+
+ok('create with null returns null', KjrSortable.create(null) === null);
+
+var div = document.createElement('div');
+var s = KjrSortable.create(div, { enabled: false });
+ok('create returns instance',   s !== null);
+ok('isEnabled false on start',  s.isEnabled() === false);
+s.enable();
+ok('enable() sets isEnabled',   s.isEnabled() === true);
+s.disable();
+ok('disable() clears isEnabled', s.isEnabled() === false);
+ok('getOrder empty container',   JSON.stringify(s.getOrder()) === '[]');
+s.destroy();
+ok('destroy does not throw',     true);
+
+suiteEnd();
+
+/* ── KjrSortable VERSION ── */
+suite('KjrSortable meta');
+ok('VERSION is string', typeof KjrSortable.VERSION === 'string');
+ok('VERSION is 1.0',    KjrSortable.VERSION === '1.0');
+suiteEnd();
+
+/* ── render ── */
+var total = _pass + _fail;
+_lines.push('<div class="summary ' + (_fail ? 'fail' : 'pass') + '">' +
+  _pass + '/' + total + ' passed' + (_fail ? ' — ' + _fail + ' FAILED' : ' — all green') +
+  '</div>');
+document.getElementById('output').innerHTML = _lines.join('');
+</script>
+</body>
+</html>
