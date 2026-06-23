@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   KUJIRA SHARED — kjr-sortable.js   (KJR_SORTABLE_VERSION 1.0)
+   KUJIRA SHARED — kjr-sortable.js   (KJR_SORTABLE_VERSION 1.1)
    Reusable pointer-events drag-to-reorder engine. App-agnostic.
-   Loaded by a plain <script src="kjr-sortable.js?v=1.0"> (exposes
+   Loaded by a plain <script src="kjr-sortable.js?v=1.1"> (exposes
    window.KjrSortable); also require()-able from node for unit tests.
 
    CSS contract (host provides these classes):
@@ -19,7 +19,7 @@
 (function (root) {
   'use strict';
 
-  var VERSION = '1.0';
+  var VERSION = '1.1';
 
   /* ── Pure helper ─────────────────────────────────────────────────────
      indexForPointer(pointerY, itemRects) -> insertion index (0..n)
@@ -220,6 +220,7 @@
       if (activeId !== null) _commit(); /* cancel in-progress drag */
     }
     function isEnabled()  { return enabled; }
+    function isDragging() { return activeId !== null; }
     function getOrder()   {
       var ids = [];
       var children = containerEl.querySelectorAll(':scope > ' + itemSel);
@@ -234,7 +235,7 @@
       containerEl.removeEventListener('pointerdown', _onPointerDown);
     }
 
-    return { enable: enable, disable: disable, isEnabled: isEnabled, getOrder: getOrder, destroy: destroy };
+    return { enable: enable, disable: disable, isEnabled: isEnabled, isDragging: isDragging, getOrder: getOrder, destroy: destroy };
   }
 
   /* ── exports ── */

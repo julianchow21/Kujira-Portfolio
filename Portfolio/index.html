@@ -427,18 +427,25 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   .cb-axes-row{grid-template-columns:1fr !important}
 }
 /* ── Dashboard arrange mode ── */
+/* Grip lives on the LEFT edge, vertically centred, clear of each card's own
+   top-right controls (CPF toggle, chart pin/refresh/delete). */
 .kjr-drag-handle{
-  position:absolute;top:10px;right:10px;width:28px;height:28px;
+  position:absolute;top:50%;left:-13px;transform:translateY(-50%);
+  width:30px;height:46px;
   display:flex;align-items:center;justify-content:center;
-  background:var(--bg3);border:1px solid var(--border);border-radius:6px;
-  cursor:grab;font-size:15px;color:var(--text3);z-index:10;
-  touch-action:none;user-select:none;
+  background:var(--accent,#a78bfa);border:1px solid var(--border);border-radius:9px;
+  cursor:grab;font-size:16px;color:#fff;z-index:40;
+  touch-action:none;user-select:none;box-shadow:0 3px 10px rgba(0,0,0,.4);
 }
-.kjr-drag-handle:hover{color:var(--text);background:var(--bg2)}
+.kjr-drag-handle:hover{filter:brightness(1.1)}
 .kjr-drag-handle:active{cursor:grabbing}
-.dash-arranging #dash-stack > [data-wid]{position:relative;outline:1px dashed var(--border);border-radius:10px}
-.kjr-sortable-dragging{box-shadow:0 8px 32px rgba(0,0,0,.35);border-radius:10px;opacity:.95}
-.kjr-sortable-placeholder{background:var(--bg2);border:2px dashed var(--border);border-radius:10px;margin-top:16px}
+/* While arranging, give room on the left for the grip and freeze each card's
+   own buttons so a stray tap can never re-render the dashboard mid-drag. */
+.dash-arranging #dash-stack{padding-left:20px}
+.dash-arranging #dash-stack > [data-wid]{position:relative;outline:1px dashed var(--border);border-radius:12px}
+.dash-arranging #dash-stack > [data-wid] .btn{pointer-events:none;opacity:.4}
+.kjr-sortable-dragging{box-shadow:0 14px 40px rgba(0,0,0,.5);border-radius:12px;transform:scale(1.01)}
+.kjr-sortable-placeholder{background:color-mix(in srgb,var(--accent,#a78bfa) 12%,transparent);border:2px dashed var(--accent,#a78bfa);border-radius:12px}
 </style>
 </head>
 <body>
@@ -1048,7 +1055,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
 <script src="Worker/kjr-core.js?v=1.7"></script>
-<script src="Worker/kjr-sortable.js?v=1.0.1"></script>
+<script src="Worker/kjr-sortable.js?v=1.1"></script>
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
    KUJIRA PORTFOLIO — Finance Tracker
@@ -1058,8 +1065,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.25';
-const APP_DISPLAY_VERSION = 'v2.25 (23 Jun)';
+const APP_VERSION = 'v2.26';
+const APP_DISPLAY_VERSION = 'v2.26 (23 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -7155,6 +7162,9 @@ function toggleArrange(){
 }
 
 function renderDashboard(){
+  // Never reflow the stack mid-drag (a price refresh or stray event would
+  // destroy the lifted card and leave it stuck).
+  if (_dashSortable && _dashSortable.isDragging()) return;
   setRenderCcy('dashboard');
   const nwEl = document.getElementById('dash-networth');
   if (!nwEl) return;
