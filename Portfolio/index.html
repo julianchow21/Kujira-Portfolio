@@ -426,6 +426,19 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   .cb-palette-col{border-right:none !important;border-bottom:1px solid var(--border);max-height:200px !important}
   .cb-axes-row{grid-template-columns:1fr !important}
 }
+/* ── Dashboard arrange mode ── */
+.kjr-drag-handle{
+  position:absolute;top:10px;right:10px;width:28px;height:28px;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--bg3);border:1px solid var(--border);border-radius:6px;
+  cursor:grab;font-size:15px;color:var(--text3);z-index:10;
+  touch-action:none;user-select:none;
+}
+.kjr-drag-handle:hover{color:var(--text);background:var(--bg2)}
+.kjr-drag-handle:active{cursor:grabbing}
+.dash-arranging #dash-stack > [data-wid]{outline:1px dashed var(--border);border-radius:10px}
+.kjr-sortable-dragging{box-shadow:0 8px 32px rgba(0,0,0,.35);border-radius:10px;opacity:.95}
+.kjr-sortable-placeholder{background:var(--bg2);border:2px dashed var(--border);border-radius:10px;margin-top:16px}
 </style>
 </head>
 <body>
@@ -469,17 +482,18 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
   <!-- DASHBOARD -->
   <section class="page" id="page-dashboard">
-    <div class="page-head"><div><div class="page-title">Dashboard</div></div><div id="dash-integrity-pill"></div></div>
-    <div id="dash-networth"></div>
+    <div class="page-head"><div><div class="page-title">Dashboard</div></div><div style="display:flex;align-items:center;gap:10px"><button id="dash-arrange-btn" class="btn btn-sm btn-ghost" onclick="toggleArrange()" style="display:none">Arrange</button><div id="dash-integrity-pill"></div></div></div>
     <div id="dash-integrity"></div>
-    <div id="dash-assets"></div>
-    <div id="dash-ef"></div>
-    <div id="dash-targets"></div>
-    <div id="dash-movers"></div>
-    <div id="dash-cpf"></div>
+    <div id="dash-stack">
+      <div id="dash-networth" data-wid="networth"></div>
+      <div id="dash-assets"   data-wid="assets"></div>
+      <div id="dash-ef"       data-wid="ef"></div>
+      <div id="dash-targets"  data-wid="targets"></div>
+      <div id="dash-movers"   data-wid="movers"></div>
+      <div id="dash-cpf"      data-wid="cpf"></div>
+    </div>
     <!-- Chart Builder — buildable dashboard charts -->
     <div id="stocks-builder"></div>
-    <div id="saved-charts-container"></div>
   </section>
 
   <!-- STOCKS -->
@@ -1034,6 +1048,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
 <script src="Worker/kjr-core.js?v=1.7"></script>
+<script src="Worker/kjr-sortable.js?v=1.0"></script>
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
    KUJIRA PORTFOLIO — Finance Tracker
@@ -1043,8 +1058,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.24';
-const APP_DISPLAY_VERSION = 'v2.24 (22 Jun)';
+const APP_VERSION = 'v2.25';
+const APP_DISPLAY_VERSION = 'v2.25 (23 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -4717,8 +4732,11 @@ let _pbHistCache = {};                 // memory-only: { ysym: { range: {ccy, po
 const _pbCharts = {};                  // canvasId -> Chart instance
 const PB_PALETTE = ['#a78bfa','#2dd4bf','#f59e0b','#f87171','#60a5fa','#34d399','#fb923c','#c084fc','#38bdf8','#4ade80','#facc15','#e879f9'];
 const PB_STATE_KEY = 'kjr_pb_cb_state_v1';
-const PB_SAVED_KEY = 'kjr_portfolio_saved_charts';
+const PB_SAVED_KEY  = 'kjr_portfolio_saved_charts';
 const PB_SEEDED_KEY = 'kjr_pb_defaults_seeded_v1';
+const DASH_LAYOUT_KEY = 'kjr_portfolio_dash_layout';
+function loadDashLayout(){ try{ const r = JSON.parse(localStorage.getItem(DASH_LAYOUT_KEY)||'[]'); return Array.isArray(r)?r:[]; }catch(e){ return []; } }
+function saveDashLayout(ids){ try{ localStorage.setItem(DASH_LAYOUT_KEY, JSON.stringify(ids)); }catch(e){} }
 const PB_PERIODS = { ONE_MONTH:'1mo', THREE_MONTHS:'3mo', SIX_MONTHS:'6mo', ONE_YEAR:'1y', ALL:'all' };
 const PB_PERIOD_LABELS = { ONE_MONTH:'1M', THREE_MONTHS:'3M', SIX_MONTHS:'6M', ONE_YEAR:'1Y', ALL:'All' };
 const PB_SERIES_MODES = ['total','split','single','cpfCompare'];   // series-source view modes
@@ -5566,18 +5584,21 @@ function pbSaveChart(){
 }
 
 function pbRenderAllSaved(){
-  const container = document.getElementById('saved-charts-container');
-  if (!container) return;
+  const stack = document.getElementById('dash-stack');
+  if (!stack) return;
+  // Remove only chart cards, never wipe the fixed blocks.
+  stack.querySelectorAll(':scope > [data-wid^="chart:"]').forEach(el => el.remove());
   const charts = pbLoadSaved();
-  container.innerHTML = charts.length ? '' : '';
   charts.forEach(cfg => _pbRenderOneSaved(cfg));
+  _applyDashLayout();
 }
 function _pbRenderOneSaved(cfg){
-  const container = document.getElementById('saved-charts-container');
-  if (!container) return;
+  const stack = document.getElementById('dash-stack');
+  if (!stack) return;
   const wrap = document.createElement('div');
   wrap.className = 'saved-chart-card card';
   wrap.id = 'pb-sc-' + cfg.id;
+  wrap.setAttribute('data-wid', 'chart:' + cfg.id);
   const src = pbSource(cfg);
   const flds = pbFields(cfg);
   const meta = src.kind === 'series'
@@ -5602,7 +5623,7 @@ function _pbRenderOneSaved(cfg){
       <div id="pb-sc-wrap-${cfg.id}" style="height:260px"><canvas id="pb-sc-canvas-${cfg.id}"></canvas></div>
       <div id="pb-sc-summary-${cfg.id}" style="font-size:11px;color:var(--text3);margin-top:8px;display:flex;gap:14px;flex-wrap:wrap"></div>
     </div>`;
-  container.appendChild(wrap);
+  stack.appendChild(wrap);
   const host = { canvasId:'pb-sc-canvas-'+cfg.id, wrapEl: wrap.querySelector('#pb-sc-wrap-'+cfg.id),
                  emptyEl: wrap.querySelector('#pb-sc-empty-'+cfg.id), summaryEl: wrap.querySelector('#pb-sc-summary-'+cfg.id) };
   _pbDrawInto(host, cfg);
@@ -7081,6 +7102,59 @@ function autoSnapshot(){
   takeSnapshot({ noSave: true }); // boot already persists; avoid an extra sync
 }
 
+/* ── Dashboard arrange mode ─────────────────────────────────────────────── */
+let _dashArrange  = false;
+let _dashSortable = null;
+
+function _applyDashLayout(){
+  const stack = document.getElementById('dash-stack');
+  if (!stack) return;
+  const order = loadDashLayout();
+  if (order.length){
+    order.forEach(id => {
+      const el = stack.querySelector(':scope > [data-wid="' + id + '"]');
+      if (el) stack.appendChild(el);
+    });
+  }
+  _dashDecorate();
+  // Lazy-create sortable after stack exists.
+  if (!_dashSortable && typeof KjrSortable !== 'undefined'){
+    _dashSortable = KjrSortable.create(stack, {
+      itemSelector:   '[data-wid]',
+      handleSelector: '.kjr-drag-handle',
+      idAttr:         'data-wid',
+      enabled:        _dashArrange,
+      onReorder: function(ids){ saveDashLayout(ids); }
+    });
+  }
+}
+
+function _dashDecorate(){
+  const stack = document.getElementById('dash-stack');
+  if (!stack) return;
+  // Remove existing handles so re-decoration is idempotent.
+  stack.querySelectorAll('.kjr-drag-handle').forEach(h => h.remove());
+  if (!_dashArrange) return;
+  stack.querySelectorAll(':scope > [data-wid]').forEach(function(el){
+    if (!el.innerHTML.trim()) return; // skip empty blocks (CPF off, etc.)
+    const h = document.createElement('div');
+    h.className = 'kjr-drag-handle';
+    h.title = 'Drag to reorder';
+    h.innerHTML = '&#9776;'; // ☰ grip
+    el.style.position = 'relative';
+    el.appendChild(h);
+  });
+}
+
+function toggleArrange(){
+  _dashArrange = !_dashArrange;
+  document.body.classList.toggle('dash-arranging', _dashArrange);
+  if (_dashSortable){ _dashArrange ? _dashSortable.enable() : _dashSortable.disable(); }
+  const btn = document.getElementById('dash-arrange-btn');
+  if (btn) btn.textContent = _dashArrange ? 'Done' : 'Arrange';
+  _dashDecorate();
+}
+
 function renderDashboard(){
   setRenderCcy('dashboard');
   const nwEl = document.getElementById('dash-networth');
@@ -7184,8 +7258,13 @@ function renderDashboard(){
   // Charts only when the tab is visible (Chart.js needs a sized canvas).
   const visible = document.getElementById('page-dashboard').classList.contains('active');
   if (visible && typeof Chart !== 'undefined'){
-    renderChartBuilder();   // Chart Builder card + seeded + saved charts
+    renderChartBuilder();   // Chart Builder card + seeded + saved charts (also calls _applyDashLayout)
+  } else {
+    _applyDashLayout();
   }
+  // Show Arrange button once content is present.
+  const arrangeBtn = document.getElementById('dash-arrange-btn');
+  if (arrangeBtn) arrangeBtn.style.display = '';
 }
 
 /* ─── Emergency fund widget ─────────────────────────────────────────────
