@@ -426,6 +426,9 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   .cb-palette-col{border-right:none !important;border-bottom:1px solid var(--border);max-height:200px !important}
   .cb-axes-row{grid-template-columns:1fr !important}
 }
+/* ── Holdings table pager + note ── */
+.tbl-pager{display:flex;align-items:center;justify-content:center;gap:14px;padding:14px 12px 4px;flex-wrap:wrap}
+.tbl-note{padding:8px 12px 4px;text-align:right;font-size:11px}
 /* ── Dashboard arrange mode ── */
 /* Grip lives on the LEFT edge, vertically centred, clear of each card's own
    top-right controls (CPF toggle, chart pin/refresh/delete). */
@@ -1065,8 +1068,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.26';
-const APP_DISPLAY_VERSION = 'v2.26 (23 Jun)';
+const APP_VERSION = 'v2.27';
+const APP_DISPLAY_VERSION = 'v2.27 (23 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1769,7 +1772,7 @@ function setStockSort(key){
   DB.settings.stocksSort = cur.key !== key ? { key, dir:'asc' }
     : cur.dir === 'asc' ? { key, dir:'desc' }
     : { key:null, dir:null };
-  saveData(); renderStocks();
+  _stocksPage = 0; saveData(); renderStocks();
 }
 function setWatchlistSort(key){
   const cur = DB.settings.watchlistSort || {};
@@ -3418,6 +3421,8 @@ function fxFreshnessText(){
    ═══════════════════════════════════════════════════════════════════════ */
 let _autoRefreshTimer = null;
 let _autoTickInFlight = false;
+let _stockRefreshInFlight = false;   // dedupe manual click vs auto-tick price pulls
+let _cryptoRefreshInFlight = false;
 
 /* ── Undo / Redo ─────────────────────────────────────────────────────────
    Snapshots of DB taken before each user-initiated mutation (modal save,
@@ -3568,6 +3573,8 @@ function priceFor(table, item){
 async function refreshStockPrices(opts = {}){
   if (!DB.stocks.length && !(DB.watchlist || []).length){ if (!opts.silent) showToast('No stocks to refresh'); return; }
   if (!getSyncUrl()){ if (!opts.silent) showToast('Set the Apps Script URL first', 'error'); return; }
+  if (_stockRefreshInFlight){ if (!opts.silent) showToast('Price refresh already running'); return; }
+  _stockRefreshInFlight = true;
   const btn = document.getElementById('btn-refresh-stocks');
   if (btn) btn.disabled = true;
   try {
@@ -3599,6 +3606,7 @@ async function refreshStockPrices(opts = {}){
   } catch (err) {
     showToast('Price refresh failed: ' + err.message, 'error');
   } finally {
+    _stockRefreshInFlight = false;
     if (btn) btn.disabled = false;
   }
 }
@@ -3629,6 +3637,8 @@ async function refreshFundamentals(symbols){
 async function refreshCryptoPrices(){
   if (!DB.crypto.length){ showToast('No coins to refresh'); return; }
   if (!getSyncUrl()){ showToast('Set the Apps Script URL first', 'error'); return; }
+  if (_cryptoRefreshInFlight){ showToast('Crypto refresh already running'); return; }
+  _cryptoRefreshInFlight = true;
   const btn = document.getElementById('btn-refresh-crypto');
   if (btn) btn.disabled = true;
   try {
@@ -3654,6 +3664,7 @@ async function refreshCryptoPrices(){
   } catch (err) {
     showToast('Crypto refresh failed: ' + err.message, 'error');
   } finally {
+    _cryptoRefreshInFlight = false;
     if (btn) btn.disabled = false;
   }
 }
@@ -4259,6 +4270,8 @@ function sharesHeldAsOf(stockId, asOfDate, excludeTxnId){
    ═══════════════════════════════════════════════════════════════════════ */
 /* ─── Holdings filter state (ephemeral, not persisted) ─────────────────── */
 let _stocksFilter  = { sector:'', market:'' };
+let _stocksPage    = 0;                 // 0-based page for the Holdings table
+const STOCKS_PAGE_SIZE = 50;            // rows per page; pager only shows beyond this
 let _sfText = 'No prices yet';
 let _sfCls  = '';
 let _lastStockRows = [];  // cache for CSV export — always reflects what's on screen
@@ -4630,8 +4643,17 @@ function renderStocks(){
     });
   }
 
-  // Cache for CSV export.
+  // Cache for CSV export (always the FULL filtered set, not just the page).
   _lastStockRows = filteredRows;
+
+  // Pagination: only the visible tbody is paged; summary + tfoot stay full-set.
+  const totalRows = filteredRows.length;
+  const pageCount = Math.max(1, Math.ceil(totalRows / STOCKS_PAGE_SIZE));
+  if (_stocksPage > pageCount - 1) _stocksPage = pageCount - 1;
+  if (_stocksPage < 0) _stocksPage = 0;
+  const pageRows = totalRows > STOCKS_PAGE_SIZE
+    ? filteredRows.slice(_stocksPage * STOCKS_PAGE_SIZE, (_stocksPage + 1) * STOCKS_PAGE_SIZE)
+    : filteredRows;
 
   const dc = displayCcy();
   const cols = orderedStockCols().filter(c => c.visible);
@@ -4655,16 +4677,16 @@ function renderStocks(){
 
   // Combined card-head right: filters + action buttons + freshness — shared by all table states.
   const cardHeadRight = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-    <select id="sf-market" class="fi fi-sm" onchange="_stocksFilter.market=this.value; renderStocks()">
+    <select id="sf-market" class="fi fi-sm" onchange="_stocksFilter.market=this.value; _stocksPage=0; renderStocks()">
       <option value="">All markets</option>
       <option value="SGX"${_stocksFilter.market==='SGX'?' selected':''}>SGX</option>
       <option value="US"${_stocksFilter.market==='US'?' selected':''}>US</option>
     </select>
-    <select id="sf-sector" class="fi fi-sm" onchange="_stocksFilter.sector=this.value; renderStocks()">
+    <select id="sf-sector" class="fi fi-sm" onchange="_stocksFilter.sector=this.value; _stocksPage=0; renderStocks()">
       <option value="">All sectors</option>
       ${sectorOpts}
     </select>
-    ${anyFilter ? `<button class="btn btn-sm btn-ghost" onclick="_stocksFilter={sector:'',market:''}; renderStocks()">Clear</button>` : ''}
+    ${anyFilter ? `<button class="btn btn-sm btn-ghost" onclick="_stocksFilter={sector:'',market:''}; _stocksPage=0; renderStocks()">Clear</button>` : ''}
     <button class="btn btn-primary btn-sm" onclick="openEntityModal('stocks')">＋ Add stock</button>
     <button class="btn btn-sm" onclick="exportHoldingsCSV()">Export CSV</button>
     <button class="btn btn-sm" onclick="refreshStockPrices()" id="btn-refresh-stocks">↻ Refresh prices</button>
@@ -4699,7 +4721,7 @@ function renderStocks(){
         <div class="tbl-wrap"><table class="holdings"><thead><tr>
         ${thSort('symbol', 'Symbol', ' tl sticky-col')}${headCells}<th></th>
       </tr></thead><tbody>
-        ${filteredRows.map(r => {
+        ${pageRows.map(r => {
           const cells = cols.map(c => `<td class="${c.cls}">${c.render(r, ctx)}</td>`).join('');
           const ax = encodeURIComponent(r.ysym);
           return `<tr>
@@ -4713,7 +4735,14 @@ function renderStocks(){
         }).join('')}
       </tbody><tfoot><tr class="totals-row">
         <td class="tl sticky-col"><strong>Total</strong></td>${totCells}<td></td>
-      </tr></tfoot></table></div></div>
+      </tr></tfoot></table></div>
+        ${pageCount > 1 ? `<div class="tbl-pager">
+          <button class="btn btn-sm" ${_stocksPage <= 0 ? 'disabled' : ''} onclick="_stocksPage--;renderStocks()">‹ Prev</button>
+          <span class="hint">Page ${_stocksPage + 1} of ${pageCount} · showing ${pageRows.length} of ${totalRows}</span>
+          <button class="btn btn-sm" ${_stocksPage >= pageCount - 1 ? 'disabled' : ''} onclick="_stocksPage++;renderStocks()">Next ›</button>
+        </div>` : ''}
+        <div class="tbl-note hint">Cost basis and average cost use the weighted-average method, not FIFO.</div>
+      </div>
     `;
   }
 
