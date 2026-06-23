@@ -1043,8 +1043,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.23';
-const APP_DISPLAY_VERSION = 'v2.23 (22 Jun)';
+const APP_VERSION = 'v2.24';
+const APP_DISPLAY_VERSION = 'v2.24 (22 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -4721,6 +4721,9 @@ const PB_SAVED_KEY = 'kjr_portfolio_saved_charts';
 const PB_SEEDED_KEY = 'kjr_pb_defaults_seeded_v1';
 const PB_PERIODS = { ONE_MONTH:'1mo', THREE_MONTHS:'3mo', SIX_MONTHS:'6mo', ONE_YEAR:'1y', ALL:'all' };
 const PB_PERIOD_LABELS = { ONE_MONTH:'1M', THREE_MONTHS:'3M', SIX_MONTHS:'6M', ONE_YEAR:'1Y', ALL:'All' };
+const PB_SERIES_MODES = ['total','split','single','cpfCompare'];   // series-source view modes
+const PB_CLASS_KEYS = ['stocks','cash','cpf','realestate','crypto']; // net-worth single-class keys
+const PB_CLASS_LABELS = { stocks:'Stocks', cash:'Cash', cpf:'CPF', realestate:'Real Estate', crypto:'Crypto' };
 
 /* Field schemas (per-source; money measures return raw SGD). */
 const PB_HOLDINGS_FIELDS = {
@@ -4778,16 +4781,43 @@ function _pbNetWorthSeries(cfg){
   const cutoff = _pbRangeCutoff(cfg.range);
   const rows = cutoff ? snaps.filter(s => s.date >= cutoff) : snaps;
   const labels = rows.map(s => s.date);
-  const netOf = s => _dashShowCpf ? s.net : (s.net - ((s.byClass && s.byClass.cpf) || 0));
+  const cpfOf = s => (s.byClass && s.byClass.cpf) || 0;
+  const netOf = s => _dashShowCpf ? s.net : (s.net - cpfOf(s));
+  const classMeta = { stocks:['Stocks',0], cash:['Cash',1], cpf:['CPF',2], realestate:['Real Estate',3], crypto:['Crypto',4] };
+  const dot = i => PB_PALETTE[i % PB_PALETTE.length];
+
+  // By class — stacked area of every class (CPF band only when CPF is on).
   if (cfg.seriesMode === 'split'){
-    const classDefs = [['stocks','Stocks',0],['cash','Cash',1],['cpf','CPF',2],['realestate','Real Estate',3],['crypto','Crypto',4]]
-      .filter(([k]) => k !== 'cpf' || _dashShowCpf);
-    return { labels, stacked:true, datasets: classDefs.map(([k,lab,i]) => ({
-      label:lab, data:rows.map(s=>toDisplay((s.byClass&&s.byClass[k])||0,'SGD')),
-      borderColor:PB_PALETTE[i%PB_PALETTE.length], backgroundColor:PB_PALETTE[i%PB_PALETTE.length]+'44',
-      fill:true, borderWidth:1.5, pointRadius:0, tension:0.25, stack:'nw'
-    }))};
+    return { labels, stacked:true, datasets: Object.entries(classMeta)
+      .filter(([k]) => k !== 'cpf' || _dashShowCpf)
+      .map(([k,[lab,i]]) => ({
+        label:lab, data:rows.map(s=>toDisplay((s.byClass&&s.byClass[k])||0,'SGD')),
+        borderColor:dot(i), backgroundColor:dot(i)+'44',
+        fill:true, borderWidth:1.5, pointRadius:0, tension:0.25, stack:'nw'
+      }))};
   }
+  // Single class — isolate one class as its own line.
+  if (cfg.seriesMode === 'single'){
+    const k = classMeta[cfg.seriesClass] ? cfg.seriesClass : 'cash';
+    if (k === 'cpf' && !_dashShowCpf) return { labels:[], datasets:[], hidden:true };
+    const [lab,i] = classMeta[k];
+    return { labels, stacked:false, datasets:[{
+      label:lab, data:rows.map(s=>toDisplay((s.byClass&&s.byClass[k])||0,'SGD')),
+      borderColor:dot(i), backgroundColor:'transparent',
+      fill:false, borderWidth:2, pointRadius:rows.length>30?0:2, tension:0.25
+    }]};
+  }
+  // With vs without CPF — two lines so the CPF contribution is the gap between.
+  if (cfg.seriesMode === 'cpfCompare'){
+    if (!_dashShowCpf) return { labels:[], datasets:[], hidden:true };
+    return { labels, stacked:false, datasets:[
+      { label:'With CPF', data:rows.map(s=>toDisplay(s.net,'SGD')),
+        borderColor:_cssVar('--accent'), backgroundColor:'transparent', fill:false, borderWidth:2, pointRadius:rows.length>30?0:2, tension:0.25 },
+      { label:'Ex-CPF', data:rows.map(s=>toDisplay(s.net - cpfOf(s),'SGD')),
+        borderColor:dot(1), backgroundColor:'transparent', fill:false, borderWidth:2, borderDash:[5,4], pointRadius:rows.length>30?0:2, tension:0.25 }
+    ]};
+  }
+  // Total — single net worth line, follows the dashboard CPF toggle.
   return { labels, stacked:false, datasets:[{
     label:_dashShowCpf?'Net worth':'Net worth (ex-CPF)',
     data:rows.map(s=>toDisplay(netOf(s),'SGD')),
@@ -4859,7 +4889,8 @@ function _pbLoadState(){
         y: raw.y.filter(k => flds[k] && flds[k].type === 'meas'),
         mode: raw.mode === 'timeseries' ? 'timeseries' : 'crosssec',
         range: PB_PERIODS[raw.range] ? raw.range : 'SIX_MONTHS',
-        seriesMode: (raw.seriesMode === 'split' || raw.nwMode === 'byClass') ? 'split' : 'total',
+        seriesMode: PB_SERIES_MODES.includes(raw.seriesMode) ? raw.seriesMode : (raw.nwMode === 'byClass' ? 'split' : 'total'),
+        seriesClass: PB_CLASS_KEYS.includes(raw.seriesClass) ? raw.seriesClass : 'cash',
         tsValue: raw.tsValue === 'positionValue' ? 'positionValue' : 'price',
         tsAvgCost: !!raw.tsAvgCost,
         tsSymbols: Array.isArray(raw.tsSymbols) ? raw.tsSymbols : [],
@@ -4867,7 +4898,7 @@ function _pbLoadState(){
       };
     }
   }catch(e){}
-  return { source:'holdings', x:[], y:[], mode:'crosssec', range:'SIX_MONTHS', seriesMode:'total', tsValue:'price', tsAvgCost:false, tsSymbols:[], customItems:null };
+  return { source:'holdings', x:[], y:[], mode:'crosssec', range:'SIX_MONTHS', seriesMode:'total', seriesClass:'cash', tsValue:'price', tsAvgCost:false, tsSymbols:[], customItems:null };
 }
 function _pbSaveState(){ try{ localStorage.setItem(PB_STATE_KEY, JSON.stringify(pbState)); }catch(e){} }
 let pbState = _pbLoadState();
@@ -4927,9 +4958,16 @@ function _pbEnsureUI(){
           <div style="${rl}">Period</div>
           <div class="btns" id="pb-series-periods" style="display:flex;gap:4px;flex-wrap:wrap"></div>
           <div style="${rl};margin-top:8px">View</div>
-          <div class="btns" style="display:flex;gap:4px">
-            <button class="cb-period-btn" id="pb-series-total" onclick="pbSetSeriesMode('total')">Total</button>
-            <button class="cb-period-btn" id="pb-series-split" onclick="pbSetSeriesMode('split')">By class</button>
+          <select class="fi fi-sm" id="pb-series-view" onchange="pbSetSeriesView(this.value)"></select>
+          <div id="pb-series-class-wrap" style="display:none;flex-direction:column;gap:6px">
+            <div style="${rl};margin-top:4px">Class</div>
+            <select class="fi fi-sm" id="pb-series-class" onchange="pbSetSeriesClass(this.value)">
+              <option value="stocks">Stocks</option>
+              <option value="cash">Cash</option>
+              <option value="cpf">CPF</option>
+              <option value="realestate">Real Estate</option>
+              <option value="crypto">Crypto</option>
+            </select>
           </div>
         </div>
       </div>
@@ -5007,9 +5045,22 @@ function renderChartBuilder(){
   pbRenderChips('x'); pbRenderChips('y');
   _pbRenderSymbolList();
   _pbMarkPeriodBtns();
-  _pbMarkSeriesBtns();
   pbRenderChart();
   pbRenderAllSaved();
+}
+
+/* View options per series source. */
+function _pbSeriesViewOpts(srcKey){
+  return srcKey === 'cpf'
+    ? [['total','Total'],['split','By account']]
+    : [['total','Total'],['split','By class'],['single','Single class'],['cpfCompare','With vs without CPF']];
+}
+/* Short label for a series chart's view, used in the saved-card meta line. */
+function _pbSeriesViewLabel(cfg, src){
+  if (cfg.seriesMode === 'split') return src.key === 'cpf' ? 'by account' : 'by class';
+  if (cfg.seriesMode === 'single') return (PB_CLASS_LABELS[cfg.seriesClass] || 'class').toLowerCase();
+  if (cfg.seriesMode === 'cpfCompare') return 'with vs without CPF';
+  return 'total';
 }
 
 function _pbApplyModeUI(){
@@ -5028,9 +5079,19 @@ function _pbApplyModeUI(){
     if (ctype)      ctype.style.display      = 'none';
     if (modeBtns)   modeBtns.style.display   = 'none';
     if (seriesControls) seriesControls.style.display = 'flex';
-    // Split toggle is labelled per source: net worth splits by class, CPF by account.
-    const splitBtn = document.getElementById('pb-series-split');
-    if (splitBtn) splitBtn.textContent = src.key === 'cpf' ? 'By account' : 'By class';
+    // View options are source-specific; reset to Total if the current view
+    // isn't valid for this source (e.g. cpfCompare after switching to CPF).
+    const viewSel = document.getElementById('pb-series-view');
+    if (viewSel){
+      const opts = _pbSeriesViewOpts(src.key);
+      viewSel.innerHTML = opts.map(([v,l]) => `<option value="${v}">${l}</option>`).join('');
+      if (!opts.some(([v]) => v === pbState.seriesMode)) pbState.seriesMode = 'total';
+      viewSel.value = pbState.seriesMode;
+    }
+    const classWrap = document.getElementById('pb-series-class-wrap');
+    if (classWrap) classWrap.style.display = (src.key === 'networth' && pbState.seriesMode === 'single') ? 'flex' : 'none';
+    const classSel = document.getElementById('pb-series-class');
+    if (classSel) classSel.value = pbState.seriesClass || 'cash';
     pbState.mode = 'crosssec';
   } else if (src.kind === 'crosssec'){
     palettePane.style.display = 'flex';
@@ -5065,17 +5126,11 @@ function pbSetPeriod(k){
   if (!PB_PERIODS[k]) return;
   pbState.range = k; _pbSaveState();
   _pbMarkPeriodBtns();
-  _pbMarkSeriesBtns();
   pbRenderChart();
 }
 function _pbMarkPeriodBtns(){
   document.querySelectorAll('#pb-ts-periods .cb-period-btn, #pb-series-periods .cb-period-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.period === pbState.range));
-}
-function _pbMarkSeriesBtns(){
-  const isSplit = pbState.seriesMode === 'split';
-  const t = document.getElementById('pb-series-total'); if (t) t.classList.toggle('active', !isSplit);
-  const b = document.getElementById('pb-series-split'); if (b) b.classList.toggle('active', isSplit);
 }
 
 /* ── Palette (cross-sectional) ── */
@@ -5174,6 +5229,7 @@ function _pbLiveConfig(){
     source: pbState.source || 'holdings',
     mode: pbState.mode,
     seriesMode: pbState.seriesMode || 'total',
+    seriesClass: pbState.seriesClass || 'cash',
     xFields: [...pbState.x], yFields: [...pbState.y],
     chartType: (document.getElementById('pb-chart-type')||{}).value || 'bar',
     topN: (document.getElementById('pb-topn')||{}).value || 'all',
@@ -5384,7 +5440,7 @@ function _pbDrawInternalSeries(host, cfg, showEmpty, showChart){
       responsive:true, maintainAspectRatio:false, animation:{duration:300},
       interaction:{ mode:'index', intersect:false },
       plugins:{
-        legend:{ display:ser.stacked, position:'bottom', labels:{ color:_cssVar('--text2'), font:{size:11}, boxWidth:12, padding:12 } },
+        legend:{ display: ser.stacked || ser.datasets.length > 1, position:'bottom', labels:{ color:_cssVar('--text2'), font:{size:11}, boxWidth:12, padding:12 } },
         tooltip:{ callbacks:{ label: c => ' ' + c.dataset.label + ': ' + fmt(c.parsed.y, { noConvert:true, dp:0 }) } }
       },
       scales:{
@@ -5456,7 +5512,8 @@ function pbLoadSaved(){
       title: typeof c.title === 'string' ? c.title : 'Chart',
       source: srcKey,
       mode,
-      seriesMode: (c.seriesMode === 'split' || c.nwMode === 'byClass') ? 'split' : 'total',
+      seriesMode: PB_SERIES_MODES.includes(c.seriesMode) ? c.seriesMode : (c.nwMode === 'byClass' ? 'split' : 'total'),
+      seriesClass: PB_CLASS_KEYS.includes(c.seriesClass) ? c.seriesClass : 'cash',
       xFields: Array.isArray(c.xFields) ? c.xFields.filter(k => flds[k] && flds[k].type==='dim') : [],
       yFields: Array.isArray(c.yFields) ? c.yFields.filter(k => flds[k] && flds[k].type==='meas') : [],
       chartType: ['bar','line','doughnut','scatter'].includes(c.chartType) ? c.chartType : 'bar',
@@ -5492,7 +5549,10 @@ function pbSaveChart(){
   const defTitle = src.kind === 'series'
     ? (src.key === 'cpf'
         ? (cfg.seriesMode === 'split' ? 'CPF by account' : 'CPF over time')
-        : (cfg.seriesMode === 'split' ? 'Net worth by class' : 'Net worth over time'))
+        : cfg.seriesMode === 'split'      ? 'Net worth by class'
+        : cfg.seriesMode === 'single'     ? (PB_CLASS_LABELS[cfg.seriesClass] || 'Class') + ' over time'
+        : cfg.seriesMode === 'cpfCompare' ? 'Net worth: with vs without CPF'
+        : 'Net worth over time')
     : cfg.mode === 'timeseries'
     ? 'Price history · ' + PB_PERIOD_LABELS[cfg.range]
     : cfg.xFields.map(k => flds[k]?.label).join(' + ') + ' vs ' + cfg.yFields.map(k => flds[k]?.label).join(' + ');
@@ -5521,7 +5581,7 @@ function _pbRenderOneSaved(cfg){
   const src = pbSource(cfg);
   const flds = pbFields(cfg);
   const meta = src.kind === 'series'
-    ? `${src.key === 'cpf' ? 'CPF' : 'Net worth'} · ${cfg.seriesMode === 'split' ? (src.key === 'cpf' ? 'by account' : 'by class') : 'total'} · ${PB_PERIOD_LABELS[cfg.range] || 'all time'}`
+    ? `${src.key === 'cpf' ? 'CPF' : 'Net worth'} · ${_pbSeriesViewLabel(cfg, src)} · ${PB_PERIOD_LABELS[cfg.range] || 'all time'}`
     : cfg.mode === 'timeseries'
     ? `Price history · ${PB_PERIOD_LABELS[cfg.range]} · ${cfg.tsValue==='positionValue'?'Position value':'Close price'}`
     : `X: ${cfg.xFields.map(k=>flds[k]?.label||k).join(' · ')} · Y: ${cfg.yFields.map(k=>flds[k]?.label||k).join(' · ')} · Top ${cfg.topN} · ${cfg.chartType}`;
@@ -5617,10 +5677,17 @@ function pbSetSource(val){
   _pbSaveState();
   renderChartBuilder();
 }
-function pbSetSeriesMode(mode){
-  pbState.seriesMode = mode === 'split' ? 'split' : 'total';
+function pbSetSeriesView(v){
+  const valid = _pbSeriesViewOpts(pbState.source).some(([k]) => k === v);
+  pbState.seriesMode = valid ? v : 'total';
   _pbSaveState();
-  _pbMarkSeriesBtns();
+  const classWrap = document.getElementById('pb-series-class-wrap');
+  if (classWrap) classWrap.style.display = (pbState.source === 'networth' && pbState.seriesMode === 'single') ? 'flex' : 'none';
+  pbRenderChart();
+}
+function pbSetSeriesClass(c){
+  pbState.seriesClass = ['stocks','cash','cpf','realestate','crypto'].includes(c) ? c : 'cash';
+  _pbSaveState();
   pbRenderChart();
 }
 
