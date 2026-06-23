@@ -153,7 +153,7 @@
       containerEl.classList.add('kjr-sortable-active');
 
       captureEl = handleSel ? handle : item;
-      captureEl.setPointerCapture(activeId);
+      try { captureEl.setPointerCapture(activeId); } catch (_) {}
       captureEl.addEventListener('pointermove',   _onPointerMove);
       captureEl.addEventListener('pointerup',     _onPointerUp);
       captureEl.addEventListener('pointercancel', _onPointerCancel);

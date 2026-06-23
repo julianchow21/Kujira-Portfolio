@@ -436,7 +436,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 }
 .kjr-drag-handle:hover{color:var(--text);background:var(--bg2)}
 .kjr-drag-handle:active{cursor:grabbing}
-.dash-arranging #dash-stack > [data-wid]{outline:1px dashed var(--border);border-radius:10px}
+.dash-arranging #dash-stack > [data-wid]{position:relative;outline:1px dashed var(--border);border-radius:10px}
 .kjr-sortable-dragging{box-shadow:0 8px 32px rgba(0,0,0,.35);border-radius:10px;opacity:.95}
 .kjr-sortable-placeholder{background:var(--bg2);border:2px dashed var(--border);border-radius:10px;margin-top:16px}
 </style>
@@ -1048,7 +1048,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
 <script src="Worker/kjr-core.js?v=1.7"></script>
-<script src="Worker/kjr-sortable.js?v=1.0"></script>
+<script src="Worker/kjr-sortable.js?v=1.0.1"></script>
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
    KUJIRA PORTFOLIO — Finance Tracker
@@ -7140,8 +7140,7 @@ function _dashDecorate(){
     const h = document.createElement('div');
     h.className = 'kjr-drag-handle';
     h.title = 'Drag to reorder';
-    h.innerHTML = '&#9776;'; // ☰ grip
-    el.style.position = 'relative';
+    h.innerHTML = '&#9776;'; // ☰ grip (positioning comes from the .dash-arranging CSS rule)
     el.appendChild(h);
   });
 }
