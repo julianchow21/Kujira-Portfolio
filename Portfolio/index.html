@@ -1034,8 +1034,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.21';
-const APP_DISPLAY_VERSION = 'v2.21 (22 Jun)';
+const APP_VERSION = 'v2.22';
+const APP_DISPLAY_VERSION = 'v2.22 (22 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -4897,7 +4897,7 @@ function _pbEnsureUI(){
     <div id="pb-layout" class="cb-layout" style="display:grid;grid-template-columns:220px 1fr;gap:0;min-height:380px">
 
       <!-- Left rail: field palette (crosssec) OR symbol controls (price history) OR series controls -->
-      <div class="cb-palette-col" style="border-right:1px solid var(--border);padding:14px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;max-height:560px">
+      <div class="cb-palette-col" style="border-right:1px solid var(--border);padding:14px;display:flex;flex-direction:column;gap:8px">
         <div id="pb-palette-pane" style="display:flex;flex-direction:column;gap:8px">
           <div style="${rl}">Available Fields</div>
           <input id="pb-palette-search" class="fi fi-sm" placeholder="Search fields..." oninput="pbFilterPalette(this.value)">
@@ -4966,7 +4966,7 @@ function _pbEnsureUI(){
             <div class="empty-title">Build a chart</div>
             <div class="empty-sub">Pick a source and fields, or switch to Price history.</div>
           </div>
-          <div id="pb-chart-wrap" style="display:none;height:320px;position:relative"><canvas id="pb-live-canvas"></canvas></div>
+          <div id="pb-chart-wrap" style="display:none;flex:1;min-height:320px;position:relative"><canvas id="pb-live-canvas"></canvas></div>
           <div id="pb-summary" style="font-size:11px;color:var(--text3);margin-top:8px;display:flex;gap:14px;flex-wrap:wrap"></div>
         </div>
       </div>
