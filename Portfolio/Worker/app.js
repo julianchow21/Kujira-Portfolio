@@ -12,7 +12,7 @@
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
 const APP_VERSION = 'v2.27';
-const APP_DISPLAY_VERSION = 'v2.28 (24 Jun)';
+const APP_DISPLAY_VERSION = 'v2.29 (24 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
