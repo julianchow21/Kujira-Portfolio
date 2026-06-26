@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script src="Worker/theme-init.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <!-- Content Security Policy: lock down what this page can load and connect to.
      If a future XSS slipped past kjrEscape, the attacker still cannot exfil
@@ -484,6 +485,9 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   </nav>
   <a href="../Trading/" class="nav-btn" style="text-decoration:none;border-left:1px solid var(--border);margin-left:4px;padding-left:14px" title="Kujira Trading dashboard">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/></svg><span class="tb-trading-label">Trading</span>
+  </a>
+  <a href="../Journal/" class="nav-btn" style="text-decoration:none" title="Kujira Journal">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span class="tb-trading-label">Journal</span>
   </a>
   <div class="topbar-actions">
     <div class="ccy-toggle" role="group" aria-label="Display currency">

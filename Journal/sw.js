@@ -1,6 +1,6 @@
 /* Offline app shell. Bump CACHE on every ship so clients pull the new build. */
-const CACHE = 'kjr-journal-v2';
-const SHELL = ['./', './index.html', './icon.svg', './manifest.webmanifest', './lib/kjr-format.js', './lib/kjr-calendar.js'];
+const CACHE = 'kjr-journal-v3';
+const SHELL = ['./', './index.html', './icon.svg', './manifest.webmanifest', './lib/theme-init.js?v=1.0', './lib/kjr-format.js?v=1.0', './lib/kjr-calendar.js?v=1.0'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

@@ -12,7 +12,7 @@
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
 const APP_VERSION = 'v2.27';
-const APP_DISPLAY_VERSION = 'v2.29 (24 Jun)';
+const APP_DISPLAY_VERSION = 'v2.30 (25 Jun)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -2794,8 +2794,8 @@ const ENTITY_SCHEMAS = {
       { key:'symbol',  label:'Symbol',  type:'text',   required:true, placeholder:'AAPL or D05', hint:'Yahoo ticker. For SGX, omit the .SI (we add it).' },
       { key:'market',  label:'Market',  type:'select', required:true, options:[['SGX','SGX (Singapore)'],['US','US (NYSE/NASDAQ)']], default:'US' },
       { key:'sector',  label:'Sector',  type:'select', options:GICS_SECTOR_OPTIONS, default:'', hint:'Optional. Drives the sector allocation view and the cyclical/defensive split.' },
-      { key:'shares',  label:'Shares',  type:'number', required:true, step:'0.0001', placeholder:'100', hint:'Your current holding. If you log trades below, this is treated as the opening position and trades adjust it.' },
-      { key:'avgCost', label:'Avg cost per share', type:'number', required:true, step:'0.0001', placeholder:'150.00' },
+      { key:'shares',  label:'Shares',  type:'number', required:true, step:'0.0001', min:'0', placeholder:'100', hint:'Your current holding. If you log trades below, this is treated as the opening position and trades adjust it.' },
+      { key:'avgCost', label:'Avg cost per share', type:'number', required:true, step:'0.0001', min:'0', placeholder:'150.00' },
       { key:'currency', label:'Cost currency', type:'select', options:[['USD','USD'],['SGD','SGD']], default:'USD', hint:'Currency the avg cost is stated in. Defaults match the market.' },
       { key:'divPerShare', label:'Annual dividend / share', type:'number', step:'0.0001', min:'0', placeholder:'0.00', hint:'Optional, in the cost currency. Drives projected dividend income and yield on cost. Leave blank for non-payers.' },
       { key:'divExDate',  label:'Ex-dividend date', type:'date', hint:'Next ex-dividend date. Drives the upcoming payments list (next 90 days).' },
@@ -2820,8 +2820,8 @@ const ENTITY_SCHEMAS = {
       { key:'date',    label:'Trade date', type:'date', required:true },
       { key:'side',    label:'Side', type:'select', required:true, options:[['buy','Buy'],['sell','Sell']], default:'buy' },
       { key:'shares',  label:'Shares', type:'number', required:true, step:'0.0001', placeholder:'10' },
-      { key:'price',   label:'Price per share', type:'number', required:true, step:'0.0001', placeholder:'150.00', hint:'In the stock\'s own currency.' },
-      { key:'fees',    label:'Fees / commission', type:'number', step:'0.01', placeholder:'0.00' },
+      { key:'price',   label:'Price per share', type:'number', required:true, step:'0.0001', min:'0', placeholder:'150.00', hint:'In the stock\'s own currency.' },
+      { key:'fees',    label:'Fees / commission', type:'number', step:'0.01', min:'0', placeholder:'0.00' },
       { key:'cashAccountId', label:'Funded from (cash account)', type:'select',
         optionsFn: () => [['', '— Not linked —']].concat((DB.cash || []).map(c => [c.id, (c.name || '?') + ' · ' + (c.currency || 'SGD')])),
         hint:'Buys debit this account, sells credit it. Use a same-currency account.' },
@@ -2849,8 +2849,8 @@ const ENTITY_SCHEMAS = {
     fields: [
       { key:'symbol',       label:'Symbol', type:'text', required:true, placeholder:'BTC', hint:'Common ticker. Mapped to CoinGecko id automatically for known coins.' },
       { key:'coingeckoId',  label:'CoinGecko ID (override)', type:'text', placeholder:'bitcoin', hint:'Leave blank if symbol is in the common list.' },
-      { key:'amount',       label:'Amount', type:'number', required:true, step:'0.00000001', placeholder:'0.5' },
-      { key:'avgCost',      label:'Avg cost per coin', type:'number', step:'0.0001', placeholder:'45000' },
+      { key:'amount',       label:'Amount', type:'number', required:true, step:'0.00000001', min:'0', placeholder:'0.5' },
+      { key:'avgCost',      label:'Avg cost per coin', type:'number', step:'0.0001', min:'0', placeholder:'45000' },
       { key:'currency',     label:'Cost currency', type:'select', options:[['USD','USD'],['SGD','SGD']], default:'USD' },
       { key:'notes',        label:'Notes', type:'textarea' }
     ],
@@ -2864,7 +2864,7 @@ const ENTITY_SCHEMAS = {
     title: 'property',
     fields: [
       { key:'name',     label:'Name / address', type:'text', required:true, placeholder:'HDB, Punggol' },
-      { key:'value',    label:'Current value (SGD)', type:'number', required:true, step:'1', placeholder:'500000' },
+      { key:'value',    label:'Current value (SGD)', type:'number', required:true, step:'1', min:'0', placeholder:'500000' },
       { key:'notes',    label:'Notes', type:'textarea' }
     ],
     defaults: {},
@@ -2875,9 +2875,9 @@ const ENTITY_SCHEMAS = {
     fields: [
       { key:'name',     label:'Account name', type:'text', required:true, placeholder:'DBS Multiplier' },
       { key:'account',  label:'Account type', type:'select', options:[['Savings','Savings'],['Current','Current'],['FD','Fixed deposit'],['MMF','Money market'],['Brokerage','Brokerage cash'],['Foreign','Foreign currency'],['Other','Other']], default:'Savings' },
-      { key:'amount',   label:'Balance', type:'number', step:'0.01', placeholder:'10000', hint:'For Brokerage accounts the balance is calculated from movements + linked trades below, leave blank.' },
+      { key:'amount',   label:'Balance', type:'number', step:'0.01', min:'0', placeholder:'10000', hint:'For Brokerage accounts the balance is calculated from movements + linked trades below, leave blank.' },
       { key:'currency', label:'Currency', type:'select', options:[['SGD','SGD'],['USD','USD'],['EUR','EUR'],['GBP','GBP'],['HKD','HKD'],['JPY','JPY'],['AUD','AUD'],['MYR','MYR'],['Other','Other']], default:'SGD' },
-      { key:'apy',      label:'Interest rate % p.a. (APY)', type:'number', step:'0.01', placeholder:'0.00', hint:'Annual yield. Shown as projected monthly / annual interest. Leave blank for non-interest-bearing accounts.' },
+      { key:'apy',      label:'Interest rate % p.a. (APY)', type:'number', step:'0.01', min:'0', placeholder:'0.00', hint:'Annual yield. Shown as projected monthly / annual interest. Leave blank for non-interest-bearing accounts.' },
       { key:'notes',    label:'Notes', type:'textarea' }
     ],
     defaults: { account:'Savings', currency:'SGD' }
@@ -2895,7 +2895,7 @@ const ENTITY_SCHEMAS = {
         optionsFn: () => [['', '— n/a —']].concat((DB.cash || []).map(c => [c.id, (c.name || '?') + ' · ' + (c.currency || 'SGD')])),
         hint:'Source account. Leave as n/a unless this is a transfer.' },
       { key:'date',   label:'Date', type:'date', required:true },
-      { key:'amount', label:'Amount', type:'number', required:true, step:'0.01', placeholder:'1000.00', hint:'Amount leaving the source, in its currency.' },
+      { key:'amount', label:'Amount', type:'number', required:true, step:'0.01', min:'0', placeholder:'1000.00', hint:'Amount leaving the source, in its currency.' },
       { key:'amountIn', label:'Amount received (cross-currency transfers)', type:'number', step:'0.01', placeholder:'auto',
         hint:'Only for transfers where the two accounts use different currencies. Leave blank if same currency.' },
       { key:'notes',  label:'Notes', type:'textarea' }
@@ -2911,7 +2911,7 @@ const ENTITY_SCHEMAS = {
         hint:'Use negative amount for outflows (withdrawals or transfer-out).' },
       { key:'account',  label:'Account', type:'select', required:true,
         options:[['OA','OA'],['SA','SA'],['MA','MA'],['RA','RA']], default:'OA' },
-      { key:'amount',   label:'Amount (SGD)', type:'number', required:true, step:'0.01', placeholder:'850.00' },
+      { key:'amount',   label:'Amount (SGD)', type:'number', required:true, step:'0.01', min:'0', placeholder:'850.00' },
       { key:'source',   label:'Source / reference', type:'text', placeholder:'March salary, year-end interest, etc.' },
       { key:'notes',    label:'Notes', type:'textarea' }
     ],
@@ -2936,7 +2936,7 @@ const ENTITY_SCHEMAS = {
     title: 'expense',
     fields: [
       { key:'date',        label:'Date',        type:'date',   required:true },
-      { key:'amount',      label:'Amount',      type:'number', required:true, step:'0.01', placeholder:'45.50' },
+      { key:'amount',      label:'Amount',      type:'number', required:true, step:'0.01', min:'0', placeholder:'45.50' },
       { key:'currency',    label:'Currency',    type:'select', options:[['SGD','SGD'],['USD','USD'],['EUR','EUR'],['GBP','GBP'],['HKD','HKD'],['JPY','JPY'],['AUD','AUD'],['MYR','MYR']], default:'SGD' },
       { key:'category',    label:'Category',    type:'select', required:true,
         optionsFn: () => (DB.categories && DB.categories.expense || []).map(c => [c, c]),

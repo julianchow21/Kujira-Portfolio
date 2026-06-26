@@ -1,0 +1,1 @@
+(function(){try{var t=localStorage.getItem('kjr-pf-theme-v1');if(t==='dark')document.documentElement.classList.add('dark');else if(t==='light')document.documentElement.classList.remove('dark');}catch(e){}})();
