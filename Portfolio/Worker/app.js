@@ -12,7 +12,7 @@
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
 const APP_VERSION = 'v2.27';
-const APP_DISPLAY_VERSION = 'v2.31 (1 Jul)';
+const APP_DISPLAY_VERSION = 'v2.32 (1 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -2901,7 +2901,8 @@ const ENTITY_SCHEMAS = {
     fields: [
       { key:'name',     label:'Account name', type:'text', required:true, placeholder:'DBS Multiplier' },
       { key:'account',  label:'Account type', type:'select', options:[['Savings','Savings'],['Current','Current'],['FD','Fixed deposit'],['MMF','Money market'],['Brokerage','Brokerage cash'],['Foreign','Foreign currency'],['Other','Other']], default:'Savings' },
-      { key:'amount',   label:'Balance', type:'number', step:'0.01', min:'0', placeholder:'10000', hint:'For Brokerage accounts the balance is calculated from movements + linked trades below, leave blank.' },
+      { key:'amount',   label:'Balance', type:'number', step:'0.01', min:'0', placeholder:'10000', hint:'The balance as of the date on the right. Cash movements dated after it (e.g. auto salary) accrue on top. For Brokerage accounts leave blank — it is calculated from movements + linked trades below.' },
+      { key:'asOf',     label:'Balance as of', type:'date', hint:'Movements dated after this accrue on top; anything on/before is assumed already inside the balance. Defaults to today.' },
       { key:'currency', label:'Currency', type:'select', options:[['SGD','SGD'],['USD','USD'],['EUR','EUR'],['GBP','GBP'],['HKD','HKD'],['JPY','JPY'],['AUD','AUD'],['MYR','MYR'],['Other','Other']], default:'SGD' },
       { key:'apy',      label:'Interest rate % p.a. (APY)', type:'number', step:'0.01', min:'0', placeholder:'0.00', hint:'Annual yield. Shown as projected monthly / annual interest. Leave blank for non-interest-bearing accounts.' },
       { key:'notes',    label:'Notes', type:'textarea' }
@@ -3011,6 +3012,24 @@ function openEntityModal(table, existingId){
     };
     if (typeSel) typeSel.addEventListener('change', syncCashFields);
     syncCashFields();
+  }
+
+  // Cash accounts: default the "Balance as of" anchor to today so a freshly
+  // typed balance means "as of now" and only later movements accrue. Brokerage
+  // balances are fully derived from trades, so the anchor is meaningless there —
+  // hide and clear it when the type is Brokerage.
+  if (table === 'cash'){
+    const acctTypeSel = body.querySelector('[data-fkey="account"]');
+    const asOfEl      = body.querySelector('[data-fkey="asOf"]');
+    const asOfGrp     = asOfEl ? asOfEl.closest('.form-group') : null;
+    if (asOfEl && !asOfEl.value) asOfEl.value = _isoDateSG(new Date());
+    const syncAcctFields = () => {
+      const isBrokerage = acctTypeSel && acctTypeSel.value === 'Brokerage';
+      if (asOfGrp) asOfGrp.style.display = isBrokerage ? 'none' : '';
+      if (isBrokerage && asOfEl) asOfEl.value = '';
+    };
+    if (acctTypeSel) acctTypeSel.addEventListener('change', syncAcctFields);
+    syncAcctFields();
   }
 
   // Wire up market → currency coercion for stocks (nice UX)
@@ -5481,11 +5500,17 @@ function transferInAmount(t){
 }
 
 /* Live balance of any cash account, in its own currency:
-   typed balance (opening) + movements + transfers in/out + linked trade
-   flows. A pure manual account with no activity just shows its typed amount. */
+   typed balance (as-of opening) + later movements + transfers in/out + linked
+   trade flows. A pure manual account with no activity just shows its typed
+   amount. The typed balance is anchored to acct.asOf: anything dated on/before
+   that is assumed already inside it, so only later movements accrue (mirrors
+   the CPF anchor model). No asOf → every movement accrues (legacy behaviour). */
 function deriveCashBalance(acct){
   let bal = Number(acct.amount) || 0;
+  const asOf = acct.asOf || '';
+  const accrues = d => !asOf || String(d || '') > asOf;
   (DB.cashTxns || []).forEach(t => {
+    if (!accrues(t.date)) return;                          // already in the opening
     if (t.type === 'transfer'){
       if (t.fromAccountId === acct.id) bal -= Math.abs(Number(t.amount) || 0);
       if (t.cashAccountId === acct.id) bal += transferInAmount(t);
@@ -5493,7 +5518,7 @@ function deriveCashBalance(acct){
       bal += cashMovementDelta(t);
     }
   });
-  (DB.stockTxns || []).forEach(t => { if (t.cashAccountId === acct.id) bal += cashTradeFlow(t); });
+  (DB.stockTxns || []).forEach(t => { if (t.cashAccountId === acct.id && accrues(t.date)) bal += cashTradeFlow(t); });
   return bal;
 }
 
