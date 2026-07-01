@@ -91,6 +91,28 @@ a{color:var(--blue);text-decoration:none}
 .icon-btn{width:44px;height:44px;border-radius:var(--radius);border:1px solid var(--glass-border);background:var(--glass);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text2);transition:all 0.15s;flex-shrink:0}
 @media (hover:hover){.icon-btn:hover{background:var(--glass-strong);color:var(--text)}}
 .icon-btn svg{width:15px;height:15px}
+.icon-btn[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+
+/* PRIVACY MODE — blur every money figure. Blur is em-based so it scales with
+   the text size and stays unreadable from the 40px net-worth hero down to 12px
+   table cells. On pointer devices, hovering a single figure reveals just that
+   one so the owner can still check a number without switching the mode off. */
+html.privacy .dash-hero-value,
+html.privacy .h-summary-value,
+html.privacy .metric-value,
+html.privacy .alloc-legend-amt,
+html.privacy .mover-px,
+html.privacy .money-chip,
+html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user-select:none;user-select:none;cursor:default}
+@media (hover:hover){
+  html.privacy .dash-hero-value:hover,
+  html.privacy .h-summary-value:hover,
+  html.privacy .metric-value:hover,
+  html.privacy .alloc-legend-amt:hover,
+  html.privacy .mover-px:hover,
+  html.privacy .money-chip:hover,
+  html.privacy td.num:hover{filter:none;-webkit-user-select:auto;user-select:auto}
+}
 
 /* SYNC PILL */
 .sync-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;border:1px solid var(--glass-border);background:var(--glass);font-size:12px;font-weight:600;color:var(--text2);font-family:inherit;cursor:pointer;transition:all 0.15s;white-space:nowrap}
@@ -498,6 +520,9 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     <a class="icon-btn docs-link" href="https://app.notion.com/p/3858d0753fdb818083facfd5bef9602e" target="_blank" rel="noopener noreferrer" title="How it works (docs)" aria-label="How it works">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
     </a>
+    <button id="privacy-toggle" class="icon-btn" data-click="togglePrivacy" title="Hide amounts" aria-label="Hide amounts" aria-pressed="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>
     <button class="icon-btn" data-click="toggleTheme" title="Toggle theme" aria-label="Toggle theme">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
     </button>

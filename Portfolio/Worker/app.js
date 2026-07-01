@@ -12,7 +12,7 @@
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
 const APP_VERSION = 'v2.27';
-const APP_DISPLAY_VERSION = 'v2.30 (25 Jun)';
+const APP_DISPLAY_VERSION = 'v2.31 (1 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -25,6 +25,7 @@ const LK_SYNC_TS   = 'kjr-pf-sync-ts-v1';
 const LK_LAST_PULL = 'kjr-pf-last-pull-v1';
 const LK_LAST_PULL_SRC = 'kjr-pf-last-pull-src-v1';  // 'server' if from doGet._savedAt or doPost.savedAt, else 'client'
 const LK_THEME     = 'kjr-pf-theme-v1';
+const LK_PRIVACY   = 'kjr-pf-privacy-v1';   // blur all money figures (shoulder-surfing guard)
 const LK_PRICE_CACHE = 'kjr-pf-price-cache-v1'; // persisted separately so first paint uses last-known prices
 
 /* Sync constants */
@@ -2203,6 +2204,31 @@ function setThemeChoice(t){
 function toggleTheme(){
   setThemeChoice(currentTheme() === 'dark' ? 'light' : 'dark');
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PRIVACY MODE — blur every money figure so an onlooker cannot read the
+   net worth or balances off the screen. Pure CSS (html.privacy + selectors),
+   so it survives re-renders. State persists in localStorage, per-device.
+   ═══════════════════════════════════════════════════════════════════════ */
+const EYE_SVG     = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+function privacyOn(){ return localStorage.getItem(LK_PRIVACY) === '1'; }
+function applyPrivacy(on){
+  document.documentElement.classList.toggle('privacy', !!on);
+  const btn = document.getElementById('privacy-toggle');
+  if (btn){
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on ? 'Show amounts' : 'Hide amounts';
+    btn.setAttribute('aria-label', btn.title);
+    btn.innerHTML = on ? EYE_OFF_SVG : EYE_SVG;
+  }
+}
+function togglePrivacy(){
+  const on = !privacyOn();
+  localStorage.setItem(LK_PRIVACY, on ? '1' : '0');
+  applyPrivacy(on);
+  showToast(on ? 'Amounts hidden' : 'Amounts shown');
+}
 function updateThemeUI(t){
   t = t || currentTheme();
   document.querySelectorAll('.theme-toggle button').forEach(b => {
@@ -2960,6 +2986,32 @@ function openEntityModal(table, existingId){
   document.getElementById('em-title').textContent = (existing ? 'Edit ' : 'Add ') + schema.title;
   const body = document.getElementById('em-body');
   body.innerHTML = '<div class="form-row">' + schema.fields.map(f => renderField(f, item[f.key])).join('') + '</div>';
+
+  // Cash movements: the source-account and cross-currency "amount received"
+  // fields only make sense for a transfer. For a plain deposit/withdrawal they
+  // are noise, so hide them (and simplify the account label) unless the type is
+  // Transfer. Re-runs on every type change.
+  if (table === 'cashTxns'){
+    const typeSel   = body.querySelector('[data-fkey="type"]');
+    const acctGrp   = body.querySelector('[data-fkey="cashAccountId"]');
+    const fromEl    = body.querySelector('[data-fkey="fromAccountId"]');
+    const amtInEl   = body.querySelector('[data-fkey="amountIn"]');
+    const fromGrp   = fromEl  ? fromEl.closest('.form-group')  : null;
+    const amtInGrp  = amtInEl ? amtInEl.closest('.form-group') : null;
+    const acctLabel = acctGrp ? acctGrp.closest('.form-group').querySelector('.lbl') : null;
+    const acctHint  = acctGrp ? acctGrp.closest('.form-group').querySelector('.hint') : null;
+    const syncCashFields = () => {
+      const isTransfer = typeSel && typeSel.value === 'transfer';
+      if (fromGrp)   fromGrp.style.display  = isTransfer ? '' : 'none';
+      if (amtInGrp)  amtInGrp.style.display = isTransfer ? '' : 'none';
+      if (acctLabel) acctLabel.textContent = (isTransfer ? 'To account' : 'Account') + ' *';
+      if (acctHint)  acctHint.style.display = isTransfer ? '' : 'none';
+      // Drop any stale transfer-only values so a deposit never saves a source.
+      if (!isTransfer){ if (fromEl) fromEl.value = ''; if (amtInEl) amtInEl.value = ''; }
+    };
+    if (typeSel) typeSel.addEventListener('change', syncCashFields);
+    syncCashFields();
+  }
 
   // Wire up market → currency coercion for stocks (nice UX)
   if (table === 'stocks'){
@@ -4349,7 +4401,8 @@ function _pbDrawCrossSectional(host, cfg, showEmpty, showChart){
       const vals = entries.map(([,v]) => _pbVal(v[yKey]||0, f));
       const tot = vals.reduce((s,v)=>s+v,0), avg = vals.length?tot/vals.length:0;
       const mx = vals.length?Math.max(...vals):0, mn = vals.length?Math.min(...vals):0;
-      const fm = v => kjrFmtMeasure(v, f, curSym);
+      // Wrapped in .money-chip so privacy mode blurs these totals too.
+      const fm = v => `<span class="money-chip">${kjrFmtMeasure(v, f, curSym)}</span>`;
       return `<span><strong style="color:${PB_PALETTE[yi%PB_PALETTE.length]}">${f.label}</strong>` +
              (f.agg === 'avg' ? '' : ` · Total: ${fm(tot)}`) + ` · Avg: ${fm(avg)} · Min: ${fm(mn)} · Max: ${fm(mx)}</span>`;
     });
@@ -5505,7 +5558,7 @@ function renderCash(){
   // Currency breakdown
   const byCcy = {};
   rows.forEach(r => { byCcy[r.ccy] = (byCcy[r.ccy] || 0) + r.bal; });
-  const ccyChips = Object.entries(byCcy).map(([k,v]) => `<span class="tag" style="margin-right:6px">${kjrEscape(k)} ${v.toLocaleString('en-SG', {maximumFractionDigits:2})}</span>`).join('');
+  const ccyChips = Object.entries(byCcy).map(([k,v]) => `<span class="tag money-chip" style="margin-right:6px">${kjrEscape(k)} ${v.toLocaleString('en-SG', {maximumFractionDigits:2})}</span>`).join('');
 
   const summaryCards = [
     { label:'Accounts',    value: String(list.length), accent:'accent' },
@@ -5551,10 +5604,16 @@ function renderCashTxns(){
 
   const nameOf = id => { const a = accts.find(x => x.id === id); return a ? a.name : '—'; };
   const ccyOf  = id => { const a = accts.find(x => x.id === id); return a ? (a.currency || 'SGD') : 'SGD'; };
-  const txns = (DB.cashTxns || []).slice().sort((a,b) => String(b.date||'').localeCompare(String(a.date||'')));
+  // Same-day entries (e.g. the auto salary → transfer → assumed-spend trio)
+  // must stay in creation order, not whatever order storage happens to return.
+  // uid()'s Date.now()-based prefix makes id a reliable creation-order key.
+  const txns = (DB.cashTxns || []).slice().sort((a,b) => {
+    const byDate = String(b.date||'').localeCompare(String(a.date||''));
+    return byDate !== 0 ? byDate : String(a.id||'').localeCompare(String(b.id||''));
+  });
 
   const head = `<div class="card">
-      <div class="card-head"><h3>Cash movements</h3>
+      <div class="card-head"><h3>Cash Movements</h3>
         <button class="btn btn-primary btn-sm" data-click="openEntity" data-a0="cashTxns">＋ Add movement</button>
       </div>`;
 
@@ -6472,6 +6531,7 @@ function installEventDelegation(){
     // navigation / theme / currency
     navigate:            (el) => navigate(A(el)[0]),
     toggleTheme:         () => toggleTheme(),
+    togglePrivacy:       () => togglePrivacy(),
     setThemeChoice:      (el) => setThemeChoice(A(el)[0]),
     setDisplayCcy:       (el) => setDisplayCcy(A(el)[0]),
     // entity modals
@@ -6595,6 +6655,7 @@ function installEventDelegation(){
 
 async function boot(){
   applyTheme(localStorage.getItem(LK_THEME) || 'dark');
+  applyPrivacy(privacyOn());
   // Stamp display version into the logo (matches Collectibles app-ver format)
   const verEl = document.getElementById('logo-version');
   if (verEl) verEl.textContent = APP_DISPLAY_VERSION;
