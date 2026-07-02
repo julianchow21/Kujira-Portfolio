@@ -1,0 +1,25 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "node": true
+  },
+  "extends": "eslint:recommended",
+  "parserOptions": {
+    "ecmaVersion": 12,
+    "sourceType": "script"
+  },
+  "globals": {
+    "SpreadsheetApp": "readonly",
+    "ContentService": "readonly",
+    "CacheService": "readonly",
+    "UrlFetchApp": "readonly",
+    "Logger": "readonly",
+    "KjrSortable": "readonly",
+    "Chart": "readonly"
+  },
+  "rules": {
+    "no-unused-vars": ["warn", { "vars": "all", "args": "none", "ignoreRestSiblings": false }],
+    "no-undef": "error"
+  }
+}
