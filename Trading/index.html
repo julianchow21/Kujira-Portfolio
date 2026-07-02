@@ -305,7 +305,7 @@ body.has-alertbar{padding-bottom:56px}
       <a class="tb-tab" href="../Portfolio/" title="Kujira Portfolio">Portfolio</a>
     </nav>
     <div class="tb-right">
-      <span class="tb-ver">v3.5 (21 Jun)</span>
+      <span class="tb-ver">v3.6 (30 Jun)</span>
       <button class="iconbtn" id="refreshBtn" title="Refresh now">&#x21bb;</button>
       <button class="iconbtn" id="gearBtn" title="Settings">&#9881;</button>
     </div>
@@ -346,9 +346,9 @@ body.has-alertbar{padding-bottom:56px}
       </div>
       <div class="spacer"></div>
       <div class="toggles">
-        <button class="tgl" id="styleBtn" title="Candles / Area" style="color:var(--text2);padding:5px 9px"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><rect x="2" y="4" width="3" height="6" rx=".5"/><line x1="3.5" y1="2" x2="3.5" y2="4"/><line x1="3.5" y1="10" x2="3.5" y2="12"/><rect x="9" y="3" width="3" height="5" rx=".5"/><line x1="10.5" y1="1" x2="10.5" y2="3"/><line x1="10.5" y1="8" x2="10.5" y2="11"/></svg></button>
-        <button class="tgl" id="autoFitBtn" title="Fit data to screen" style="color:var(--text2);padding:5px 9px"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><path d="M4 4L1 7l3 3M10 4l3 3-3 3M1 7h12"/></svg></button>
-        <button class="tgl" id="fsBtn" title="Fullscreen" style="color:var(--text2);padding:5px 9px"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><path d="M5 1H1v4M9 1h4v4M1 9v4h4M13 9v4H9"/></svg></button>
+        <button class="tgl" id="styleBtn" title="Candles / Area" aria-label="Toggle candles or area chart" style="color:var(--text2);padding:5px 9px"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><rect x="2" y="4" width="3" height="6" rx=".5"/><line x1="3.5" y1="2" x2="3.5" y2="4"/><line x1="3.5" y1="10" x2="3.5" y2="12"/><rect x="9" y="3" width="3" height="5" rx=".5"/><line x1="10.5" y1="1" x2="10.5" y2="3"/><line x1="10.5" y1="8" x2="10.5" y2="11"/></svg></button>
+        <button class="tgl" id="autoFitBtn" title="Fit data to screen" aria-label="Fit data to screen" style="color:var(--text2);padding:5px 9px"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><path d="M4 4L1 7l3 3M10 4l3 3-3 3M1 7h12"/></svg></button>
+        <button class="tgl" id="fsBtn" title="Fullscreen" aria-label="Toggle fullscreen chart" style="color:var(--text2);padding:5px 9px"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12"><path d="M5 1H1v4M9 1h4v4M1 9v4h4M13 9v4H9"/></svg></button>
         <span id="togglesDyn"></span>
       </div>
     </div>
@@ -470,8 +470,8 @@ body.has-alertbar{padding-bottom:56px}
 
 <!-- Settings drawer -->
 <div class="scrim" id="scrim"></div>
-<div class="drawer" id="drawer">
-  <button class="iconbtn drawer-x" id="drawerX">&times;</button>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Settings">
+  <button class="iconbtn drawer-x" id="drawerX" aria-label="Close settings">&times;</button>
   <h2>Settings</h2>
   <div class="muted" style="font-size:12px">Data source &amp; refresh</div>
 
@@ -549,7 +549,7 @@ body.has-alertbar{padding-bottom:56px}
   <span class="warn">For information only, not financial advice.</span>
   Live <span id="footSym">MU</span> data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v3.5 (21 Jun)</span>
+  <span style="margin-left:8px;color:var(--text3)">v3.6 (30 Jun)</span>
 
 </div>
 

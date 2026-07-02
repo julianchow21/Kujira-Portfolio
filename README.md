@@ -96,13 +96,13 @@ To report a security issue, please open a private security advisory on the GitHu
 
 ## File layout
 
-This repo hosts two apps on one GitHub Pages site, each in its own folder. The root `index.html` is a redirect stub that forwards the old root URL to `Portfolio/` (and its `sw.js` is a kill switch that retires the old root-scoped service worker).
+This repo hosts three apps on one GitHub Pages site, each in its own folder. There is no root redirect (it was removed); navigate to each app's path directly.
 
 | Path | Role |
 |---|---|
-| `Portfolio/` | The Kujira Portfolio app: `index.html`, `kjr-core.js`, `apps-script.gs` (backend for your Code.gs), PWA assets, `tests/`, `Docs/`. |
+| `Portfolio/` | The Kujira Portfolio app. Top level: `index.html`, `sw.js`, `Docs/`, own CLAUDE.md. Supporting files live in `Worker/`: `app.js`, `kjr-core.js`, `apps-script.gs` (backend for your Code.gs), PWA assets, shared `whale-icon.png`. |
 | `Trading/` | Kujira Trading, a separate SPA for MU day-trade tracking. Own CLAUDE.md and docs. |
-| `index.html`, `sw.js` | Redirect stub + service worker kill switch for the pre-restructure root URL. |
-| `README.md` | This file. |
+| `Journal/` | Kujira Journal, the trading-journal app. Own CLAUDE.md and docs. |
+| `README.md`, `PRIVACY.md`, `SECURITY.md` | Repo-level docs at root. |
 | `PRIVACY.md` | Privacy notice. |
 | `SECURITY.md` | Threat model and security policy. |
