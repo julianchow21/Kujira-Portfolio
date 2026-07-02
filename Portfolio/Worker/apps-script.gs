@@ -105,7 +105,7 @@ const ALLOWED_KEYS = {
   cpfBalances:1, cpfHistory:1,
   income:1, expenses:1,
   snapshots:1, categories:1, settings:1,
-  _priceCache:1, changelog:1, trash:1, _meta:1
+  changelog:1, trash:1, _meta:1
 };
 
 const MAX_BODY_BYTES   = 49500;     // Sheet cell hard limit 50000 chars
@@ -149,31 +149,47 @@ function doPost(e) {
     if (!data || typeof data !== 'object') throw new Error('Payload must be a JSON object');
     if (data.schema !== SCHEMA) throw new Error('Invalid payload (schema mismatch — expected ' + SCHEMA + ')');
 
-    const sh = getSheet_();
-
-    // Optimistic concurrency: if the client sent lastSeenRemoteAt, compare to the
-    // current server stamp. Mismatch → reject so the UI can offer pull-or-force.
-    // beforeunload writes omit lastSeenRemoteAt and bypass the check.
-    if (data.lastSeenRemoteAt) {
-      const currentRemoteAt = sh.getRange('C1').getValue();
-      if (currentRemoteAt && String(currentRemoteAt) !== data.lastSeenRemoteAt) {
-        return json_({
-          conflict: true,
-          remoteAt: String(currentRemoteAt),
-          lastSeenRemoteAt: data.lastSeenRemoteAt
-        });
-      }
+    // Lock around the read-check-write so two near-simultaneous saves cannot
+    // both pass the C1 conflict check before either writes (the second writer
+    // would otherwise clobber the first without either side seeing a conflict).
+    const lock = LockService.getScriptLock();
+    try {
+      lock.waitLock(10000);
+    } catch (lockErr) {
+      return json_({ error: 'Sheet busy, try again' });
     }
 
-    // Drop unknown keys, cap oversize arrays + strings
-    const clean = sanitisePayload_(data);
+    let clean, stamp;
+    try {
+      const sh = getSheet_();
 
-    const stamp = new Date().toISOString();
-    sh.getRange(CELL).setValue(JSON.stringify(clean));
-    sh.getRange('C1').setValue(stamp);
+      // Optimistic concurrency: if the client sent lastSeenRemoteAt, compare to the
+      // current server stamp. Mismatch → reject so the UI can offer pull-or-force.
+      // beforeunload writes omit lastSeenRemoteAt and bypass the check.
+      if (data.lastSeenRemoteAt) {
+        const currentRemoteAt = sh.getRange('C1').getValue();
+        if (currentRemoteAt && String(currentRemoteAt) !== data.lastSeenRemoteAt) {
+          return json_({
+            conflict: true,
+            remoteAt: String(currentRemoteAt),
+            lastSeenRemoteAt: data.lastSeenRemoteAt
+          });
+        }
+      }
+
+      // Drop unknown keys, cap oversize arrays + strings
+      clean = sanitisePayload_(data);
+
+      stamp = new Date().toISOString();
+      sh.getRange(CELL).setValue(JSON.stringify(clean));
+      sh.getRange('C1').setValue(stamp);
+    } finally {
+      lock.releaseLock();
+    }
 
     // Best-effort view sheets so the user can sanity-check raw numbers in Sheets.
-    // Never blocks the sync return.
+    // Never blocks the sync return. Deliberately outside the lock, so a slow
+    // view refresh never extends how long the next writer has to wait.
     try { refreshViews_(clean); } catch (viewErr) {
       Logger.log('refreshViews_ error: ' + viewErr.message);
     }

@@ -114,10 +114,16 @@ const SG_TAX_BRACKETS = [
   { from: 1000000, to: Infinity, rate: 24,   base: 199150 }
 ];
 
+/* Rates below are the CPF Board schedule effective 1 January 2026. The 55-60
+   and 60-65 bands both rose 1.5 points from 2025 (announced multi-year phase-in
+   of senior worker contribution rates); the additional amount from each of
+   those increases is allocated to the Retirement Account. Verify against
+   cpf.gov.sg before relying on this for a year this file has not been
+   reviewed for. */
 function cpfContribRatesForAge(age){
   if (age == null || age <= 55) return { employer:17.0, employee:20.0 };
-  if (age <= 60) return { employer:15.5, employee:17.0 };
-  if (age <= 65) return { employer:12.0, employee:11.5 };
+  if (age <= 60) return { employer:16.0, employee:18.0 };
+  if (age <= 65) return { employer:12.5, employee:12.5 };
   if (age <= 70) return { employer:9.0,  employee:7.5 };
   return { employer:7.5, employee:5.0 };
 }
@@ -199,6 +205,19 @@ function safeRatio(num, denom, scale){
   return n / d * (scale != null ? scale : 100);
 }
 
+/* Take-home for an income entry: the typed net if it's a real finite value
+   (0 included, so a genuine zero net-take-home isn't discarded), else gross
+   minus employee CPF. Never falls back to full gross, an income row with a
+   blank net is not the same as a tax-free one. */
+function incomeNet(entry){
+  const e = entry || {};
+  const net = Number(e.net);
+  if (e.net != null && e.net !== '' && isFinite(net)) return net;
+  const gross = Number(e.gross) || 0;
+  const empCpf = Number(e.employeeCPF) || 0;
+  return gross - empCpf;
+}
+
 /* ─── Momentum + sector helpers (v1.2) ──────────────────────────────────
    rangePosition: where a price sits inside a low–high band, 0..1. Null when
    any input is missing, non-finite, or the band has zero/negative width.
@@ -257,6 +276,7 @@ function computeStockPosition(openingShares, openingAvgCost, sortedTxns){
   let shares    = Number(openingShares)  || 0;
   let costBasis = roundMoney(shares * (Number(openingAvgCost) || 0));
   let realisedPL = 0;
+  let oversold   = 0;   // shares sold beyond what was held (ledger inconsistency)
   for (const t of sortedTxns){
     const qty  = Math.abs(Number(t.shares) || 0);
     const px   = Number(t.price) || 0;
@@ -264,6 +284,7 @@ function computeStockPosition(openingShares, openingAvgCost, sortedTxns){
     if (t.side === 'sell'){
       const avg        = shares > 0 ? costBasis / shares : 0;
       const sellQty    = Math.min(qty, shares);
+      if (qty > sellQty) oversold += (qty - sellQty);   // sold more than held
       const costRemoved = roundMoney(avg * sellQty);
       realisedPL = roundMoney(realisedPL + (px * sellQty - fees) - costRemoved);
       costBasis  = roundMoney(costBasis - costRemoved);
@@ -274,7 +295,7 @@ function computeStockPosition(openingShares, openingAvgCost, sortedTxns){
     }
   }
   const avgCost = shares > 0 ? costBasis / shares : 0;
-  return { shares, avgCost, costBasis, realisedPL, txnCount: sortedTxns.length };
+  return { shares, avgCost, costBasis, realisedPL, txnCount: sortedTxns.length, oversold: roundMoney(oversold, 4) };
 }
 
 /* ─── IBKR Activity Statement CSV import ───────────────────────────────
@@ -490,7 +511,7 @@ if (typeof module !== 'undefined' && module.exports) {
     _round2, computeCpfContribution,
     _monthsBetween,
     kjrSafeNumber,
-    roundMoney, safeRatio,
+    roundMoney, safeRatio, incomeNet,
     rangePosition, vsBaseline, SECTOR_CLASS, sectorClass,
     computeStockPosition,
     parseCSV, ibkrNum, ibkrExtractTrades, ibkrMatchTrades,

@@ -11,12 +11,12 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.27';
-const APP_DISPLAY_VERSION = 'v2.33 (1 Jul)';
+const APP_VERSION = 'v2.34';
+const APP_DISPLAY_VERSION = 'v2.34 (2 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 /* Local storage keys */
 const LK_DB        = 'kjr-pf-db-v1';
@@ -260,10 +260,30 @@ function generateAutoCpfInterest(){
     // Monthly interest on the carried-in base (≈ lowest balance: excludes this
     // month's own contributions and the current year's accruing interest).
     ['OA','SA','MA','RA'].forEach(a => { yearAcc[a] = _round2(yearAcc[a] + (base[a]||0) * mo(r[a])); });
-    const pool  = Math.min(base.OA||0, 20000) + (base.SA||0) + (base.MA||0) + (base.RA||0);
-    const extra = _round2(Math.min(pool, 60000) * e60 + ((age != null && age >= 55) ? Math.min(pool, 30000) * e30 : 0));
-    const extraAcct = (age != null && age >= 55) ? 'RA' : 'SA';
-    yearAcc[extraAcct] = _round2(yearAcc[extraAcct] + extra);
+
+    // Extra interest (+1% on first $60k, +1% more on first $30k from 55). CPF
+    // credits the extra earned on each account into THAT account, except OA's
+    // extra which goes to SA (or RA from 55). The pool fills OA first (capped at
+    // $20k), then SA, MA, RA. This apportions the extra per account rather than
+    // dumping it all into one, so per-account balances track the statement. The
+    // additional $30k band (55+) is credited wholly to RA per CPF rules.
+    const oaInPool = Math.min(base.OA||0, 20000);
+    let room = 60000;
+    const takeFromPool = (bal) => { const t = Math.max(0, Math.min(bal||0, room)); room -= t; return t; };
+    const poolOA = takeFromPool(oaInPool);
+    const poolSA = takeFromPool(base.SA||0);
+    const poolMA = takeFromPool(base.MA||0);
+    const poolRA = takeFromPool(base.RA||0);
+    const senior = (age != null && age >= 55);
+    const oaExtraAcct = senior ? 'RA' : 'SA';   // OA's extra is never paid into OA
+    yearAcc[oaExtraAcct] = _round2(yearAcc[oaExtraAcct] + poolOA * e60);
+    yearAcc.SA = _round2(yearAcc.SA + poolSA * e60);
+    yearAcc.MA = _round2(yearAcc.MA + poolMA * e60);
+    yearAcc.RA = _round2(yearAcc.RA + poolRA * e60);
+    if (senior){
+      const pool = oaInPool + (base.SA||0) + (base.MA||0) + (base.RA||0);
+      yearAcc.RA = _round2(yearAcc.RA + Math.min(pool, 30000) * e30);
+    }
 
     // This month's contributions join the principal now (earn from next month).
     if (ext[ym]) ['OA','SA','MA','RA'].forEach(a => base[a] = (base[a]||0) + (ext[ym][a]||0));
@@ -1014,6 +1034,22 @@ const _MIGRATIONS = {
     settings.tabCurrency = {};
     settings.baseCurrency = 'SGD';
     return Object.assign({}, db, { settings });
+  },
+  /* v3: CPF history amounts are now uniformly signed (withdrawals negative,
+     contributions/interest positive). Older rows may hold a positive
+     "withdrawal" amount from before entityModalSave started normalising the
+     sign, flip those once. Already-negative or non-withdrawal rows pass
+     through unchanged (-Math.abs is idempotent). */
+  3: db => {
+    if (!Array.isArray(db.cpfHistory)) return db;
+    const cpfHistory = db.cpfHistory.map(h => {
+      if (h && h.type === 'withdrawal' && h.amount != null){
+        const amt = Number(h.amount);
+        if (isFinite(amt)) return Object.assign({}, h, { amount: -Math.abs(amt) });
+      }
+      return h;
+    });
+    return Object.assign({}, db, { cpfHistory });
   }
 };
 
@@ -1104,8 +1140,12 @@ function setSyncUrl(u){
   updateSyncStatusPill();
 }
 
+/* _priceCache is stripped, same as localPersistPayload: it is refetchable and
+   large (quotes + fundamentals per symbol), and syncing it eats the 49.5KB
+   sheet-cell payload cap for no reason. */
 function syncPayload(){
-  return Object.assign({}, DB, {
+  const { _priceCache, ...rest } = DB;
+  return Object.assign({}, rest, {
     schema: SCHEMA,
     version: 1,
     schemaVersion: SCHEMA_VERSION,
@@ -1155,6 +1195,24 @@ async function safeJson(resp){
   } catch (_) {
     return { ok: false, status, data: null, text };
   }
+}
+
+/* Tables compared when deciding whether a sync conflict is genuine divergence
+   (two devices with different edits) or just clock/timestamp drift on an
+   otherwise identical blob. Deliberately excludes volatile fields that always
+   differ between two independent reads of the "same" data: updatedAt,
+   lastSeenRemoteAt, _savedAt, _priceCache (never synced), _meta, appVersion,
+   schemaVersion, version. */
+const _DIVERGENCE_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns',
+  'cpfBalances','cpfHistory','income','expenses','snapshots','categories','settings','changelog','trash'];
+function _divergenceSnapshot(obj){
+  const src = obj || {};
+  const out = {};
+  _DIVERGENCE_TABLES.forEach(k => { out[k] = src[k] !== undefined ? src[k] : null; });
+  return JSON.stringify(out);
+}
+function _isMaterialDivergence(localObj, remoteObj){
+  return _divergenceSnapshot(localObj) !== _divergenceSnapshot(remoteObj);
 }
 
 function strictConflictsEnabled(){
@@ -1217,7 +1275,30 @@ async function pushToRemote(){
         showConflictModal({ remoteAt: data.remoteAt, lastSeenRemoteAt: data.lastSeenRemoteAt, stashedBody: body });
         return;
       }
-      // Auto-recovery with one retry. The first attempt sometimes 404s on
+      // Before force-pushing, verify the remote actually holds the same data.
+      // A conflict is usually just clock drift or a Sheets cell-format quirk,
+      // but on real two-device use it can be a genuine divergence, another
+      // device's edits that a blind force-push would silently discard. Read
+      // the remote back and only auto-recover when the data itself matches;
+      // otherwise fall through to the same modal strict mode uses.
+      let remoteSnapshot;
+      try {
+        const checkResp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
+        const checkParsed = await safeJson(checkResp);
+        if (!checkParsed.ok || !checkParsed.data || checkParsed.data.error) throw new Error('unreadable remote');
+        remoteSnapshot = checkParsed.data;
+      } catch (checkErr) {
+        // Can't verify, don't force-push blind.
+        setSyncStatus('failed', 'Could not verify cloud state, use Settings to Pull or Push');
+        showToast('Sync conflict, could not verify the cloud copy. Use Settings to Pull or Push.', 'error');
+        return;
+      }
+      if (_isMaterialDivergence(JSON.parse(body), remoteSnapshot)) {
+        showConflictModal({ remoteAt: data.remoteAt, lastSeenRemoteAt: data.lastSeenRemoteAt, stashedBody: body });
+        return;
+      }
+      // Effectively identical data, safe to auto-recover with one retry. The
+      // first attempt sometimes 404s on
       // Apps Script's redirect target (file:// origin + googleusercontent
       // redirect chain). 500 ms backoff usually clears it.
       const recover = async () => {
@@ -1306,7 +1387,12 @@ async function pullFromRemote(opts){
       }
       throw new Error('Sheet has no ' + SCHEMA + ' data yet. Push first.');
     }
+    // Remote no longer carries _priceCache (it is never synced, see syncPayload).
+    // mergeDefaults would otherwise reset it to {}, blanking every quote on the
+    // Stocks/Watchlist tabs on every pull. Carry the in-memory cache forward.
+    const prevPriceCache = DB._priceCache;
     DB = mergeDefaults(data);
+    DB._priceCache = Object.assign({}, prevPriceCache, DB._priceCache);
     saveLocal();
     // Prefer the server's C1 timestamp (data._savedAt) — that's what doPost
     // compares lastSeenRemoteAt against. Falling back to data.updatedAt
@@ -1891,11 +1977,18 @@ function estimateAnnualTax(){
   const bonus           = Number(sal.annualBonus) || 0;
   const annualGross     = gross * 12 + bonus;
 
-  // Annual employee CPF: apply monthly OW ceiling, then sum 12 months.
+  // Annual employee CPF relief. Ordinary Wage leg: monthly OW ceiling × 12.
+  // Additional Wage leg (bonus): the AW subject to CPF is capped at the annual
+  // AW ceiling of $102,000 minus the OW that attracted CPF this year, so a
+  // bonus above that cap earns no further CPF relief. Both legs use the
+  // employee rate for the person's age band.
   const age          = _ageOnYear(new Date().getFullYear());
   const rates        = cpfContribRatesForAge(age);
   const monthlyWage  = Math.min(gross, CPF_OW_CEILING_2026);
-  const annualEmpCpf = monthlyWage * (rates.employee / 100) * 12;
+  const owForCpf     = monthlyWage * 12;
+  const awCeiling    = Math.max(0, 102000 - owForCpf);
+  const awSubject    = Math.min(bonus, awCeiling);
+  const annualEmpCpf = (owForCpf + awSubject) * (rates.employee / 100);
 
   const reliefs         = Math.max(0, Number(tax.totalReliefs) || 0);
   const chargeableIncome = Math.max(0, annualGross - annualEmpCpf - reliefs);
@@ -1904,9 +1997,11 @@ function estimateAnnualTax(){
   if (tax.manualAnnualTax != null){
     annualTax = Math.max(0, Number(tax.manualAnnualTax) || 0);
   } else if (tax.residency === 'non-resident'){
-    // Non-resident employment income: higher of 15% flat or graduated.
+    // Non-resident employment income: higher of 15% flat on gross employment
+    // income or the graduated tax on chargeable income (IRAS rule). The flat
+    // leg does not net off CPF or personal reliefs.
     const graduated = computeSgIncomeTax(chargeableIncome);
-    const flat      = chargeableIncome * 0.15;
+    const flat      = annualGross * 0.15;
     annualTax       = Math.max(graduated, flat);
   } else {
     annualTax = computeSgIncomeTax(chargeableIncome);
@@ -1944,6 +2039,7 @@ function renderTaxEstimate(){
       <div class="hint-block">
         <div class="hint" style="font-size:12px;margin-bottom:2px">Less employee CPF</div>
         <div style="font-weight:600">(${fmt2(est.annualEmpCpf)})</div>
+        <div class="hint" style="font-size:11px">incl. CPF on bonus</div>
       </div>
       <div class="hint-block">
         <div class="hint" style="font-size:12px;margin-bottom:2px">Less reliefs</div>
@@ -2264,24 +2360,37 @@ function coinIdFor(symbolOrId){
 /* ═══════════════════════════════════════════════════════════════════════
    FX — convert anything to base currency (SGD by default)
    ═══════════════════════════════════════════════════════════════════════ */
+/* Any-currency-to-SGD rate is looked up under fxRates[<CCY>SGD] (the existing
+   'USDSGD' key is just the CCY=USD case, unchanged for back-compat). A cross
+   pair (X to Y, neither SGD) routes through SGD: XSGD / YSGD. Returns null,
+   never a guess, when a needed leg is missing so callers can decide whether
+   to fall back or exclude. */
 function getFx(from, to){
   from = (from || '').toUpperCase();
   to   = (to   || '').toUpperCase();
   if (!from || !to || from === to) return 1;
 
-  // Manual override wins
+  // Manual override, USD/SGD only, wins over any fetched rate.
   if (from === 'USD' && to === 'SGD' && DB.settings.fxOverrides.USDSGD)
     return Number(DB.settings.fxOverrides.USDSGD);
   if (from === 'SGD' && to === 'USD' && DB.settings.fxOverrides.USDSGD)
     return 1 / Number(DB.settings.fxOverrides.USDSGD);
 
-  // Cached fetched rate
-  if (from === 'USD' && to === 'SGD' && DB.settings.fxRates.USDSGD)
-    return Number(DB.settings.fxRates.USDSGD);
-  if (from === 'SGD' && to === 'USD' && DB.settings.fxRates.USDSGD)
-    return 1 / Number(DB.settings.fxRates.USDSGD);
+  const rates = DB.settings.fxRates || {};
+  const rateToSgd = (ccy) => {
+    const r = rates[ccy + 'SGD'];
+    return (r != null && isFinite(Number(r)) && Number(r) > 0) ? Number(r) : null;
+  };
 
-  return null; // unknown pair
+  if (to === 'SGD') return rateToSgd(from);
+  if (from === 'SGD'){
+    const r = rateToSgd(to);
+    return r != null ? 1 / r : null;
+  }
+  // Cross pair: both legs must be known.
+  const fromSgd = rateToSgd(from), toSgd = rateToSgd(to);
+  if (fromSgd == null || toSgd == null) return null;
+  return fromSgd / toSgd;
 }
 
 function toSGD(amount, currency){
@@ -2291,6 +2400,20 @@ function toSGD(amount, currency){
   const r = getFx(currency, 'SGD');
   if (r == null) return n; // best-effort; UI flags missing FX
   return n * r;
+}
+
+/* Strict SGD conversion for aggregate totals (net worth, snapshots, expense
+   roll-ups): returns null instead of silently passing the raw number through
+   1:1 when the rate is missing, so a caller summing many accounts/rows can
+   exclude the unconvertible ones rather than let a foreign-currency figure
+   inflate an SGD total at face value. */
+function sgdOrNull(amount, currency){
+  const ccy = currency || 'SGD';
+  const n = Number(amount);
+  if (!isFinite(n)) return 0;
+  if (ccy === 'SGD') return n;
+  const r = getFx(ccy, 'SGD');
+  return r == null ? null : n * r;
 }
 
 /* ─── Per-tab display currency ─────────────────────────────────────────
@@ -2357,6 +2480,16 @@ function updateCcyToggleUI(){
 /* opts.silent suppresses the success toast (auto-refresh path). Failures
    still toast only on the manual path. A single in-flight guard collapses
    the auto-tick + refreshStockPrices double-call into one network hit. */
+/* Every non-SGD currency actually in use, so a JPY cash account or an EUR
+   expense gets its own rate fetched instead of only ever asking for USDSGD.
+   USD is always included (stocks/crypto lean on it even with no USD cash). */
+function _fxPairsInUse(){
+  const ccys = new Set(['USD']);
+  (DB.cash || []).forEach(c => { const ccy = (c.currency || 'SGD').toUpperCase(); if (ccy !== 'SGD') ccys.add(ccy); });
+  (DB.expenses || []).forEach(x => { const ccy = (x.currency || 'SGD').toUpperCase(); if (ccy !== 'SGD') ccys.add(ccy); });
+  return Array.from(ccys).map(c => c + 'SGD');
+}
+
 let _fxInFlight = null;
 async function refreshFx(opts){
   opts = opts || {};
@@ -2366,17 +2499,22 @@ async function refreshFx(opts){
   if (btn) btn.disabled = true;
   _fxInFlight = (async () => {
     try {
-      const url = getSyncUrl() + (getSyncUrl().includes('?') ? '&' : '?') + 'action=fx&pairs=USDSGD';
+      const pairs = _fxPairsInUse();
+      const url = getSyncUrl() + (getSyncUrl().includes('?') ? '&' : '?') + 'action=fx&pairs=' + encodeURIComponent(pairs.join(','));
       const resp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
       const data = await resp.json();
-      if (data.error) throw new Error(data.error);
-      const usdsgd = data.rates && data.rates.USDSGD && data.rates.USDSGD.rate;
-      if (!usdsgd) throw new Error('USDSGD missing in response');
-      DB.settings.fxRates.USDSGD = usdsgd;
+      if (data.error && !data.rates) throw new Error(data.error);
+      const rates = data.rates || {};
+      let ok = 0;
+      pairs.forEach(p => {
+        const rate = rates[p] && rates[p].rate;
+        if (rate != null && isFinite(Number(rate))){ DB.settings.fxRates[p] = Number(rate); ok++; }
+      });
+      if (!ok) throw new Error('No rates in response');
       DB.settings.fxRates.lastUpdated = new Date().toISOString();
       saveData();
       renderAll();
-      if (!opts.silent) showToast('FX refreshed', 'success');
+      if (!opts.silent) showToast('FX refreshed: ' + ok + '/' + pairs.length + ' pair' + (pairs.length===1?'':'s'), 'success');
     } catch (err) {
       if (!opts.silent) showToast('FX refresh failed: ' + err.message, 'error');
       else console.warn('[fx]', err.message);
@@ -2938,11 +3076,24 @@ const ENTITY_SCHEMAS = {
         hint:'Use negative amount for outflows (withdrawals or transfer-out).' },
       { key:'account',  label:'Account', type:'select', required:true,
         options:[['OA','OA'],['SA','SA'],['MA','MA'],['RA','RA']], default:'OA' },
-      { key:'amount',   label:'Amount (SGD)', type:'number', required:true, step:'0.01', min:'0', placeholder:'850.00' },
+      { key:'amount',   label:'Amount (SGD)', type:'number', required:true, step:'0.01', placeholder:'850.00',
+        hint:'Enter a positive number. Withdrawals are stored as outflows automatically. Adjustments and transfers keep the sign you enter.' },
       { key:'source',   label:'Source / reference', type:'text', placeholder:'March salary, year-end interest, etc.' },
       { key:'notes',    label:'Notes', type:'textarea' }
     ],
-    defaults: { type:'contribution', account:'OA', date: new Date().toISOString().slice(0,10) }
+    defaults: { type:'contribution', account:'OA', date: new Date().toISOString().slice(0,10) },
+    afterRead: (item) => {
+      // Normalise sign by type so storage is uniformly signed: withdrawals are
+      // always outflows, contributions/interest are always inflows. Transfers
+      // and adjustments keep whatever sign the user entered (either direction).
+      if (item.amount != null && item.amount !== ''){
+        const amt = Number(item.amount);
+        if (isFinite(amt)){
+          if (item.type === 'withdrawal') item.amount = -Math.abs(amt);
+          else if (item.type === 'contribution' || item.type === 'interest') item.amount = Math.abs(amt);
+        }
+      }
+    }
   },
   income: {
     title: 'income entry',
@@ -3403,13 +3554,19 @@ function ibkrShowPreview(matched, skippedCount){
   const chipCls = { 'new':'pos', 'dup':'muted', 'new-stock':'warn' };
   const chipLbl = { 'new':'new', 'dup':'dup', 'new-stock':'new stock' };
 
-  const tableRows = matched.map(t => {
+  const chipTitle = { 'dup':'Matches a trade already in the ledger. Skipped unless you tick it (e.g. two identical trades on the same day).' };
+  const tableRows = matched.map((t, idx) => {
     const ccySym = t.currency === 'SGD' ? 'S$' : 'US$';
     const ccy    = t.currency || 'USD';
     const ccyMismatch = t.stockId && (() => {
       const s = (DB.stocks || []).find(x => x.id === t.stockId);
       return s && (s.currency || (s.market === 'SGX' ? 'SGD' : 'USD')) !== ccy;
     })();
+    // Dups are skipped by default, but a checkbox lets the user force-import a
+    // genuine repeat trade (same symbol/date/side/size/price) rather than lose it.
+    const statusCell = t.status === 'dup'
+      ? `<label class="ibkr-dup-opt" title="${kjrEscape(chipTitle.dup)}"><input type="checkbox" data-ibkr-dup="${idx}"> <span class="tag muted">possible dup</span></label>`
+      : `<span class="tag ${chipCls[t.status]}" ${chipTitle[t.status] ? 'title="' + kjrEscape(chipTitle[t.status]) + '"' : ''}>${chipLbl[t.status]}</span>`;
     return `<tr${ccyMismatch ? ' class="warn-row"' : ''}>
       <td class="tl">${kjrEscape(t.date)}</td>
       <td class="tl">${kjrEscape(t.symbol)}</td>
@@ -3417,7 +3574,7 @@ function ibkrShowPreview(matched, skippedCount){
       <td class="num">${t.shares}</td>
       <td class="num">${ccySym}${t.price.toFixed(4)}</td>
       <td class="num muted">${t.fees ? ccySym + t.fees.toFixed(2) : '—'}</td>
-      <td class="tl"><span class="tag ${chipCls[t.status]}">${chipLbl[t.status]}</span>${ccyMismatch ? ' ⚠' : ''}</td>
+      <td class="tl">${statusCell}${ccyMismatch ? ' ⚠' : ''}</td>
     </tr>`;
   }).join('');
 
@@ -3446,11 +3603,12 @@ function ibkrShowPreview(matched, skippedCount){
             <tbody>${tableRows}</tbody>
           </table>
         </div>
-        ${newStocks.length ? '<p style="margin:.5rem 0 0;font-size:.8rem;color:var(--tx2)">New stocks will be created as stubs — add sector, cost currency, and notes after import.</p>' : ''}
+        ${dupTrades.length ? '<p style="margin:.5rem 0 0;font-size:.8rem;color:var(--tx2)">Duplicates are skipped by default. Tick one to import it anyway, e.g. two genuinely identical trades on the same day.</p>' : ''}
+        ${newStocks.length ? '<p style="margin:.5rem 0 0;font-size:.8rem;color:var(--tx2)">New stocks will be created as stubs, add sector, cost currency, and notes after import.</p>' : ''}
       </div>
       <div class="modal-foot" style="padding:.75rem 1rem;display:flex;gap:.5rem;justify-content:flex-end">
         <button class="btn btn-ghost" data-click="closeIbkrPreview">Cancel</button>
-        <button class="btn btn-primary" data-click="ibkrConfirmImport" ${newTrades.length + newStocks.length === 0 ? 'disabled' : ''}>
+        <button class="btn btn-primary" data-click="ibkrConfirmImport" ${newTrades.length + newStocks.length + dupTrades.length === 0 ? 'disabled' : ''}>
           Import ${newTrades.length + newStocks.length} trade${newTrades.length + newStocks.length !== 1 ? 's' : ''}
         </button>
       </div>
@@ -3466,6 +3624,12 @@ function ibkrConfirmImport(){
   const overlay = document.getElementById('ibkr-preview-overlay');
   let matched;
   try { matched = JSON.parse(overlay.dataset.matched || '[]'); } catch(_){ matched = []; }
+  // Read which dup rows the user opted to force-import, BEFORE tearing down the
+  // overlay (its DOM, and the checkbox state, disappear on close).
+  const forcedDupIdx = new Set(
+    Array.from(overlay.querySelectorAll('input[data-ibkr-dup]:checked'))
+      .map(el => Number(el.getAttribute('data-ibkr-dup')))
+  );
   overlay.classList.remove('open');
 
   const now = new Date().toISOString();
@@ -3488,17 +3652,20 @@ function ibkrConfirmImport(){
     addedStocks++;
   });
 
-  // Commit new trades (skip dups)
-  matched.filter(t => t.status !== 'dup').forEach(t => {
-    const stockId = t.stockId || newStockSymbols[t.symbol];
-    if (!stockId) return;
-    (DB.stockTxns = DB.stockTxns || []).push({
-      id: uid('stockTxns'), stockId,
-      date: t.date, side: t.side,
-      shares: t.shares, price: t.price, fees: t.fees || 0,
-      cashAccountId: '', notes: '', createdAt: now, updatedAt: now
-    });
-    addedTrades++;
+  // Commit new trades, plus any dup rows the user explicitly ticked.
+  matched.forEach((t, idx) => {
+    if (t.status === 'dup' && !forcedDupIdx.has(idx)) return;   // skip un-ticked dups
+    if (t.status === 'new-stock' || t.status === 'new' || (t.status === 'dup' && forcedDupIdx.has(idx))){
+      const stockId = t.stockId || newStockSymbols[t.symbol];
+      if (!stockId) return;
+      (DB.stockTxns = DB.stockTxns || []).push({
+        id: uid('stockTxns'), stockId,
+        date: t.date, side: t.side,
+        shares: t.shares, price: t.price, fees: t.fees || 0,
+        cashAccountId: '', notes: '', createdAt: now, updatedAt: now
+      });
+      addedTrades++;
+    }
   });
 
   saveData();
@@ -3849,8 +4016,8 @@ function _pbAllocRows(){
 function _pbCashflowRows(){
   const ms = _recentMonths(12);
   const incBy = {}, expBy = {};
-  (DB.income   || []).forEach(i => { const ym=String(i.date||'').slice(0,7); if(ym) incBy[ym]=(incBy[ym]||0)+(Number(i.net)||Number(i.gross)||0); });
-  (DB.expenses || []).forEach(x => { const ym=String(x.date||'').slice(0,7); if(ym) expBy[ym]=(expBy[ym]||0)+expenseAmountSgd(x); });
+  (DB.income   || []).forEach(i => { const ym=String(i.date||'').slice(0,7); if(ym) incBy[ym]=(incBy[ym]||0)+incomeNet(i); });
+  (DB.expenses || []).forEach(x => { const ym=String(x.date||'').slice(0,7); if(!ym) return; const sgd = expenseAmountSgdOrNull(x); if (sgd != null) expBy[ym]=(expBy[ym]||0)+sgd; });
   return ms.map(m => { const inc=incBy[m]||0, exp=expBy[m]||0; return { month:m, income:inc, expense:exp, net:inc-exp }; });
 }
 function _pbRangeCutoff(rangeKey){
@@ -5551,10 +5718,10 @@ function renderCash(){
   if (!bodyEl) return;
 
   if (fresh){
-    const hasUsd = list.some(c => (c.currency || 'SGD') !== 'SGD');
-    const hasOverride = !!DB.settings.fxOverrides.USDSGD;
-    const hasRate = !!DB.settings.fxRates.USDSGD;
-    fresh.className = 'freshness' + (hasUsd && !hasRate && !hasOverride ? ' stale' : (hasRate || hasOverride ? ' fresh' : ''));
+    const foreignCcys = Array.from(new Set(list.map(c => (c.currency || 'SGD').toUpperCase()).filter(c => c !== 'SGD')));
+    const hasForeign = foreignCcys.length > 0;
+    const allHaveRates = foreignCcys.every(c => getFx(c, 'SGD') != null);
+    fresh.className = 'freshness' + (hasForeign && !allHaveRates ? ' stale' : (allHaveRates || !hasForeign ? ' fresh' : ''));
     fresh.textContent = fxFreshnessText();
   }
 
@@ -5564,17 +5731,18 @@ function renderCash(){
     return;
   }
 
-  let totSgd = 0, fxMissing = false, totInterestSgd = 0;
+  let totSgd = 0, fxMissing = false, totInterestSgd = 0, excludedCount = 0;
   const rows = list.map(c => {
     const ccy = c.currency || 'SGD';
     const bal = deriveCashBalance(c);          // native-currency balance
-    const sgd = toSGD(bal, ccy);
+    const sgd = sgdOrNull(bal, ccy);           // null when the currency can't be converted
     if (fxMissingFor(ccy)) fxMissing = true;
-    totSgd += sgd;
+    if (sgd == null) excludedCount++;
+    else totSgd += sgd;
     const monthlyInt  = projectedMonthlyInterest(c);
     const annualInt   = monthlyInt * 12;
     const intSgd      = toSGD(annualInt, ccy);
-    totInterestSgd   += intSgd;
+    if (sgd != null) totInterestSgd += intSgd;
     return { c, ccy, sgd, bal, derived: hasCashActivity(c), apy: Number(c.apy)||0, monthlyInt };
   });
 
@@ -5587,7 +5755,9 @@ function renderCash(){
 
   const summaryCards = [
     { label:'Accounts',    value: String(list.length), accent:'accent' },
-    { label:'Total (' + displayCcy() + ')', value: fmt(totSgd, {dp:0}), accent:'accent', sub: fxMissing ? 'FX missing for some, set in Settings or refresh' : '' },
+    { label:'Total (' + displayCcy() + ')', value: fmt(totSgd, {dp:0}), accent:'accent',
+      sub: excludedCount ? excludedCount + ' account' + (excludedCount>1?'s':'') + ' excluded from total, FX missing'
+         : fxMissing ? 'FX missing for some, set in Settings or refresh' : '' },
     { label:'By currency', value: '', sub: ccyChips || '—' }
   ];
   if (showApy){
@@ -5606,7 +5776,7 @@ function renderCash(){
         <td class="tl"><span class="tag">${kjrEscape(r.c.account || '—')}</span></td>
         <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${r.bal.toLocaleString('en-SG', {maximumFractionDigits:2})}${r.derived ? '<span class="hint" title="Calculated from movements + linked trades"> ◆</span>' : ''}</td>
         <td class="num">${kjrEscape(r.ccy)}</td>
-        <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${fmt(r.sgd)}</td>
+        <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${r.sgd != null ? fmt(r.sgd) : '<span class="price-stale">— FX missing</span>'}</td>
         ${showApy ? `<td class="num">${r.apy ? r.apy.toFixed(2) + '%' : '—'}</td><td class="num">${r.monthlyInt ? r.c.currency && r.c.currency !== 'SGD' ? r.c.currency + ' ' + r.monthlyInt.toLocaleString('en-SG',{maximumFractionDigits:2}) : fmt(toSGD(r.monthlyInt, r.ccy)) : '—'}</td>` : ''}
         <td class="tl muted">${kjrEscape(r.c.notes || '')}</td>
         <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cash" data-edit-id="${kjrEscape(r.c.id)}">Edit</button></td>
@@ -5897,6 +6067,12 @@ function _ymLabel(ym){
 function expenseAmountSgd(x){
   return toSGD(Number(x.amount) || 0, x.currency || 'SGD');
 }
+/* Strict variant for totals (KPI, monthly roll-up): null when the currency
+   can't be converted, so an unconvertible expense is excluded rather than
+   counted 1:1 into an SGD total. */
+function expenseAmountSgdOrNull(x){
+  return sgdOrNull(Number(x.amount) || 0, x.currency || 'SGD');
+}
 
 function renderCashflow(){
   setRenderCcy('cashflow');
@@ -5936,15 +6112,23 @@ function renderCashflow(){
 
   // ─── KPI summary (top of page) ──────────────────────────────────────
   const totGross = income.reduce((s,i) => s + (Number(i.gross) || 0), 0);
-  const totNet   = income.reduce((s,i) => s + (Number(i.net) || Number(i.gross) || 0), 0);
-  const totExp   = expenses.reduce((s,x) => s + expenseAmountSgd(x), 0);
+  const totNet   = income.reduce((s,i) => s + incomeNet(i), 0);
+  // Exclude expenses whose currency can't be converted to SGD rather than
+  // counting them 1:1, which would silently inflate the total.
+  let totExp = 0, excludedExpCount = 0;
+  expenses.forEach(x => {
+    const sgd = expenseAmountSgdOrNull(x);
+    if (sgd == null) excludedExpCount++;
+    else totExp += sgd;
+  });
   const savings  = totNet - totExp;
   const savingsRate = totNet > 0 ? (savings / totNet * 100) : null;
   const sumEl = document.getElementById('cf-summary');
   if (sumEl){
     sumEl.innerHTML = renderSummary([
       { label: fYear ? 'Income ' + fYear : 'Income (all years)',  value: fmt(totNet,{dp:0}),  accent:'pos', sub: 'gross ' + fmt(totGross,{dp:0}) },
-      { label: fYear ? 'Expenses ' + fYear : 'Expenses (all years)', value: fmt(totExp,{dp:0}), accent:'neg', sub: expenses.length + ' txns' },
+      { label: fYear ? 'Expenses ' + fYear : 'Expenses (all years)', value: fmt(totExp,{dp:0}), accent:'neg',
+        sub: expenses.length + ' txns' + (excludedExpCount ? ' · ' + excludedExpCount + ' excluded, FX missing' : '') },
       { label: 'Net savings', value: fmt(savings,{dp:0}), accent: savings >= 0 ? 'pos' : 'neg' },
       { label: 'Savings rate', value: savingsRate != null ? fmtPct(savingsRate) : '—', accent: savingsRate != null && savingsRate >= 0 ? 'pos' : 'neg', sub: 'of take-home' }
     ]);
@@ -5965,8 +6149,8 @@ function renderCashflow(){
       const mIn = income.filter(i => _ymOf(i.date) === ym);
       const mEx = expenses.filter(x => _ymOf(x.date) === ym);
       const gross = mIn.reduce((s,i) => s + (Number(i.gross) || 0), 0);
-      const net   = mIn.reduce((s,i) => s + (Number(i.net) || Number(i.gross) || 0), 0);
-      const exp   = mEx.reduce((s,x) => s + expenseAmountSgd(x), 0);
+      const net   = mIn.reduce((s,i) => s + incomeNet(i), 0);
+      const exp   = mEx.reduce((s,x) => { const sgd = expenseAmountSgdOrNull(x); return s + (sgd == null ? 0 : sgd); }, 0);
       const ne    = net - exp;
       const rate  = net > 0 ? (ne / net * 100) : null;
       const cls   = ne >= 0 ? 'pos' : 'neg';
@@ -5977,7 +6161,7 @@ function renderCashflow(){
         <td class="num">${fmt(exp,{dp:0})}</td>
         <td class="num ${cls}">${fmt(ne,{dp:0})}</td>
         <td class="num ${cls}">${rate != null ? fmtPct(rate) : '—'}</td>
-        <td class="num muted">${mEx.length}</td>
+        <td class="num muted">${mIn.length + mEx.length}</td>
       </tr>`;
     }).join('')}</tbody></table></div>`;
   }
@@ -5997,7 +6181,7 @@ function renderCashflow(){
     </tr></thead><tbody>${sortedIn.map(i => `<tr>
       <td class="tl">${fmtDateSG(i.date)}</td>
       <td class="num">${fmt(Number(i.gross) || 0,{dp:0})}</td>
-      <td class="num pos">${fmt(Number(i.net) || Number(i.gross) || 0,{dp:0})}</td>
+      <td class="num pos">${fmt(incomeNet(i),{dp:0})}</td>
       <td class="num muted">${i.employerCPF ? fmt(Number(i.employerCPF),{dp:0}) : '—'}</td>
       <td class="num muted">${i.employeeCPF ? fmt(Number(i.employeeCPF),{dp:0}) : '—'}</td>
       <td class="tl">${kjrEscape(i.source || '')}</td>
@@ -6014,12 +6198,12 @@ function renderCashflow(){
   } else {
     const sortedEx = expenses.slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
     expenseEl.innerHTML = `<div class="tbl-wrap"><table class="holdings"><thead><tr>
-      <th class="tl">Date</th><th>Amount</th><th>Currency</th><th>SGD</th><th class="tl">Category</th><th class="tl">Sub-category</th><th class="tl">Merchant</th><th class="tl">Notes</th><th></th>
+      <th class="tl">Date</th><th>Amount</th><th>Currency</th><th>${displayCcy()}</th><th class="tl">Category</th><th class="tl">Sub-category</th><th class="tl">Merchant</th><th class="tl">Notes</th><th></th>
     </tr></thead><tbody>${sortedEx.map(x => `<tr>
       <td class="tl">${fmtDateSG(x.date)}</td>
       <td class="num">${Number(x.amount || 0).toLocaleString('en-SG', {maximumFractionDigits:2})}</td>
       <td class="num">${kjrEscape(x.currency || 'SGD')}</td>
-      <td class="num neg">${fmt(expenseAmountSgd(x))}</td>
+      <td class="num neg">${expenseAmountSgdOrNull(x) != null ? fmt(expenseAmountSgd(x)) : '<span class="price-stale">— FX missing</span>'}</td>
       <td class="tl"><span class="tag">${kjrEscape(x.category || 'Other')}</span></td>
       <td class="tl muted">${kjrEscape(x.subcategory || '')}</td>
       <td class="tl muted">${kjrEscape(x.merchant || '')}</td>
@@ -6049,11 +6233,21 @@ function _stockMvSGD(){
   });
   return mv;
 }
-function _cashSGD(){
-  // Use the DERIVED balance (opening + movements + linked trade flows), the same
-  // figure the Cash tab shows, so net worth / allocation / EF never drift from it.
-  return (DB.cash || []).reduce((s,c) => s + toSGD(deriveCashBalance(c), c.currency || 'SGD'), 0);
+/* Use the DERIVED balance (opening + movements + linked trade flows), the same
+   figure the Cash tab shows, so net worth / allocation / EF never drift from it.
+   Accounts whose currency has no known SGD rate are EXCLUDED from the total
+   (never counted 1:1), so a stray foreign balance can't silently inflate net
+   worth. excludedCount lets callers show a badge. */
+function _cashSGDInfo(){
+  let total = 0, excludedCount = 0;
+  (DB.cash || []).forEach(c => {
+    const sgd = sgdOrNull(deriveCashBalance(c), c.currency || 'SGD');
+    if (sgd == null) excludedCount++;
+    else total += sgd;
+  });
+  return { total, excludedCount };
 }
+function _cashSGD(){ return _cashSGDInfo().total; }
 function _cpfSGD(){
   const e = cpfEffectiveBalances();
   return e.OA + e.SA + e.MA + e.RA;
@@ -6102,6 +6296,15 @@ function runReconciliation(){
     const bal = deriveCashBalance(c);
     if (bal < -0.005) issues.push({ level:'warn',
       msg: (c.name || 'A cash account') + ' is negative (' + fmt(toSGD(bal, c.currency || 'SGD')) + '), so a deposit or transfer in is probably missing.' });
+  });
+
+  // Over-sold ledgers: a stock whose trades sell more shares than were ever
+  // held. The position caps at zero, but realised P&L on the phantom shares is
+  // misstated, so flag it for the user to correct the trade history.
+  (DB.stocks || []).forEach(s => {
+    const pos = deriveStockPosition(s.id);
+    if (pos && pos.oversold > 0.00005) issues.push({ level:'warn',
+      msg: (s.symbol || 'A stock') + "'s ledger sells " + (+pos.oversold.toFixed(4)) + ' more share' + (pos.oversold > 1 ? 's' : '') + ' than were held, so its realised P&L may be misstated. Check the trade history.' });
   });
 
   return { ok: issues.length === 0, issues };
@@ -6238,9 +6441,10 @@ function renderDashboard(){
   const nwEl = document.getElementById('dash-networth');
   if (!nwEl) return;
 
+  const cashInfo = _cashSGDInfo();
   const classes = [
     { key:'Stocks',      val:_stockMvSGD(),     color:'--accent' },
-    { key:'Cash',        val:_cashSGD(),        color:'--blue'   },
+    { key:'Cash',        val:cashInfo.total,    color:'--blue'   },
     { key:'CPF',         val:_cpfSGD(),         color:'--green'  },
     { key:'Real Estate', val:_realestateSGD(),  color:'--amber'  }
   ];
@@ -6259,8 +6463,11 @@ function renderDashboard(){
     ? `<div style="width:1px;height:48px;background:var(--glass-border);align-self:center;flex-shrink:0"></div>
     <div><div class="dash-hero-label">Liquid (ex-CPF)</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${fmt(netExCpf, {dp:0})}</div></div>`
     : '';
+  const fxExclusionNote = cashInfo.excludedCount
+    ? `<div class="dash-hero-label" style="margin-top:4px">Excludes ${cashInfo.excludedCount} cash account${cashInfo.excludedCount>1?'s':''} with missing FX, refresh FX in Settings</div>`
+    : '';
   nwEl.innerHTML = `<div class="dash-hero">
-    <div><div class="dash-hero-label">${_dashShowCpf ? 'Net worth (with CPF)' : 'Liquid net worth'}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div></div>
+    <div><div class="dash-hero-label">${_dashShowCpf ? 'Net worth (with CPF)' : 'Liquid net worth'}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div>${fxExclusionNote}</div>
     ${heroSecondary}
     <button style="margin-left:auto;flex-shrink:0" class="btn btn-sm${_dashShowCpf ? ' btn-active' : ''}" data-click="toggleDashCpf" title="${_dashShowCpf ? 'Click to exclude CPF from net worth' : 'Click to include CPF in net worth'}">CPF ${_dashShowCpf ? 'on' : 'off'}</button>
   </div>`;
@@ -6433,8 +6640,8 @@ function renderTopMovers(){
   const movers = [];
   (DB.stocks || []).forEach(s => {
     const px = DB._priceCache[yahooSymbol(s)];
-    if (!px || px.price == null || px.prevClose == null || !px.prevClose) return;
-    const chgPct = (px.price - px.prevClose) / px.prevClose * 100;
+    if (!px || px.price == null || px.previousClose == null || !px.previousClose) return;
+    const chgPct = (px.price - px.previousClose) / px.previousClose * 100;
     if (!isFinite(chgPct)) return;
     movers.push({ label: (s.symbol||'').toUpperCase(), sub:'stock', chgPct, price: px.price, ccy: px.currency || s.currency || 'USD' });
   });
