@@ -86,7 +86,7 @@ table.holdings th.tl,table.holdings td.tl{text-align:left}
 table.holdings td{font-variant-numeric:tabular-nums}
 table.holdings td.cell-sym{font-weight:600}
 
-/* ROW ACTIONS — real table-cell so the row-hover background covers it fully
+/* ROW ACTIONS, real table-cell so the row-hover background covers it fully
    (the fix already applied in Portfolio). */
 .row-actions{text-align:right;white-space:nowrap}
 .row-actions .btn{vertical-align:middle}
@@ -158,7 +158,7 @@ textarea.fi{resize:vertical;min-height:70px}
     <button class="nav-btn" data-tab="settings" onclick="showPage('settings')">Settings</button>
   </nav>
   <div class="topbar-actions">
-    <span class="ver-badge">v0.2 (30 Jun)</span>
+    <span class="ver-badge">v0.3 (3 Jul)</span>
     <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">&#9680;</button>
   </div>
 </div>
@@ -233,7 +233,7 @@ const ENTITY_SCHEMAS={
       { key:'coverTPD', label:'TPD cover (SGD)', type:'number', step:'1' },
       { key:'coverCI', label:'Critical illness cover (SGD)', type:'number', step:'1' },
       { key:'coverHosp', label:'Hospital ward', type:'select', default:'',
-        options:[['','&mdash; n/a &mdash;'],['B1','Public B1'],['A','Public A'],['Private','Private'],['As-charged','As-charged']] },
+        options:[['','n/a'],['B1','Public B1'],['A','Public A'],['Private','Private'],['As-charged','As-charged']] },
       { key:'coverIncomeMonthly', label:'Disability income (monthly benefit, SGD)', type:'number', step:'1' },
       { key:'coverLTCMonthly', label:'Long-term care (monthly payout, SGD)', type:'number', step:'1' },
       { key:'premium', label:'Premium (per payment)', type:'number', step:'0.01', placeholder:'1200' },
@@ -246,6 +246,7 @@ const ENTITY_SCHEMAS={
       { key:'cashValue', label:'Current cash / surrender value (SGD)', type:'number', step:'0.01', hint:'Counts toward net worth. Leave blank for term and health policies.' },
       { key:'maturityValue', label:'Projected maturity value (SGD)', type:'number', step:'1' },
       { key:'beneficiary', label:'Nominee(s)', type:'text' },
+      { key:'docUrl', label:'Policy document link', type:'text', placeholder:'https://...' },
       { key:'notes', label:'Notes', type:'textarea' }
     ],
     defaults:{ type:'Term Life', status:'Active', insured:'Self', premiumFreq:'Annual', premiumMode:'Cash' },
@@ -329,7 +330,10 @@ function insuranceCashValueSGD(){ return (DB.insurance||[]).filter(p=>p.status==
 /* Coverage adequacy (from the spec). */
 const COVERAGE_TARGETS_DEFAULT={ deathMult:10, tpdMult:10, ciMult:4, incomeProtectionPct:60, ltcMonthlyTarget:2500, hospTargetWard:'A', includeCareShieldBase:false };
 function coverageTargets(){ return Object.assign({}, COVERAGE_TARGETS_DEFAULT, DB.settings.coverageTargets||{}); }
-function setCoverageTarget(key,val){ DB.settings.coverageTargets=Object.assign({}, DB.settings.coverageTargets, {[key]:val}); saveData(); renderInsurance(); }
+/* A cleared number field arrives as null. Storing it would zero the target and
+   falsely mark the risk "covered", so drop the override and fall back to the
+   default instead. */
+function setCoverageTarget(key,val){ const next=Object.assign({}, DB.settings.coverageTargets); if(val==null||(typeof val==='number'&&!isFinite(val))) delete next[key]; else next[key]=val; DB.settings.coverageTargets=next; saveData(); renderInsurance(); renderSettings(); }
 function annualIncomeSGD(){
   const inc=(DB.income||[]).filter(i=>i.date&&isFinite(Number(i.gross)));
   if(!inc.length) return 0;
