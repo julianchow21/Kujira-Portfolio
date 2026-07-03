@@ -8,8 +8,9 @@ Monorepo of 4 static SPAs hosted on GitHub Pages. No framework, no bundler, no b
 
 - **Dev server:** `npx serve -l 3807 .` (launch config: `kjr-portfolio` in `.claude/launch.json`)
 - **Node unit tests (core logic):** `node Portfolio/tests/test-core.js`
+- **Release consistency check:** `node Portfolio/tests/check-release.js`, run before every ship. Asserts index.html script tags match sw.js CORE_ASSETS exactly (including `?v=` strings), sw.js CACHE_NAME equals `kjr-portfolio-` + APP_VERSION, and APP_VERSION agrees with APP_DISPLAY_VERSION
 - **Browser unit tests (sortable):** open `Portfolio/tests/tests.html` in a browser
-- `Portfolio/package.json` has a broken test stub (`npm test` prints an error). Do not rely on it.
+- `Portfolio/package.json` "test" script now runs test-core.js then check-release.js (`npm test` from `Portfolio/`). The old broken stub is gone.
 - No lint/typecheck/format scripts. `Portfolio/.eslintrc.json` exists but is not wired to any command.
 
 ## App boundaries

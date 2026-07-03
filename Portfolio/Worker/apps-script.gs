@@ -1,9 +1,9 @@
 /**
- * Kujira Portfolio · Portfolio Tracker — Google Sheets sync + price proxy
+ * Kujira Portfolio · Portfolio Tracker, Google Sheets sync + price proxy
  *
  * One Apps Script Web App that does two jobs:
- *   1. State sync — JSON blob round-trip between the HTML app and a Google Sheet
- *   2. Price proxy — server-side fetch of Yahoo Finance + CoinGecko (browser CORS bypass)
+ *   1. State sync, JSON blob round-trip between the HTML app and a Google Sheet
+ *   2. Price proxy, server-side fetch of Yahoo Finance + CoinGecko (browser CORS bypass)
  *
  * SETUP
  *   1. Create a blank Google Sheet
@@ -33,6 +33,15 @@ const SHEET_NAME = 'Data';
 const CELL       = 'A1';
 const SCHEMA     = 'kujira-portfolio';
 
+/* Chunked storage (A2). A single sheet cell tops out at 50,000 chars, and
+   years of transactions/changelog will outgrow that. A1 holds either the
+   legacy raw JSON blob (old client compatibility) or a small chunk header
+   {chunked:true, parts:N}; when chunked, the real payload is split across
+   A2:A(N+1), CHUNK_SIZE chars per cell. C1 (the concurrency stamp) is
+   unaffected either way. doGet always reassembles and returns the full
+   payload, so an old client never has to know chunking exists. */
+const CHUNK_SIZE = 49000;
+
 const PRICE_CACHE_TTL_SEC = 300;
 
 function getOrCreate_(name) {
@@ -53,7 +62,7 @@ function getSheet_() {
   }
   // Always force the timestamp cell to plain text format. Without this, Sheets
   // can auto-parse our ISO string into a Date object. String(date) then returns
-  // a locale-formatted string that doesn't round-trip with the original — which
+  // a locale-formatted string that doesn't round-trip with the original, which
   // breaks the optimistic-concurrency check.
   sh.getRange('C1').setNumberFormat('@');
   return sh;
@@ -63,6 +72,63 @@ function json_(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/* Read A1 and, if it is a chunk header, reassemble A2:A(N+1) into the full
+   JSON string. Returns the raw JSON text either way (never the header
+   itself). A1 empty/missing returns '{}' same as the pre-chunking behaviour. */
+function readPayloadRaw_(sh) {
+  const a1 = sh.getRange(CELL).getValue();
+  const a1Str = a1 ? a1.toString() : '{}';
+  let header;
+  try { header = JSON.parse(a1Str); } catch (_) { header = null; }
+  if (header && header.chunked === true && Number(header.parts) > 0) {
+    const parts = Number(header.parts);
+    const cells = sh.getRange(2, 1, parts, 1).getValues(); // A2:A(parts+1)
+    return cells.map(row => (row[0] != null ? row[0].toString() : '')).join('');
+  }
+  return a1Str;
+}
+
+/* Write the JSON string, splitting across A2:A(N+1) when it would not fit
+   a single cell. Clears any stale chunk cells left over from a previous
+   write in the other mode (or a previous write with more chunks) so a
+   shrinking payload never leaves orphaned old chunks behind for the next
+   doGet to (harmlessly, but wastefully) carry around.
+   Sheets formula trap: a JSON chunk can start with '=' or '+' and would be
+   parsed as a formula if the cell is left in automatic format, same class
+   of bug the C1 timestamp already guards against. Every cell we write to
+   (header or chunk) is forced to plain-text format first. */
+function writePayloadRaw_(sh, jsonStr) {
+  // How many chunk cells (if any) did the previous write leave behind?
+  // Read the previous header before we overwrite A1.
+  const prevA1 = sh.getRange(CELL).getValue();
+  let prevParts = 0;
+  try {
+    const prevHeader = JSON.parse(prevA1 ? prevA1.toString() : '');
+    if (prevHeader && prevHeader.chunked === true && Number(prevHeader.parts) > 0) {
+      prevParts = Number(prevHeader.parts);
+    }
+  } catch (_) { /* legacy single-cell body, prevParts stays 0 */ }
+
+  if (jsonStr.length <= CHUNK_SIZE) {
+    // Legacy single-cell mode.
+    sh.getRange(CELL).setNumberFormat('@').setValue(jsonStr);
+    if (prevParts > 0) sh.getRange(2, 1, prevParts, 1).clearContent(); // mode switch: drop stale chunks
+    return;
+  }
+
+  const parts = [];
+  for (let i = 0; i < jsonStr.length; i += CHUNK_SIZE) parts.push(jsonStr.slice(i, i + CHUNK_SIZE));
+
+  const header = JSON.stringify({ chunked: true, parts: parts.length });
+  sh.getRange(CELL).setNumberFormat('@').setValue(header);
+  const chunkRange = sh.getRange(2, 1, parts.length, 1);
+  chunkRange.setNumberFormat('@');
+  chunkRange.setValues(parts.map(p => [p]));
+  if (prevParts > parts.length) {
+    sh.getRange(2 + parts.length, 1, prevParts - parts.length, 1).clearContent(); // shrank: drop the tail
+  }
 }
 
 function doGet(e) {
@@ -76,16 +142,25 @@ function doGet(e) {
     if (action === 'history') return json_(fetchYahooHistory_(e.parameter.symbols || '', e.parameter.range || '1y'));
 
     const sh  = getSheet_();
-    const raw = sh.getRange(CELL).getValue();
-    const payload = raw ? raw.toString() : '{}';
+    // Always reassembled here, so a client (old or new) only ever sees the
+    // full payload, never a chunk header. That is what keeps old clients
+    // working unchanged after this backend starts chunking large payloads.
+    const payload = readPayloadRaw_(sh);
     let parsed;
     try { parsed = JSON.parse(payload); }
-    catch (_) { parsed = { schema: SCHEMA, version: 1 }; }
+    catch (_) {
+      // Corrupt stored payload (manual sheet edit, or a torn read while a
+      // chunked write is mid-flight). NEVER return a schema-stamped empty
+      // object here: a pulling client would accept it as valid and replace
+      // its local data with nothing. Failing loudly makes the client show
+      // "failed" and retry, which is the safe outcome.
+      return json_({ error: 'Stored payload unreadable, refusing to return empty data. Retry, and check the Data sheet if this persists.' });
+    }
 
     // Attach the server's own timestamp so the client can use it as the
     // optimistic-concurrency token. Without this, the client falls back to
-    // the blob's updatedAt — which it set itself, milliseconds before the
-    // save — and that never matches C1. Result: every reload + edit
+    // the blob's updatedAt, which it set itself, milliseconds before the
+    // save, and that never matches C1. Result: every reload + edit
     // triggers a false-positive sync conflict.
     const savedAt = sh.getRange('C1').getValue();
     if (savedAt) parsed._savedAt = String(savedAt);
@@ -108,21 +183,25 @@ const ALLOWED_KEYS = {
   changelog:1, trash:1, _meta:1
 };
 
-const MAX_BODY_BYTES   = 49500;     // Sheet cell hard limit 50000 chars
-const MAX_ARRAY_LEN    = 5000;      // any one table capped — beyond is anomalous
+// Wire-body cap. This is no longer a single sheet cell's 50,000-char limit
+// (writePayloadRaw_ splits across chunk cells for that), it now only guards
+// against a runaway/malicious POST body. Matches the client's new soft cap
+// (app.js PAYLOAD_HARD_CAP) so a legitimate large sync is never rejected here.
+const MAX_BODY_BYTES   = 400000;
+const MAX_ARRAY_LEN    = 5000;      // any one table capped, beyond is anomalous
 const MAX_STRING_LEN   = 5000;      // single string field cap
 
 function sanitisePayload_(data) {
   // Strip unknown top-level keys
   const clean = {};
   Object.keys(data || {}).forEach(k => { if (ALLOWED_KEYS[k]) clean[k] = data[k]; });
-  // Hard caps on arrays — protect against accidental runaway
+  // Hard caps on arrays, protect against accidental runaway
   ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash'].forEach(t => {
     if (Array.isArray(clean[t]) && clean[t].length > MAX_ARRAY_LEN) {
       clean[t] = clean[t].slice(0, MAX_ARRAY_LEN);
     }
   });
-  // Truncate any string field >5KB (defensive — the frontend already caps)
+  // Truncate any string field >5KB (defensive, the frontend already caps)
   truncateStringsDeep_(clean, MAX_STRING_LEN);
   return clean;
 }
@@ -147,7 +226,7 @@ function doPost(e) {
     catch (parseErr) { throw new Error('Payload is not valid JSON'); }
 
     if (!data || typeof data !== 'object') throw new Error('Payload must be a JSON object');
-    if (data.schema !== SCHEMA) throw new Error('Invalid payload (schema mismatch — expected ' + SCHEMA + ')');
+    if (data.schema !== SCHEMA) throw new Error('Invalid payload (schema mismatch, expected ' + SCHEMA + ')');
 
     // Lock around the read-check-write so two near-simultaneous saves cannot
     // both pass the C1 conflict check before either writes (the second writer
@@ -164,8 +243,9 @@ function doPost(e) {
       const sh = getSheet_();
 
       // Optimistic concurrency: if the client sent lastSeenRemoteAt, compare to the
-      // current server stamp. Mismatch → reject so the UI can offer pull-or-force.
-      // beforeunload writes omit lastSeenRemoteAt and bypass the check.
+      // current server stamp. Mismatch, reject so the UI can offer pull-or-force.
+      // syncPayload() (app.js) always includes lastSeenRemoteAt, including on the
+      // beforeunload flush, so an unload write is checked the same as any other.
       if (data.lastSeenRemoteAt) {
         const currentRemoteAt = sh.getRange('C1').getValue();
         if (currentRemoteAt && String(currentRemoteAt) !== data.lastSeenRemoteAt) {
@@ -181,7 +261,7 @@ function doPost(e) {
       clean = sanitisePayload_(data);
 
       stamp = new Date().toISOString();
-      sh.getRange(CELL).setValue(JSON.stringify(clean));
+      writePayloadRaw_(sh, JSON.stringify(clean));
       sh.getRange('C1').setValue(stamp);
     } finally {
       lock.releaseLock();
@@ -209,7 +289,7 @@ function doPost(e) {
 
    includePrePost=true with a 5-minute intraday series lets us read the
    latest pre/post market trade: we take the last non-null close and classify
-   it against the regular session window. Pre/post is best-effort — it only
+   it against the regular session window. Pre/post is best-effort, it only
    appears for US tickers during extended hours and may be null otherwise. */
 function fetchYahooQuotes_(symbolsCsv) {
   const symbols = String(symbolsCsv || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -333,7 +413,7 @@ function extractExtendedPrice_(r) {
    is crumb-protected: hit fc.yahoo.com for a session cookie, exchange it
    for a crumb at v1/test/getcrumb, then pass both on every call. The
    cookie+crumb pair is cached 30 min, per-symbol fundamentals 6 h
-   (CacheService TTL ceiling — these change daily at most). On a 401 the
+   (CacheService TTL ceiling, these change daily at most). On a 401 the
    crumb is refreshed once and the failed symbols retried. Missing fields
    (ETFs have no PE) come back null and the app renders its empty token. */
 const FUND_CACHE_TTL_SEC  = 21600;  // 6 h, CacheService maximum
@@ -468,7 +548,7 @@ function fetchYahooFundamentals_(symbolsCsv) {
   return { fundamentals: out };
 }
 
-/* ─── Yahoo assetProfile — sector + industry for a single symbol ────────
+/* ─── Yahoo assetProfile, sector + industry for a single symbol ────────
    Returns { sector, industry } (both may be null if Yahoo has no data).
    Used by the sector auto-fill feature in openEntityModal.               */
 const PROFILE_CACHE_TTL_SEC = 21600; // CacheService ceiling is 6 h
@@ -549,7 +629,7 @@ function fetchYahooFx_(pairsCsv) {
 /* ─── Per-table view sheets ──────────────────────────────────────────────
    One readable tab per data type so the user can audit raw values without
    opening the app. Headers stay stable across versions; new fields append
-   to the right. Each write is atomic (single setValues call) — half-written
+   to the right. Each write is atomic (single setValues call), half-written
    tabs from a quota timeout are avoided. Best-effort: never throws.        */
 const VIEW_SCHEMAS = {
   Stocks:        ['id','symbol','market','sector','shares','avgCost','divPerShare','divExDate','divPayDate','currency','notes','createdAt','updatedAt'],
@@ -612,7 +692,7 @@ function writeTable_(tabName, rows) {
   sh.autoResizeColumns(1, headers.length);
 }
 
-/* CPF Balances is a key/value object, not an array — flatten to 4 rows. */
+/* CPF Balances is a key/value object, not an array, flatten to 4 rows. */
 function writeCpfBalances_(tabName, balances) {
   const sh = getOrCreate_(tabName);
   sh.clearContents();
@@ -626,7 +706,7 @@ function writeCpfBalances_(tabName, balances) {
   sh.autoResizeColumns(1, headers.length);
 }
 
-/* Trash entries wrap arbitrary data — stringify the inner record for display. */
+/* Trash entries wrap arbitrary data, stringify the inner record for display. */
 function writeTrash_(tabName, rows) {
   const sh = getOrCreate_(tabName);
   sh.clearContents();
@@ -667,7 +747,7 @@ function writeSettings_(tabName, settings) {
     Returns { history: { SYM: { ccy, points:[{t,c}] } } }.
     Points use ms timestamps. Adjusted close is preferred over raw close.
     Per-symbol failures return { symbol, error } so the batch never throws.
-    Results are cached for 6 h — history changes at most once per trading day. */
+    Results are cached for 6 h, history changes at most once per trading day. */
 function fetchYahooHistory_(symbolsCsv, range) {
   const VALID_RANGES = { '1mo': true, '3mo': true, '6mo': true, '1y': true };
   const r = VALID_RANGES[range] ? range : '1y';

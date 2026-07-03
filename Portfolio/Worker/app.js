@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.34';
-const APP_DISPLAY_VERSION = 'v2.34 (2 Jul)';
+const APP_VERSION = 'v2.35';
+const APP_DISPLAY_VERSION = 'v2.35 (3 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -28,10 +28,13 @@ const LK_THEME     = 'kjr-pf-theme-v1';
 const LK_PRIVACY   = 'kjr-pf-privacy-v1';   // blur all money figures (shoulder-surfing guard)
 const LK_PRICE_CACHE = 'kjr-pf-price-cache-v1'; // persisted separately so first paint uses last-known prices
 
-/* Sync constants */
+/* Sync constants. PAYLOAD_HARD_CAP is a soft cap now the backend chunks large
+   payloads across sheet cells (Worker/apps-script.gs writePayloadRaw_), it no
+   longer reflects a single cell's 50,000-char limit. Kept well under Apps
+   Script's own request-size ceiling. PAYLOAD_WARN_AT stays at 80% of the cap. */
 const SYNC_DEBOUNCE_MS = 800;
-const PAYLOAD_WARN_AT  = 40000;
-const PAYLOAD_HARD_CAP = 49500;
+const PAYLOAD_HARD_CAP = 400000;
+const PAYLOAD_WARN_AT  = Math.round(PAYLOAD_HARD_CAP * 0.8);
 
 /* Auto-refresh: poll prices every 60s while the tab is visible.
    Crypto runs every tick (trades 24/7). Stocks only run Monday-Friday SGT
@@ -1134,6 +1137,16 @@ function saveData(){
    Pattern lifted from Send Ops, schema identifier swapped.
    ═══════════════════════════════════════════════════════════════════════ */
 function getSyncUrl(){ return (localStorage.getItem(LK_SYNC_URL) || '').trim(); }
+
+/* AGENTS.md data-safety rule 1: never let a preview origin push to the cloud.
+   Origin isolation (localhost never shares a sync URL with the live site)
+   was the only thing stopping this. If a real sync URL is ever pasted into
+   a localhost/file: session (e.g. copy-pasted for debugging), this is the
+   last line of defence against seeded QA data overwriting a real sheet. */
+function isLocalPreview(){
+  const h = location.hostname;
+  return location.protocol === 'file:' || h === 'localhost' || h === '127.0.0.1';
+}
 function setSyncUrl(u){
   if (u) localStorage.setItem(LK_SYNC_URL, u.trim());
   else   localStorage.removeItem(LK_SYNC_URL);
@@ -1227,6 +1240,11 @@ function setStrictConflicts(on){
 async function pushToRemote(){
   const url = getSyncUrl();
   if (!url) { setSyncStatus('local'); return; }
+  // Preview guard (AGENTS.md data-safety rule 1): never let a localhost/file:
+  // session push to a real sheet, even if a live sync URL ends up in
+  // localStorage (e.g. pasted for debugging). Timers and dirty state stay
+  // untouched here, only the network write is skipped.
+  if (isLocalPreview()) { setSyncStatus('local', 'Preview, sync disabled'); return; }
 
   if (_activeSyncController) { try { _activeSyncController.abort(); } catch(_){} }
   const controller = new AbortController();
@@ -1238,11 +1256,11 @@ async function pushToRemote(){
 
     if (body.length > PAYLOAD_WARN_AT && !_bloatWarned) {
       _bloatWarned = true;
-      const pct = Math.round((body.length / 50000) * 100);
+      const pct = Math.round((body.length / PAYLOAD_HARD_CAP) * 100);
       showToast('Data size at ' + pct + '% of sync limit. Consider trimming changelog.', 'error');
     }
     if (body.length > PAYLOAD_HARD_CAP) {
-      setSyncStatus('failed', 'Payload exceeds 50KB sync limit.');
+      setSyncStatus('failed', 'Payload exceeds sync limit.');
       return;
     }
 
@@ -1263,7 +1281,19 @@ async function pushToRemote(){
       return;
     }
     const data = parsed.data;
-    if (data.error) throw new Error(data.error);
+    if (data.error) {
+      // Old backend (pre-A2, no chunked storage) still hard-rejects any body
+      // over its single-cell 49,500-char limit with this exact message. A
+      // new client sending a bigger payload hits it first, before this
+      // check exists on any newer deploy. Surface the same "redeploy"
+      // prompt used for the missing-_savedAt case (see pullFromRemote).
+      if (/Payload too large/i.test(data.error)) {
+        setSyncStatus('failed', 'Backend out of date, redeploy Apps Script.');
+        showToast('Backend out of date, redeploy Apps Script (see README) to sync larger payloads.', 'error');
+        return;
+      }
+      throw new Error(data.error);
+    }
     if (data.conflict) {
       console.info('[sync] conflict — source:', lastPullSource(), 'strict:', strictConflictsEnabled());
       // Single-user mode default: silently force-push to recover. The
@@ -1429,6 +1459,9 @@ window.addEventListener('beforeunload', () => {
   clearTimeout(_syncTimer); _syncTimer = null;
   const url = getSyncUrl();
   if (!url) return;
+  // Preview guard: same rule as pushToRemote, a localhost/file: tab must
+  // never fire a real network write on close.
+  if (isLocalPreview()) { setSyncStatus('local', 'Preview, sync disabled'); return; }
   const payload = JSON.stringify(syncPayload());
   try {
     fetch(url, { method:'POST', body:payload, keepalive:true, headers:{ 'Content-Type':'text/plain;charset=utf-8' } });
