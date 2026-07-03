@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.41';
-const APP_DISPLAY_VERSION = 'v2.41 (3 Jul)';
+const APP_VERSION = 'v2.42';
+const APP_DISPLAY_VERSION = 'v2.42 (3 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1279,6 +1279,16 @@ function _divergenceSnapshot(obj){
   const src = obj || {};
   const out = {};
   _DIVERGENCE_TABLES.forEach(k => { out[k] = src[k] !== undefined ? src[k] : null; });
+  // settings.fxRates.lastUpdated is freshness metadata, not user data. Two
+  // clients never refresh FX at the same second, so comparing it made every
+  // conflict look like genuine divergence and forced the modal. Copies only,
+  // never mutate the caller's settings object.
+  if (out.settings && out.settings.fxRates){
+    out.settings = Object.assign({}, out.settings, {
+      fxRates: Object.assign({}, out.settings.fxRates)
+    });
+    delete out.settings.fxRates.lastUpdated;
+  }
   return JSON.stringify(out);
 }
 function _isMaterialDivergence(localObj, remoteObj){
@@ -2701,14 +2711,20 @@ async function refreshFx(opts){
       const data = await resp.json();
       if (data.error && !data.rates) throw new Error(data.error);
       const rates = data.rates || {};
-      let ok = 0;
+      let ok = 0, changed = false;
       pairs.forEach(p => {
         const rate = rates[p] && rates[p].rate;
-        if (rate != null && isFinite(Number(rate))){ DB.settings.fxRates[p] = Number(rate); ok++; }
+        if (rate != null && isFinite(Number(rate))){
+          if (DB.settings.fxRates[p] !== Number(rate)) changed = true;
+          DB.settings.fxRates[p] = Number(rate); ok++;
+        }
       });
       if (!ok) throw new Error('No rates in response');
       DB.settings.fxRates.lastUpdated = new Date().toISOString();
-      saveData();
+      // Cloud push only when a rate actually moved. lastUpdated alone is
+      // freshness metadata, and syncing it turned every background FX tick
+      // into a sheet write, feeding the multi-client conflict loop.
+      if (changed) saveData(); else saveLocal();
       renderAll();
       if (!opts.silent) showToast('FX refreshed: ' + ok + '/' + pairs.length + ' pair' + (pairs.length===1?'':'s'), 'success');
     } catch (err) {
@@ -2916,7 +2932,10 @@ async function refreshStockPrices(opts = {}){
     if (DB.stocks.some(s => (s.currency || (s.market === 'US' ? 'USD' : 'SGD')) === 'USD') && !DB.settings.fxOverrides.USDSGD){
       refreshFx({ silent: true }).catch(()=>{});
     }
-    saveData();
+    // No saveData() here: quotes live in _priceCache, which is memory-only and
+    // stripped from both local persist and the sync payload. A push after every
+    // silent auto-tick stamped the cloud sheet each minute per open tab, which
+    // is what kept two clients in a rolling conflict.
     renderStocks();
     if (!opts.silent) showToast('Prices: ' + ok + ' refreshed' + (fail ? ', ' + fail + ' failed' : ''), fail ? 'error' : 'success');
     // Fundamentals ride behind the price refresh, fire-and-forget: the cells
@@ -2977,7 +2996,8 @@ async function refreshCryptoPrices(){
       };
       ok++;
     });
-    saveData();
+    // No saveData(): same reasoning as refreshStockPrices, _priceCache is
+    // memory-only, so there is nothing to persist and nothing worth pushing.
     renderCrypto();
     showToast('Crypto: ' + ok + ' refreshed', 'success');
   } catch (err) {
