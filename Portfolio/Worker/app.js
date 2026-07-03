@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.35';
-const APP_DISPLAY_VERSION = 'v2.35 (3 Jul)';
+const APP_VERSION = 'v2.36';
+const APP_DISPLAY_VERSION = 'v2.36 (3 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -450,6 +450,11 @@ const TABS = [
    Real markup stays in the DOM (preserved underneath), just hidden by the
    .phase2-locked class. To unblock a tab, remove it from this set. */
 const PHASE_2_TABS = new Set(['crypto', 'projections']);
+
+/* Mobile bottom bar shows exactly 5 fixed destinations (Apple's pattern caps
+   a tab bar at 5); everything else lives behind the "More" sheet. Decided
+   03/07/2026: Dashboard, Stocks, Cash, P&L, More. */
+const MOBILE_BOTTOM_TABS = ['dashboard', 'stocks', 'cash', 'cashflow'];
 
 function _phase2LabelFor(key){
   const tab = TABS.find(t => t.key === key);
@@ -1565,14 +1570,15 @@ function showConflictModal(opts){
 function setSyncStatus(state, detail){
   const pill = document.getElementById('sync-pill');
   if (!pill) return;
+  const label = document.getElementById('sync-pill-label') || pill;
   pill.classList.remove('s-local','s-syncing','s-synced','s-failed');
   const ts = localStorage.getItem(LK_SYNC_TS);
   const tsLabel = ts ? ' · ' + relTime(ts) : '';
   switch (state) {
-    case 'local':   pill.classList.add('s-local');   pill.textContent = 'Local only'; break;
-    case 'syncing': pill.classList.add('s-syncing'); pill.textContent = 'Syncing…'; break;
-    case 'synced':  pill.classList.add('s-synced');  pill.textContent = 'Synced' + tsLabel; break;
-    case 'failed':  pill.classList.add('s-failed');  pill.textContent = 'Sync failed'; break;
+    case 'local':   pill.classList.add('s-local');   label.textContent = 'Local only'; break;
+    case 'syncing': pill.classList.add('s-syncing'); label.textContent = 'Syncing…'; break;
+    case 'synced':  pill.classList.add('s-synced');  label.textContent = 'Synced' + tsLabel; break;
+    case 'failed':  pill.classList.add('s-failed');  label.textContent = 'Sync failed'; break;
   }
   pill.title = detail || (state === 'synced' ? 'All changes pushed to the cloud' : (state === 'local' ? 'No Apps Script URL set' : ''));
   const det = document.getElementById('sync-status-detail');
@@ -2264,24 +2270,95 @@ async function testPriceFetch(){
 /* ═══════════════════════════════════════════════════════════════════════
    NAV / ROUTING
    ═══════════════════════════════════════════════════════════════════════ */
+const MORE_SHEET_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>';
+
 function renderNav(){
   const host  = document.getElementById('nav-host');
   const bhost = document.getElementById('bottom-nav');
   if (host)  host.innerHTML  = '';
   if (bhost) bhost.innerHTML = '';
+
+  // Desktop topbar: unchanged, every tab except Settings (shown via the cog icon).
   TABS.forEach(t => {
-    if (t.key === 'settings') return; // Settings shown via the cog icon
+    if (t.key === 'settings') return;
     const btn = document.createElement('button');
     btn.className = 'nav-btn'; btn.dataset.tab = t.key;
     const chip = PHASE_2_TABS.has(t.key) ? '<span class="phase-chip-mini">P2</span>' : '';
     btn.innerHTML = t.icon + '<span>' + t.label + chip + '</span>';
     btn.onclick = () => navigate(t.key);
     if (host) host.appendChild(btn);
-    if (bhost) {
-      const b2 = btn.cloneNode(true);
-      b2.onclick = () => navigate(t.key);
-      bhost.appendChild(b2);
-    }
+  });
+
+  // Mobile bottom bar: exactly 5 fixed destinations, MOBILE_BOTTOM_TABS in
+  // order, plus a "More" button that opens the sheet with everything else.
+  if (bhost) {
+    MOBILE_BOTTOM_TABS.forEach(key => {
+      const t = TABS.find(x => x.key === key);
+      if (!t) return;
+      const btn = document.createElement('button');
+      btn.className = 'nav-btn'; btn.dataset.tab = t.key;
+      btn.innerHTML = t.icon + '<span>' + t.label + '</span>';
+      btn.onclick = () => navigate(t.key);
+      bhost.appendChild(btn);
+    });
+    const moreBtn = document.createElement('button');
+    moreBtn.className = 'nav-btn'; moreBtn.dataset.tab = 'more';
+    moreBtn.innerHTML = MORE_SHEET_ICON + '<span>More</span>';
+    moreBtn.onclick = () => openMoreSheet();
+    bhost.appendChild(moreBtn);
+  }
+
+  renderMoreSheet();
+}
+
+/* Tabs reachable only through the More sheet on mobile: every TABS entry not
+   already pinned to the bottom bar, in TABS order (Settings included). */
+function _moreSheetTabs(){
+  return TABS.filter(t => !MOBILE_BOTTOM_TABS.includes(t.key));
+}
+
+function renderMoreSheet(){
+  const body = document.getElementById('more-sheet-body');
+  if (!body) return;
+  const rows = _moreSheetTabs().map(t => {
+    const chip = PHASE_2_TABS.has(t.key) ? '<span class="phase-chip-mini">P2</span>' : '';
+    return '<button class="btn more-sheet-row" data-click="navigate" data-a0="' + t.key + '">'
+      + t.icon + '<span>' + kjrEscape(t.label) + '</span>' + chip + '</button>';
+  }).join('');
+  const crossApp = ''
+    + '<a class="btn more-sheet-row" href="../Trading/" style="text-decoration:none">'
+    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/></svg><span>Trading</span></a>'
+    + '<a class="btn more-sheet-row" href="../Journal/" style="text-decoration:none">'
+    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>Journal</span></a>';
+  body.innerHTML = rows + crossApp;
+}
+
+function openMoreSheet(){
+  const ov = document.getElementById('more-sheet');
+  if (!ov) return;
+  renderMoreSheet();
+  ov.classList.add('open');
+  // The sheet starts translated off-screen (CSS default) and slides in via
+  // .sheet-in, added a frame after .open so display:none -> flex doesn't eat
+  // the transition (no transition fires across a display change in the same frame).
+  requestAnimationFrame(() => ov.classList.add('sheet-in'));
+  document.querySelectorAll('.bottom-tab-bar .nav-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === 'more');
+  });
+}
+
+function closeMoreSheet(){
+  const ov = document.getElementById('more-sheet');
+  if (ov){ ov.classList.remove('open'); ov.classList.remove('sheet-in'); }
+  // Opening the sheet gave "More" the active state as tap feedback. If the
+  // user dismissed without navigating, hand the highlight back to the tab
+  // that actually owns the page. (showPage also calls this before its own
+  // active-state pass, which lands the same result, so there is no flicker.)
+  const cur = (typeof _currentTab !== 'undefined' && _currentTab) ? _currentTab : 'dashboard';
+  const inMoreSheet = !MOBILE_BOTTOM_TABS.includes(cur);
+  document.querySelectorAll('.bottom-tab-bar .nav-btn').forEach(b => {
+    if (b.dataset.tab === 'more') b.classList.toggle('active', inMoreSheet);
+    else b.classList.toggle('active', b.dataset.tab === cur);
   });
 }
 
@@ -2300,9 +2377,14 @@ function showPage(key){
       target.classList.add('phase2-locked');
     }
   }
+  // On mobile the current tab may live only in the More sheet (not one of the
+  // 5 fixed bottom-bar buttons); the "more" button then takes the active state.
+  const inMoreSheet = !MOBILE_BOTTOM_TABS.includes(key);
   document.querySelectorAll('.nav-btn').forEach(b => {
+    if (b.dataset.tab === 'more') { b.classList.toggle('active', inMoreSheet); return; }
     b.classList.toggle('active', b.dataset.tab === key);
   });
+  closeMoreSheet(); // navigating (incl. from within the sheet) always closes it
   updateCcyToggleUI(); // reflect the new tab's currency
   if (key === 'dashboard') renderDashboard(); // (re)draw charts now the canvas is sized
   if (key === 'settings') { loadSettingsForm(); renderDiagnostics(); }
@@ -2320,6 +2402,14 @@ function currentTheme(){
 function applyTheme(t){
   document.documentElement.classList.toggle('dark', t === 'dark');
   updateThemeUI(t);
+  // iOS Safari + installed-app chrome paint from this meta tag. Read the
+  // actual --bg the class toggle just applied rather than hardcoding the two
+  // hex values here as well, so the two can never drift apart.
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeMeta) {
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+    if (bg) themeMeta.setAttribute('content', bg);
+  }
   // Charts read colours from CSS vars at draw time, so redraw if the dashboard is up.
   if (typeof _currentTab !== 'undefined' && _currentTab === 'dashboard' && typeof renderDashboard === 'function') {
     renderDashboard();
@@ -6763,6 +6853,12 @@ function installEventDelegation(){
     if (!kjrSafeId(id)) { showToast('Invalid entry id', 'error'); return; }
     openEntityModal(table, id);
   });
+  // More sheet (mobile): Escape closes it, matching the entity/columns modals.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const sheet = document.getElementById('more-sheet');
+    if (sheet && sheet.classList.contains('open')) closeMoreSheet();
+  });
   // Undo / Redo — skip when focus is inside a text field (let browser handle).
   document.addEventListener('keydown', (e) => {
     const mod = e.ctrlKey || e.metaKey;
@@ -6795,6 +6891,8 @@ function installEventDelegation(){
   const ACTIONS = {
     // navigation / theme / currency
     navigate:            (el) => navigate(A(el)[0]),
+    openMoreSheet:       () => openMoreSheet(),
+    closeMoreSheet:      () => closeMoreSheet(),
     toggleTheme:         () => toggleTheme(),
     togglePrivacy:       () => togglePrivacy(),
     setThemeChoice:      (el) => setThemeChoice(A(el)[0]),

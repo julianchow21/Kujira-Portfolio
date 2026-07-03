@@ -2,8 +2,9 @@
   "name": "Kujira Portfolio",
   "short_name": "Kujira",
   "description": "Personal finance and portfolio tracker",
-  "start_url": "../",
+  "start_url": "./",
   "scope": "../",
+  "id": "./",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#0f0f0f",
@@ -13,7 +14,7 @@
       "src": "whale-icon.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }
