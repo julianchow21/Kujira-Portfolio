@@ -26,7 +26,7 @@ Chart.js 4.4.1 (CDN, SRI-pinned). Backend is Google Apps Script + Google Sheets 
 | Cash | `cash` | Live |
 | CPF | `cpf` | Live |
 | P&L | `cashflow` | Live |
-| Projections | `projections` | Phase 2 locked |
+| Projections | `projections` | Live (v2.45, FIRE + CPF trajectory in today's dollars) |
 | Settings | `settings` | Live |
 
 To unblock a Phase 2 tab: remove its key from `PHASE_2_TABS`.
