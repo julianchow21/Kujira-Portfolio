@@ -196,6 +196,105 @@ function runTests() {
     assert.strictEqual(core.kjrValidDate(undefined), false);
   });
 
+  // 8. Testing seedDecision (D5: full matrix for the #Crit-1 guard)
+  test('seedDecision - ok when remote schema matches expected', () => {
+    assert.strictEqual(core.seedDecision({ schema: 5, stocks: [] }, {}, 5), 'ok');
+    assert.strictEqual(core.seedDecision({ schema: 5, stocks: [{ id: 1 }] }, {}, 5), 'ok');
+  });
+
+  test('seedDecision - refuse when remote is populated under a wrong schema', () => {
+    assert.strictEqual(core.seedDecision({ schema: 4, stocks: [{ id: 1 }] }, {}, 5), 'refuse');
+    assert.strictEqual(core.seedDecision({ schema: 4, expenses: [{ id: 1 }] }, { allowSeed: true }, 5), 'refuse'); // populated wins even with allowSeed
+  });
+
+  test('seedDecision - seed when remote is empty and allowSeed is set', () => {
+    assert.strictEqual(core.seedDecision({ schema: 4, stocks: [] }, { allowSeed: true }, 5), 'seed');
+    assert.strictEqual(core.seedDecision(null, { allowSeed: true }, 5), 'seed'); // no remote at all, still safe to seed
+  });
+
+  test('seedDecision - push-first when remote is empty without allowSeed', () => {
+    assert.strictEqual(core.seedDecision({ schema: 4, stocks: [] }, {}, 5), 'push-first');
+    assert.strictEqual(core.seedDecision(null, {}, 5), 'push-first');
+    assert.strictEqual(core.seedDecision(null, undefined, 5), 'push-first');
+  });
+
+  test('looksPopulated - true when any tracked table has rows', () => {
+    assert.strictEqual(core.looksPopulated({ stocks: [{ id: 1 }] }), true);
+    assert.strictEqual(core.looksPopulated({ expenses: [{ id: 1 }] }), true);
+    assert.strictEqual(core.looksPopulated({ cpfHistory: [{ id: 1 }] }), true);
+  });
+
+  test('looksPopulated - false for empty, malformed or snapshot-only data', () => {
+    assert.strictEqual(core.looksPopulated({ stocks: [] }), false);
+    assert.strictEqual(core.looksPopulated({}), false);
+    assert.strictEqual(core.looksPopulated(null), false);
+    assert.strictEqual(core.looksPopulated({ snapshots: [{ id: 1 }], trash: [{ id: 1 }] }), false); // excluded tables
+  });
+
+  // 9. Testing getPayday (D5: SG public holiday walk-back, 2026)
+  test('getPayday - walks back over a weekend and Chinese New Year (Jan 2026)', () => {
+    // 2026-01-31 is a Saturday; 2026-01-30 (Fri) is the last working day.
+    assert.strictEqual(core.getPayday(2026, 1), '2026-01-30');
+  });
+
+  test('getPayday - walks back over a weekend (Feb 2026)', () => {
+    // 2026-02-28 is a Saturday; 2026-02-27 (Fri) is the last working day.
+    assert.strictEqual(core.getPayday(2026, 2), '2026-02-27');
+  });
+
+  test('getPayday - walks back over Vesak Day observed + weekend (May 2026)', () => {
+    // 2026-05-31 is a Sunday, 2026-05-30 (Sat) is a weekend too, 2026-05-29 (Fri) is the last working day.
+    assert.strictEqual(core.getPayday(2026, 5), '2026-05-29');
+  });
+
+  test('getPayday - plain month needs no walk-back (Mar 2026)', () => {
+    // 2026-03-31 is a Tuesday, not a holiday, so it is its own payday.
+    assert.strictEqual(core.getPayday(2026, 3), '2026-03-31');
+  });
+
+  // 10. Testing computeSgIncomeTax (D5: moved from app.js, IRAS worked examples)
+  test('computeSgIncomeTax - IRAS worked examples at known chargeable-income points', () => {
+    assert.strictEqual(core.computeSgIncomeTax(40000), 550);
+    assert.strictEqual(core.computeSgIncomeTax(80000), 3350);
+    assert.strictEqual(core.computeSgIncomeTax(120000), 7950);
+  });
+
+  test('computeSgIncomeTax - edge cases', () => {
+    assert.strictEqual(core.computeSgIncomeTax(0), 0);
+    assert.strictEqual(core.computeSgIncomeTax(-100), 0); // negative clamps to 0
+    assert.strictEqual(core.computeSgIncomeTax(20000), 0); // first band is 0%, at the boundary
+  });
+
+  // 11. Testing parseCSV (D5: RFC 4180 quoting edge cases)
+  test('parseCSV - quoted field with an embedded comma', () => {
+    const rows = core.parseCSV('a,"b,c",d\n');
+    assert.deepStrictEqual(rows, [['a', 'b,c', 'd']]);
+  });
+
+  test('parseCSV - doubled-quote escape inside a quoted field', () => {
+    const rows = core.parseCSV('a,"he said ""hi""",c\n');
+    assert.deepStrictEqual(rows, [['a', 'he said "hi"', 'c']]);
+  });
+
+  test('parseCSV - CRLF line endings', () => {
+    const rows = core.parseCSV('a,b,c\r\nd,e,f\r\n');
+    assert.deepStrictEqual(rows, [['a', 'b', 'c'], ['d', 'e', 'f']]);
+  });
+
+  test('parseCSV - mixed quoting, embedded comma and CRLF together', () => {
+    const rows = core.parseCSV('sym,note\r\nAAPL,"Q3 ""beat"", raised guidance"\r\nD05,plain\r\n');
+    assert.deepStrictEqual(rows, [
+      ['sym', 'note'],
+      ['AAPL', 'Q3 "beat", raised guidance'],
+      ['D05', 'plain']
+    ]);
+  });
+
+  // 12. Testing CONSTANTS_VERIFIED_FOR (D6: ageing signal)
+  test('CONSTANTS_VERIFIED_FOR - exported and matches the reviewed year', () => {
+    assert.strictEqual(core.CONSTANTS_VERIFIED_FOR, 2026);
+  });
+
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
   if (failed > 0) process.exit(1);
 }

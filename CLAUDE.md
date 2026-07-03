@@ -118,7 +118,7 @@ These extend or override the master `CLAUDE.md` rules for this repo.
 
 - **Feature backlog:** `~/Claude Projects/Claude/tasks/todo.md` (external path, **never** in a local file)
 - Each app's `CLAUDE.md` (architecture, tabs, data layer, gotchas, design tokens)
-- `Portfolio/Docs/QA SOP v1 (4 Jun).md` (QA runbook, seed data instructions, invariants)
+- `Portfolio/Docs/QA SOP v2 (3 Jul).md` (QA runbook, seed data instructions, invariants)
 - `SECURITY.md` (threat model, audit checklist; run before each release)
 - `README.md` (user-facing setup walkthrough)
 - `.claude/` and `.wrangler/` are **gitignored**; don't rely on them being committed

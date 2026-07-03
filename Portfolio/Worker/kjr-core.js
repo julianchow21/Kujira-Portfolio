@@ -38,6 +38,12 @@ function seedDecision(remoteData, opts, expectedSchema){
   return 'push-first';
 }
 
+/* Year these CPF/tax/holiday constants were last checked against CPF Board,
+   IRAS and MOM sources. app.js renderDiagnostics compares this to the current
+   year and shows an amber warning once it is stale. Bump alongside a review
+   of SG_HOLIDAYS, SG_TAX_BRACKETS and cpfContribRatesForAge/cpfAllocationForAge. */
+const CONSTANTS_VERIFIED_FOR = 2026;
+
 /* ─── SG public holidays ────────────────────────────────────────────────
    2026 follows the MOM gazette. 2027 covers fixed-date holidays only.
    Observed-Monday dates (when a holiday falls on a Sunday) are the entries
@@ -132,6 +138,24 @@ const SG_TAX_BRACKETS = [
   { from:  500000, to:  1000000, rate: 23,   base:  84150 },
   { from: 1000000, to: Infinity, rate: 24,   base: 199150 }
 ];
+
+/* Pure SG resident progressive tax calc on chargeable income (annual gross
+   minus employee CPF minus reliefs, computed by the caller). Walks bands from
+   highest to find the applicable one. Verified against IRAS worked examples
+   at $40k (550), $80k (3,350), $120k (7,950). No DB/DOM reads, moved here from
+   app.js so it is unit-testable under node; app.js keeps calling it as a
+   kjr-core global (also used by the non-resident 15%-flat comparison there). */
+function computeSgIncomeTax(chargeableIncome){
+  const ci = Math.max(0, Number(chargeableIncome) || 0);
+  if (ci === 0) return 0;
+  for (let i = SG_TAX_BRACKETS.length - 1; i >= 0; i--){
+    const band = SG_TAX_BRACKETS[i];
+    if (ci > band.from){
+      return _round2(band.base + (ci - band.from) * band.rate / 100);
+    }
+  }
+  return 0;
+}
 
 /* Rates below are the CPF Board schedule effective 1 January 2026. The 55-60
    and 60-65 bands both rose 1.5 points from 2025 (announced multi-year phase-in
@@ -526,7 +550,8 @@ if (typeof module !== 'undefined' && module.exports) {
     looksPopulated, seedDecision,
     SG_HOLIDAYS, _isoDate, _isoDateSG, getPayday,
     OVERSOLD_EPSILON,
-    CPF_OW_CEILING_2026, SG_TAX_BRACKETS,
+    CPF_OW_CEILING_2026, SG_TAX_BRACKETS, computeSgIncomeTax,
+    CONSTANTS_VERIFIED_FOR,
     cpfContribRatesForAge, cpfAllocationForAge,
     _round2, computeCpfContribution,
     _monthsBetween,

@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.37';
-const APP_DISPLAY_VERSION = 'v2.37 (3 Jul)';
+const APP_VERSION = 'v2.38';
+const APP_DISPLAY_VERSION = 'v2.38 (3 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -2033,20 +2033,9 @@ function renderBucketPreview(){
    - Resident: progressive brackets (SG_TAX_BRACKETS).
    - Non-resident: employment income taxed at HIGHER of 15% flat or graduated.
    - Monthly provision = annual tax ÷ 12 (accrual, not PAYE withholding).
-   Verified against IRAS worked examples at $40k, $80k, $120k. */
-
-function computeSgIncomeTax(chargeableIncome){
-  const ci = Math.max(0, Number(chargeableIncome) || 0);
-  if (ci === 0) return 0;
-  // Walk bands from highest to find the right one.
-  for (let i = SG_TAX_BRACKETS.length - 1; i >= 0; i--){
-    const band = SG_TAX_BRACKETS[i];
-    if (ci > band.from){
-      return _round2(band.base + (ci - band.from) * band.rate / 100);
-    }
-  }
-  return 0;
-}
+   Verified against IRAS worked examples at $40k, $80k, $120k.
+   computeSgIncomeTax itself now lives in kjr-core.js (pure, unit-tested under
+   node) and is used here as a kjr-core global, loaded before this file. */
 
 /* Returns a breakdown object or null if salary is not configured.
    Memo key is a JSON snapshot of the relevant inputs for cheap dirty-check. */
@@ -2249,7 +2238,7 @@ function renderDiagnostics(){
   if (!out) return;
   const ts   = localStorage.getItem(LK_SYNC_TS);
   const last = localStorage.getItem(LK_LAST_PULL);
-  out.textContent = [
+  const lines = [
     'App version    : ' + APP_VERSION,
     'Schema         : ' + SCHEMA,
     'Apps Script URL: ' + (getSyncUrl() ? '✓ set' : '✗ not set'),
@@ -2269,7 +2258,24 @@ function renderDiagnostics(){
       ' retireAge=' + (DB.settings.retirementAge || '—') +
       ' return=' + DB.settings.expectedReturn + '%' +
       ' inflation=' + DB.settings.inflationRate + '%'
-  ].join('\n');
+  ];
+  out.textContent = lines.join('\n');
+
+  // D6: constants ageing. CPF, tax and holiday tables are only reviewed
+  // through CONSTANTS_VERIFIED_FOR (kjr-core.js). Warn once the calendar
+  // outruns that review, never fabricate figures for years not checked.
+  // Refresh diagnostics can be clicked repeatedly, so drop any prior warning
+  // node before deciding whether to add a fresh one.
+  const prevWarn = document.getElementById('diag-constants-warning');
+  if (prevWarn) prevWarn.remove();
+  const thisYear = new Date().getFullYear();
+  if (thisYear > CONSTANTS_VERIFIED_FOR){
+    const warn = document.createElement('div');
+    warn.id = 'diag-constants-warning';
+    warn.style.cssText = 'margin-top:10px;background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);padding:10px;border-radius:8px;font-size:12px';
+    warn.textContent = '⚠ CPF, tax and holiday constants last verified for ' + CONSTANTS_VERIFIED_FOR + '. Verify against CPF Board, IRAS and MOM before trusting ' + (CONSTANTS_VERIFIED_FOR + 1) + '+ figures.';
+    out.after(warn);
+  }
 }
 
 /* Reveal/hide the Apps Script URL. Default state is hidden (type=password).
