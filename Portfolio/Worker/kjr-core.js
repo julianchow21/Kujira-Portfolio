@@ -77,6 +77,19 @@ function _isoDateSG(d){
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Singapore' }).format(d);
 }
 
+/* Strict date-string validity check, beyond the shape-only regex. Rejects
+   calendar-impossible dates (2026-02-30, 2026-13-01) that the regex alone
+   would accept. Round-trips through Date and checks the parts survived
+   unchanged, so a JS Date's own month/day overflow (e.g. Feb 30 rolling
+   into March) cannot slip through as "valid". */
+function kjrValidDate(s){
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
 /* Last working day of a month. month is 1-12. Starts at the last calendar
    day and walks backwards past Saturdays, Sundays and SG public holidays. */
 function getPayday(year, month){
@@ -88,6 +101,12 @@ function getPayday(year, month){
   }
   return _isoDate(d);
 }
+
+/* Oversell tolerance: below any real share fraction, above float noise. Used
+   both at the trade-save warning (immediate, single trade) and in
+   runReconciliation (whole ledger), so a fractional oversell can never pass
+   one check and trip the other. */
+const OVERSOLD_EPSILON = 1e-6;
 
 /* ─── CPF contribution engine (2026) ───────────────────────────────────
    Rates are CPF Board figures. OW (Ordinary Wage) monthly ceiling S$8,000.
@@ -506,6 +525,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     looksPopulated, seedDecision,
     SG_HOLIDAYS, _isoDate, _isoDateSG, getPayday,
+    OVERSOLD_EPSILON,
     CPF_OW_CEILING_2026, SG_TAX_BRACKETS,
     cpfContribRatesForAge, cpfAllocationForAge,
     _round2, computeCpfContribution,
@@ -515,6 +535,7 @@ if (typeof module !== 'undefined' && module.exports) {
     rangePosition, vsBaseline, SECTOR_CLASS, sectorClass,
     computeStockPosition,
     parseCSV, ibkrNum, ibkrExtractTrades, ibkrMatchTrades,
-    kjrChartAggregate, kjrFmtMeasure, kjrFmtAxis
+    kjrChartAggregate, kjrFmtMeasure, kjrFmtAxis,
+    kjrValidDate
   };
 }

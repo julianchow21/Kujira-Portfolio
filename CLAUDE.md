@@ -64,7 +64,7 @@ These are hard-learned loss classes; every data-storing app must uphold them:
 
 - `APP_VERSION` and `APP_DISPLAY_VERSION` live in `Portfolio/Worker/app.js:14-15`. Bump both on every deploy.
 - `PHASE_2_TABS` hides locked tabs from the nav but their DOM markup remains intact; code is preserved, not deleted.
-- Portfolio uses warm light theme **default** with dark opt-in. Trading and Journal use dark only. Don't apply one app's theme default to another.
+- Portfolio uses dark theme **default** with warm light opt-in. Trading and Journal use dark only. Don't apply one app's theme default to another.
 
 ## Trading app specifics
 
@@ -126,4 +126,4 @@ These extend or override the master `CLAUDE.md` rules for this repo.
 ## Conventions
 
 - All apps use the Kujira design token system: `--bg/bg2/bg3/bg4`, `--text/text2/text3`, `--red/green/blue/amber`, `--accent`, `--radius`, `--glass*` (Portfolio), `--surface-solid` (Portfolio dense tables)
-- Portfolio light theme default (`--accent:#c15f3c` terracotta); dark override (`--accent:#2dd4bf` teal). Trading/Journal: dark only, `--accent:#2dd4bf`.
+- Portfolio dark theme default (`--accent:#2dd4bf` teal); warm light opt-in (`--accent:#c15f3c` terracotta). Trading/Journal: dark only, `--accent:#2dd4bf`.

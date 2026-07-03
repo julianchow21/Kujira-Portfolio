@@ -169,6 +169,33 @@ function runTests() {
     assert.strictEqual(core.incomeNet({}), 0);
   });
 
+  // 6. Testing OVERSOLD_EPSILON (D2: single constant, both call sites consume it)
+  test('OVERSOLD_EPSILON - exported and sane', () => {
+    assert.strictEqual(core.OVERSOLD_EPSILON, 1e-6);
+    assert.strictEqual(core.OVERSOLD_EPSILON > 0, true);
+  });
+
+  // 7. Testing kjrValidDate (D3: shape regex + real calendar round-trip)
+  test('kjrValidDate - rejects calendar-impossible dates', () => {
+    assert.strictEqual(core.kjrValidDate('2026-02-30'), false); // Feb has 28/29 days
+    assert.strictEqual(core.kjrValidDate('2026-13-01'), false); // month 13
+    assert.strictEqual(core.kjrValidDate('2023-02-29'), false); // 2023 not a leap year
+  });
+
+  test('kjrValidDate - accepts valid calendar dates', () => {
+    assert.strictEqual(core.kjrValidDate('2024-02-29'), true);  // 2024 is a leap year
+    assert.strictEqual(core.kjrValidDate('2026-01-01'), true);
+    assert.strictEqual(core.kjrValidDate('2026-12-31'), true);
+  });
+
+  test('kjrValidDate - rejects malformed shapes and non-strings', () => {
+    assert.strictEqual(core.kjrValidDate(''), false);
+    assert.strictEqual(core.kjrValidDate('2026-1-1'), false);   // not zero-padded
+    assert.strictEqual(core.kjrValidDate('not-a-date'), false);
+    assert.strictEqual(core.kjrValidDate(null), false);
+    assert.strictEqual(core.kjrValidDate(undefined), false);
+  });
+
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
   if (failed > 0) process.exit(1);
 }

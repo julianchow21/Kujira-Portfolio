@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.36';
-const APP_DISPLAY_VERSION = 'v2.36 (3 Jul)';
+const APP_VERSION = 'v2.37';
+const APP_DISPLAY_VERSION = 'v2.37 (3 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -818,7 +818,16 @@ function freshDB(){
         residency:       'resident',  // 'resident' | 'non-resident'
         totalReliefs:    1000,        // SGD. Default = earned income relief ($1,000).
         manualAnnualTax: null         // Override. Null = use computed estimate.
-      }
+      },
+      // Dashboard chart builder + saved charts + arrange order. Device-local
+      // until D1; now DB-resident so they ride sync, export and import.
+      // savedCharts: null = never seeded yet (seed the 3 defaults once on
+      // next render); [] = user deliberately deleted every chart (never
+      // re-seed); array = the charts themselves. Null and [] must stay
+      // distinct so "delete everything" cannot look like "brand new".
+      savedCharts:  null,
+      chartBuilder: null,   // live chart-builder config, or null = use the built-in default
+      dashLayout:   []      // dashboard card arrange order (widget ids)
     },
     _priceCache:  {},
     changelog:    [],
@@ -1078,12 +1087,34 @@ function _runMigrations(db){
    downstream. Items with invalid ids get a fresh uid() so they're still recoverable. */
 const _LIST_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash'];
 
+/* Date-typed fields per list table (per ENTITY_SCHEMAS), used to sanitise
+   calendar-invalid dates (e.g. 2026-02-30) coming from the cloud or an
+   import. The row is kept, only the bad date is nulled, so a corrupted
+   sheet or a hostile payload cannot silently misrepresent a date as valid
+   downstream (fmtDateSG, sorting, salary/CPF engines). */
+const _DATE_FIELDS_BY_TABLE = {
+  stocks: ['divExDate', 'divPayDate'],
+  stockTxns: ['date'],
+  cash: ['asOf'],
+  cashTxns: ['date'],
+  cpfHistory: ['date'],
+  income: ['date'],
+  expenses: ['date']
+};
+let _sanitiseInvalidDateCount = 0;   // recovered-date counter, reset per mergeDefaults() run
+
 function _sanitiseList(arr, table){
   if (!Array.isArray(arr)) return [];
+  const dateFields = _DATE_FIELDS_BY_TABLE[table];
   return arr.map(item => {
     if (!item || typeof item !== 'object') return null;
     const safe = Object.assign({}, item);
     if (!kjrSafeId(safe.id)) safe.id = uid(table);
+    if (dateFields){
+      dateFields.forEach(k => {
+        if (safe[k] && !kjrValidDate(safe[k])){ safe[k] = null; _sanitiseInvalidDateCount++; }
+      });
+    }
     return safe;
   }).filter(Boolean);
 }
@@ -1115,12 +1146,24 @@ function mergeDefaults(loaded){
   out.settings.salaryRules = Array.isArray(safe.settings && safe.settings.salaryRules)
     ? safe.settings.salaryRules : base.settings.salaryRules.slice();
   out.settings.tax = Object.assign({}, base.settings.tax, (safe.settings && safe.settings.tax) || {});
+  // D1: saved charts / chart-builder state / dash layout, now DB-resident.
+  // savedCharts and chartBuilder: null is meaningful (see freshDB comment),
+  // so only coerce a non-null, non-array/non-object stray value back to null.
+  // dashLayout must be an array; anything else falls back to the default.
+  const _sc = safe.settings && safe.settings.savedCharts;
+  out.settings.savedCharts = (_sc === null || Array.isArray(_sc)) ? _sc : (out.settings.savedCharts ?? null);
+  const _cb = safe.settings && safe.settings.chartBuilder;
+  out.settings.chartBuilder = (_cb === null || (_cb && typeof _cb === 'object')) ? _cb : (out.settings.chartBuilder ?? null);
+  out.settings.dashLayout = Array.isArray(safe.settings && safe.settings.dashLayout)
+    ? safe.settings.dashLayout : base.settings.dashLayout.slice();
   out.categories = Object.assign({}, base.categories, safe.categories || {});
   out.cpfBalances = Object.assign({}, base.cpfBalances, safe.cpfBalances || {});
   // Migration: pre-anchor data has updatedAt but no anchorDate. Treat the last
   // save as the anchor so the typed figure stays put and only grows forward.
   if (!out.cpfBalances.anchorDate && out.cpfBalances.updatedAt) out.cpfBalances.anchorDate = String(out.cpfBalances.updatedAt).slice(0,10);
+  _sanitiseInvalidDateCount = 0;
   _LIST_TABLES.forEach(t => { out[t] = _sanitiseList(out[t], t); });
+  if (_sanitiseInvalidDateCount > 0) console.warn('mergeDefaults: nulled ' + _sanitiseInvalidDateCount + ' calendar-invalid date field(s) from loaded data');
   if (!out._priceCache || typeof out._priceCache !== 'object') out._priceCache = {};
   out.schemaVersion = SCHEMA_VERSION;
   return out;
@@ -1781,7 +1824,7 @@ function loadSettingsForm(){
   setV('cfg-cpf-extra30',      s.cpfRates.extraFirst30kAge55);
   loadCpfBalancesForm();
   const cpfAnchorMeta = document.getElementById('cfg-cpf-anchor-meta');
-  if (cpfAnchorMeta){ const an = _cpfAnchorDate(); cpfAnchorMeta.textContent = an ? 'Anchored ' + an : 'Not set yet'; }
+  if (cpfAnchorMeta){ const an = _cpfAnchorDate(); cpfAnchorMeta.textContent = an ? 'Anchored ' + fmtDateSG(an) : 'Not set yet'; }
   const sal = s.salary || {};
   setV('cfg-salary-employer',  sal.employer);
   setV('cfg-salary-gross',     sal.grossMonthly);
@@ -3405,6 +3448,7 @@ function entityModalSave(){
   // control-char stripping + length cap (500 default, 5000 for textareas).
   // Numbers get isFinite checks; non-finite becomes null and trips required.
   const body = document.getElementById('em-body');
+  let invalidDateLabel = null;   // non-blank but calendar-invalid date (e.g. 2026-02-30): block save, distinct from "left blank"
   for (const f of schema.fields){
     const el = body.querySelector(`[data-fkey="${f.key}"]`);
     if (!el) continue;
@@ -3412,13 +3456,15 @@ function entityModalSave(){
     if (f.type === 'number') {
       item[f.key] = kjrSafeNumber(raw);
     } else if (f.type === 'select' || f.type === 'date') {
-      // Selects: must be one of the declared options. Date: ISO yyyy-mm-dd format.
+      // Selects: must be one of the declared options. Date: ISO yyyy-mm-dd
+      // format plus a real calendar check (kjrValidDate), not just the shape.
       if (f.type === 'select') {
         const optList = f.optionsFn ? (f.optionsFn() || []) : (f.options || []);
         const allowed = optList.map(o => String(Array.isArray(o) ? o[0] : o));
         item[f.key] = allowed.includes(String(raw)) ? String(raw) : (f.default || allowed[0] || '');
       } else if (f.type === 'date') {
-        item[f.key] = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '';
+        if (raw && !kjrValidDate(raw)) invalidDateLabel = f.label;
+        item[f.key] = kjrValidDate(raw) ? raw : '';
       } else {
         item[f.key] = kjrSafeString(raw, 80);
       }
@@ -3428,6 +3474,8 @@ function entityModalSave(){
       item[f.key] = kjrSafeString(String(raw).trim(), 120);
     }
   }
+
+  if (invalidDateLabel){ showToast('Invalid date: ' + invalidDateLabel, 'error'); return; }
 
   // Validate required
   for (const f of schema.fields){
@@ -3446,7 +3494,7 @@ function entityModalSave(){
   if (table === 'stockTxns' && item.side === 'sell'){
     const held = sharesHeldAsOf(item.stockId, item.date, item.id);
     const qty  = Math.abs(Number(item.shares) || 0);
-    if (qty > held + 1e-9){
+    if (qty > held + OVERSOLD_EPSILON){
       const sym = (DB.stocks.find(s => s.id === item.stockId) || {}).symbol || 'this stock';
       if (!confirm('This sells ' + qty + ' shares of ' + sym + ' but only ' + (held > 0 ? held : 0) + ' were held as of ' + fmtDateSG(item.date) + '.\n\nSave anyway?')) return;
     }
@@ -3691,7 +3739,7 @@ function ibkrShowPreview(matched, skippedCount){
       ? `<label class="ibkr-dup-opt" title="${kjrEscape(chipTitle.dup)}"><input type="checkbox" data-ibkr-dup="${idx}"> <span class="tag muted">possible dup</span></label>`
       : `<span class="tag ${chipCls[t.status]}" ${chipTitle[t.status] ? 'title="' + kjrEscape(chipTitle[t.status]) + '"' : ''}>${chipLbl[t.status]}</span>`;
     return `<tr${ccyMismatch ? ' class="warn-row"' : ''}>
-      <td class="tl">${kjrEscape(t.date)}</td>
+      <td class="tl">${kjrEscape(fmtDateSG(t.date))}</td>
       <td class="tl">${kjrEscape(t.symbol)}</td>
       <td class="tl"><span class="tag ${t.side === 'sell' ? 'neg' : 'pos'}">${t.side.toUpperCase()}</span></td>
       <td class="num">${t.shares}</td>
@@ -4087,12 +4135,17 @@ let _stockChartRows = [];
 let _pbHistCache = {};                 // memory-only: { ysym: { range: {ccy, points, fetchedAt} } }
 const _pbCharts = {};                  // canvasId -> Chart instance
 const PB_PALETTE = ['#a78bfa','#2dd4bf','#f59e0b','#f87171','#60a5fa','#34d399','#fb923c','#c084fc','#38bdf8','#4ade80','#facc15','#e879f9'];
+/* D1: these four were device-local localStorage keys (pre-v2.37). They now
+   live in DB.settings so they ride sync, export and import like everything
+   else. The old key names are kept here only as migration source keys
+   (see migrateDeviceLocalChartState, called once on boot), nothing reads
+   or writes them directly any more. */
 const PB_STATE_KEY = 'kjr_pb_cb_state_v1';
 const PB_SAVED_KEY  = 'kjr_portfolio_saved_charts';
 const PB_SEEDED_KEY = 'kjr_pb_defaults_seeded_v1';
 const DASH_LAYOUT_KEY = 'kjr_portfolio_dash_layout';
-function loadDashLayout(){ try{ const r = JSON.parse(localStorage.getItem(DASH_LAYOUT_KEY)||'[]'); return Array.isArray(r)?r:[]; }catch(e){ return []; } }
-function saveDashLayout(ids){ try{ localStorage.setItem(DASH_LAYOUT_KEY, JSON.stringify(ids)); }catch(e){} }
+function loadDashLayout(){ return Array.isArray(DB.settings.dashLayout) ? DB.settings.dashLayout : []; }
+function saveDashLayout(ids){ DB.settings.dashLayout = Array.isArray(ids) ? ids : []; saveData(); }
 const PB_PERIODS = { ONE_MONTH:'1mo', THREE_MONTHS:'3mo', SIX_MONTHS:'6mo', ONE_YEAR:'1y', ALL:'all' };
 const PB_PERIOD_LABELS = { ONE_MONTH:'1M', THREE_MONTHS:'3M', SIX_MONTHS:'6M', ONE_YEAR:'1Y', ALL:'All' };
 const PB_SERIES_MODES = ['total','split','single','cpfCompare'];   // series-source view modes
@@ -4253,7 +4306,7 @@ function _pbFilteredRows(kw){
 
 function _pbLoadState(){
   try{
-    const raw = JSON.parse(localStorage.getItem(PB_STATE_KEY) || 'null');
+    const raw = DB.settings.chartBuilder || null;
     if (raw && Array.isArray(raw.x) && Array.isArray(raw.y)){
       const srcKey = PB_SOURCES[raw.source] ? raw.source : 'holdings';
       const flds = PB_SOURCES[srcKey].fields || PB_HOLDINGS_FIELDS;
@@ -4274,7 +4327,9 @@ function _pbLoadState(){
   }catch(e){}
   return { source:'holdings', x:[], y:[], mode:'crosssec', range:'SIX_MONTHS', seriesMode:'total', seriesClass:'cash', tsValue:'price', tsAvgCost:false, tsSymbols:[], customItems:null };
 }
-function _pbSaveState(){ try{ localStorage.setItem(PB_STATE_KEY, JSON.stringify(pbState)); }catch(e){} }
+function _pbSaveState(){ DB.settings.chartBuilder = pbState; saveData(); }
+// Parse-time default; migrateDeviceLocalChartState() reloads this from
+// DB.settings once the real DB is in place (loadLocal() runs later, at boot).
 let pbState = _pbLoadState();
 
 /* ── Builder UI injection (once) ── */
@@ -4870,11 +4925,14 @@ function pbResetChart(){
   pbRenderChart();
 }
 
-/* ═══════ SAVED CHARTS ═══════ */
+/* ═══════ SAVED CHARTS ═══════
+   DB.settings.savedCharts: null = never seeded (pbSeedDefaults will seed the
+   3 built-in charts once), [] = user deliberately deleted every chart (never
+   re-seed), array = the charts. pbLoadSaved() always returns an array for
+   callers that iterate; pbSeedDefaults() reads the raw field directly so it
+   can tell "never seeded" apart from "deliberately empty". */
 function pbLoadSaved(){
-  let raw = [];
-  try { raw = JSON.parse(localStorage.getItem(PB_SAVED_KEY) || '[]'); } catch(e){ raw = []; }
-  if (!Array.isArray(raw)) return [];
+  const raw = Array.isArray(DB.settings.savedCharts) ? DB.settings.savedCharts : [];
   const result = raw.filter(c => c && typeof c === 'object').map(c => {
     const srcKey = PB_SOURCES[c.source] ? c.source : 'holdings';
     const flds = pbFields({ source: srcKey });
@@ -4908,7 +4966,7 @@ function pbLoadSaved(){
   });
   return result.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
 }
-function pbPersistSaved(charts){ try{ localStorage.setItem(PB_SAVED_KEY, JSON.stringify(charts)); }catch(e){} }
+function pbPersistSaved(charts){ DB.settings.savedCharts = Array.isArray(charts) ? charts : []; saveData(); }
 
 function pbSaveChart(){
   const cfg = _pbLiveConfig();
@@ -5070,9 +5128,11 @@ function pbSeedDefaults(){
   // Seed the three built-in charts ONCE ever. After that the user owns them:
   // deleting a default keeps it gone across reloads (no re-seeding). Brand-new
   // installs still get all three on first render.
-  let seeded = false;
-  try { seeded = localStorage.getItem(PB_SEEDED_KEY) === '1'; } catch(e){}
-  if (seeded) return;
+  // DB.settings.savedCharts === null means "never seeded" (freshDB default);
+  // once seeded it is always an array, even [] after the user deletes every
+  // chart, so [] must never be mistaken for "never seeded" (that would
+  // resurrect deleted defaults on next boot).
+  if (DB.settings.savedCharts !== null) return;
   const charts = pbLoadSaved();
   const ids = new Set(charts.map(c => c.id));
   const defaults = [
@@ -5086,14 +5146,62 @@ function pbSeedDefaults(){
       range:'SIX_MONTHS', xFields:['month'], yFields:['income','expense'], chartType:'bar', topN:'all', sort:'alpha',
       dualAxis:false, kwFilter:'', tsSymbols:[], tsValue:'price', tsAvgCost:false, pinned:true, order:2 },
   ];
-  let changed = false;
-  defaults.forEach(def => { if (!ids.has(def.id)){ charts.push(def); changed = true; } });
-  if (changed){
-    charts.sort((a,b) => (a.order??999) - (b.order??999));
-    pbPersistSaved(charts);
+  defaults.forEach(def => { if (!ids.has(def.id)) charts.push(def); });
+  charts.sort((a,b) => (a.order??999) - (b.order??999));
+  // Always persist here, even if charts was already []: this is what flips
+  // savedCharts from null ("never seeded") to a real array, so we never
+  // re-enter this branch and resurrect a default the user later deletes.
+  pbPersistSaved(charts);
+}
+
+/* D1: one-time migration off the four localStorage keys (pre-v2.37) into
+   DB.settings, so saved charts, live builder state, seeded-defaults status
+   and dash layout ride sync/export/import like the rest of the DB. Runs once
+   on boot, after loadLocal() but before the first renderAll(). Guarded on the
+   DB fields still being at their fresh defaults, so it never clobbers data
+   that already migrated (e.g. arrived via a cloud pull on a second device).
+   Removes the old keys afterwards and persists via saveData() (not
+   saveLocal()) so the migrated state syncs immediately rather than waiting
+   for the next unrelated edit. */
+function migrateDeviceLocalChartState(){
+  let migrated = false;
+  try {
+    const oldState = JSON.parse(localStorage.getItem(PB_STATE_KEY) || 'null');
+    if (oldState && DB.settings.chartBuilder === null){
+      DB.settings.chartBuilder = oldState;
+      migrated = true;
+    }
+  } catch(e){}
+  try {
+    const oldSaved = JSON.parse(localStorage.getItem(PB_SAVED_KEY) || 'null');
+    const wasSeeded = localStorage.getItem(PB_SEEDED_KEY) === '1';
+    if (DB.settings.savedCharts === null && (Array.isArray(oldSaved) || wasSeeded)){
+      // Old device had either real charts, or an empty-but-seeded state
+      // (user deleted every chart), both must carry over as an array so
+      // pbSeedDefaults() never re-seeds on this device.
+      DB.settings.savedCharts = Array.isArray(oldSaved) ? oldSaved : [];
+      migrated = true;
+    }
+  } catch(e){}
+  try {
+    const oldLayout = JSON.parse(localStorage.getItem(DASH_LAYOUT_KEY) || 'null');
+    if (Array.isArray(oldLayout) && oldLayout.length && DB.settings.dashLayout.length === 0){
+      DB.settings.dashLayout = oldLayout;
+      migrated = true;
+    }
+  } catch(e){}
+  localStorage.removeItem(PB_STATE_KEY);
+  localStorage.removeItem(PB_SAVED_KEY);
+  localStorage.removeItem(PB_SEEDED_KEY);
+  localStorage.removeItem(DASH_LAYOUT_KEY);
+  // Always reload the module-level builder state here, not only on migration:
+  // pbState was initialised at parse time against the empty freshDB(), and
+  // loadLocal() has since replaced DB with the real data. Without this, a
+  // saved builder config would be ignored on every normal boot.
+  pbState = _pbLoadState();
+  if (migrated){
+    saveData();                 // persists locally AND syncs, so the migration is not device-local
   }
-  // Mark seeded so we never re-add a default the user later deletes.
-  try { localStorage.setItem(PB_SEEDED_KEY, '1'); } catch(e){}
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -6088,8 +6196,8 @@ function renderCpf(){
   const accrued = total - opening;
   const anchor = _cpfAnchorDate();
   const subLine = accrued > 0.5
-    ? '+' + fmt(accrued, {dp:0}) + ' since ' + (anchor || '—') + ' (salary + year-end interest)'
-    : (anchor ? 'Anchored ' + anchor : 'Set starting balances in Settings');
+    ? '+' + fmt(accrued, {dp:0}) + ' since ' + (anchor ? fmtDateSG(anchor) : '—') + ' (salary + year-end interest)'
+    : (anchor ? 'Anchored ' + fmtDateSG(anchor) : 'Set starting balances in Settings');
 
   // KPI row — live balance (typed figure auto-grown by salary each payday)
   balsEl.innerHTML = `<div class="metrics">
@@ -6100,7 +6208,7 @@ function renderCpf(){
     <div class="metric"><div class="metric-label">RA · ${DB.settings.cpfRates.RA}%</div><div class="metric-value">${fmt(eff.RA||0)}</div></div>
   </div>`;
 
-  if (metaEl) metaEl.textContent = anchor ? 'Statement figure as of ' + anchor : 'Not set yet';
+  if (metaEl) metaEl.textContent = anchor ? 'Statement figure as of ' + fmtDateSG(anchor) : 'Not set yet';
 
   loadCpfBalancesForm();
 
@@ -6426,7 +6534,7 @@ function runReconciliation(){
   // misstated, so flag it for the user to correct the trade history.
   (DB.stocks || []).forEach(s => {
     const pos = deriveStockPosition(s.id);
-    if (pos && pos.oversold > 0.00005) issues.push({ level:'warn',
+    if (pos && pos.oversold > OVERSOLD_EPSILON) issues.push({ level:'warn',
       msg: (s.symbol || 'A stock') + "'s ledger sells " + (+pos.oversold.toFixed(4)) + ' more share' + (pos.oversold > 1 ? 's' : '') + ' than were held, so its realised P&L may be misstated. Check the trade history.' });
   });
 
@@ -6584,13 +6692,13 @@ function renderDashboard(){
   // Net worth hero — secondary (ex-CPF) only shown when CPF is on
   const heroSecondary = _dashShowCpf
     ? `<div style="width:1px;height:48px;background:var(--glass-border);align-self:center;flex-shrink:0"></div>
-    <div><div class="dash-hero-label">Liquid (ex-CPF)</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${fmt(netExCpf, {dp:0})}</div></div>`
+    <div><div class="dash-hero-label">Ex-CPF</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${fmt(netExCpf, {dp:0})}</div></div>`
     : '';
   const fxExclusionNote = cashInfo.excludedCount
     ? `<div class="dash-hero-label" style="margin-top:4px">Excludes ${cashInfo.excludedCount} cash account${cashInfo.excludedCount>1?'s':''} with missing FX, refresh FX in Settings</div>`
     : '';
   nwEl.innerHTML = `<div class="dash-hero">
-    <div><div class="dash-hero-label">${_dashShowCpf ? 'Net worth (with CPF)' : 'Liquid net worth'}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div>${fxExclusionNote}</div>
+    <div><div class="dash-hero-label">${_dashShowCpf ? 'Net worth (with CPF)' : 'Net worth (ex-CPF)'}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div>${fxExclusionNote}</div>
     ${heroSecondary}
     <button style="margin-left:auto;flex-shrink:0" class="btn btn-sm${_dashShowCpf ? ' btn-active' : ''}" data-click="toggleDashCpf" title="${_dashShowCpf ? 'Click to exclude CPF from net worth' : 'Click to include CPF in net worth'}">CPF ${_dashShowCpf ? 'on' : 'off'}</button>
   </div>`;
@@ -7030,6 +7138,7 @@ async function boot(){
   // engines and the network pull are deferred below — neither blocks first paint.
   const had = loadLocal();
   if (!had) saveLocal(); // seed empty DB so localStorage has the canonical shape
+  migrateDeviceLocalChartState(); // D1: one-time pickup of the old localStorage chart/layout keys
   updateCcyToggleUI();
   renderAll();
   if (!location.hash) history.replaceState(null, '', '#dashboard'); // seed without an extra entry
