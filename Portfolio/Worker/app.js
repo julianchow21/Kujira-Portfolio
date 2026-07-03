@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.43';
-const APP_DISPLAY_VERSION = 'v2.43 (3 Jul)';
+const APP_VERSION = 'v2.44';
+const APP_DISPLAY_VERSION = 'v2.44 (3 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -754,6 +754,13 @@ function setWatchlistSort(key){
     : { key:null, dir:null };
   saveData(); renderWatchlist();
 }
+function setInsuranceSort(key){
+  const cur = DB.settings.insuranceSort || {};
+  DB.settings.insuranceSort = cur.key !== key ? { key, dir:'asc' }
+    : cur.dir === 'asc' ? { key, dir:'desc' }
+    : { key:null, dir:null };
+  saveData(); renderInsurance();
+}
 
 function freshDB(){
   return {
@@ -780,6 +787,7 @@ function freshDB(){
       stocksColumns: defaultStockColumns(),  // holdings table columns: order + visibility
       stocksSort:    { key:null, dir:null },  // holdings table sort: column + asc|desc
       watchlistSort: { key:null, dir:null },  // watchlist sort: column + asc|desc
+      insuranceSort: { key:null, dir:null },  // insurance register sort: column + asc|desc
       boardColumns:  defaultCols(BOARD_COLUMNS), // Watchlist+ board: column order + visibility
       boardSort:     { key:null, dir:null },  // Watchlist+ board sort: column + asc|desc
       fxRates:      { USDSGD: null, lastUpdated: null },
@@ -6093,7 +6101,46 @@ function renderInsurance(){
     { label:'Death cover',           value: fmt(cover('coverDeath'), {dp:0}) },
     { label:'Cash value (net worth)', value: fmt(insuranceCashValueSGD(), {dp:0}), accent:'accent' }
   ]);
-  const rows = list.slice().sort((a,b) => String(a.insurer||'').localeCompare(String(b.insurer||''))).map(p => `<tr>
+  // Sort accessors, mirrors WL_SORT_VALS. Null/empty always sorts last.
+  const INS_SORT_VALS = {
+    insurer:     p => p.insurer || '',
+    type:        p => p.type || '',
+    insured:     p => p.insured || '',
+    status:      p => p.status || '',
+    coverDeath:  p => (p.coverDeath != null && p.coverDeath !== '') ? Number(p.coverDeath) : null,
+    premium:     p => p.premium ? annualPremium(p) : null,
+    premiumDue:  p => p.premiumDue || null,
+    cashValue:   p => (p.cashValue != null && p.cashValue !== '') ? Number(p.cashValue) : null
+  };
+  const insSort = DB.settings.insuranceSort || {};
+  const insSortFn = (insSort.key && insSort.dir && INS_SORT_VALS[insSort.key]) ? INS_SORT_VALS[insSort.key] : null;
+  const sortPolicies = arr => {
+    if (insSortFn){
+      const dir = insSort.dir === 'desc' ? -1 : 1;
+      arr.sort((a, b) => {
+        const va = insSortFn(a), vb = insSortFn(b);
+        if (va == null && vb == null) return 0;
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        return (typeof va === 'string' || typeof vb === 'string')
+          ? dir * String(va).localeCompare(String(vb))
+          : dir * (va - vb);
+      });
+    } else {
+      arr.sort((a,b) => String(a.insurer||'').localeCompare(String(b.insurer||'')));
+    }
+    return arr;
+  };
+
+  // Sortable header, data-ins-sort-key keeps it off the holdings/watchlist routers.
+  const insTh = (key, lbl, extraCls) => {
+    const active = insSort.key === key && insSort.dir;
+    const glyph  = active ? `<span class="sort-glyph">${insSort.dir === 'asc' ? '▲' : '▼'}</span>` : '';
+    const aria   = active ? ` aria-sort="${insSort.dir === 'asc' ? 'ascending' : 'descending'}"` : '';
+    return `<th class="sortable${extraCls||''}" data-ins-sort-key="${key}" tabindex="0"${aria}>${lbl}${glyph}</th>`;
+  };
+
+  const rowHtml = p => `<tr>
     <td class="tl cell-sym">${kjrEscape(p.insurer||'?')}</td>
     <td class="tl">${kjrEscape(p.type||'')}</td>
     <td class="tl">${kjrEscape(p.insured||'')}</td>
@@ -6103,10 +6150,56 @@ function renderInsurance(){
     <td class="num">${p.premiumDue?fmtDateSG(p.premiumDue):'—'}</td>
     <td class="num">${p.cashValue?fmt(Number(p.cashValue),{dp:0}):'—'}</td>
     <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="insurance" data-edit-id="${kjrEscape(p.id)}">Edit</button></td>
-  </tr>`).join('');
+  </tr>`;
+
+  // Family view, group by insured when more than one distinct person is on
+  // the register (case-insensitive trim, empty counts as 'Self'). Adequacy
+  // stays self-only regardless (coverageAdequacy/_selfPolicies untouched).
+  const insuredOf = p => { const v = String(p.insured||'').trim(); return v || 'Self'; };
+  const distinctInsured = Array.from(new Set(list.map(p => insuredOf(p).toLowerCase())));
+  let rows;
+  if (distinctInsured.length > 1){
+    const groups = {};
+    list.forEach(p => {
+      const name = insuredOf(p);
+      const gkey = name.toLowerCase();
+      if (!groups[gkey]) groups[gkey] = { name, items:[] };
+      groups[gkey].items.push(p);
+    });
+    const order = Object.values(groups).sort((a,b) => {
+      const aSelf = a.name.toLowerCase() === 'self', bSelf = b.name.toLowerCase() === 'self';
+      if (aSelf && !bSelf) return -1;
+      if (bSelf && !aSelf) return 1;
+      return a.name.localeCompare(b.name);
+    });
+    rows = order.map(g => {
+      // Subtotals count Active policies only, same as the summary buckets, a
+      // lapsed policy must not inflate anyone's cover. All rows stay visible.
+      const act   = g.items.filter(p => p.status === 'Active');
+      const death = act.reduce((s,p) => s + (Number(p.coverDeath)||0), 0);
+      const ci    = act.reduce((s,p) => s + (Number(p.coverCI)||0), 0);
+      const prem  = act.reduce((s,p) => s + cashPremiumPerYear(p), 0);
+      const groupHead = `<tr class="ins-group-row"><td colspan="9">${kjrEscape(g.name)} · Death ${fmt(death,{dp:0})} · CI ${fmt(ci,{dp:0})} · Premiums ${fmt(prem,{dp:0})}/yr</td></tr>`;
+      return groupHead + sortPolicies(g.items.slice()).map(rowHtml).join('');
+    }).join('');
+  } else {
+    rows = sortPolicies(list.slice()).map(rowHtml).join('');
+  }
+
   const table = `<div class="tbl-wrap"><table class="holdings"><thead><tr>
-    <th class="tl">Insurer</th><th class="tl">Type</th><th class="tl">Insured</th><th class="tl">Status</th><th>Death cover</th><th>Premium</th><th>Next due</th><th>Cash value</th><th></th>
+    ${insTh('insurer','Insurer',' tl')}${insTh('type','Type',' tl')}${insTh('insured','Insured',' tl')}${insTh('status','Status',' tl')}${insTh('coverDeath','Death cover')}${insTh('premium','Premium')}${insTh('premiumDue','Next due')}${insTh('cashValue','Cash value')}<th></th>
   </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+
+  // Premium schedule, next 12 months of cash-outlay premiums.
+  const schedule = _insurancePremiumSchedule(list);
+  let premCard = '';
+  if (schedule.series.some(v => v > 0)){
+    premCard = `<div class="card"><div class="card-head"><h3>Premium schedule <span class="page-sub">cash outlay, next 12 months</span></h3></div><div class="card-body">
+      <div style="height:220px"><canvas id="ins-prem-canvas"></canvas></div>
+      ${schedule.excluded ? `<p class="hint">${schedule.excluded} polic${schedule.excluded===1?'y':'ies'} without a next-due date are not scheduled.</p>` : ''}
+    </div></div>`;
+  }
+
   const today = new Date();
   const horizon = new Date(today.getTime() + 90*864e5);
   const due = list.filter(p => p.premiumDue && new Date(p.premiumDue) >= today && new Date(p.premiumDue) <= horizon)
@@ -6117,7 +6210,82 @@ function renderInsurance(){
       due.map(p => `<tr><td class="tl cell-sym">${kjrEscape(p.insurer||'?')}</td><td class="tl">${kjrEscape(p.plan||p.type||'')}</td><td class="num">${fmtDateSG(p.premiumDue)} (in ${Math.max(0,Math.ceil((new Date(p.premiumDue)-today)/864e5))}d)</td><td class="num">${p.premium?fmt(Number(p.premium),{dp:0}):'—'}</td></tr>`).join('')
     }</tbody></table></div></div></div>`;
   }
-  el.innerHTML = head + `<div class="card-body">${summary}</div>` + table + renew + renderCoverageAdequacy();
+  el.innerHTML = head + `<div class="card-body">${summary}</div>` + table + premCard + renew + renderCoverageAdequacy();
+  _renderInsPremiumChart(schedule.series);
+}
+
+/* Premium schedule, next 12 buckets starting the current month. Only ACTIVE
+   policies with a positive cash premium (Cash/Card mode) are scheduled:
+   Monthly hits every bucket, Quarterly/Semi-annual/Annual anchor on
+   premiumDue and repeat every 3/6/12 months, Single never hits. A policy
+   that should recur but has no valid premiumDue can't be anchored, so it's
+   excluded and counted for the hint. */
+function _insurancePremiumSchedule(list){
+  const months = [];
+  const base = new Date(); base.setDate(1);
+  for (let i = 0; i < 12; i++){
+    const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
+    months.push({ y:d.getFullYear(), m:d.getMonth(), label: d.toLocaleDateString('en-SG',{month:'short',year:'2-digit'}) });
+  }
+  const series = months.map(() => 0);
+  let excluded = 0;
+  (list||[]).forEach(p => {
+    if (p.status !== 'Active') return;
+    const amt = Number(p.premium) || 0;
+    if (amt <= 0) return;
+    if (!['Cash','Card'].includes(p.premiumMode)) return;
+    const freq = p.premiumFreq || 'Annual';
+    if (freq === 'Single') return;
+    if (freq === 'Monthly'){
+      for (let i = 0; i < 12; i++) series[i] += amt;
+      return;
+    }
+    const due = p.premiumDue ? new Date(p.premiumDue) : null;
+    if (!due || isNaN(due.getTime())){ excluded++; return; }
+    const step = freq === 'Quarterly' ? 3 : freq === 'Semi-annual' ? 6 : 12; // Annual + fallback
+    // dueIdx is the anchor month's offset from the window start. A FUTURE due
+    // date is itself the next payment, so recurrence starts there and nothing
+    // lands before it. Only a past-due anchor (user hasn't updated the field)
+    // gets projected forward into 0..step-1 via modular reduction.
+    const dueIdx = (due.getFullYear() - months[0].y) * 12 + (due.getMonth() - months[0].m);
+    const firstHit = dueIdx >= 0 ? dueIdx : ((dueIdx % step) + step) % step;
+    for (let i = firstHit; i < 12; i += step) series[i] += amt;
+  });
+  return { series, labels: months.map(m => m.label), excluded };
+}
+
+/* Chart.js bar of the 12-month premium schedule. Mirrors the _pbMountChart
+   lifecycle: fixed canvas id, destroy-before-create, register in _pbCharts. */
+function _renderInsPremiumChart(series){
+  if (typeof Chart === 'undefined') return;
+  if (!series || !series.some(v => v > 0)) return;
+  const canvas = document.getElementById('ins-prem-canvas');
+  if (!canvas) return;
+  const months = [];
+  const base = new Date(); base.setDate(1);
+  for (let i = 0; i < 12; i++){
+    const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
+    months.push(d.toLocaleDateString('en-SG',{month:'short',year:'2-digit'}));
+  }
+  const dc = displayCcy();
+  const values = series.map(v => +toDisplay(v, 'SGD').toFixed(2));
+  const axisColor = _cssVar('--text3'), gridColor = _cssVar('--border');
+  const old = _pbCharts['ins-prem-canvas']; if (old){ try{ old.destroy(); }catch(e){} }
+  _pbCharts['ins-prem-canvas'] = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels: months, datasets: [{ label:'Premiums', data: values, backgroundColor: PB_PALETTE[0]+'55', borderColor: PB_PALETTE[0], borderWidth:1.5, borderRadius:4 }] },
+    options: {
+      responsive:true, maintainAspectRatio:false, animation:{duration:300},
+      plugins:{
+        legend:{ display:false },
+        tooltip:{ callbacks:{ label: c => ' ' + fmt(c.parsed.y, { noConvert:true, dp:0 }) } }
+      },
+      scales:{
+        x:{ ticks:{ color:axisColor, font:{size:10} }, grid:{ display:false } },
+        y:{ ticks:{ color:axisColor, font:{size:10}, callback: v => dc + ' ' + Number(v).toLocaleString('en-SG') }, grid:{ color:gridColor } }
+      }
+    }
+  });
 }
 
 function renderCoverageAdequacy(){
@@ -7318,6 +7486,8 @@ function installEventDelegation(){
     if (bTh){ setBoardSort(bTh.getAttribute('data-board-sort-key')); return; }
     const wlTh = e.target.closest('th[data-wl-sort-key]');
     if (wlTh){ setWatchlistSort(wlTh.getAttribute('data-wl-sort-key')); return; }
+    const insTh = e.target.closest('th[data-ins-sort-key]');
+    if (insTh){ setInsuranceSort(insTh.getAttribute('data-ins-sort-key')); return; }
     const th = e.target.closest('th[data-sort-key]');
     if (th){ setStockSort(th.getAttribute('data-sort-key')); return; }
     const btn = e.target.closest('[data-edit-table][data-edit-id]');
@@ -7350,6 +7520,8 @@ function installEventDelegation(){
     if (bTh){ e.preventDefault(); setBoardSort(bTh.getAttribute('data-board-sort-key')); return; }
     const wlTh = e.target && e.target.closest ? e.target.closest('th[data-wl-sort-key]') : null;
     if (wlTh){ e.preventDefault(); setWatchlistSort(wlTh.getAttribute('data-wl-sort-key')); return; }
+    const insTh = e.target && e.target.closest ? e.target.closest('th[data-ins-sort-key]') : null;
+    if (insTh){ e.preventDefault(); setInsuranceSort(insTh.getAttribute('data-ins-sort-key')); return; }
     const th = e.target && e.target.closest ? e.target.closest('th[data-sort-key]') : null;
     if (!th) return;
     e.preventDefault();

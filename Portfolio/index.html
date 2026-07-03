@@ -322,6 +322,9 @@ textarea.fi{resize:vertical;min-height:70px}
    Solid tokens only, no glass, consistent with .card being in-flow. */
 .cov-bar{display:inline-block;width:80px;height:6px;border-radius:3px;background:var(--bg3);overflow:hidden;vertical-align:middle;margin-right:8px}
 .cov-bar span{display:block;height:100%;background:var(--accent)}
+/* Insurance family-view group header row (Feature 2). Solid token, matches
+   the register table's in-flow surface. */
+.ins-group-row td{background:var(--bg3);font-weight:600;font-size:12px;color:var(--text2)}
 .cov-pill{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:8px;border:1px solid transparent;white-space:nowrap}
 .cov-pill.covered{color:var(--green);background:var(--green-soft);border-color:var(--green-border)}
 .cov-pill.partial{color:var(--amber);background:var(--amber-soft);border-color:var(--amber-border)}
@@ -1281,8 +1284,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.43"></script>
-<script src="Worker/kjr-sortable.js?v=2.43"></script>
-<script src="Worker/app.js?v=2.43"></script>
+<script src="Worker/kjr-core.js?v=2.44"></script>
+<script src="Worker/kjr-sortable.js?v=2.44"></script>
+<script src="Worker/app.js?v=2.44"></script>
 </body>
 </html>
