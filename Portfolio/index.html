@@ -318,6 +318,16 @@ textarea.fi{resize:vertical;min-height:70px}
 .h-summary-value{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.3px}
 .h-summary-sub{font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums}
 
+/* COVERAGE ADEQUACY (Insurance tab), ported from the standalone module.
+   Solid tokens only, no glass, consistent with .card being in-flow. */
+.cov-bar{display:inline-block;width:80px;height:6px;border-radius:3px;background:var(--bg3);overflow:hidden;vertical-align:middle;margin-right:8px}
+.cov-bar span{display:block;height:100%;background:var(--accent)}
+.cov-pill{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:8px;border:1px solid transparent;white-space:nowrap}
+.cov-pill.covered{color:var(--green);background:var(--green-soft);border-color:var(--green-border)}
+.cov-pill.partial{color:var(--amber);background:var(--amber-soft);border-color:var(--amber-border)}
+.cov-pill.gap{color:var(--red);background:var(--red-soft);border-color:var(--red-border)}
+.cov-pill.na{color:var(--text3);background:var(--bg4);border-color:var(--border2)}
+
 /* MARKET / ACCOUNT TAG */
 .tag{display:inline-flex;align-items:center;padding:1px 5px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2)}
 .tag.sgx{color:var(--blue);border-color:var(--blue-border);background:var(--blue-soft)}
@@ -705,6 +715,14 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     <div id="realestate-body"></div>
   </section>
 
+  <!-- INSURANCE -->
+  <section class="page" id="page-insurance">
+    <div class="page-head">
+      <div><div class="page-title">Insurance</div><div class="page-sub">Life, health, and general policies, plus a protection adequacy check.</div></div>
+    </div>
+    <div id="insurance-root"></div>
+  </section>
+
   <!-- CASH -->
   <section class="page" id="page-cash">
     <div class="page-head">
@@ -898,6 +916,50 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
           </div>
         </div>
         <div style="margin-top:14px"><button class="btn btn-primary" data-click="saveSettings">Save</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Coverage targets</h3><span class="hint">Rule-of-thumb benchmarks for the Insurance tab's protection adequacy check.</span></div>
+      <div class="card-body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="lbl">Death (× annual income)</label>
+            <input type="number" step="1" id="cfg-cov-death-mult" class="fi" data-change="setCovDeathMult">
+          </div>
+          <div class="form-group">
+            <label class="lbl">TPD (× annual income)</label>
+            <input type="number" step="1" id="cfg-cov-tpd-mult" class="fi" data-change="setCovTpdMult">
+          </div>
+          <div class="form-group">
+            <label class="lbl">Critical illness (× annual income)</label>
+            <input type="number" step="1" id="cfg-cov-ci-mult" class="fi" data-change="setCovCiMult">
+          </div>
+          <div class="form-group">
+            <label class="lbl">Income protection (% of monthly)</label>
+            <input type="number" step="1" id="cfg-cov-income-pct" class="fi" data-change="setCovIncomePct">
+          </div>
+          <div class="form-group">
+            <label class="lbl">Long-term care target (SGD/mo)</label>
+            <input type="number" step="1" id="cfg-cov-ltc-target" class="fi" data-change="setCovLtcTarget">
+          </div>
+          <div class="form-group">
+            <label class="lbl">Hospitalisation target ward</label>
+            <select id="cfg-cov-hosp-ward" class="fi" data-change="setCovHospWard">
+              <option value="B1">B1</option>
+              <option value="A">A</option>
+              <option value="Private">Private</option>
+              <option value="As-charged">As-charged</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:14px">
+          <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="cfg-cov-careshield" data-change="setCovCareshield">
+            <span style="font-size:13px">Include CareShield Life base (~600/mo) in LTC cover</span>
+          </label>
+        </div>
+        <p class="hint" style="margin-top:10px">Rule-of-thumb benchmarks, editable so the metric is transparent. Not personalised advice.</p>
       </div>
     </div>
 
@@ -1219,8 +1281,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.42"></script>
-<script src="Worker/kjr-sortable.js?v=2.42"></script>
-<script src="Worker/app.js?v=2.42"></script>
+<script src="Worker/kjr-core.js?v=2.43"></script>
+<script src="Worker/kjr-sortable.js?v=2.43"></script>
+<script src="Worker/app.js?v=2.43"></script>
 </body>
 </html>

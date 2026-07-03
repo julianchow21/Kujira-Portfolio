@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.42';
-const APP_DISPLAY_VERSION = 'v2.42 (3 Jul)';
+const APP_VERSION = 'v2.43';
+const APP_DISPLAY_VERSION = 'v2.43 (3 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -441,6 +441,7 @@ const TABS = [
   { key:'cpf',         label:'CPF',         icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6z"/><path d="M9 12l2 2 4-4"/></svg>' },
   { key:'cashflow',    label:'P&L',         icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h13l-3-3M21 17H8l3 3"/></svg>' },
   { key:'realestate',  label:'Real Estate', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>' },
+  { key:'insurance',   label:'Insurance',   icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6z"/></svg>' },
   { key:'crypto',      label:'Crypto',      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 8h4a2 2 0 1 1 0 4H9zm0 4h4.5a2 2 0 1 1 0 4H9zM10 6v2M10 16v2M13 6v2M13 16v2"/></svg>' },
   { key:'projections', label:'Projections', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>' },
   { key:'settings',    label:'Settings',    icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' }
@@ -768,6 +769,7 @@ function freshDB(){
     income:       [],
     expenses:     [],
     snapshots:    [],
+    insurance:    [],
     categories:   {
       income:  ['Salary', 'Bonus', 'Dividends', 'Rental', 'Side income', 'Refund', 'Other'],
       expense: ['Housing', 'Food', 'Transport', 'Utilities', 'Insurance', 'Healthcare', 'Entertainment', 'Shopping', 'Travel', 'Education', 'Personal', 'Tax', 'Other']
@@ -1094,7 +1096,7 @@ function _runMigrations(db){
    Also re-validates ids on every list-typed table — a corrupted sheet or hostile
    payload cannot land an id like "x'); evil(); //" that would break event-delegation
    downstream. Items with invalid ids get a fresh uid() so they're still recoverable. */
-const _LIST_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash'];
+const _LIST_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash','insurance'];
 
 /* Date-typed fields per list table (per ENTITY_SCHEMAS), used to sanitise
    calendar-invalid dates (e.g. 2026-02-30) coming from the cloud or an
@@ -1108,7 +1110,8 @@ const _DATE_FIELDS_BY_TABLE = {
   cashTxns: ['date'],
   cpfHistory: ['date'],
   income: ['date'],
-  expenses: ['date']
+  expenses: ['date'],
+  insurance: ['premiumDue']
 };
 let _sanitiseInvalidDateCount = 0;   // recovered-date counter, reset per mergeDefaults() run
 
@@ -1274,7 +1277,7 @@ async function safeJson(resp){
    lastSeenRemoteAt, _savedAt, _priceCache (never synced), _meta, appVersion,
    schemaVersion, version. */
 const _DIVERGENCE_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns',
-  'cpfBalances','cpfHistory','income','expenses','snapshots','categories','settings','changelog','trash'];
+  'cpfBalances','cpfHistory','income','expenses','snapshots','categories','settings','changelog','trash','insurance'];
 function _divergenceSnapshot(obj){
   const src = obj || {};
   const out = {};
@@ -1842,6 +1845,15 @@ function loadSettingsForm(){
   }
   const scCheckbox = document.getElementById('cfg-strict-conflicts');
   if (scCheckbox) scCheckbox.checked = strictConflictsEnabled();
+  const covT = coverageTargets();
+  setV('cfg-cov-death-mult',   covT.deathMult);
+  setV('cfg-cov-tpd-mult',     covT.tpdMult);
+  setV('cfg-cov-ci-mult',      covT.ciMult);
+  setV('cfg-cov-income-pct',   covT.incomeProtectionPct);
+  setV('cfg-cov-ltc-target',   covT.ltcMonthlyTarget);
+  setV('cfg-cov-hosp-ward',    covT.hospTargetWard);
+  const csCheckbox = document.getElementById('cfg-cov-careshield');
+  if (csCheckbox) csCheckbox.checked = !!covT.includeCareShieldBase;
   setV('cfg-base-currency',    s.baseCurrency || 'SGD');
   setV('cfg-fx-usdsgd',        s.fxOverrides && s.fxOverrides.USDSGD);
   setV('cfg-birth-year',       s.birthYear);
@@ -3027,7 +3039,7 @@ function sendToTrash(table, id){
 }
 
 /* Human label for a trashed entry, by table. Used by the Recently deleted UI. */
-const TRASH_TABLE_NAMES = { stocks:'Stock', stockTxns:'Trade', watchlist:'Watchlist', crypto:'Crypto', realestate:'Property', cash:'Cash account', cashTxns:'Cash movement', cpfHistory:'CPF entry', income:'Income', expenses:'Expense' };
+const TRASH_TABLE_NAMES = { stocks:'Stock', stockTxns:'Trade', watchlist:'Watchlist', crypto:'Crypto', realestate:'Property', cash:'Cash account', cashTxns:'Cash movement', cpfHistory:'CPF entry', income:'Income', expenses:'Expense', insurance:'Policy' };
 function trashLabel(table, data){
   data = data || {};
   const d = data.date ? (' · ' + fmtDateSG(data.date)) : '';
@@ -3045,6 +3057,7 @@ function trashLabel(table, data){
     case 'cpfHistory': return (data.type || 'entry') + ' ' + (data.account || '') + ' ' + (Number(data.amount)||0) + d;
     case 'income':     return 'Gross ' + (Number(data.gross)||0) + d;
     case 'expenses':   return (data.category || 'expense') + ' ' + (Number(data.amount)||0) + d;
+    case 'insurance':  return (data.insurer || '?') + (data.plan ? ' · ' + data.plan : (data.type ? ' · ' + data.type : ''));
     default:           return table;
   }
 }
@@ -3167,6 +3180,9 @@ const YAHOO_SECTOR_TO_GICS = {
   'Utilities':              'Utilities'
 };
 
+/* SG insurers datalist for the Insurance tab's insurer field (ported verbatim
+   from the standalone Insurance Module prototype). */
+const SG_INSURERS=['AIA','Prudential','Great Eastern','Income','Singlife','Manulife','HSBC Life','Tokio Marine','China Taiping','Etiqa','FWD','Raffles Health Insurance','MSIG','AIG','Allianz','Chubb','Sompo','Liberty','QBE'];
 const ENTITY_SCHEMAS = {
   stocks: {
     title: 'stock holding',
@@ -3340,6 +3356,40 @@ const ENTITY_SCHEMAS = {
       { key:'notes',       label:'Notes',        type:'textarea' }
     ],
     defaults: { date: new Date().toISOString().slice(0,10), currency:'SGD', category:'Other' }
+  },
+  insurance:{
+    title:'policy',
+    fields:[
+      { key:'insurer', label:'Insurer', type:'text', required:true, datalist:SG_INSURERS, placeholder:'AIA' },
+      { key:'plan', label:'Plan name', type:'text', placeholder:'Living Care' },
+      { key:'policyNo', label:'Policy number', type:'text' },
+      { key:'type', label:'Type', type:'select', required:true, default:'Term Life',
+        options:[['Term Life','Term Life'],['Whole Life','Whole Life'],['Endowment','Endowment'],['ILP','Investment-Linked'],['Critical Illness','Critical Illness'],['Hospitalisation','Hospitalisation (IP)'],['Personal Accident','Personal Accident'],['Disability Income','Disability Income'],['Long-term Care','CareShield / ElderShield'],['Mortgage','Mortgage (HPS / MRTA)'],['Car','Car'],['Home','Home / Fire'],['Travel','Travel'],['Other','Other']] },
+      { key:'insured', label:'Life insured', type:'text', required:true, placeholder:'Self', default:'Self' },
+      { key:'status', label:'Status', type:'select', default:'Active',
+        options:[['Active','Active'],['Paid-up','Paid-up'],['Lapsed','Lapsed'],['Matured','Matured'],['Surrendered','Surrendered'],['Pending','Pending']] },
+      { key:'coverDeath', label:'Death cover (SGD)', type:'number', step:'1', placeholder:'500000' },
+      { key:'coverTPD', label:'TPD cover (SGD)', type:'number', step:'1' },
+      { key:'coverCI', label:'Critical illness cover (SGD)', type:'number', step:'1' },
+      { key:'coverHosp', label:'Hospital ward', type:'select', default:'',
+        options:[['','n/a'],['B1','Public B1'],['A','Public A'],['Private','Private'],['As-charged','As-charged']] },
+      { key:'coverIncomeMonthly', label:'Disability income (monthly benefit, SGD)', type:'number', step:'1' },
+      { key:'coverLTCMonthly', label:'Long-term care (monthly payout, SGD)', type:'number', step:'1' },
+      { key:'premium', label:'Premium (per payment)', type:'number', step:'0.01', placeholder:'1200' },
+      { key:'premiumFreq', label:'Frequency', type:'select', default:'Annual',
+        options:[['Monthly','Monthly'],['Quarterly','Quarterly'],['Semi-annual','Semi-annual'],['Annual','Annual'],['Single','Single premium']] },
+      { key:'premiumMode', label:'Paid from', type:'select', default:'Cash',
+        options:[['Cash','Cash / GIRO'],['Card','Credit card'],['MediSave','MediSave'],['CPF','CPF (DPS)'],['Other','Other']],
+        hint:'MediSave / CPF premiums are excluded from your cash premium outlay.' },
+      { key:'premiumDue', label:'Next premium / renewal date', type:'date' },
+      { key:'cashValue', label:'Current cash / surrender value (SGD)', type:'number', step:'0.01', hint:'Counts toward net worth. Leave blank for term and health policies.' },
+      { key:'maturityValue', label:'Projected maturity value (SGD)', type:'number', step:'1' },
+      { key:'beneficiary', label:'Nominee(s)', type:'text' },
+      { key:'docUrl', label:'Policy document link', type:'text', placeholder:'https://...' },
+      { key:'notes', label:'Notes', type:'textarea' }
+    ],
+    defaults:{ type:'Term Life', status:'Active', insured:'Self', premiumFreq:'Annual', premiumMode:'Cash' },
+    afterRead:(item)=>{ item.currency='SGD'; item.updatedAt=new Date().toISOString(); }
   }
 };
 
@@ -3474,7 +3524,16 @@ function renderField(f, value){
     const step = f.step ? ` step="${kjrEscape(f.step)}"` : '';
     const min  = f.min != null ? ` min="${kjrEscape(f.min)}"` : '';
     const inputType = f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text');
-    input = `<input class="fi" type="${inputType}" data-fkey="${f.key}"${step}${min} value="${safeV}" placeholder="${kjrEscape(f.placeholder||'')}"${required}>`;
+    // datalist gives a text field free-text-with-suggestions behaviour
+    // (e.g. insurer names): a <datalist> sibling + list= attribute pointing
+    // at it. Fields without f.datalist render byte-identically to before.
+    let listAttr = '', listEl = '';
+    if (Array.isArray(f.datalist) && f.datalist.length){
+      const dlId = 'dl-' + f.key;
+      listAttr = ` list="${dlId}"`;
+      listEl = `<datalist id="${dlId}">${f.datalist.map(o => `<option value="${kjrEscape(o)}"></option>`).join('')}</datalist>`;
+    }
+    input = `<input class="fi" type="${inputType}" data-fkey="${f.key}"${step}${min}${listAttr} value="${safeV}" placeholder="${kjrEscape(f.placeholder||'')}"${required}>${listEl}`;
   }
   return `<div class="form-group"${full}><label class="lbl">${kjrEscape(f.label)}${f.required ? ' *' : ''}</label>${input}${hint}</div>`;
 }
@@ -4260,7 +4319,7 @@ function _pbNetWorthSeries(cfg){
   const labels = rows.map(s => s.date);
   const cpfOf = s => (s.byClass && s.byClass.cpf) || 0;
   const netOf = s => _dashShowCpf ? s.net : (s.net - cpfOf(s));
-  const classMeta = { stocks:['Stocks',0], cash:['Cash',1], cpf:['CPF',2], realestate:['Real Estate',3], crypto:['Crypto',4] };
+  const classMeta = { stocks:['Stocks',0], cash:['Cash',1], cpf:['CPF',2], realestate:['Real Estate',3], crypto:['Crypto',4], insurance:['Insurance',5] };
   const dot = i => PB_PALETTE[i % PB_PALETTE.length];
 
   // By class — stacked area of every class (CPF band only when CPF is on).
@@ -5919,6 +5978,170 @@ function renderRealestate(){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   INSURANCE — ported from the verified standalone Insurance Module (v0.3).
+   Schema, helpers, and adequacy maths are byte-for-byte the same logic;
+   only the QA income stub is dropped (annualIncomeSGD reads DB.income for
+   real here) and rendering is adapted to Portfolio's fmt()/kjrEscape/
+   delegation conventions.
+   ═══════════════════════════════════════════════════════════════════════ */
+const PREMIUM_PER_YEAR = { Monthly:12, Quarterly:4, 'Semi-annual':2, Annual:1, Single:0 };
+function annualPremium(p){ return (Number(p.premium)||0)*(PREMIUM_PER_YEAR[p.premiumFreq]??1); }
+function cashPremiumPerYear(p){ return ['Cash','Card'].includes(p.premiumMode)?annualPremium(p):0; }
+function insuranceCashValueSGD(){ return (DB.insurance||[]).filter(p=>p.status==='Active').reduce((s,p)=>s+toSGD(Number(p.cashValue)||0,p.currency||'SGD'),0); }
+
+/* Coverage adequacy targets, editable in Settings, code-level defaults so a
+   brand-new / never-migrated DB needs no schema bump. */
+const COVERAGE_TARGETS_DEFAULT = { deathMult:10, tpdMult:10, ciMult:4, incomeProtectionPct:60, ltcMonthlyTarget:2500, hospTargetWard:'A', includeCareShieldBase:false };
+function coverageTargets(){ return Object.assign({}, COVERAGE_TARGETS_DEFAULT, DB.settings.coverageTargets||{}); }
+/* A cleared number field arrives as null. Storing it would zero the target and
+   falsely mark the risk "covered", so drop the override and fall back to the
+   default instead. (Ported exactly from the standalone's v0.3 fix.) */
+function setCoverageTarget(key,val){
+  const next=Object.assign({}, DB.settings.coverageTargets);
+  if(val==null||(typeof val==='number'&&!isFinite(val))) delete next[key];
+  else next[key]=val;
+  DB.settings.coverageTargets=next;
+  saveData(); renderInsurance(); loadSettingsForm();
+}
+function annualIncomeSGD(){
+  const inc=(DB.income||[]).filter(i=>i.date&&isFinite(Number(i.gross)));
+  if(!inc.length) return 0;
+  const cutoff=new Date(); cutoff.setFullYear(cutoff.getFullYear()-1);
+  const cutISO=_isoDateSG(cutoff);
+  let rows=inc.filter(i=>i.date>=cutISO);
+  if(!rows.length) rows=inc;
+  const byMonth={};
+  rows.forEach(i=>{ const m=String(i.date).slice(0,7); byMonth[m]=(byMonth[m]||0)+(Number(i.gross)||0); });
+  const months=Object.keys(byMonth).length||1;
+  const total=Object.values(byMonth).reduce((s,v)=>s+v,0);
+  return months>=12?total:(total/months)*12;
+}
+function _selfPolicies(){ return (DB.insurance||[]).filter(p=>p.status==='Active'&&(!p.insured||/^self$/i.test(p.insured))); }
+function coverageAdequacy(){
+  const t=coverageTargets();
+  const annual=annualIncomeSGD();
+  const monthly=annual/12;
+  const pol=_selfPolicies();
+  const sum=k=>pol.reduce((s,p)=>s+(Number(p[k])||0),0);
+  const WARD_RANK={ '':0, B1:1, A:2, Private:3, 'As-charged':3 };
+  const hasIP=pol.some(p=>p.type==='Hospitalisation'&&(WARD_RANK[p.coverHosp]||0)>=(WARD_RANK[t.hospTargetWard]||0));
+  const ltcCurrent=sum('coverLTCMonthly')+(t.includeCareShieldBase?600:0);
+  const risks=[
+    { key:'death', label:'Death', unit:'sum', target:annual*t.deathMult, current:sum('coverDeath') },
+    { key:'tpd', label:'Total disability', unit:'sum', target:annual*t.tpdMult, current:sum('coverTPD') },
+    { key:'ci', label:'Critical illness', unit:'sum', target:annual*t.ciMult, current:sum('coverCI') },
+    { key:'hosp', label:'Hospitalisation', unit:'bool', target:1, current:hasIP?1:0 },
+    { key:'income', label:'Income protection', unit:'mo', target:monthly*t.incomeProtectionPct/100, current:sum('coverIncomeMonthly') },
+    { key:'ltc', label:'Long-term care', unit:'mo', target:t.ltcMonthlyTarget, current:ltcCurrent }
+  ].map(r=>{
+    const assessed=r.unit==='bool'||r.key==='ltc'||annual>0;
+    const ratio=r.target>0?Math.min(1,r.current/r.target):(r.current>0?1:0);
+    const gap=Math.max(0,r.target-r.current);
+    let status='na';
+    if(assessed) status=r.unit==='bool'?(r.current?'covered':'gap'):ratio>=1?'covered':ratio>=0.5?'partial':'gap';
+    return Object.assign(r,{ratio,gap,assessed,status});
+  });
+  const ratios=risks.filter(r=>r.assessed).map(r=>r.unit==='bool'?(r.current?1:0):r.ratio);
+  const score=ratios.length?Math.round(ratios.reduce((s,v)=>s+v,0)/ratios.length*100):null;
+  const weakest=risks.filter(r=>r.assessed&&r.status!=='covered').sort((a,b)=>a.ratio-b.ratio)[0]||null;
+  return { annual, monthly, risks, score, weakest };
+}
+
+function exportInsuranceCSV(){
+  const list = DB.insurance || [];
+  if (!list.length){ showToast('No policies to export'); return; }
+  const headers = ['Insurer','Plan','Policy No','Type','Insured','Status','Death Cover (SGD)','CI Cover (SGD)','Annual Premium (SGD)','Premium Mode','Next Premium Due','Cash Value (SGD)'];
+  const rows = list.map(p => [
+    p.insurer || '',
+    p.plan || '',
+    p.policyNo || '',
+    p.type || '',
+    p.insured || '',
+    p.status || '',
+    p.coverDeath != null ? p.coverDeath : '',
+    p.coverCI != null ? p.coverCI : '',
+    annualPremium(p) || '',
+    p.premiumMode || '',
+    p.premiumDue || '',
+    p.cashValue != null ? p.cashValue : ''
+  ]);
+  downloadCSV('kujira-insurance-' + _isoDateSG(new Date()) + '.csv', headers, rows);
+}
+
+function renderInsurance(){
+  setRenderCcy('insurance');
+  const el = document.getElementById('insurance-root');
+  if (!el) return;
+  const list = (DB.insurance || []).slice();
+  const head = `<div class="card"><div class="card-head"><h3>Policies</h3>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      ${list.length ? `<button class="btn btn-sm" data-click="exportInsuranceCSV">Export CSV</button>` : ''}
+      <button class="btn btn-primary btn-sm" data-click="openEntity" data-a0="insurance">＋ Add policy</button>
+    </div>
+  </div>`;
+  if (!list.length){
+    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">🛡</div><div class="empty-title">No policies yet</div><div class="empty-sub">Track life, health, and general policies. Premiums, renewal dates, and any cash value feed the summary and the adequacy check.</div></div></div></div>` + renderCoverageAdequacy();
+    return;
+  }
+  const active = list.filter(p => p.status === 'Active');
+  const cashYr = active.reduce((s,p) => s + cashPremiumPerYear(p), 0);
+  const nonCashYr = active.reduce((s,p) => s + (annualPremium(p) - cashPremiumPerYear(p)), 0);
+  const cover = k => active.reduce((s,p) => s + (Number(p[k])||0), 0);
+  const summary = renderSummary([
+    { label:'Annual premium (cash)', value: fmt(cashYr, {dp:0}), accent:'accent' },
+    { label:'From MediSave / CPF',   value: fmt(nonCashYr, {dp:0}) },
+    { label:'Death cover',           value: fmt(cover('coverDeath'), {dp:0}) },
+    { label:'Cash value (net worth)', value: fmt(insuranceCashValueSGD(), {dp:0}), accent:'accent' }
+  ]);
+  const rows = list.slice().sort((a,b) => String(a.insurer||'').localeCompare(String(b.insurer||''))).map(p => `<tr>
+    <td class="tl cell-sym">${kjrEscape(p.insurer||'?')}</td>
+    <td class="tl">${kjrEscape(p.type||'')}</td>
+    <td class="tl">${kjrEscape(p.insured||'')}</td>
+    <td class="tl">${kjrEscape(p.status||'')}</td>
+    <td class="num">${p.coverDeath?fmt(Number(p.coverDeath),{dp:0}):'—'}</td>
+    <td class="num">${p.premium?fmt(annualPremium(p),{dp:0})+'/yr':'—'}</td>
+    <td class="num">${p.premiumDue?fmtDateSG(p.premiumDue):'—'}</td>
+    <td class="num">${p.cashValue?fmt(Number(p.cashValue),{dp:0}):'—'}</td>
+    <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="insurance" data-edit-id="${kjrEscape(p.id)}">Edit</button></td>
+  </tr>`).join('');
+  const table = `<div class="tbl-wrap"><table class="holdings"><thead><tr>
+    <th class="tl">Insurer</th><th class="tl">Type</th><th class="tl">Insured</th><th class="tl">Status</th><th>Death cover</th><th>Premium</th><th>Next due</th><th>Cash value</th><th></th>
+  </tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  const today = new Date();
+  const horizon = new Date(today.getTime() + 90*864e5);
+  const due = list.filter(p => p.premiumDue && new Date(p.premiumDue) >= today && new Date(p.premiumDue) <= horizon)
+    .sort((a,b) => String(a.premiumDue).localeCompare(String(b.premiumDue)));
+  let renew = '';
+  if (due.length){
+    renew = `<div class="card"><div class="card-head"><h3>Upcoming premiums <span class="page-sub">next 90 days</span></h3></div><div class="card-body"><div class="tbl-wrap"><table class="holdings"><tbody>${
+      due.map(p => `<tr><td class="tl cell-sym">${kjrEscape(p.insurer||'?')}</td><td class="tl">${kjrEscape(p.plan||p.type||'')}</td><td class="num">${fmtDateSG(p.premiumDue)} (in ${Math.max(0,Math.ceil((new Date(p.premiumDue)-today)/864e5))}d)</td><td class="num">${p.premium?fmt(Number(p.premium),{dp:0}):'—'}</td></tr>`).join('')
+    }</tbody></table></div></div></div>`;
+  }
+  el.innerHTML = head + `<div class="card-body">${summary}</div>` + table + renew + renderCoverageAdequacy();
+}
+
+function renderCoverageAdequacy(){
+  const a = coverageAdequacy();
+  if (a.annual <= 0 && !_selfPolicies().length){
+    return `<div class="card"><div class="card-head"><h3>Protection adequacy</h3></div><div class="card-body"><div class="empty"><div class="empty-icon">🧭</div><div class="empty-title">Add income and policies to see your gaps</div><div class="empty-sub">Targets are based on your annual income. Log income on the P&amp;L tab and add your policies.</div></div></div></div>`;
+  }
+  const t = coverageTargets();
+  const cur = r => r.unit==='bool' ? (r.current?'Yes':'No') : fmt(r.current,{dp:0}) + (r.unit==='mo'?'/mo':'');
+  const tgt = r => !r.assessed ? '—' : r.unit==='bool' ? ('Ward '+t.hospTargetWard+'+') : fmt(r.target,{dp:0}) + (r.unit==='mo'?'/mo':'');
+  const PILL = { covered:['covered','✓ Covered'], partial:['partial','◔ Partial'], gap:['gap','✕ Under-insured'], na:['na','– Not assessed'] };
+  const rows = a.risks.map(r => {
+    const pill = PILL[r.status];
+    const bar = (r.assessed && r.unit!=='bool') ? `<div class="cov-bar"><span style="width:${Math.round(r.ratio*100)}%"></span></div>` : '';
+    return `<tr><td class="tl">${kjrEscape(r.label)}</td><td class="num">${cur(r)}</td><td class="num">${tgt(r)}</td><td class="num">${(r.assessed&&r.gap>0&&r.unit!=='bool')?fmt(r.gap,{dp:0})+(r.unit==='mo'?'/mo':''):'—'}</td><td class="tl">${bar}<span class="cov-pill ${pill[0]}">${pill[1]}</span></td></tr>`;
+  }).join('');
+  const head = a.score==null ? 'Add income to score' : 'Protection score ' + a.score + '%' + (a.weakest ? ' · weakest: ' + kjrEscape(a.weakest.label) : '');
+  return `<div class="card"><div class="card-head"><h3>Protection adequacy</h3><span class="page-sub">${head}</span></div><div class="card-body">
+    <div class="tbl-wrap"><table class="holdings"><thead><tr><th class="tl">Risk</th><th>Current</th><th>Recommended</th><th>Gap</th><th class="tl">Status</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="hint" style="margin-top:10px">Rule-of-thumb guide using income multiples (death and TPD 10x, CI 4x annual income, income protection 60% of monthly income). Not personalised financial advice, see a licensed adviser for a full needs analysis. Targets are editable in Settings.</p>
+  </div></div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    CASH — derived balances for brokerage accounts
    ═══════════════════════════════════════════════════════════════════════ */
 function isBrokerageAcct(acct){ return acct && acct.account === 'Brokerage'; }
@@ -6628,18 +6851,19 @@ function _netWorthClassesSGD(){
     cash:       _cashSGD(),
     cpf:        _cpfSGD(),
     realestate: _realestateSGD(),
-    crypto:     _cryptoSGD()
+    crypto:     _cryptoSGD(),
+    insurance:  insuranceCashValueSGD()
   };
 }
 function currentNetWorthSGD(){
   const c = _netWorthClassesSGD();
-  return c.stocks + c.cash + c.cpf + c.realestate + c.crypto;
+  return c.stocks + c.cash + c.cpf + c.realestate + c.crypto + (c.insurance||0);
 }
 function takeSnapshot(opts){
   opts = opts || {};
   if (!Array.isArray(DB.snapshots)) DB.snapshots = [];
   const byClass = _netWorthClassesSGD();
-  const net = byClass.stocks + byClass.cash + byClass.cpf + byClass.realestate + byClass.crypto;
+  const net = byClass.stocks + byClass.cash + byClass.cpf + byClass.realestate + byClass.crypto + (byClass.insurance||0);
   const today = _isoDateSG(new Date());
   const existing = DB.snapshots.find(s => s.date === today);
   if (existing){
@@ -6782,6 +7006,8 @@ function renderDashboard(){
   ];
   const crypto = _cryptoSGD();
   if (crypto > 0) classes.push({ key:'Crypto', val:crypto, color:'--accent2' });
+  const insVal = insuranceCashValueSGD();
+  if (insVal > 0) classes.push({ key:'Insurance', val:insVal, color:'--purple' });
   const netFull   = roundMoney(classes.reduce((s,c) => s + c.val, 0));
   const cpfVal    = _cpfSGD();
   const netExCpf  = roundMoney(netFull - cpfVal);
@@ -6856,7 +7082,8 @@ function renderDashboard(){
     Cash:   TABS.find(t => t.key === 'cash').icon,
     CPF:    TABS.find(t => t.key === 'cpf').icon,
     'Real Estate': TABS.find(t => t.key === 'realestate').icon,
-    Crypto: TABS.find(t => t.key === 'crypto').icon
+    Crypto: TABS.find(t => t.key === 'crypto').icon,
+    Insurance: TABS.find(t => t.key === 'insurance').icon
   };
   const assetsEl = document.getElementById('dash-assets');
   if (assetsEl){
@@ -7067,6 +7294,7 @@ function renderAll(){
   renderCash();
   renderCpf();
   renderCashflow();
+  renderInsurance();
   if (document.getElementById('page-settings').classList.contains('active')) {
     loadSettingsForm();
     renderDiagnostics();
@@ -7165,6 +7393,14 @@ function installEventDelegation(){
     dismissConflict:     () => { const m = document.getElementById('conflict-modal'); if (m) m.remove(); setSyncStatus('failed', 'Conflict unresolved'); },
     setStrictConflicts:  (el) => setStrictConflicts(el.checked),
     setAutoRefreshEnabled: (el) => setAutoRefreshEnabled(el.checked),
+    // insurance coverage targets (Settings)
+    setCovDeathMult:     (el) => setCoverageTarget('deathMult', kjrSafeNumber(el.value)),
+    setCovTpdMult:       (el) => setCoverageTarget('tpdMult', kjrSafeNumber(el.value)),
+    setCovCiMult:        (el) => setCoverageTarget('ciMult', kjrSafeNumber(el.value)),
+    setCovIncomePct:     (el) => setCoverageTarget('incomeProtectionPct', kjrSafeNumber(el.value)),
+    setCovLtcTarget:     (el) => setCoverageTarget('ltcMonthlyTarget', kjrSafeNumber(el.value)),
+    setCovHospWard:      (el) => setCoverageTarget('hospTargetWard', el.value),
+    setCovCareshield:    (el) => setCoverageTarget('includeCareShieldBase', el.checked),
     // prices
     refreshStockPrices:  () => refreshStockPrices(),
     refreshCryptoPrices: () => refreshCryptoPrices(),
@@ -7209,6 +7445,7 @@ function installEventDelegation(){
     exportBackup:        () => exportBackup(),
     exportHoldingsCSV:   () => exportHoldingsCSV(),
     exportLedgerCSV:     () => exportLedgerCSV(),
+    exportInsuranceCSV:  () => exportInsuranceCSV(),
     clickImportFile:     () => { const i = document.getElementById('import-file-input'); if (i) i.click(); },
     importBackupFromFile: (el) => importBackupFromFile(el),
     clickIbkrFile:       () => { const i = document.getElementById('ibkr-file-input'); if (i) i.click(); },
