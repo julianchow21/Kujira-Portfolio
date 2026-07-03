@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.39';
-const APP_DISPLAY_VERSION = 'v2.39 (3 Jul)';
+const APP_VERSION = 'v2.40';
+const APP_DISPLAY_VERSION = 'v2.40 (3 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1585,7 +1585,15 @@ function showConflictModal(opts){
       </div>
     </div>`;
   document.body.appendChild(wrap);
-  document.getElementById('cf-pull').onclick = async () => { wrap.remove(); await pullFromRemote(); };
+  document.getElementById('cf-pull').onclick = async () => {
+    wrap.remove();
+    // Same cancellation as cf-force below: a debounced or in-flight push
+    // still carries the pre-pull payload and old stamp, and would land
+    // right after the pull, conflict again, and reopen this modal in a loop.
+    if (_syncTimer) { clearTimeout(_syncTimer); _syncTimer = null; }
+    if (_activeSyncController) { try { _activeSyncController.abort(); } catch(_){} _activeSyncController = null; }
+    await pullFromRemote();
+  };
   document.getElementById('cf-force').onclick = async () => {
     wrap.remove();
     // Cancel any pending or in-flight push so force-push has the cloud to
