@@ -43,6 +43,7 @@
   --glass:rgba(255,255,255,0.6);--glass-strong:rgba(255,255,255,0.78);
   --glass-border:rgba(0,0,0,0.06);--glass-hi:rgba(255,255,255,0.5);
   --glass-blur:12px;--glass-shadow:0 6px 18px rgba(60,50,40,0.10);
+  --shadow-card:0 1px 3px rgba(60,50,40,0.07);
   --surface-solid:#ffffff;
   --glow1:rgba(193,95,60,0.06);--glow2:rgba(167,139,250,0.05);
   --tx:var(--text);--tx2:var(--text2);--tx3:var(--text3);
@@ -61,6 +62,7 @@ html.dark{
   --glass:rgba(255,255,255,0.05);--glass-strong:rgba(255,255,255,0.07);
   --glass-border:rgba(255,255,255,0.11);--glass-hi:rgba(255,255,255,0.07);
   --glass-blur:14px;--glass-shadow:0 8px 22px rgba(0,0,0,0.35);
+  --shadow-card:0 1px 3px rgba(0,0,0,0.25);
   --surface-solid:rgba(30,34,45,0.94);
   --glow1:rgba(45,212,191,0.16);--glow2:rgba(167,139,250,0.13);
   --tx:var(--text);--tx2:var(--text2);--tx3:var(--text3);
@@ -79,19 +81,33 @@ a{color:var(--blue);text-decoration:none}
 .logo-whale{height:44px;width:44px;flex-shrink:0;border-radius:8px;object-fit:cover}
 .logo-name{display:flex;flex-direction:column;line-height:1.1}
 .logo-name span:first-child{font-size:14px;font-weight:800;letter-spacing:0.5px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.logo-name span:last-child{font-size:12px;font-weight:400;letter-spacing:0.3px;text-transform:none;color:var(--text3);-webkit-text-fill-color:var(--text3);opacity:0.85}
-.nav{display:flex;gap:2px;flex:1;overflow-x:auto;scrollbar-width:none;position:relative}
+.logo-name span:last-child{font-size:12px;font-weight:400;letter-spacing:0.3px;text-transform:none;color:var(--text3);-webkit-text-fill-color:var(--text3);opacity:0.85;white-space:nowrap}
+.nav{display:flex;gap:2px;flex:1 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none;position:relative}
 .nav::-webkit-scrollbar{display:none}
-.nav::after{content:'';position:sticky;right:0;align-self:stretch;flex:0 0 24px;margin-left:-24px;pointer-events:none;background:linear-gradient(to right,transparent,var(--bg))}
-.nav-btn{padding:8px 14px;border-radius:var(--radius);border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--text2);transition:all 0.15s;font-family:inherit;display:flex;align-items:center;gap:6px;white-space:nowrap}
+/* Fade tints the topbar's own glass backdrop (not the opaque page --bg, which
+   sat one shade off and made the last visible label look chopped off rather
+   than "more to scroll"). Same colour-mix trick as the mobile scroll hints. */
+.nav::after{content:'';position:sticky;right:0;align-self:stretch;flex:0 0 24px;margin-left:-24px;pointer-events:none;background:linear-gradient(to right,transparent,color-mix(in srgb,var(--glass) 100%,var(--bg) 60%))}
+.nav-btn{padding:8px 14px;border-radius:var(--radius);border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--text2);transition:all 0.15s;font-family:inherit;display:flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0}
 @media (hover:hover){.nav-btn:hover{background:var(--glass-strong);color:var(--text)}}
-.nav-btn.active{background:var(--glass-strong);color:var(--text);font-weight:500}
+.nav-btn.active{background:var(--accent-soft);color:var(--accent);font-weight:500}
 .nav-btn svg{width:15px;height:15px;flex-shrink:0}
 .topbar-actions{display:flex;align-items:center;gap:8px;margin-left:12px;flex-shrink:0}
-.icon-btn{width:44px;height:44px;border-radius:var(--radius);border:1px solid var(--glass-border);background:var(--glass);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text2);transition:all 0.15s;flex-shrink:0}
+/* Icon buttons grouped into one bordered cluster (see markup): container owns
+   the border/radius/background, buttons inside are borderless with dividers. */
+.icon-btn-group{display:flex;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2);overflow:hidden;flex-shrink:0}
+.icon-btn-group .icon-btn{border:none;border-right:1px solid var(--border);border-radius:0;background:transparent}
+.icon-btn-group .icon-btn:last-child{border-right:none}
+.icon-btn{width:36px;height:36px;border-radius:var(--radius);border:1px solid var(--glass-border);background:var(--glass);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text2);transition:all 0.15s;flex-shrink:0}
 @media (hover:hover){.icon-btn:hover{background:var(--glass-strong);color:var(--text)}}
+.icon-btn-group .icon-btn:hover{background:var(--bg3)}
 .icon-btn svg{width:15px;height:15px}
 .icon-btn[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+/* Touch devices keep a 44px effective target even though the visual box is
+   36px on desktop: an invisible padding pad rather than resizing the chip. */
+@media (hover:none){
+  .icon-btn-group .icon-btn{width:44px;height:44px}
+}
 
 /* TOUCH PRESS STATES, coarse-pointer devices get no :hover feedback today
    (every hover rule above is gated behind (hover:hover)), so taps on .btn/
@@ -126,8 +142,13 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
   html.privacy td.num:hover{filter:none;-webkit-user-select:auto;user-select:auto}
 }
 
-/* SYNC PILL */
+/* SYNC PILL, a compact status-dot control in the topbar on every width. The
+   text label (Local only / Syncing… / Synced 2m / Sync failed) moves into the
+   dashboard hero subline instead (setSyncStatus keeps both in step); the pill
+   itself stays reachable and clickable from every tab via its dot + title. */
 .sync-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;border:1px solid var(--glass-border);background:var(--glass);font-size:12px;font-weight:600;color:var(--text2);font-family:inherit;cursor:pointer;transition:all 0.15s;white-space:nowrap}
+#sync-pill-label{display:none}
+.sync-pill{padding:7px 9px}
 @media (hover:hover){.sync-pill:hover{background:var(--glass-strong);color:var(--text)}}
 .sync-pill::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--text3);flex-shrink:0}
 .sync-pill.s-local::before{background:var(--text3)}
@@ -146,9 +167,10 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
 .page-title{font-size:20px;font-weight:700;letter-spacing:-0.3px}
 .page-sub{font-size:12px;color:var(--text3);margin-top:2px}
 
-/* CARDS */
-.card{background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi);overflow:hidden;margin-bottom:16px}
-.card-head{padding:14px 18px;border-bottom:1px solid var(--glass-border);display:flex;align-items:center;justify-content:space-between;gap:12px}
+/* CARDS, solid in-flow surfaces (glass reserved for topbar/modals/toasts/
+   bottom bar, section 7 of the restyle spec). One subtle shadow level. */
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);overflow:hidden;margin-bottom:16px}
+.card-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px}
 /* Stocks tab (and any card-head with the same filters+actions+freshness
    pattern) stacks ~500px tall before the table on a 430px phone. Compact it:
    selects shrink to half-width each (2-up row), buttons/chip wrap tightly. */
@@ -162,14 +184,14 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
 
 /* METRICS */
 .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
-.metric{background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi);padding:16px 18px;text-align:center}
+.metric{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:16px 18px;text-align:center}
 .metric-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px}
 .metric-value{font-size:24px;font-weight:700;letter-spacing:-0.5px;font-variant-numeric:tabular-nums}
 .metric-sub{font-size:12px;color:var(--text2);margin-top:3px;display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap}
 .pos{color:var(--green)}.neg{color:var(--red)}
 
 /* STAT BOX (alt to metric) */
-.stat-box{background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius);box-shadow:var(--glass-shadow);padding:12px 14px}
+.stat-box{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
 .stat-box.g{border-left:3px solid var(--green)}
 .stat-box.y{border-left:3px solid var(--amber)}
 .stat-box.r{border-left:3px solid var(--red)}
@@ -178,9 +200,9 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
 /* TABLES */
 .tbl-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;padding:10px 12px;color:var(--text3);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:0.4px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--surface-solid);position:sticky;top:0;z-index:10}
-td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle;background:var(--surface-solid);transition:background 0.12s ease}
-tr:last-child td{border-bottom:none}
+th{text-align:left;padding:10px 12px;color:var(--text3);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--surface-solid);position:sticky;top:0;z-index:10}
+td{padding:10px 12px;border-top:1px solid var(--bg4);vertical-align:middle;background:var(--surface-solid);transition:background 0.12s ease}
+tbody tr:first-child td{border-top:none}
 @media (hover:hover){tbody tr:hover td{background:color-mix(in srgb,var(--surface-solid) 93%,var(--text) 7%)}}
 .num{font-variant-numeric:tabular-nums;font-family:'SF Mono','Fira Code',monospace;font-size:12px;text-align:right}
 .num-cell{text-align:right}
@@ -281,13 +303,13 @@ textarea.fi{resize:vertical;min-height:70px}
 /* HOLDINGS TOOLBAR */
 .h-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
 .h-toolbar .grow{flex:1}
-.freshness{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text3);padding:5px 10px;border-radius:999px;border:1px solid var(--glass-border);background:var(--glass)}
+.freshness{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text3);padding:5px 10px;border-radius:999px;border:1px solid var(--border);background:var(--bg2)}
 .freshness.stale{color:var(--amber);border-color:var(--amber-border);background:var(--amber-soft)}
 .freshness.fresh{color:var(--green);border-color:var(--green-border);background:var(--green-soft)}
 .freshness::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;opacity:0.85}
 
 /* SUMMARY ROW (above table) */
-.h-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:14px;padding:14px;background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);box-shadow:var(--glass-shadow)}
+.h-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:14px;padding:14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card)}
 .h-summary-item{display:flex;flex-direction:column;gap:3px;padding:4px 10px;border-left:3px solid var(--border2)}
 .h-summary-item.accent{border-left-color:var(--accent)}
 .h-summary-item.pos{border-left-color:var(--green)}
@@ -297,7 +319,7 @@ textarea.fi{resize:vertical;min-height:70px}
 .h-summary-sub{font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums}
 
 /* MARKET / ACCOUNT TAG */
-.tag{display:inline-flex;align-items:center;padding:2px 7px;border-radius:4px;font-size:12px;font-weight:700;letter-spacing:0.5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2)}
+.tag{display:inline-flex;align-items:center;padding:1px 5px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2)}
 .tag.sgx{color:var(--blue);border-color:var(--blue-border);background:var(--blue-soft)}
 .tag.us{color:var(--accent);border-color:var(--accent-border);background:var(--accent-soft)}
 .tag.crypto{color:var(--amber);border-color:var(--amber-border);background:var(--amber-soft)}
@@ -316,7 +338,11 @@ textarea.fi{resize:vertical;min-height:70px}
 .integrity-list li.error{color:var(--red)}
 .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
 @media (max-width:840px){.dash-grid{grid-template-columns:1fr}}
-/* Allocation proportion bar (asset-class mix) */
+/* Allocation proportion bar (asset-class mix, dashboard only). NOTE: .alloc-bar
+   and .alloc-legend are reused bare (unscoped) by the Stocks-tab sector card
+   further down this stylesheet (.alloc-stack/.alloc-key there instead), so the
+   dashboard-only tweaks below are scoped under #dash-assets to avoid bleeding
+   into that unrelated component. */
 .alloc-bar{display:flex;gap:6px;height:46px;margin-bottom:16px}
 .alloc-seg{display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.2px;border-radius:8px;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:0 10px;transition:flex-grow 0.3s ease,filter 0.15s;cursor:default}
 @media (hover:hover){.alloc-seg:hover{filter:brightness(1.1)}}
@@ -325,11 +351,32 @@ textarea.fi{resize:vertical;min-height:70px}
 .alloc-legend-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
 .alloc-legend-amt{color:var(--text);font-weight:600}
 .alloc-legend-pct{color:var(--text3)}
+/* Dashboard segmented bar: thin pill, no in-slice labels (legend below always
+   carries every class regardless of slice size, fixing the old small-segment
+   label loss). */
+#dash-assets .alloc-bar{height:10px;border-radius:999px;overflow:hidden;gap:2px;margin-bottom:14px}
+#dash-assets .alloc-seg{padding:0;border-radius:0;font-size:0}
+#dash-assets .alloc-legend-item{gap:6px}
+#dash-assets .alloc-legend-dot{width:8px;height:8px;border-radius:2px}
 .dash-chart-wrap{position:relative;height:260px}
-.dash-hero{background:var(--glass-strong);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi);padding:22px 24px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+/* Dashboard hero: solid card (glass reserved for topbar/modals/toasts/bottom
+   bar per the restyle), value/label/subline on the left, sparkline on the
+   right. */
+.dash-hero{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px 22px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
 .dash-hero-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
-.dash-hero-value{font-size:40px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums;line-height:1}
+.dash-hero-value{font-size:36px;font-weight:600;letter-spacing:-0.01em;font-variant-numeric:tabular-nums;line-height:1.1}
 .dash-hero-sub{font-size:12px;color:var(--text2)}
+.dash-hero-chip{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:500;border-radius:999px;padding:2px 9px;margin-left:8px;vertical-align:middle;text-transform:none;letter-spacing:normal}
+.dash-hero-chip.pos{color:var(--green);background:var(--green-soft)}
+.dash-hero-chip.neg{color:var(--red);background:var(--red-soft)}
+.dash-hero-spark{flex-shrink:0;margin-left:auto}
+/* Asset-class cards (one per class, above the allocation bar) */
+.dash-class-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+.dash-class-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px}
+.dash-class-icon{width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:8px}
+.dash-class-icon svg{width:14px;height:14px}
+.dash-class-value{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
+.dash-class-label{font-size:12px;color:var(--text2);margin-top:2px}
 /* Target allocation bars */
 .alloc-row{display:grid;grid-template-columns:120px 1fr auto auto auto;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
 .alloc-row:last-child{border-bottom:none}
@@ -358,7 +405,7 @@ textarea.fi{resize:vertical;min-height:70px}
 .rebal-alert{background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--text);border-radius:var(--radius);padding:9px 12px;font-size:13px}
 /* Top movers */
 .movers-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
-.mover{background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius);box-shadow:var(--glass-shadow);padding:10px 12px;display:flex;flex-direction:column;gap:3px}
+.mover{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;display:flex;flex-direction:column;gap:3px}
 .mover-sym{font-weight:700;font-size:13px}
 .mover-px{font-size:13px;color:var(--text2)}
 .mover-chg{font-size:13px;font-weight:700}
@@ -371,11 +418,11 @@ textarea.fi{resize:vertical;min-height:70px}
 .trash-actions{display:flex;gap:6px;flex-shrink:0}
 @media(max-width:640px){.trash-row{flex-direction:column;align-items:stretch}.trash-actions{justify-content:flex-end}}
 .bucket-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:6px}
-.bucket{background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius);box-shadow:var(--glass-shadow);padding:10px 12px}
+.bucket{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
 .bucket-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.4px;font-weight:600}
 .bucket-amt{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
 .bucket-sub{font-size:12px;color:var(--text2)}
-.hint-block{background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius);padding:10px 12px}
+.hint-block{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
 .px-ext{font-size:12px;color:var(--text3);margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .px-ext-tag{display:inline-block;padding:0 4px;border-radius:3px;background:var(--bg4);border:1px solid var(--border2);color:var(--text2);font-weight:700;font-size:12px;letter-spacing:0.3px;text-transform:uppercase}
 
@@ -488,14 +535,11 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   .tbl-wrap{position:relative}
   .tbl-wrap::after{content:'';position:sticky;float:right;top:0;right:0;width:28px;height:100%;margin-left:-28px;pointer-events:none;background:linear-gradient(to right,transparent,var(--bg))}
 }
-/* Sync pill collapses to its status dot only below 480px, full text stays
-   available via the title attribute and in Settings. */
-@media (max-width: 480px){
-  #sync-pill-label{display:none}
-  .sync-pill{padding:7px 9px}
-}
+/* Only the elements still on the glass treatment need this fallback now
+   (.card/.metric/.stat-box/.dash-hero/.h-summary/.mover/.bucket/.hint-block/
+   .freshness went solid var(--bg2) in the restyle, so they no longer need it). */
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
-  .topbar,.card,.metric,.stat-box,.modal,.toast,.dash-hero,.h-summary,.mover,.bucket,.hint-block,.bottom-tab-bar,.freshness,.icon-btn,.sync-pill,.ccy-toggle,.theme-toggle{background:var(--surface-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
+  .topbar,.modal,.toast,.bottom-tab-bar,.icon-btn,.sync-pill,.ccy-toggle,.theme-toggle{background:var(--surface-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
 }
 
 /* ── Custom Chart Builder (Stocks tab) ── */
@@ -575,18 +619,20 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <button type="button" data-ccy="USD" data-click="setDisplayCcy" data-a0="USD">USD</button>
     </div>
     <button id="sync-pill" class="sync-pill s-local" data-click="manualSync" title="Click to sync now"><span id="sync-pill-label">Local only</span></button>
-    <a class="icon-btn docs-link" href="https://app.notion.com/p/3858d0753fdb818083facfd5bef9602e" target="_blank" rel="noopener noreferrer" title="How it works (docs)" aria-label="How it works">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-    </a>
-    <button id="privacy-toggle" class="icon-btn" data-click="togglePrivacy" title="Hide amounts" aria-label="Hide amounts" aria-pressed="false">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
-    </button>
-    <button class="icon-btn" data-click="toggleTheme" title="Toggle theme" aria-label="Toggle theme">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-    </button>
-    <button class="icon-btn" data-click="navigate" data-a0="settings" title="Settings" aria-label="Settings">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-    </button>
+    <div class="icon-btn-group">
+      <a class="icon-btn docs-link" href="https://app.notion.com/p/3858d0753fdb818083facfd5bef9602e" target="_blank" rel="noopener noreferrer" title="How it works (docs)" aria-label="How it works">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+      </a>
+      <button id="privacy-toggle" class="icon-btn" data-click="togglePrivacy" title="Hide amounts" aria-label="Hide amounts" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+      <button class="icon-btn" data-click="toggleTheme" title="Toggle theme" aria-label="Toggle theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+      </button>
+      <button class="icon-btn" data-click="navigate" data-a0="settings" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
   </div>
 </header>
 
@@ -1173,8 +1219,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.38"></script>
-<script src="Worker/kjr-sortable.js?v=2.38"></script>
-<script src="Worker/app.js?v=2.38"></script>
+<script src="Worker/kjr-core.js?v=2.39"></script>
+<script src="Worker/kjr-sortable.js?v=2.39"></script>
+<script src="Worker/app.js?v=2.39"></script>
 </body>
 </html>

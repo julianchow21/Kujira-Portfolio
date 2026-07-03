@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.38';
-const APP_DISPLAY_VERSION = 'v2.38 (3 Jul)';
+const APP_VERSION = 'v2.39';
+const APP_DISPLAY_VERSION = 'v2.39 (3 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -548,11 +548,11 @@ const STOCK_COLUMNS = [
   { key:'cost', label:dc=>`Cost basis (${dc})`, cls:'num', defVis:false,
     render:r => fmt(r.cost, {dp:0}) },
   { key:'pl', label:dc=>`P&L (${dc})`, cls:'num', defVis:true,
-    render:r => r.pl!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${fmt(r.pl, {dp:0,signed:true})}</span>` : '—' },
+    render:r => r.pl!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${_plArrow(r.pl)}${fmt(r.pl, {dp:0,signed:true})}</span>` : '—' },
   { key:'plPct', label:()=>'P&L %', cls:'num', defVis:true,
     render:r => r.plPct!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${fmtPct(r.plPct)}</span>` : '—' },
   { key:'realised', label:dc=>`Realised P&L (${dc})`, cls:'num', defVis:false,
-    render:r => r.realisedSgd!=null ? `<span class="${r.realisedSgd>=0?'pos':'neg'}">${fmt(r.realisedSgd, {dp:0,signed:true})}</span>` : '—' },
+    render:r => r.realisedSgd!=null ? `<span class="${r.realisedSgd>=0?'pos':'neg'}">${_plArrow(r.realisedSgd)}${fmt(r.realisedSgd, {dp:0,signed:true})}</span>` : '—' },
   { key:'weight', label:()=>'Weight %', cls:'num', defVis:false,
     render:r => r.weight!=null ? r.weight.toFixed(1)+'%' : '—' },
   { key:'divIncome', label:dc=>`Dividend/yr (${dc})`, cls:'num', defVis:false,
@@ -910,6 +910,15 @@ function fmtPct(n, dp){
   // Trend arrow + sign so percentage direction is legible without colour (a11y).
   const arrow = v > 0 ? '▲ ' : v < 0 ? '▼ ' : '';
   return arrow + (v >= 0 ? '+' : '') + v.toFixed(dp != null ? dp : 2) + '%';
+}
+
+/* Same arrow-plus-sign-plus-colour rule as fmtPct, for the money-value P&L
+   cells (fmt() with signed:true already adds the +, this just prepends the
+   matching trend arrow so a colour-blind reader gets the same signal). */
+function _plArrow(v){
+  const n = Number(v);
+  if (!isFinite(n)) return '';
+  return n > 0 ? '▲ ' : n < 0 ? '▼ ' : '';
 }
 
 /* Compact money for huge figures (market cap): $3.21T, US$310.45B, $48.0M.
@@ -1617,15 +1626,22 @@ function setSyncStatus(state, detail){
   pill.classList.remove('s-local','s-syncing','s-synced','s-failed');
   const ts = localStorage.getItem(LK_SYNC_TS);
   const tsLabel = ts ? ' · ' + relTime(ts) : '';
+  let text = '';
   switch (state) {
-    case 'local':   pill.classList.add('s-local');   label.textContent = 'Local only'; break;
-    case 'syncing': pill.classList.add('s-syncing'); label.textContent = 'Syncing…'; break;
-    case 'synced':  pill.classList.add('s-synced');  label.textContent = 'Synced' + tsLabel; break;
-    case 'failed':  pill.classList.add('s-failed');  label.textContent = 'Sync failed'; break;
+    case 'local':   pill.classList.add('s-local');   text = 'Local only'; break;
+    case 'syncing': pill.classList.add('s-syncing'); text = 'Syncing…'; break;
+    case 'synced':  pill.classList.add('s-synced');  text = 'Synced' + tsLabel; break;
+    case 'failed':  pill.classList.add('s-failed');  text = 'Sync failed'; break;
   }
+  label.textContent = text;
   pill.title = detail || (state === 'synced' ? 'All changes pushed to the cloud' : (state === 'local' ? 'No Apps Script URL set' : ''));
   const det = document.getElementById('sync-status-detail');
   if (det) det.textContent = detail || (ts ? 'Last sync ' + relTime(ts) : 'No sync yet');
+  // The pill itself is dot-only on every width now (see index.html), the text
+  // moves into the dashboard hero subline instead. Null-checked: the subline
+  // only exists while the dashboard is the rendered/current page.
+  const heroSync = document.getElementById('dash-hero-sync');
+  if (heroSync) heroSync.textContent = text;
 }
 
 function updateSyncStatusPill(){
@@ -4081,9 +4097,9 @@ function renderStocks(){
       switch(c.key){
         case 'mv':       return `<td class="num">${fAnyMv?fmt(fTotMv,{dp:0}):'—'}</td>`;
         case 'cost':     return `<td class="num">${fmt(fTotCost,{dp:0})}</td>`;
-        case 'pl':       return `<td class="num">${fAnyMv?`<span class="${fTotPl>=0?'pos':'neg'}">${fmt(fTotPl,{dp:0,signed:true})}</span>`:'—'}</td>`;
+        case 'pl':       return `<td class="num">${fAnyMv?`<span class="${fTotPl>=0?'pos':'neg'}">${_plArrow(fTotPl)}${fmt(fTotPl,{dp:0,signed:true})}</span>`:'—'}</td>`;
         case 'plPct':    return `<td class="num">${fAnyMv&&fTotPlPct!=null?`<span class="${fTotPl>=0?'pos':'neg'}">${fmtPct(fTotPlPct)}</span>`:'—'}</td>`;
-        case 'realised': return `<td class="num">${fTotRealised?`<span class="${fTotRealised>=0?'pos':'neg'}">${fmt(fTotRealised,{dp:0,signed:true})}</span>`:'—'}</td>`;
+        case 'realised': return `<td class="num">${fTotRealised?`<span class="${fTotRealised>=0?'pos':'neg'}">${_plArrow(fTotRealised)}${fmt(fTotRealised,{dp:0,signed:true})}</span>`:'—'}</td>`;
         case 'divIncome':return `<td class="num">${fTotDiv?fmt(fTotDiv,{dp:0}):'—'}</td>`;
         default:         return `<td></td>`;
       }
@@ -5732,7 +5748,7 @@ function renderStockTxns(){
             <td class="num">${pos.shares}</td>
             <td class="num">${fmt(toSGD(pos.avgCost, ccy))}</td>
             <td></td>
-            <td class="num"><span class="${pos.realisedPL >= 0 ? 'pos' : 'neg'}">${fmt(toSGD(pos.realisedPL, ccy), {dp:0,signed:true})}</span></td>
+            <td class="num"><span class="${pos.realisedPL >= 0 ? 'pos' : 'neg'}">${_plArrow(pos.realisedPL)}${fmt(toSGD(pos.realisedPL, ccy), {dp:0,signed:true})}</span></td>
             <td class="tl muted">realised P&amp;L</td><td></td>
           </tr>`
         : '';
@@ -6670,6 +6686,57 @@ function toggleArrange(){
   _dashDecorate();
 }
 
+/* ─── Hero monthly-change chip + sparkline ──────────────────────────────
+   Both read the same DB.snapshots series renderDashboard already uses (one
+   row/day: {date, net, byClass}). Pure presentation, no new stored figures. */
+/* Latest snapshot vs the closest one at least 28 days older. Needs 2+
+   qualifying snapshots or returns null (caller renders no chip at all, never
+   an empty pill). netOf lets the caller pick full or ex-CPF net per row. */
+function _heroMonthlyChange(snaps, netOf){
+  if (!Array.isArray(snaps) || snaps.length < 2) return null;
+  const sorted = snaps.slice().sort((a,b) => String(a.date).localeCompare(String(b.date)));
+  const latest = sorted[sorted.length - 1];
+  const latestMs = new Date(latest.date + 'T00:00:00').getTime();
+  if (!isFinite(latestMs)) return null;
+  let baseline = null;
+  for (let i = sorted.length - 2; i >= 0; i--){
+    const ms = new Date(sorted[i].date + 'T00:00:00').getTime();
+    if (!isFinite(ms)) continue;
+    const days = (latestMs - ms) / 86400000;
+    if (days >= 28){ baseline = sorted[i]; break; }
+  }
+  if (!baseline) return null;
+  const curNet = netOf(latest), baseNet = netOf(baseline);
+  if (!isFinite(curNet) || !isFinite(baseNet) || baseNet === 0) return null;
+  const pct = (curNet - baseNet) / Math.abs(baseNet) * 100;
+  if (!isFinite(pct)) return null;
+  return { pct };
+}
+
+/* Inline SVG polyline, ~150x52, from the same series (every point). Hidden
+   entirely (caller returns '') when under 2 snapshots. Shape-only + aria-hidden,
+   the numbers themselves live in the value/chip, not the sparkline. */
+function _heroSparkline(snaps, netOf){
+  if (!Array.isArray(snaps) || snaps.length < 2) return '';
+  const sorted = snaps.slice().sort((a,b) => String(a.date).localeCompare(String(b.date)));
+  const pts = sorted.map(s => netOf(s)).filter(v => isFinite(v));
+  if (pts.length < 2) return '';
+  const w = 150, h = 52, pad = 3;
+  const min = Math.min(...pts), max = Math.max(...pts);
+  const span = (max - min) || 1;
+  const stepX = (w - pad*2) / (pts.length - 1);
+  const coords = pts.map((v, i) => {
+    const x = pad + i * stepX;
+    const y = pad + (1 - (v - min) / span) * (h - pad*2);
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  });
+  const last = coords[coords.length - 1].split(',');
+  return `<svg class="dash-hero-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <polyline points="${coords.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="3" fill="var(--accent)"/>
+  </svg>`;
+}
+
 function renderDashboard(){
   // Never reflow the stack mid-drag (a price refresh or stray event would
   // destroy the lifted card and leave it stuck).
@@ -6697,16 +6764,37 @@ function renderDashboard(){
 
   // Net worth hero — secondary (ex-CPF) only shown when CPF is on
   const heroSecondary = _dashShowCpf
-    ? `<div style="width:1px;height:48px;background:var(--glass-border);align-self:center;flex-shrink:0"></div>
+    ? `<div style="width:1px;height:48px;background:var(--border);align-self:center;flex-shrink:0"></div>
     <div><div class="dash-hero-label">Ex-CPF</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${fmt(netExCpf, {dp:0})}</div></div>`
     : '';
   const fxExclusionNote = cashInfo.excludedCount
     ? `<div class="dash-hero-label" style="margin-top:4px">Excludes ${cashInfo.excludedCount} cash account${cashInfo.excludedCount>1?'s':''} with missing FX, refresh FX in Settings</div>`
     : '';
+
+  // Monthly change chip: latest snapshot vs the closest one >=28 days older,
+  // in the same full/ex-CPF terms as the headline figure. No chip at all
+  // (not an empty pill) when fewer than 2 qualifying snapshots exist.
+  const snaps = DB.snapshots || [];
+  const netOf = s => _dashShowCpf ? s.net : (s.net - ((s.byClass && s.byClass.cpf) || 0));
+  const change = _heroMonthlyChange(snaps, netOf);
+  const changeChip = change
+    ? `<span class="dash-hero-chip ${change.pct >= 0 ? 'pos' : 'neg'}">${change.pct >= 0 ? '▲' : '▼'} ${change.pct >= 0 ? '+' : ''}${change.pct.toFixed(1)}% this month</span>`
+    : '';
+  const spark = _heroSparkline(snaps, netOf);
+
+  // Subline: current CPF-toggle wording plus the sync status (kept in step by
+  // setSyncStatus, which also writes #dash-hero-sync directly on every sync
+  // event; this initial value covers the render that creates the element).
+  const syncText = document.getElementById('sync-pill-label')
+    ? document.getElementById('sync-pill-label').textContent
+    : 'Local only';
+  const subline = `CPF ${_dashShowCpf ? 'on' : 'off'} · <span id="dash-hero-sync">${kjrEscape(syncText)}</span>`;
+
   nwEl.innerHTML = `<div class="dash-hero">
-    <div><div class="dash-hero-label">${_dashShowCpf ? 'Net worth (with CPF)' : 'Net worth (ex-CPF)'}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div>${fxExclusionNote}</div>
+    <div><div class="dash-hero-label">${_dashShowCpf ? 'Net worth (with CPF)' : 'Net worth (ex-CPF)'}${changeChip}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div><div class="dash-hero-sub">${subline}</div>${fxExclusionNote}</div>
     ${heroSecondary}
-    <button style="margin-left:auto;flex-shrink:0" class="btn btn-sm${_dashShowCpf ? ' btn-active' : ''}" data-click="toggleDashCpf" title="${_dashShowCpf ? 'Click to exclude CPF from net worth' : 'Click to include CPF in net worth'}">CPF ${_dashShowCpf ? 'on' : 'off'}</button>
+    ${spark}
+    <button style="${spark ? '' : 'margin-left:auto;'}flex-shrink:0" class="btn btn-sm${_dashShowCpf ? ' btn-active' : ''}" data-click="toggleDashCpf" title="${_dashShowCpf ? 'Click to exclude CPF from net worth' : 'Click to include CPF in net worth'}">CPF ${_dashShowCpf ? 'on' : 'off'}</button>
   </div>`;
 
   // Data integrity / reconciliation — ok state is a pill in the page-head,
@@ -6729,9 +6817,19 @@ function renderDashboard(){
     </div>`;
   }
 
-  // Asset-class allocation bar — a segmented proportion bar (each class sized
-  // by its share of net worth) with a $ + % legend below. When CPF is toggled
-  // off it is excluded entirely, like everywhere else on the dashboard.
+  // Asset-class cards + allocation bar. One small card per class (icon chip,
+  // value, share of net worth), a segmented proportion bar, and a $ + %
+  // legend that always lists every class regardless of slice size. When CPF
+  // is toggled off it is excluded entirely, like everywhere else on the
+  // dashboard. Icons reuse the exact SVGs from TABS (Stocks/Cash/CPF/Real
+  // Estate) rather than inventing new artwork.
+  const CLASS_ICON = {
+    Stocks: TABS.find(t => t.key === 'stocks').icon,
+    Cash:   TABS.find(t => t.key === 'cash').icon,
+    CPF:    TABS.find(t => t.key === 'cpf').icon,
+    'Real Estate': TABS.find(t => t.key === 'realestate').icon,
+    Crypto: TABS.find(t => t.key === 'crypto').icon
+  };
   const assetsEl = document.getElementById('dash-assets');
   if (assetsEl){
     if (netFull <= 0){
@@ -6739,16 +6837,23 @@ function renderDashboard(){
     } else {
       const segs = displayClasses.filter(c => c.val > 0);
       const pctOf = c => displayNet > 0 ? (c.val / displayNet * 100) : 0;
+      const classCards = segs.map(c => {
+        const p = pctOf(c);
+        return `<div class="dash-class-card">
+          <div class="dash-class-icon" style="background:var(${c.color}-soft,var(${c.color}));color:var(${c.color})">${CLASS_ICON[c.key] || ''}</div>
+          <div class="dash-class-value metric-value">${fmt(c.val,{dp:0})}</div>
+          <div class="dash-class-label">${kjrEscape(c.key)} · ${p.toFixed(0)}%</div>
+        </div>`;
+      }).join('');
       const bar = segs.map(c => {
         const p = pctOf(c);
-        const lbl = p >= 9 ? `${kjrEscape(c.key)} ${p.toFixed(0)}%` : '';  // hide label on cramped slivers
-        return `<div class="alloc-seg" style="flex:${c.val};background:var(${c.color})" title="${kjrEscape(c.key)} · ${fmt(c.val,{dp:0})} (${p.toFixed(0)}%)">${lbl}</div>`;
+        return `<div class="alloc-seg" style="flex:${c.val};background:var(${c.color})" title="${kjrEscape(c.key)} · ${fmt(c.val,{dp:0})} (${p.toFixed(0)}%)"></div>`;
       }).join('');
       const legend = segs.map(c => {
         const p = pctOf(c);
         return `<div class="alloc-legend-item"><span class="alloc-legend-dot" style="background:var(${c.color})"></span>${kjrEscape(c.key)} <span class="alloc-legend-amt">${fmt(c.val,{dp:0})}</span> <span class="alloc-legend-pct">${p.toFixed(0)}%</span></div>`;
       }).join('');
-      assetsEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="alloc-bar">${bar}</div><div class="alloc-legend">${legend}</div></div></div>`;
+      assetsEl.innerHTML = `<div class="dash-class-grid" style="margin-top:16px">${classCards}</div><div class="card"><div class="card-body"><div class="alloc-bar">${bar}</div><div class="alloc-legend">${legend}</div></div></div>`;
     }
   }
 

@@ -168,6 +168,7 @@ These are the checks that catch finance bugs. Add a new one whenever a feature a
 | 02/07 | `app.js?v=` left on an old version for several releases while `APP_VERSION` moved on, only the manual `CACHE_NAME` bump masked it | `tests/check-release.js`, wired into `npm test`, fails the build on any mismatch |
 | 02/07 | doGet returned a malformed/corrupt payload on a partial write and the client treated it as "wrong schema", risking a seed-overwrite of real data | `seedDecision()` pure guard (kjr-core.js) refuses to seed over anything that `looksPopulated()`, regardless of schema mismatch |
 | 03/07 (theme) | `theme-init.js` did nothing when no theme was stored, so a fresh visitor first-painted light then flipped to dark when `boot()` ran, a visible flash | `theme-init.js` adds the `dark` class unless the stored choice is exactly `'light'` |
+| 03/07 (verification) | verifying a mid-session `Worker/*.js` edit in the preview browser without bumping `?v=` or clearing the service worker, sw.js serves the cache-first stale copy so the edit silently never loads | after any Worker JS edit during a verification session, unregister the service worker and clear caches in the console (or bump `?v=`), then confirm the new code is live via eval before judging |
 
 For wider cross-project rules see `~/Claude Projects/Claude/lessons.md`.
 

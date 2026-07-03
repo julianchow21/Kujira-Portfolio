@@ -125,5 +125,5 @@ These extend or override the master `CLAUDE.md` rules for this repo.
 
 ## Conventions
 
-- All apps use the Kujira design token system: `--bg/bg2/bg3/bg4`, `--text/text2/text3`, `--red/green/blue/amber`, `--accent`, `--radius`, `--glass*` (Portfolio), `--surface-solid` (Portfolio dense tables)
+- All apps use the Kujira design token system: `--bg/bg2/bg3/bg4`, `--text/text2/text3`, `--red/green/blue/amber`, `--accent`, `--radius`, `--glass*` (Portfolio, floating elements only since v2.39), `--surface-solid` (Portfolio dense tables)
 - Portfolio dark theme default (`--accent:#2dd4bf` teal); warm light opt-in (`--accent:#c15f3c` terracotta). Trading/Journal: dark only, `--accent:#2dd4bf`.
