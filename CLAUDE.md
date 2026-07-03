@@ -108,7 +108,7 @@ These extend or override the master `CLAUDE.md` rules for this repo.
 
 - Confirm once per session, then push freely. Direct to `main`, no feature branches.
 - Commit message format: `Portfolio v1.5 fix mobile sell grid overflow` (sub-project name + version + imperative description).
-- End every commit with: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+- End every commit with the attribution line for whichever model is running: `Co-Authored-By: <current model name> <noreply@anthropic.com>`
 
 ### Verify before done
 
