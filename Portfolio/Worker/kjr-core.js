@@ -205,6 +205,127 @@ function computeCpfContribution(grossMonthly, age){
   return { wage, employerCPF, employeeCPF, total, net, byAccount, allocated: !!alloc };
 }
 
+/* ─── Projections (Phase 6) ─────────────────────────────────────────────
+   Pure liquid-assets FIRE projection. All figures are REAL (today's) SGD,
+   the caller supplies a nominal liquidNow and this discounts forward with a
+   monthly-compounded real rate, so a single line answers "what does this look
+   like in today's money". Non-finite inputs are treated as 0 so a stray NaN
+   from a bad settings read can never propagate into the chart. months is
+   capped at 1200 (100 years) to keep the loop bounded regardless of caller input.
+     liquidNow          current stocks+cash+crypto SGD (CPF and insurance cash
+                         value are NOT liquid, caller excludes them)
+     monthlySavings     real SGD/month added each period (may be negative)
+     annualReturnPct    nominal expected return, % p.a.
+     annualInflationPct expected inflation, % p.a.
+     months             projection horizon in months
+     fireNumber         target liquid balance; <=0 or non-finite disables crossover
+   Returns { series, crossoverMonth }. series[0] is liquidNow (index = month,
+   0..months). crossoverMonth is the first index whose series value is >= the
+   FIRE number, or null if never reached within the horizon (or fireNumber<=0). */
+function kjrProjectLiquid(params){
+  const p = params || {};
+  const finite = (v, fallback) => (isFinite(Number(v)) ? Number(v) : (fallback || 0));
+  const liquidNow      = finite(p.liquidNow, 0);
+  const monthlySavings = finite(p.monthlySavings, 0);
+  const annualReturn   = finite(p.annualReturnPct, 0);
+  const annualInflation = finite(p.annualInflationPct, 0);
+  const fireNumber     = finite(p.fireNumber, 0);
+  const months = Math.max(0, Math.min(1200, Math.round(finite(p.months, 0))));
+
+  const rm = Math.pow((1 + annualReturn / 100) / (1 + annualInflation / 100), 1 / 12) - 1;
+
+  const series = [liquidNow];
+  let bal = liquidNow;
+  let crossoverMonth = (fireNumber > 0 && bal >= fireNumber) ? 0 : null;
+  for (let m = 1; m <= months; m++){
+    bal = bal * (1 + rm) + monthlySavings;
+    series.push(bal);
+    if (crossoverMonth == null && fireNumber > 0 && bal >= fireNumber) crossoverMonth = m;
+  }
+  return { series, crossoverMonth };
+}
+
+/* Pure CPF balance projection, NOMINAL SGD (the caller deflates to real terms
+   with Math.pow(1+i, -m/12) before charting, kept out of core so this stays
+   purely mechanical). Calls computeCpfContribution directly (same file) for
+   the monthly contribution split; age increments on 12-month boundaries from
+   currentAge, matching how the rest of the salary engine treats age-banded
+   CPF rates (whole years, not exact birthdays).
+   Interest: simplification vs. generateAutoCpfInterest in app.js, that engine
+   computes each month's interest on the carried-in base (this month's own
+   contribution/interest excluded) and only credits it at year-end, the same
+   shape is followed here (accrue monthly into a yearAcc bucket at rate/100/12
+   on the month's OPENING per-account balance, credit annually every 12th
+   month, then fold into principal). The +1% extra on the first S$60k combined
+   (OA capped at S$20k in that pool) is modelled the same way as app.js. The
+   age-55+ additional +1% on the first S$30k (paid into RA) is NOT modelled
+   here, cleanly reproducing that tier's interaction with the OA/SA/MA-stops-
+   at-55 contribution cutoff added meaningful complexity for a projection this
+   coarse; flagged in the report rather than silently approximated.
+     balances     { OA, SA, MA }    (RA excluded per instructions, only OA/SA/MA in)
+     grossMonthly SGD gross before CPF; 0 or null -> no contributions, interest only
+     currentAge   whole years, null -> contributions run at the <=55 rates forever
+                   (age never advances), since there is no birth year to advance from
+     months       projection horizon in months
+     rates        CPF_DEFAULTS shape { OA, SA, MA, RA, extraFirst60k, extraFirst30kAge55 }
+   Returns { series }, series[0] is the opening OA+SA+MA total, one entry per
+   month, NOMINAL SGD (RA deliberately excluded, see above). */
+function kjrProjectCpf(params){
+  const p = params || {};
+  const bals  = p.balances || {};
+  const rates = p.rates || {};
+  const finite = (v, fallback) => (isFinite(Number(v)) ? Number(v) : (fallback || 0));
+  const grossMonthly = finite(p.grossMonthly, 0);
+  const currentAge   = (p.currentAge == null || !isFinite(Number(p.currentAge))) ? null : Number(p.currentAge);
+  const months = Math.max(0, Math.min(1200, Math.round(finite(p.months, 0))));
+
+  const bal = { OA: finite(bals.OA, 0), SA: finite(bals.SA, 0), MA: finite(bals.MA, 0) };
+  const mo = x => (finite(x, 0) / 100) / 12;
+  const e60 = mo(rates.extraFirst60k != null ? rates.extraFirst60k : 1);
+
+  const series = [bal.OA + bal.SA + bal.MA];
+  let yearAcc = { OA: 0, SA: 0, MA: 0 };
+
+  for (let m = 1; m <= months; m++){
+    const age = currentAge == null ? null : currentAge + Math.floor((m - 1) / 12);
+
+    // Monthly interest on the opening (pre-contribution) balance this month.
+    ['OA','SA','MA'].forEach(a => { yearAcc[a] = _round2(yearAcc[a] + bal[a] * mo(rates[a])); });
+
+    // Extra +1% on first S$60k combined (OA capped at S$20k in the pool).
+    const oaInPool = Math.min(bal.OA, 20000);
+    let room = 60000;
+    const takeFromPool = v => { const t = Math.max(0, Math.min(v, room)); room -= t; return t; };
+    const poolOA = takeFromPool(oaInPool);
+    const poolSA = takeFromPool(bal.SA);
+    const poolMA = takeFromPool(bal.MA);
+    // OA's extra is never paid into OA itself; mirrors app.js paying it to SA (<55).
+    yearAcc.SA = _round2(yearAcc.SA + poolOA * e60);
+    yearAcc.SA = _round2(yearAcc.SA + poolSA * e60);
+    yearAcc.MA = _round2(yearAcc.MA + poolMA * e60);
+
+    // Contributions (stop once computeCpfContribution reports no allocation,
+    // i.e. age > 55): join the principal this month, earning from next month.
+    if (grossMonthly > 0){
+      const c = computeCpfContribution(grossMonthly, age);
+      if (c.allocated && c.byAccount){
+        bal.OA += c.byAccount.OA || 0;
+        bal.SA += c.byAccount.SA || 0;
+        bal.MA += c.byAccount.MA || 0;
+      }
+    }
+
+    // Year-end credit (every 12th month from the start): post + fold into principal.
+    if (m % 12 === 0){
+      ['OA','SA','MA'].forEach(a => { bal[a] = _round2(bal[a] + yearAcc[a]); });
+      yearAcc = { OA: 0, SA: 0, MA: 0 };
+    }
+
+    series.push(bal.OA + bal.SA + bal.MA);
+  }
+  return { series };
+}
+
 /* Inclusive list of 'YYYY-MM' between two 'YYYY-MM' bounds. */
 function _monthsBetween(startYM, endYM){
   const out = [];
@@ -554,6 +675,7 @@ if (typeof module !== 'undefined' && module.exports) {
     CONSTANTS_VERIFIED_FOR,
     cpfContribRatesForAge, cpfAllocationForAge,
     _round2, computeCpfContribution,
+    kjrProjectLiquid, kjrProjectCpf,
     _monthsBetween,
     kjrSafeNumber,
     roundMoney, safeRatio, incomeNet,

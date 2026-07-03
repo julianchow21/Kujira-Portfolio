@@ -818,8 +818,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
   <!-- PROJECTIONS -->
   <section class="page" id="page-projections">
-    <div class="page-head"><div><div class="page-title">Projections <span class="phase-chip">Phase 6</span></div><div class="page-sub">FIRE number, retirement readiness, CPF growth.</div></div></div>
-    <div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🎯</div><div class="empty-title">Projections arrive in Phase 6</div><div class="empty-sub">Hand-tuned CPF rate engine plus configurable return and inflation assumptions.</div></div></div></div>
+    <div class="page-head"><div><div class="page-title">Projections</div><div class="page-sub">FIRE number, retirement readiness, CPF growth. Figures in today's dollars.</div></div></div>
+    <div id="projections-root"></div>
   </section>
 
   <!-- SETTINGS -->
@@ -1284,8 +1284,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.44"></script>
-<script src="Worker/kjr-sortable.js?v=2.44"></script>
-<script src="Worker/app.js?v=2.44"></script>
+<script src="Worker/kjr-core.js?v=2.45"></script>
+<script src="Worker/kjr-sortable.js?v=2.45"></script>
+<script src="Worker/app.js?v=2.45"></script>
 </body>
 </html>

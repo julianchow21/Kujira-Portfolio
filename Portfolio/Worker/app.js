@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.44';
-const APP_DISPLAY_VERSION = 'v2.44 (3 Jul)';
+const APP_VERSION = 'v2.45';
+const APP_DISPLAY_VERSION = 'v2.45 (3 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -450,7 +450,7 @@ const TABS = [
 /* Phase 2 lock — tabs whose UI and renderers are parked while Phase 1 ships.
    Real markup stays in the DOM (preserved underneath), just hidden by the
    .phase2-locked class. To unblock a tab, remove it from this set. */
-const PHASE_2_TABS = new Set(['crypto', 'projections']);
+const PHASE_2_TABS = new Set(['crypto']);
 
 /* Mobile bottom bar shows exactly 5 fixed destinations (Apple's pattern caps
    a tab bar at 5); everything else lives behind the "More" sheet. Decided
@@ -2490,6 +2490,7 @@ function showPage(key){
   closeMoreSheet(); // navigating (incl. from within the sheet) always closes it
   updateCcyToggleUI(); // reflect the new tab's currency
   if (key === 'dashboard') renderDashboard(); // (re)draw charts now the canvas is sized
+  if (key === 'projections') renderProjections(); // same reason: canvas needs to be sized/visible
   if (key === 'settings') { loadSettingsForm(); renderDiagnostics(); }
   if (window.scrollTo) window.scrollTo({ top: 0, behavior: 'instant' });
   // History is owned by the router (navigate/hashchange), not showPage — see
@@ -6024,6 +6025,65 @@ function annualIncomeSGD(){
   const total=Object.values(byMonth).reduce((s,v)=>s+v,0);
   return months>=12?total:(total/months)*12;
 }
+/* ═══════════════════════════════════════════════════════════════════════
+   PROJECTIONS (Phase 6), derivation helpers. Pure reads of DB, no rendering.
+   ═══════════════════════════════════════════════════════════════════════ */
+/* Trailing-12-month expenses, annualised by distinct months present (same
+   shape as annualIncomeSGD). excluded counts rows skipped for an
+   unconvertible currency (expenseAmountSgdOrNull returning null), so the
+   assumptions card can flag it rather than silently understating spend. */
+function annualExpensesSGD(){
+  const all = (DB.expenses||[]).filter(x=>x.date);
+  if (!all.length) return { annual:0, excluded:0 };
+  const cutoff=new Date(); cutoff.setFullYear(cutoff.getFullYear()-1);
+  const cutISO=_isoDateSG(cutoff);
+  let rows = all.filter(x=>x.date>=cutISO);
+  if (!rows.length) rows = all;
+  const byMonth={}; let excluded=0;
+  rows.forEach(x=>{
+    const sgd = expenseAmountSgdOrNull(x);
+    if (sgd == null){ excluded++; return; }
+    const m=String(x.date).slice(0,7); byMonth[m]=(byMonth[m]||0)+sgd;
+  });
+  const months=Object.keys(byMonth).length||1;
+  const total=Object.values(byMonth).reduce((s,v)=>s+v,0);
+  const annual = months>=12 ? total : (total/months)*12;
+  return { annual, excluded };
+}
+
+/* Trailing-12-month average monthly savings: per distinct month present in
+   either income or expenses, take-home (incomeNet) minus expenses, averaged.
+   Negative is allowed and returned honestly (see Phase 6 methodology). */
+function derivedMonthlySavingsSGD(){
+  const cutoff=new Date(); cutoff.setFullYear(cutoff.getFullYear()-1);
+  const cutISO=_isoDateSG(cutoff);
+  let inc = (DB.income||[]).filter(i=>i.date);
+  let exp = (DB.expenses||[]).filter(x=>x.date);
+  let incRows = inc.filter(i=>i.date>=cutISO);
+  let expRows = exp.filter(x=>x.date>=cutISO);
+  if (!incRows.length && !expRows.length){ incRows = inc; expRows = exp; }
+  const byMonth = {};
+  incRows.forEach(i=>{ const m=String(i.date).slice(0,7); (byMonth[m]=byMonth[m]||{inc:0,exp:0}).inc += incomeNet(i); });
+  expRows.forEach(x=>{ const sgd = expenseAmountSgdOrNull(x); if (sgd==null) return; const m=String(x.date).slice(0,7); (byMonth[m]=byMonth[m]||{inc:0,exp:0}).exp += sgd; });
+  const keys = Object.keys(byMonth);
+  if (!keys.length) return 0;
+  const totalNet = keys.reduce((s,m)=>s+(byMonth[m].inc-byMonth[m].exp),0);
+  return totalNet / keys.length;
+}
+
+/* FIRE number: manual override wins, else trailing-12mo annualised expenses x
+   fireMultiple. Returns null when neither is derivable (no expenses logged and
+   no manual target set) so the caller shows a designed empty state instead of
+   a fabricated figure. */
+function fireNumberSGD(){
+  const target = DB.settings.fireTarget;
+  if (target != null && isFinite(Number(target)) && Number(target) > 0) return Number(target);
+  const { annual } = annualExpensesSGD();
+  if (!(annual > 0)) return null;
+  const mult = Number(DB.settings.fireMultiple) || 25;
+  return annual * mult;
+}
+
 function _selfPolicies(){ return (DB.insurance||[]).filter(p=>p.status==='Active'&&(!p.insured||/^self$/i.test(p.insured))); }
 function coverageAdequacy(){
   const t=coverageTargets();
@@ -6307,6 +6367,147 @@ function renderCoverageAdequacy(){
     <div class="tbl-wrap"><table class="holdings"><thead><tr><th class="tl">Risk</th><th>Current</th><th>Recommended</th><th>Gap</th><th class="tl">Status</th></tr></thead><tbody>${rows}</tbody></table></div>
     <p class="hint" style="margin-top:10px">Rule-of-thumb guide using income multiples (death and TPD 10x, CI 4x annual income, income protection 60% of monthly income). Not personalised financial advice, see a licensed adviser for a full needs analysis. Targets are editable in Settings.</p>
   </div></div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PROJECTIONS (Phase 6), FIRE number, liquid + CPF trajectory, assumptions.
+   Everything below is real (today's) SGD unless noted. CPF nominal series
+   comes back from kjrProjectCpf and is deflated here (Math.pow(1+i,-m/12)),
+   kept out of kjr-core so the pure module never has to know "today".
+   ═══════════════════════════════════════════════════════════════════════ */
+const PROJECTION_MONTHS = 480; // 40 years, plenty of runway past any realistic retirementAge
+
+function renderProjections(){
+  setRenderCcy('projections');
+  const el = document.getElementById('projections-root');
+  if (!el) return;
+
+  const s = DB.settings || {};
+  const birthYear = s.birthYear;
+  const liquidNow = _stockMvSGD() + _cashSGDInfo().total + _cryptoSGD();
+  const cpfNow = cpfEffectiveBalances();
+  const fireNumber = fireNumberSGD();
+  const expInfo = annualExpensesSGD();
+  const monthlySavings = derivedMonthlySavingsSGD();
+  const hasIncome = (DB.income || []).length > 0;
+  const grossMonthly = (s.salary && s.salary.grossMonthly) || 0;
+  const returnPct = s.expectedReturn != null ? Number(s.expectedReturn) : 6.0;
+  const inflationPct = s.inflationRate != null ? Number(s.inflationRate) : 3.0;
+  const retirementAge = Number(s.retirementAge) || 65;
+
+  if (!birthYear){
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🎂</div><div class="empty-title">Set your birth year to see projections</div><div class="empty-sub">Age drives the CPF contribution/interest schedule and the retirement verdict. Add it in Settings.</div></div></div></div>`;
+    return;
+  }
+  if (fireNumber == null){
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🎯</div><div class="empty-title">No FIRE number yet</div><div class="empty-sub">Log expenses on the P&amp;L tab (trailing 12 months is annualised x your FIRE multiple), or set a manual FIRE target in Settings.</div></div></div></div>`;
+    return;
+  }
+
+  const currentAge = _ageOnYear(new Date().getFullYear());
+  const monthsToRetire = Math.max(0, (retirementAge - (currentAge||0)) * 12);
+
+  const liquidProj = kjrProjectLiquid({
+    liquidNow, monthlySavings, annualReturnPct: returnPct, annualInflationPct: inflationPct,
+    months: PROJECTION_MONTHS, fireNumber
+  });
+
+  const cpfProjNominal = kjrProjectCpf({
+    balances: { OA: cpfNow.OA||0, SA: cpfNow.SA||0, MA: cpfNow.MA||0 },
+    grossMonthly, currentAge, months: PROJECTION_MONTHS,
+    rates: s.cpfRates || CPF_DEFAULTS
+  });
+  const cpfRA = cpfNow.RA || 0; // RA excluded from kjrProjectCpf's series; held flat NOMINAL, so it deflates with the rest below
+  const cpfProjReal = cpfProjNominal.series.map((v,m) => (v + cpfRA) * Math.pow(1 + inflationPct/100, -m/12));
+
+  // Crossover verdict
+  const nowYear = new Date().getFullYear();
+  let verdict;
+  if (liquidProj.crossoverMonth == null){
+    verdict = `Not reached within the ${Math.round(PROJECTION_MONTHS/12)}-year horizon at current savings.`;
+  } else {
+    const yr = nowYear + Math.floor(liquidProj.crossoverMonth / 12);
+    const ageAt = (currentAge||0) + Math.floor(liquidProj.crossoverMonth / 12);
+    verdict = `On current savings you reach it around <b>${yr}</b> (age ${ageAt}).`;
+  }
+  // On track only when the crossover lands ON OR BEFORE retirement. A null
+  // crossover (never reached in the horizon) must read as not on track.
+  const retireVerdict = (liquidProj.crossoverMonth != null && liquidProj.crossoverMonth <= monthsToRetire)
+    ? `On track to be financially independent by retirement age ${retirementAge}.`
+    : `Not reached by retirement age ${retirementAge} at current savings.`;
+
+  const progressPct = fireNumber > 0 ? Math.min(100, Math.round(liquidNow / fireNumber * 100)) : 0;
+
+  const fireCard = `<div class="card"><div class="card-head"><h3>FIRE progress</h3></div><div class="card-body">
+    <div class="metrics">
+      <div class="metric"><div class="metric-label">FIRE number</div><div class="metric-value">${fmt(fireNumber,{dp:0})}</div></div>
+      <div class="metric"><div class="metric-label">Liquid now</div><div class="metric-value">${fmt(liquidNow,{dp:0})}</div></div>
+      <div class="metric"><div class="metric-label">CPF (separate track)</div><div class="metric-value">${fmt(cpfNow.OA+cpfNow.SA+cpfNow.MA+cpfNow.RA,{dp:0})}</div></div>
+    </div>
+    <div class="cov-bar" style="width:100%;height:10px;margin:12px 0 6px"><span style="width:${progressPct}%"></span></div>
+    <p class="hint">${progressPct}% of FIRE number, liquid assets only (stocks + cash + crypto). ${verdict} ${retireVerdict}</p>
+    <p class="hint">CPF is a separate track and is never counted toward FIRE progress. Insurance cash value is excluded from liquid too, a surrender value isn't spendable.</p>
+  </div></div>`;
+
+  const chartCard = (typeof Chart === 'undefined') ? '' : `<div class="card"><div class="card-head"><h3>Trajectory <span class="page-sub">today's dollars</span></h3></div><div class="card-body">
+    <div style="height:280px"><canvas id="proj-canvas"></canvas></div>
+  </div></div>`;
+
+  const negSavings = monthlySavings < 0;
+  const assumptionsCard = `<div class="card"><div class="card-head"><h3>Assumptions</h3></div><div class="card-body">
+    <div class="tbl-wrap"><table class="holdings"><tbody>
+      <tr><td class="tl">Expected return</td><td class="num">${fmtPct(returnPct,1)}</td></tr>
+      <tr><td class="tl">Inflation</td><td class="num">${fmtPct(inflationPct,1)}</td></tr>
+      <tr><td class="tl">FIRE target</td><td class="num">${s.fireTarget!=null ? fmt(Number(s.fireTarget),{dp:0}) + ' (manual override)' : (Number(s.fireMultiple)||25) + '&times; expenses'}</td></tr>
+      <tr><td class="tl">Retirement age</td><td class="num">${retirementAge}</td></tr>
+      <tr><td class="tl">Annual expenses (derived)</td><td class="num">${expInfo.annual>0 ? fmt(expInfo.annual,{dp:0}) : '—'}${expInfo.excluded ? ' <span class="hint">('+expInfo.excluded+' excluded, FX missing)</span>' : ''}</td></tr>
+      <tr><td class="tl">Monthly savings (derived)</td><td class="num${negSavings?' neg':''}">${fmt(monthlySavings,{dp:0})}${negSavings?' <span class="hint">(negative, spending exceeds take-home)</span>':''}</td></tr>
+      <tr><td class="tl">Salary used for CPF</td><td class="num">${grossMonthly>0 ? fmt(grossMonthly,{dp:0})+'/mo' : '— (none set, interest only)'}</td></tr>
+    </tbody></table></div>
+    <p class="hint" style="margin-top:10px">Salary held flat, no assumed raises. Every figure above is shown in today's dollars.${!hasIncome ? ' No income logged, savings above is derived as negative expenses only.' : ''}</p>
+    <p class="hint">Not personalised financial advice, see a licensed adviser for a full retirement plan. Edit in Settings.</p>
+  </div></div>`;
+
+  el.innerHTML = fireCard + chartCard + assumptionsCard;
+  if (typeof Chart !== 'undefined') _renderProjectionChart(liquidProj.series, cpfProjReal, fireNumber);
+}
+
+/* Chart.js line, same destroy-then-create lifecycle as _renderInsPremiumChart.
+   X axis is years: every 12th month is labelled with the calendar year, the
+   rest carry an empty label so the axis stays legible on a 40-year horizon. */
+function _renderProjectionChart(liquidSeries, cpfSeries, fireNumber){
+  const canvas = document.getElementById('proj-canvas');
+  if (!canvas) return;
+  const nowYear = new Date().getFullYear();
+  const n = liquidSeries.length;
+  const labels = liquidSeries.map((_,m) => (m % 12 === 0) ? String(nowYear + m/12) : '');
+  const dc = displayCcy();
+  const liq = liquidSeries.map(v => +toDisplay(v, 'SGD').toFixed(2));
+  const cpf = (cpfSeries||[]).map(v => +toDisplay(v, 'SGD').toFixed(2));
+  const fireLine = new Array(n).fill(fireNumber > 0 ? +toDisplay(fireNumber, 'SGD').toFixed(2) : null);
+  const axisColor = _cssVar('--text3'), gridColor = _cssVar('--border');
+
+  const old = _pbCharts['proj-canvas']; if (old){ try{ old.destroy(); }catch(e){} }
+  _pbCharts['proj-canvas'] = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets: [
+      { label:'Liquid (real)', data: liq, borderColor: PB_PALETTE[0], backgroundColor:'transparent', borderWidth:2, pointRadius:0, tension:0.15 },
+      { label:'CPF (real)', data: cpf, borderColor: PB_PALETTE[1], backgroundColor:'transparent', borderWidth:2, pointRadius:0, tension:0.15 },
+      { label:'FIRE number', data: fireLine, borderColor: PB_PALETTE[3], backgroundColor:'transparent', borderWidth:1.5, borderDash:[6,4], pointRadius:0 }
+    ] },
+    options: {
+      responsive:true, maintainAspectRatio:false, animation:{duration:300},
+      interaction:{ mode:'index', intersect:false },
+      plugins:{
+        legend:{ position:'top', labels:{ color:_cssVar('--text2'), font:{size:11}, padding:10, usePointStyle:true } },
+        tooltip:{ callbacks:{ label: c => ' ' + (c.dataset.label||'') + ': ' + (c.parsed.y==null?'—':fmt(c.parsed.y,{noConvert:true,dp:0})) } }
+      },
+      scales:{
+        x:{ ticks:{ color:axisColor, font:{size:10}, autoSkip:false, maxRotation:0 }, grid:{ display:false } },
+        y:{ ticks:{ color:axisColor, font:{size:10}, callback: v => dc + ' ' + Number(v).toLocaleString('en-SG') }, grid:{ color:gridColor } }
+      }
+    }
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -7463,6 +7664,7 @@ function renderAll(){
   renderCpf();
   renderCashflow();
   renderInsurance();
+  renderProjections();
   if (document.getElementById('page-settings').classList.contains('active')) {
     loadSettingsForm();
     renderDiagnostics();

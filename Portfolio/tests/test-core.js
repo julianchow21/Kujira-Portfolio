@@ -295,6 +295,82 @@ function runTests() {
     assert.strictEqual(core.CONSTANTS_VERIFIED_FOR, 2026);
   });
 
+  // 13. Testing kjrProjectLiquid (Phase 6: FIRE liquid-assets projection)
+  test('kjrProjectLiquid - hand-computable crossover (0% real return)', () => {
+    // 100k now, +1k/mo, 0% real return -> pure linear growth, hits 112k at month 12
+    const r = core.kjrProjectLiquid({ liquidNow:100000, monthlySavings:1000, annualReturnPct:0, annualInflationPct:0, months:24, fireNumber:112000 });
+    assert.strictEqual(r.series.length, 25);
+    assert.strictEqual(r.series[0], 100000);
+    assert.strictEqual(r.series[12], 112000);
+    assert.strictEqual(r.crossoverMonth, 12);
+  });
+
+  test('kjrProjectLiquid - zero savings still projects (flat, no crossover if below target)', () => {
+    const r = core.kjrProjectLiquid({ liquidNow:50000, monthlySavings:0, annualReturnPct:0, annualInflationPct:0, months:12, fireNumber:100000 });
+    assert.strictEqual(r.series[12], 50000);
+    assert.strictEqual(r.crossoverMonth, null);
+  });
+
+  test('kjrProjectLiquid - negative savings projects honestly (declining line)', () => {
+    const r = core.kjrProjectLiquid({ liquidNow:50000, monthlySavings:-500, annualReturnPct:0, annualInflationPct:0, months:12, fireNumber:100000 });
+    assert.strictEqual(r.series[12], 44000);
+    assert.strictEqual(r.crossoverMonth, null); // declining, never reaches target
+  });
+
+  test('kjrProjectLiquid - fireNumber <= 0 disables crossover entirely', () => {
+    const r0 = core.kjrProjectLiquid({ liquidNow:100000, monthlySavings:1000, annualReturnPct:5, annualInflationPct:2, months:12, fireNumber:0 });
+    assert.strictEqual(r0.crossoverMonth, null);
+    const rNeg = core.kjrProjectLiquid({ liquidNow:100000, monthlySavings:1000, annualReturnPct:5, annualInflationPct:2, months:12, fireNumber:-5 });
+    assert.strictEqual(rNeg.crossoverMonth, null);
+  });
+
+  test('kjrProjectLiquid - real-rate sanity: return == inflation grows only from savings', () => {
+    // 5% nominal return, 5% inflation -> 0% real, so growth is savings only, no compounding
+    const r = core.kjrProjectLiquid({ liquidNow:10000, monthlySavings:100, annualReturnPct:5, annualInflationPct:5, months:3, fireNumber:0 });
+    assert.deepStrictEqual(r.series, [10000, 10100, 10200, 10300]);
+  });
+
+  test('kjrProjectLiquid - non-finite inputs treated as 0, months capped at 1200', () => {
+    const r = core.kjrProjectLiquid({ liquidNow:NaN, monthlySavings:undefined, annualReturnPct:6, annualInflationPct:3, months:5000, fireNumber:null });
+    assert.strictEqual(r.series.length, 1201);
+    assert.strictEqual(r.series[0], 0);
+    assert.strictEqual(r.crossoverMonth, null);
+  });
+
+  // 14. Testing kjrProjectCpf (Phase 6: CPF nominal-SGD projection)
+  test('kjrProjectCpf - balances grow from interest and contributions', () => {
+    const c = core.kjrProjectCpf({
+      balances: { OA:20000, SA:10000, MA:10000 }, grossMonthly:5000, currentAge:50, months:120,
+      rates: { OA:2.5, SA:4.08, MA:4.08, RA:4.08, extraFirst60k:1, extraFirst30kAge55:1 }
+    });
+    assert.strictEqual(c.series.length, 121);
+    assert.strictEqual(c.series[0], 40000);
+    assert.strictEqual(c.series[120] > c.series[0], true);
+    assert.strictEqual(c.series[60], 170712.91);
+  });
+
+  test('kjrProjectCpf - contributions stop once age exceeds 55, interest keeps accruing', () => {
+    // currentAge 50, zero interest so growth is contributions only: age hits 56
+    // (cpfAllocationForAge stops allocating above 55) at month 73 = (56-50)*12+1.
+    const c = core.kjrProjectCpf({
+      balances: { OA:0, SA:0, MA:0 }, grossMonthly:5000, currentAge:50, months:90,
+      rates: { OA:0, SA:0, MA:0, RA:0, extraFirst60k:0, extraFirst30kAge55:0 }
+    });
+    assert.strictEqual(c.series[71] - c.series[70], 1850); // still contributing at age 55
+    assert.strictEqual(c.series[73] - c.series[72], 0);    // age 56, contributions stopped
+    assert.strictEqual(c.series[90] - c.series[73], 0);    // stays flat with zero interest
+  });
+
+  test('kjrProjectCpf - zero grossMonthly means interest-only growth, series length matches months', () => {
+    const c = core.kjrProjectCpf({
+      balances: { OA:10000, SA:5000, MA:5000 }, grossMonthly:0, currentAge:40, months:24,
+      rates: { OA:2.5, SA:4.08, MA:4.08, RA:4.08, extraFirst60k:1, extraFirst30kAge55:1 }
+    });
+    assert.strictEqual(c.series.length, 25);
+    assert.strictEqual(c.series[0], 20000);
+    assert.strictEqual(c.series[24] > c.series[0], true); // interest still accrued
+  });
+
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
   if (failed > 0) process.exit(1);
 }
