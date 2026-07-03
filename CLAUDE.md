@@ -20,7 +20,6 @@ Monorepo of 4 static SPAs hosted on GitHub Pages. No framework, no bundler, no b
 | **Portfolio/** | `index.html` | `Worker/app.js` (app logic), `Worker/kjr-core.js` (pure), `Worker/kjr-sortable.js` (drag sort) | Google Apps Script (`Worker/apps-script.gs`) |
 | **Trading/** | `index.html` (all in one) | - | Cloudflare Worker (`Trading/Worker/`) for Yahoo proxy |
 | **Journal/** | `index.html` (all in one) | `lib/kjr-format.js`, `lib/kjr-calendar.js` (vendored shared engines), `schema.sql` (Supabase) | Supabase (Phase 2) |
-| **Insurance Module/** | `index.html` | - | None (prototype) |
 
 Every app has its own `CLAUDE.md` with architecture notes, gotchas, and design tokens. **Read the app's CLAUDE.md before modifying it.**
 
@@ -81,9 +80,9 @@ These are hard-learned loss classes; every data-storing app must uphold them:
 - `user_id` on every table row, stamped in `sbBatchUpsert`. Phase 2 swaps anon key for user JWT (one line, marked in the file).
 - `lib/kjr-format.js` and `lib/kjr-calendar.js` are vendored shared engines; configured, not forked.
 
-## Insurance Module
+## Insurance
 
-- Prototype only. Single `index.html`, no backend, no tests. Reuses Portfolio's light-theme design tokens.
+- Merged into the Portfolio app as a live tab at v2.43 (03/07/2026). The old standalone `Insurance Module/` folder is retired, git holds its history. Policy register, premiums, renewals, protection adequacy, and a cash-value net-worth seam all live in `Portfolio/Worker/app.js`.
 
 ## Repo-specific workflow rules
 
