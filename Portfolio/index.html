@@ -330,6 +330,16 @@ textarea.fi{resize:vertical;min-height:70px}
 .cov-pill.partial{color:var(--amber);background:var(--amber-soft);border-color:var(--amber-border)}
 .cov-pill.gap{color:var(--red);background:var(--red-soft);border-color:var(--red-border)}
 .cov-pill.na{color:var(--text3);background:var(--bg4);border-color:var(--border2)}
+/* Policy document-link icon (register first cell). Muted by default, accent
+   on hover, no new raw colours, existing tokens only. */
+.doc-link{display:inline-flex;vertical-align:middle;margin-left:6px;color:var(--text3)}
+.doc-link:hover{color:var(--accent)}
+/* Rider sub-table (Insurance register). Chevron toggles the expanded rows;
+   the spacer keeps riderless policy rows aligned to the same indent. */
+.ins-chevron{background:transparent;border:none;padding:0;margin-right:6px;width:14px;display:inline-block;color:var(--text3);cursor:pointer;font-size:11px;vertical-align:middle}
+.ins-chevron:hover{color:var(--accent)}
+.ins-chevron-spacer{cursor:default}
+.ins-rider-row td{background:var(--bg3)}
 
 /* MARKET / ACCOUNT TAG */
 .tag{display:inline-flex;align-items:center;padding:1px 5px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2)}
@@ -1206,6 +1216,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- ENTITY MODAL (shared across Stocks/Crypto/RealEstate/Cash) -->
 <!-- IBKR import preview, dynamically populated by ibkrShowPreview() -->
 <div class="overlay" id="ibkr-preview-overlay" data-click="overlayBackdropClose"></div>
+<!-- Insurance CSV import (manual SGFinDex mapper), dynamically populated by openInsuranceImport()/insuranceImportShowMapper()/insuranceImportShowPreview() -->
+<div class="overlay" id="ins-import-overlay" data-click="overlayBackdropClose"></div>
 
 <div class="overlay" id="entity-modal">
   <div class="modal">
@@ -1284,8 +1296,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.45"></script>
-<script src="Worker/kjr-sortable.js?v=2.45"></script>
-<script src="Worker/app.js?v=2.45"></script>
+<script src="Worker/kjr-core.js?v=2.46"></script>
+<script src="Worker/kjr-sortable.js?v=2.46"></script>
+<script src="Worker/app.js?v=2.46"></script>
 </body>
 </html>

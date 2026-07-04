@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.45';
-const APP_DISPLAY_VERSION = 'v2.45 (3 Jul)';
+const APP_VERSION = 'v2.46';
+const APP_DISPLAY_VERSION = 'v2.46 (4 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -777,6 +777,7 @@ function freshDB(){
     expenses:     [],
     snapshots:    [],
     insurance:    [],
+    insuranceRiders: [],
     categories:   {
       income:  ['Salary', 'Bonus', 'Dividends', 'Rental', 'Side income', 'Refund', 'Other'],
       expense: ['Housing', 'Food', 'Transport', 'Utilities', 'Insurance', 'Healthcare', 'Entertainment', 'Shopping', 'Travel', 'Education', 'Personal', 'Tax', 'Other']
@@ -1104,7 +1105,7 @@ function _runMigrations(db){
    Also re-validates ids on every list-typed table — a corrupted sheet or hostile
    payload cannot land an id like "x'); evil(); //" that would break event-delegation
    downstream. Items with invalid ids get a fresh uid() so they're still recoverable. */
-const _LIST_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash','insurance'];
+const _LIST_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash','insurance','insuranceRiders'];
 
 /* Date-typed fields per list table (per ENTITY_SCHEMAS), used to sanitise
    calendar-invalid dates (e.g. 2026-02-30) coming from the cloud or an
@@ -1285,7 +1286,7 @@ async function safeJson(resp){
    lastSeenRemoteAt, _savedAt, _priceCache (never synced), _meta, appVersion,
    schemaVersion, version. */
 const _DIVERGENCE_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns',
-  'cpfBalances','cpfHistory','income','expenses','snapshots','categories','settings','changelog','trash','insurance'];
+  'cpfBalances','cpfHistory','income','expenses','snapshots','categories','settings','changelog','trash','insurance','insuranceRiders'];
 function _divergenceSnapshot(obj){
   const src = obj || {};
   const out = {};
@@ -3048,7 +3049,7 @@ function sendToTrash(table, id){
 }
 
 /* Human label for a trashed entry, by table. Used by the Recently deleted UI. */
-const TRASH_TABLE_NAMES = { stocks:'Stock', stockTxns:'Trade', watchlist:'Watchlist', crypto:'Crypto', realestate:'Property', cash:'Cash account', cashTxns:'Cash movement', cpfHistory:'CPF entry', income:'Income', expenses:'Expense', insurance:'Policy' };
+const TRASH_TABLE_NAMES = { stocks:'Stock', stockTxns:'Trade', watchlist:'Watchlist', crypto:'Crypto', realestate:'Property', cash:'Cash account', cashTxns:'Cash movement', cpfHistory:'CPF entry', income:'Income', expenses:'Expense', insurance:'Policy', insuranceRiders:'Rider' };
 function trashLabel(table, data){
   data = data || {};
   const d = data.date ? (' · ' + fmtDateSG(data.date)) : '';
@@ -3067,6 +3068,7 @@ function trashLabel(table, data){
     case 'income':     return 'Gross ' + (Number(data.gross)||0) + d;
     case 'expenses':   return (data.category || 'expense') + ' ' + (Number(data.amount)||0) + d;
     case 'insurance':  return (data.insurer || '?') + (data.plan ? ' · ' + data.plan : (data.type ? ' · ' + data.type : ''));
+    case 'insuranceRiders': return (data.name || 'rider') + ' · ' + (data.benefit || 'Other');
     default:           return table;
   }
 }
@@ -3399,15 +3401,35 @@ const ENTITY_SCHEMAS = {
     ],
     defaults:{ type:'Term Life', status:'Active', insured:'Self', premiumFreq:'Annual', premiumMode:'Cash' },
     afterRead:(item)=>{ item.currency='SGD'; item.updatedAt=new Date().toISOString(); }
+  },
+  insuranceRiders:{
+    title:'rider',
+    fields:[
+      { key:'policyId', label:'Policy', type:'select', required:true,
+        optionsFn: () => (DB.insurance || []).map(p => [p.id, (p.insurer || '?') + ' · ' + (p.plan || p.type || '')]),
+        hint:'Add the base policy under Policies first.' },
+      { key:'name', label:'Rider name', type:'text', required:true, placeholder:'Early CI Accelerator' },
+      { key:'benefit', label:'Benefit type', type:'select', default:'Other',
+        options:[['Death','Death'],['TPD','TPD'],['CI','CI'],['Early CI','Early CI'],['Hospitalisation','Hospitalisation'],['Accident','Accident'],['Waiver','Waiver'],['Other','Other']] },
+      { key:'cover', label:'Cover (SGD)', type:'number', step:'1', min:'0', placeholder:'50000' },
+      { key:'notes', label:'Notes', type:'textarea' }
+    ],
+    defaults:{ benefit:'Other' },
+    afterRead:(item)=>{ item.updatedAt=new Date().toISOString(); }
   }
 };
 
-function openEntityModal(table, existingId){
+/* defaultsOverride: optional extra defaults merged on top of schema.defaults
+   for a NEW entity only (never touches an edit of an existing row). Used by
+   the "＋ Add rider" action under an expanded policy to preselect that policy
+   in the Policy dropdown, so a chevron-expanded row doesn't make the user
+   re-find it in a select. */
+function openEntityModal(table, existingId, defaultsOverride){
   const schema = ENTITY_SCHEMAS[table];
   if (!schema) return;
   const list = DB[table] || [];
   const existing = existingId ? list.find(x => x.id === existingId) : null;
-  const item = existing ? Object.assign({}, existing) : Object.assign({ id: uid(table) }, schema.defaults);
+  const item = existing ? Object.assign({}, existing) : Object.assign({ id: uid(table) }, schema.defaults, defaultsOverride || {});
   _modalState = { table, item, isNew: !existing };
 
   document.getElementById('em-title').textContent = (existing ? 'Edit ' : 'Add ') + schema.title;
@@ -3695,6 +3717,11 @@ function entityModalDelete(){
     const trades = (DB.stockTxns || []).filter(t => t.stockId === item.id).length;
     if (trades) refWarning = 'This stock has ' + trades + ' trade' + (trades > 1 ? 's' : '') + ' in the ledger that will be left orphaned.\n\n';
   }
+  // Deleting an insurance policy deliberately does NOT warn about or cascade
+  // to its riders (unlike cash/stocks above). Orphaned riders simply stop
+  // rendering (ridersByPolicy in renderInsurance groups by a policyId that no
+  // longer exists), they are not deleted and are recoverable automatically:
+  // restoring the policy from trash makes them reappear with no extra step.
 
   const prompt = refWarning + 'Move this entry to trash? You can restore it from Settings → Recently deleted.';
   if (!confirm(prompt)) return;
@@ -3873,7 +3900,7 @@ function ibkrShowPreview(matched, skippedCount){
 
   const overlay = document.getElementById('ibkr-preview-overlay');
   const html = `
-    <div class="modal-box" style="max-width:700px;width:95vw">
+    <div class="modal" style="max-width:700px;width:95vw">
       <div class="modal-head"><h3>IBKR import preview</h3></div>
       <div class="modal-body" style="padding:1rem">
         <p style="margin:0 0 .75rem">Found <strong>${matched.length}</strong> trades
@@ -3884,7 +3911,7 @@ function ibkrShowPreview(matched, skippedCount){
         </p>
         ${warnHtml}
         <div class="tbl-wrap" style="max-height:340px;overflow-y:auto">
-          <table class="tbl" style="font-size:.8rem">
+          <table class="holdings" style="font-size:.8rem">
             <thead><tr>
               <th class="tl">Date</th><th class="tl">Symbol</th><th class="tl">Side</th>
               <th>Shares</th><th>Price</th><th>Fees</th><th>Status</th>
@@ -3960,6 +3987,244 @@ function ibkrConfirmImport(){
   saveData();
   renderAll();
   showToast(`Imported ${addedTrades} trade${addedTrades !== 1 ? 's' : ''}${addedStocks ? ' + ' + addedStocks + ' new stock' + (addedStocks !== 1 ? 's' : '') : ''}`);
+}
+
+/* ─── Insurance CSV import (manual SGFinDex mapper) ─────────────────────
+   No public SGFinDex API exists for a personal app, so this is a manual
+   CSV/paste import mirroring the IBKR preview-then-confirm UX above:
+   openInsuranceImport:        opens the modal (file input + paste textarea).
+   insuranceImportParse:       feeds either input through the shared parseCSV.
+   insuranceImportShowMapper:  column-mapping UI, auto-guessed by header name.
+   insuranceImportShowPreview: first 10 sanitised rows + "N ready" count.
+   insuranceImportConfirm:     one pushUndo(), batch insert, one saveData().  */
+
+// Policy fields worth importing, in the order they appear in the mapper.
+// label is shown in the mapper UI, guessTokens are lower-cased substrings
+// matched against each CSV header (case-insensitive contains) to auto-guess
+// the column, first match wins.
+const INS_IMPORT_FIELDS = [
+  { key:'insurer',            label:'Insurer',                 guessTokens:['insurer','company','provider'] },
+  { key:'plan',                label:'Plan name',               guessTokens:['plan','product'] },
+  { key:'policyNo',            label:'Policy number',           guessTokens:['policy no','policy number','policyno','certificate'] },
+  { key:'type',                label:'Type',                    guessTokens:['type','category'] },
+  { key:'insured',             label:'Life insured',            guessTokens:['insured','life assured'] },
+  { key:'status',              label:'Status',                  guessTokens:['status'] },
+  { key:'coverDeath',          label:'Death cover (SGD)',        guessTokens:['death'] },
+  { key:'coverTPD',            label:'TPD cover (SGD)',          guessTokens:['tpd','disability cover','total disability'] },
+  { key:'coverCI',             label:'Critical illness cover (SGD)', guessTokens:['critical illness','ci cover'] },
+  { key:'coverHosp',           label:'Hospital ward',            guessTokens:['ward','hospital'] },
+  { key:'coverIncomeMonthly',  label:'Disability income (monthly, SGD)', guessTokens:['disability income','income benefit'] },
+  { key:'coverLTCMonthly',     label:'Long-term care (monthly, SGD)', guessTokens:['ltc','long-term care','long term care'] },
+  { key:'premium',             label:'Premium (per payment)',    guessTokens:['premium'] },
+  { key:'premiumFreq',         label:'Frequency',                guessTokens:['frequency','freq'] },
+  { key:'premiumMode',         label:'Paid from',                guessTokens:['paid from','payment mode','mode'] },
+  { key:'premiumDue',          label:'Next premium / renewal date', guessTokens:['due','renewal','next premium'] },
+  { key:'cashValue',           label:'Cash / surrender value (SGD)', guessTokens:['cash value','surrender'] },
+  { key:'beneficiary',         label:'Nominee(s)',               guessTokens:['beneficiary','nominee'] },
+  { key:'notes',               label:'Notes',                    guessTokens:['notes','remarks'] }
+];
+const INS_IMPORT_SKIP = '__skip__'; // sentinel for "— skip —", never a real header string
+
+function openInsuranceImport(){
+  const overlay = document.getElementById('ins-import-overlay');
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:520px;width:95vw">
+      <div class="modal-head"><h3>Import policies from CSV</h3></div>
+      <div class="modal-body" style="padding:1rem">
+        <p class="hint" style="margin:0 0 10px">No public SGFinDex API exists for personal apps, so export your SGFinDex / insurer CSV and either upload or paste it below. First row must be headers.</p>
+        <div class="form-group">
+          <label class="lbl">Upload CSV file</label>
+          <input type="file" id="ins-import-file-input" accept=".csv" data-change="insImportFileSelected">
+        </div>
+        <div class="form-group" style="margin-top:10px">
+          <label class="lbl">…or paste CSV text</label>
+          <textarea class="fi" id="ins-import-paste" rows="6" placeholder="Insurer,Plan,Type,Death Cover..."></textarea>
+        </div>
+      </div>
+      <div class="modal-foot" style="padding:.75rem 1rem;display:flex;gap:.5rem;justify-content:flex-end">
+        <button class="btn btn-ghost" data-click="closeInsuranceImport">Cancel</button>
+        <button class="btn btn-primary" data-click="insImportParsePaste">Continue</button>
+      </div>
+    </div>`;
+  overlay.classList.add('open');
+}
+function closeInsuranceImport(){
+  const overlay = document.getElementById('ins-import-overlay');
+  overlay.classList.remove('open');
+  overlay.innerHTML = '';
+  _insImportRows = null; _insImportHeaders = null;
+}
+
+// Module-level parsed state, read across the mapper -> preview -> confirm
+// steps (mirrors overlay.dataset.matched in the IBKR flow, kept as plain
+// variables here since the payload can include free-text notes that would
+// need re-escaping through a dataset round-trip).
+let _insImportHeaders = null;
+let _insImportRows = null;
+
+function insImportFileSelected(input){
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => { try { _insuranceImportParseText(String(e.target.result || '')); } catch(err){ showToast('Parse error: ' + err.message, 'error'); } };
+  reader.readAsText(file);
+}
+function insImportParsePaste(){
+  const ta = document.getElementById('ins-import-paste');
+  const text = ta ? ta.value : '';
+  if (!text.trim()){ showToast('Choose a file or paste CSV text', 'error'); return; }
+  try { _insuranceImportParseText(text); } catch(err){ showToast('Parse error: ' + err.message, 'error'); }
+}
+function _insuranceImportParseText(text){
+  const rows = parseCSV(text); // kjr-core global, RFC4180-ish
+  if (!rows.length){ showToast('No rows found in this CSV', 'error'); return; }
+  _insImportHeaders = rows[0].map(h => String(h || '').trim());
+  _insImportRows = rows.slice(1).filter(r => r.some(c => String(c || '').trim() !== ''));
+  if (!_insImportRows.length){ showToast('No data rows found (only a header row)', 'error'); return; }
+  insuranceImportShowMapper();
+}
+
+/* Fuzzy header match: case-insensitive contains, first header containing any
+   of the field's guessTokens wins; "— skip —" (INS_IMPORT_SKIP) otherwise. */
+function _guessInsImportColumn(field, headers){
+  const low = headers.map(h => h.toLowerCase());
+  for (const tok of field.guessTokens){
+    const idx = low.findIndex(h => h.indexOf(tok) > -1);
+    if (idx > -1) return idx;
+  }
+  return -1;
+}
+
+function insuranceImportShowMapper(){
+  const headers = _insImportHeaders || [];
+  const guesses = INS_IMPORT_FIELDS.map(f => _guessInsImportColumn(f, headers));
+  const overlay = document.getElementById('ins-import-overlay');
+  const rowsHtml = INS_IMPORT_FIELDS.map((f, i) => {
+    const guessIdx = guesses[i];
+    const opts = [`<option value="${INS_IMPORT_SKIP}">— skip —</option>`]
+      .concat(headers.map((h, hi) => `<option value="${hi}"${hi === guessIdx ? ' selected' : ''}>${kjrEscape(h)}</option>`))
+      .join('');
+    return `<div class="form-group" style="margin-bottom:8px"><label class="lbl">${kjrEscape(f.label)}</label>
+      <select class="fi" data-ins-map-key="${f.key}">${opts}</select></div>`;
+  }).join('');
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:560px;width:95vw">
+      <div class="modal-head"><h3>Map CSV columns</h3></div>
+      <div class="modal-body" style="padding:1rem;max-height:60vh;overflow-y:auto">
+        <p class="hint" style="margin:0 0 10px">${_insImportRows.length} row${_insImportRows.length !== 1 ? 's' : ''} found. Match each field to a column, or leave it as "— skip —".</p>
+        ${rowsHtml}
+      </div>
+      <div class="modal-foot" style="padding:.75rem 1rem;display:flex;gap:.5rem;justify-content:flex-end">
+        <button class="btn btn-ghost" data-click="closeInsuranceImport">Cancel</button>
+        <button class="btn btn-primary" data-click="insuranceImportShowPreview">Preview</button>
+      </div>
+    </div>`;
+  overlay.classList.add('open');
+}
+
+/* Reads the current mapper selects into { fieldKey: colIndex|null }. */
+function _readInsImportMapping(){
+  const overlay = document.getElementById('ins-import-overlay');
+  const map = {};
+  overlay.querySelectorAll('[data-ins-map-key]').forEach(sel => {
+    const key = sel.getAttribute('data-ins-map-key');
+    const val = sel.value;
+    map[key] = (val === INS_IMPORT_SKIP || val === '') ? null : Number(val);
+  });
+  return map;
+}
+
+/* Sanitises one mapped CSV row into a policy-shaped object through the SAME
+   rules entityModalSave applies: numbers via kjrSafeNumber, selects validated
+   against the schema's own allowed values (fallback to the field default),
+   dates must match the calendar-valid ISO shape or blank, strings via
+   kjrSafeString. Returns null when the row has no usable insurer, the one
+   field every policy needs to be worth keeping. */
+function _sanitiseInsImportRow(rawRow, mapping){
+  const schema = ENTITY_SCHEMAS.insurance;
+  const cell = key => {
+    const idx = mapping[key];
+    return (idx == null) ? '' : String(rawRow[idx] != null ? rawRow[idx] : '').trim();
+  };
+  const item = {};
+  schema.fields.forEach(f => {
+    if (!(f.key in mapping)) return; // fields not offered in the mapper (e.g. docUrl) stay unset
+    const raw = cell(f.key);
+    if (f.type === 'number'){
+      item[f.key] = raw === '' ? null : kjrSafeNumber(raw);
+    } else if (f.type === 'select'){
+      const optList = f.optionsFn ? (f.optionsFn() || []) : (f.options || []);
+      const allowed = optList.map(o => String(Array.isArray(o) ? o[0] : o));
+      item[f.key] = allowed.includes(raw) ? raw : (f.default || allowed[0] || '');
+    } else if (f.type === 'date'){
+      item[f.key] = (raw && kjrValidDate(raw)) ? raw : '';
+    } else if (f.type === 'textarea'){
+      item[f.key] = kjrSafeString(raw, 5000);
+    } else {
+      item[f.key] = kjrSafeString(raw, 120);
+    }
+  });
+  if (!item.insurer) return null; // no usable insurer: not worth keeping
+  return Object.assign({}, schema.defaults, item);
+}
+
+function insuranceImportShowPreview(){
+  const mapping = _readInsImportMapping();
+  if (Object.values(mapping).every(v => v == null)){ showToast('Map at least one column', 'error'); return; }
+  const sanitised = (_insImportRows || []).map(r => _sanitiseInsImportRow(r, mapping));
+  const ready = sanitised.filter(Boolean);
+  const skipped = sanitised.length - ready.length;
+  _insImportReady = ready; // stashed for insuranceImportConfirm
+
+  const previewRows = ready.slice(0, 10).map(p => `<tr>
+    <td class="tl">${kjrEscape(p.insurer||'')}</td>
+    <td class="tl">${kjrEscape(p.plan||'')}</td>
+    <td class="tl">${kjrEscape(p.type||'')}</td>
+    <td class="num">${p.coverDeath!=null?fmt(Number(p.coverDeath),{dp:0}):'—'}</td>
+    <td class="num">${p.premium!=null?fmt(Number(p.premium),{dp:0}):'—'}</td>
+  </tr>`).join('');
+
+  const overlay = document.getElementById('ins-import-overlay');
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:640px;width:95vw">
+      <div class="modal-head"><h3>Import preview</h3></div>
+      <div class="modal-body" style="padding:1rem">
+        <p style="margin:0 0 .75rem"><strong>${ready.length}</strong> row${ready.length !== 1 ? 's' : ''} ready to import${skipped ? ` <span class="tag muted">${skipped} skipped (no insurer)</span>` : ''}</p>
+        ${ready.length ? `<div class="tbl-wrap" style="max-height:320px;overflow-y:auto"><table class="holdings" style="font-size:.8rem">
+          <thead><tr><th class="tl">Insurer</th><th class="tl">Plan</th><th class="tl">Type</th><th>Death cover</th><th>Premium</th></tr></thead>
+          <tbody>${previewRows}</tbody>
+        </table></div>
+        ${ready.length > 10 ? `<p class="hint" style="margin:.5rem 0 0">Showing the first 10 of ${ready.length}.</p>` : ''}` : ''}
+      </div>
+      <div class="modal-foot" style="padding:.75rem 1rem;display:flex;gap:.5rem;justify-content:flex-end">
+        <button class="btn btn-ghost" data-click="insuranceImportShowMapper">Back</button>
+        <button class="btn btn-primary" data-click="insuranceImportConfirm" ${ready.length ? '' : 'disabled'}>Import ${ready.length} polic${ready.length === 1 ? 'y' : 'ies'}</button>
+      </div>
+    </div>`;
+  overlay.classList.add('open');
+}
+let _insImportReady = null;
+
+/* Commits the whole batch as ONE undo step: pushUndo() once before the loop,
+   one saveData()/renderAll() after, so Ctrl+Z reverses the entire import in
+   a single action rather than row-by-row. */
+function insuranceImportConfirm(){
+  const ready = _insImportReady || [];
+  if (!ready.length) return;
+  pushUndo();
+  const now = new Date().toISOString();
+  ready.forEach(p => {
+    const item = Object.assign({ id: uid('insurance') }, p);
+    if (ENTITY_SCHEMAS.insurance.afterRead) ENTITY_SCHEMAS.insurance.afterRead(item); // currency SGD + updatedAt
+    item.createdAt = now;
+    (DB.insurance = DB.insurance || []).push(item);
+  });
+  const skipped = (_insImportRows || []).length - ready.length;
+  saveData();
+  closeInsuranceImport();
+  renderAll();
+  showToast(`Imported ${ready.length} polic${ready.length === 1 ? 'y' : 'ies'}${skipped ? ' (' + skipped + ' skipped)' : ''}`, 'success');
+  _insImportReady = null;
 }
 
 /* Compute the per-holding rows that BOTH the Holdings table and the Custom
@@ -6115,6 +6380,20 @@ function coverageAdequacy(){
   return { annual, monthly, risks, score, weakest };
 }
 
+/* Renders the small document-link icon next to a policy's insurer, or ''
+   when there is nothing safe to link. STRICT scheme check: only a value that
+   starts with http:// or https:// (after trim) is ever turned into an href.
+   Anything else (including a stored javascript: URL from a corrupted sheet
+   or a hostile payload) renders as plain absence, never as a clickable link,
+   this is the XSS-relevant path so there is no fallback rendering of the raw
+   value. The href itself is kjrEscape'd before going into the attribute. */
+const DOC_URL_RE = /^https?:\/\//i;
+function insuranceDocLinkHtml(p){
+  const url = String(p.docUrl || '').trim();
+  if (!DOC_URL_RE.test(url)) return '';
+  return ` <a href="${kjrEscape(url)}" target="_blank" rel="noopener noreferrer" title="Policy document" aria-label="Policy document" class="doc-link"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></a>`;
+}
+
 function exportInsuranceCSV(){
   const list = DB.insurance || [];
   if (!list.length){ showToast('No policies to export'); return; }
@@ -6136,6 +6415,23 @@ function exportInsuranceCSV(){
   downloadCSV('kujira-insurance-' + _isoDateSG(new Date()) + '.csv', headers, rows);
 }
 
+/* Rider sub-table expansion state (register UI only). Ephemeral: which policy
+   rows currently show their riders. Not persisted, not synced, resets on
+   reload — same convention as _stocksFilter. */
+const _insExpandedPolicies = new Set();
+function toggleRiderRow(policyId){
+  if (_insExpandedPolicies.has(policyId)) _insExpandedPolicies.delete(policyId);
+  else _insExpandedPolicies.add(policyId);
+  renderInsurance();
+}
+/* Opens the Add-rider modal with the triggering policy preselected in the
+   Policy dropdown, so expanding a policy's riders and adding one doesn't
+   force the user to re-find it in the select. */
+function openRiderForPolicy(policyId){
+  if (!kjrSafeId(policyId)) { showToast('Invalid entry id', 'error'); return; }
+  openEntityModal('insuranceRiders', undefined, { policyId });
+}
+
 function renderInsurance(){
   setRenderCcy('insurance');
   const el = document.getElementById('insurance-root');
@@ -6144,6 +6440,7 @@ function renderInsurance(){
   const head = `<div class="card"><div class="card-head"><h3>Policies</h3>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       ${list.length ? `<button class="btn btn-sm" data-click="exportInsuranceCSV">Export CSV</button>` : ''}
+      <button class="btn btn-sm" data-click="openInsuranceImport">Import CSV</button>
       <button class="btn btn-primary btn-sm" data-click="openEntity" data-a0="insurance">＋ Add policy</button>
     </div>
   </div>`;
@@ -6200,17 +6497,50 @@ function renderInsurance(){
     return `<th class="sortable${extraCls||''}" data-ins-sort-key="${key}" tabindex="0"${aria}>${lbl}${glyph}</th>`;
   };
 
-  const rowHtml = p => `<tr>
-    <td class="tl cell-sym">${kjrEscape(p.insurer||'?')}</td>
-    <td class="tl">${kjrEscape(p.type||'')}</td>
-    <td class="tl">${kjrEscape(p.insured||'')}</td>
-    <td class="tl">${kjrEscape(p.status||'')}</td>
-    <td class="num">${p.coverDeath?fmt(Number(p.coverDeath),{dp:0}):'—'}</td>
-    <td class="num">${p.premium?fmt(annualPremium(p),{dp:0})+'/yr':'—'}</td>
-    <td class="num">${p.premiumDue?fmtDateSG(p.premiumDue):'—'}</td>
-    <td class="num">${p.cashValue?fmt(Number(p.cashValue),{dp:0}):'—'}</td>
-    <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="insurance" data-edit-id="${kjrEscape(p.id)}">Edit</button></td>
-  </tr>`;
+  // Riders are grouped by policyId once per render, not per row, so a policy
+  // with no riders never fires an extra scan of the whole table.
+  const ridersByPolicy = {};
+  (DB.insuranceRiders || []).forEach(r => { (ridersByPolicy[r.policyId] = ridersByPolicy[r.policyId] || []).push(r); });
+
+  const rowHtml = p => {
+    const riders = ridersByPolicy[p.id] || [];
+    const expanded = _insExpandedPolicies.has(p.id);
+    const chevron = riders.length
+      ? `<button class="ins-chevron" data-click="toggleRiderRow" data-a0="${kjrEscape(p.id)}" aria-label="${expanded ? 'Collapse' : 'Expand'} riders" aria-expanded="${expanded}">${expanded ? '▾' : '▸'}</button>`
+      : `<span class="ins-chevron ins-chevron-spacer"></span>`;
+    const mainRow = `<tr>
+      <td class="tl cell-sym">${chevron}${kjrEscape(p.insurer||'?')}${insuranceDocLinkHtml(p)}</td>
+      <td class="tl">${kjrEscape(p.type||'')}</td>
+      <td class="tl">${kjrEscape(p.insured||'')}</td>
+      <td class="tl">${kjrEscape(p.status||'')}</td>
+      <td class="num">${p.coverDeath?fmt(Number(p.coverDeath),{dp:0}):'—'}</td>
+      <td class="num">${p.premium?fmt(annualPremium(p),{dp:0})+'/yr':'—'}</td>
+      <td class="num">${p.premiumDue?fmtDateSG(p.premiumDue):'—'}</td>
+      <td class="num">${p.cashValue?fmt(Number(p.cashValue),{dp:0}):'—'}</td>
+      <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="insurance" data-edit-id="${kjrEscape(p.id)}">Edit</button></td>
+    </tr>`;
+    if (!expanded || !riders.length) return mainRow;
+    // Expanded riders block: one indented sub-row per rider (name, benefit,
+    // cover) plus an Add rider ghost button and the double-counting hint.
+    // Riders are purely informational, coverageAdequacy() only ever reads the
+    // policy's own cover* fields, never sums rider cover on top.
+    const riderRows = riders.map(r => `<tr class="ins-rider-row">
+      <td class="tl" style="padding-left:34px">${kjrEscape(r.name||'?')}</td>
+      <td class="tl">${kjrEscape(r.benefit||'Other')}</td>
+      <td class="tl"></td>
+      <td class="tl"></td>
+      <td class="num">${r.cover?fmt(Number(r.cover),{dp:0}):'—'}</td>
+      <td class="num"></td>
+      <td class="num"></td>
+      <td class="num"></td>
+      <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="insuranceRiders" data-edit-id="${kjrEscape(r.id)}">Edit</button></td>
+    </tr>`).join('');
+    const addRow = `<tr class="ins-rider-row"><td colspan="9" style="padding-left:34px">
+      <button class="btn btn-sm btn-ghost" data-click="openRiderForPolicy" data-a0="${kjrEscape(p.id)}">＋ Add rider</button>
+      <p class="hint" style="margin:6px 0 0">Riders break down this policy's cover, the policy's own figures drive the adequacy check.</p>
+    </td></tr>`;
+    return mainRow + riderRows + addRow;
+  };
 
   // Family view, group by insured when more than one distinct person is on
   // the register (case-insensitive trim, empty counts as 'Self'). Adequacy
@@ -6357,6 +6687,23 @@ function renderCoverageAdequacy(){
   const cur = r => r.unit==='bool' ? (r.current?'Yes':'No') : fmt(r.current,{dp:0}) + (r.unit==='mo'?'/mo':'');
   const tgt = r => !r.assessed ? '—' : r.unit==='bool' ? ('Ward '+t.hospTargetWard+'+') : fmt(r.target,{dp:0}) + (r.unit==='mo'?'/mo':'');
   const PILL = { covered:['covered','✓ Covered'], partial:['partial','◔ Partial'], gap:['gap','✕ Under-insured'], na:['na','– Not assessed'] };
+
+  // Neutral state: income exists (so targets/Recommended are computable) but
+  // there is not one active self policy logged yet. Showing every risk as a
+  // red "Under-insured" here would assert a fact the app cannot know (only
+  // that nothing has been ENTERED), so every row renders as the existing `na`
+  // pill instead, no gap bars, no red. coverageAdequacy() itself is untouched,
+  // this only changes how its output is presented while the register is empty.
+  if (!_selfPolicies().length){
+    const rowsNeutral = a.risks.map(r =>
+      `<tr><td class="tl">${kjrEscape(r.label)}</td><td class="num">—</td><td class="num">${tgt(Object.assign({},r,{assessed:true}))}</td><td class="num">—</td><td class="tl"><span class="cov-pill na">– Not logged</span></td></tr>`
+    ).join('');
+    return `<div class="card"><div class="card-head"><h3>Protection adequacy</h3><span class="page-sub">Add your policies to score</span></div><div class="card-body">
+      <div class="tbl-wrap"><table class="holdings"><thead><tr><th class="tl">Risk</th><th>Current</th><th>Recommended</th><th>Gap</th><th class="tl">Status</th></tr></thead><tbody>${rowsNeutral}</tbody></table></div>
+      <p class="hint" style="margin-top:10px">Add your policies above and each risk scores against these targets.</p>
+    </div></div>`;
+  }
+
   const rows = a.risks.map(r => {
     const pill = PILL[r.status];
     const bar = (r.assessed && r.unit!=='bool') ? `<div class="cov-bar"><span style="width:${Math.round(r.ratio*100)}%"></span></div>` : '';
@@ -6904,7 +7251,7 @@ function renderCpf(){
         const cls = (Number(h.amount) || 0) >= 0 ? 'pos' : 'neg';
         return `<tr>
           <td class="tl">${fmtDateSG(h.date)}</td>
-          <td class="tl"><span class="tag ${cpfTypeColour(h.type)}">${kjrEscape(h.type)}</span></td>
+          <td class="tl"><span class="tag ${cpfTypeColour(h.type)}">${kjrEscape(cpfTypeLabel(h.type))}</span></td>
           <td class="tl"><span class="tag">${kjrEscape(h.account)}</span></td>
           <td class="num ${cls}">${fmt(Number(h.amount) || 0)}</td>
           <td class="tl muted">${kjrEscape(h.source || '')}</td>
@@ -6922,6 +7269,18 @@ function cpfTypeColour(t){
   if (t === 'transfer')     return 'sgx';     // blue
   if (t === 'withdrawal')   return '';        // neutral
   return '';
+}
+
+/* Display-only capitalisation for CPF entry types, mirrors the cash ledger's
+   TYPE_LABEL map. Stored values stay lowercase (sync + filters depend on the
+   exact strings from ENTITY_SCHEMAS.cpfHistory), only the chip text changes.
+   Unknown/future values fall back to a first-letter capitalise so a schema
+   addition here can't silently render blank. */
+const CPF_TYPE_LABEL = { contribution:'Contribution', interest:'Interest', transfer:'Transfer', withdrawal:'Withdrawal', adjustment:'Adjustment' };
+function cpfTypeLabel(t){
+  if (CPF_TYPE_LABEL[t]) return CPF_TYPE_LABEL[t];
+  const s = String(t || '');
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -7767,6 +8126,9 @@ function installEventDelegation(){
     dismissConflict:     () => { const m = document.getElementById('conflict-modal'); if (m) m.remove(); setSyncStatus('failed', 'Conflict unresolved'); },
     setStrictConflicts:  (el) => setStrictConflicts(el.checked),
     setAutoRefreshEnabled: (el) => setAutoRefreshEnabled(el.checked),
+    // insurance riders (register expand/collapse + add)
+    toggleRiderRow:      (el) => { const id = A(el)[0]; if (!kjrSafeId(id)) { showToast('Invalid entry id', 'error'); return; } toggleRiderRow(id); },
+    openRiderForPolicy:  (el) => openRiderForPolicy(A(el)[0]),
     // insurance coverage targets (Settings)
     setCovDeathMult:     (el) => setCoverageTarget('deathMult', kjrSafeNumber(el.value)),
     setCovTpdMult:       (el) => setCoverageTarget('tpdMult', kjrSafeNumber(el.value)),
@@ -7826,6 +8188,14 @@ function installEventDelegation(){
     ibkrFileSelected:    (el) => ibkrFileSelected(el),
     ibkrConfirmImport:   () => ibkrConfirmImport(),
     closeIbkrPreview:    () => { const o = document.getElementById('ibkr-preview-overlay'); if (o) o.classList.remove('open'); },
+    // insurance CSV import (manual SGFinDex mapper)
+    openInsuranceImport:       () => openInsuranceImport(),
+    closeInsuranceImport:      () => closeInsuranceImport(),
+    insImportFileSelected:     (el) => insImportFileSelected(el),
+    insImportParsePaste:       () => insImportParsePaste(),
+    insuranceImportShowMapper: () => insuranceImportShowMapper(),
+    insuranceImportShowPreview:() => insuranceImportShowPreview(),
+    insuranceImportConfirm:    () => insuranceImportConfirm(),
     // chart builder
     pbRenderChart:       () => pbRenderChart(),
     pbSaveChart:         () => pbSaveChart(),
