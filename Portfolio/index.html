@@ -232,6 +232,9 @@ tbody tr:first-child td{border-top:none}
 .form-group.full{grid-column:1/-1}
 label.lbl{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.4px;font-weight:600;cursor:pointer}
 input.fi,select.fi,textarea.fi{padding:8px 11px;border:1px solid var(--glass-border);border-radius:var(--radius);background:var(--glass);color:var(--text);font-size:13px;font-family:inherit;width:100%}
+/* iOS date inputs: strip UA intrinsic sizing and centred value text */
+input.fi[type=date]{-webkit-appearance:none;appearance:none;min-width:0;max-width:100%;text-align:left}
+input.fi[type=date]::-webkit-date-and-time-value{text-align:left;margin:0}
 input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(45,212,191,0.4)}
 input[type=checkbox],input[type=radio]{accent-color:var(--accent)}
 textarea.fi{resize:vertical;min-height:70px}
@@ -587,7 +590,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 @media (max-width:720px){
   .cb-builder-head{flex-direction:column;align-items:flex-start}
   .cb-layout{grid-template-columns:1fr !important;min-height:0 !important}
-  .cb-palette-col{border-right:none !important;border-bottom:1px solid var(--border);max-height:200px !important}
+  .cb-palette-col{border-right:none !important;border-bottom:1px solid var(--border);max-height:200px !important;overflow-y:auto;overscroll-behavior:contain}
   .cb-axes-row{grid-template-columns:1fr !important}
 }
 /* ── Holdings table pager + note ── */
@@ -1297,8 +1300,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.47"></script>
-<script src="Worker/kjr-sortable.js?v=2.47"></script>
-<script src="Worker/app.js?v=2.47"></script>
+<script src="Worker/kjr-core.js?v=2.48"></script>
+<script src="Worker/kjr-sortable.js?v=2.48"></script>
+<script src="Worker/app.js?v=2.48"></script>
 </body>
 </html>
