@@ -305,7 +305,7 @@ body.has-alertbar{padding-bottom:56px}
       <a class="tb-tab" href="../Portfolio/" title="Kujira Portfolio">Portfolio</a>
     </nav>
     <div class="tb-right">
-      <span class="tb-ver">v3.6 (30 Jun)</span>
+      <span class="tb-ver">v3.7 (4 Jul)</span>
       <button class="iconbtn" id="refreshBtn" title="Refresh now">&#x21bb;</button>
       <button class="iconbtn" id="gearBtn" title="Settings">&#9881;</button>
     </div>
@@ -549,7 +549,7 @@ body.has-alertbar{padding-bottom:56px}
   <span class="warn">For information only, not financial advice.</span>
   Live <span id="footSym">MU</span> data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v3.6 (30 Jun)</span>
+  <span style="margin-left:8px;color:var(--text3)">v3.7 (4 Jul)</span>
 
 </div>
 
@@ -2297,6 +2297,22 @@ function openSymPop(anchor, meta){
 
 /* ====================== Boot ====================== */
 function boot(){
+  // One-tap remote setup: ?worker=<https URL> wires the Cloudflare Worker proxy
+  // and saves it, so a phone opened via a shared link never falls back to the
+  // flaky public proxies. Silently ignored if missing or not https.
+  (function bootstrapWorkerParam(){
+    const qs = new URLSearchParams(location.search);
+    const raw = qs.get("worker");
+    if(raw==null) return;
+    const url = raw.trim();
+    if(!/^https:\/\//i.test(url)) return;
+    cfg.proxyMode = "worker";
+    cfg.proxyUrl = url;
+    saveCfg();
+    qs.delete("worker");
+    history.replaceState(null, "", location.pathname + (qs.toString() ? "?" + qs.toString() : "") + location.hash);
+    toast("Worker proxy connected");
+  })();
   // one-time migration: seed hidden-by-default level lines for existing users
   if(!cfg.lvDefaultsV31){
     cfg.levelLines=cfg.levelLines||{};
