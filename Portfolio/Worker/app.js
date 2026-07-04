@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.46';
-const APP_DISPLAY_VERSION = 'v2.46 (4 Jul)';
+const APP_VERSION = 'v2.47';
+const APP_DISPLAY_VERSION = 'v2.47 (4 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -450,7 +450,7 @@ const TABS = [
 /* Phase 2 lock — tabs whose UI and renderers are parked while Phase 1 ships.
    Real markup stays in the DOM (preserved underneath), just hidden by the
    .phase2-locked class. To unblock a tab, remove it from this set. */
-const PHASE_2_TABS = new Set(['crypto']);
+const PHASE_2_TABS = new Set([]);
 
 /* Mobile bottom bar shows exactly 5 fixed destinations (Apple's pattern caps
    a tab bar at 5); everything else lives behind the "More" sheet. Decided
@@ -6199,7 +6199,7 @@ function renderCrypto(){
           <td class="num">${priceTxt}</td>
           <td class="num ${chg}">${px && px.change24h != null ? fmtPct(px.change24h) : '—'}</td>
           <td class="num">${r.mv != null ? fmt(r.mv, {dp:0}) : '—'}</td>
-          <td class="num ${plClass}">${r.pl != null ? fmt(r.pl, {dp:0}) : '—'}</td>
+          <td class="num ${plClass}">${r.pl != null ? _plArrow(r.pl) + fmt(r.pl, {dp:0,signed:true}) : '—'}</td>
           <td class="num ${plClass}">${r.plPct != null ? fmtPct(r.plPct) : '—'}</td>
           <td class="num muted">${px && px.fetchedAt ? relTime(px.fetchedAt) : '—'}</td>
           <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="crypto" data-edit-id="${kjrEscape(r.c.id)}">Edit</button></td>
@@ -6212,6 +6212,29 @@ function renderCrypto(){
     fresh.className = 'freshness' + (anyPriceMissing ? ' stale' : ' fresh');
     fresh.textContent = priceFreshnessText('crypto');
   }
+}
+
+function exportCryptoCSV(){
+  const list = DB.crypto || [];
+  if (!list.length){ showToast('No coins to export'); return; }
+  const headers = ['Symbol','CoinGecko ID','Amount','Avg Cost','Currency','Price (SGD)','Value (SGD)','24h %'];
+  const rows = list.map(c => {
+    const cid = coinIdFor(c.coingeckoId || c.symbol);
+    const px  = DB._priceCache[cid] || null;
+    const priceSgd = px && px.sgd != null ? px.sgd : '';
+    const value = px && px.sgd != null ? roundMoney(px.sgd * (c.amount || 0)) : '';
+    return [
+      c.symbol || '',
+      cid || '',
+      c.amount != null ? c.amount : '',
+      c.avgCost != null ? c.avgCost : '',
+      c.currency || 'USD',
+      priceSgd,
+      value,
+      px && px.change24h != null ? px.change24h.toFixed(2) : ''
+    ];
+  });
+  downloadCSV('kujira-crypto-' + _isoDateSG(new Date()) + '.csv', headers, rows);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -8182,6 +8205,7 @@ function installEventDelegation(){
     exportHoldingsCSV:   () => exportHoldingsCSV(),
     exportLedgerCSV:     () => exportLedgerCSV(),
     exportInsuranceCSV:  () => exportInsuranceCSV(),
+    exportCryptoCSV:     () => exportCryptoCSV(),
     clickImportFile:     () => { const i = document.getElementById('import-file-input'); if (i) i.click(); },
     importBackupFromFile: (el) => importBackupFromFile(el),
     clickIbkrFile:       () => { const i = document.getElementById('ibkr-file-input'); if (i) i.click(); },
