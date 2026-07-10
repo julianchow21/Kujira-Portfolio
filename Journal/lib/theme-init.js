@@ -1,1 +1,1 @@
-(function(){try{var t=localStorage.getItem('kjr_journal_v1_theme');if(t==='light')document.documentElement.classList.add('light');else if(t==='dark')document.documentElement.classList.remove('light');}catch(e){}})();
+(function(){try{var t=localStorage.getItem('kjr_journal_v1_theme');if(!t)t=(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');if(t==='light')document.documentElement.classList.add('light');else document.documentElement.classList.remove('light');}catch(e){}})();

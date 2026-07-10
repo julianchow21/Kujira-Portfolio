@@ -313,7 +313,7 @@ th.sortable.desc::after{content:'\25BC'}
 /* ============================================================================
    APP CONFIG
    ========================================================================== */
-const APP = { name:'Kujira Journal', storageKey:'kjr_journal_v1', version:'v0.4 (15 Jun)' };
+const APP = { name:'Kujira Journal', storageKey:'kjr_journal_v1', version:'v0.5 (10 Jul)' };
 const CCY = '$';
 const TABLES = ['trades'];
 const PAGE_SIZE = 25;
@@ -332,6 +332,8 @@ const PLAN = 'owner';
 const ENTITLEMENTS = { unlimited_trades:true, simulator:true, advanced_analytics:true, ai_coach:true, chart_markers:true, csv_import:true };
 function entitlement(feature){ return PLAN==='owner' ? true : !!ENTITLEMENTS[feature]; }
 const FREE_TRADE_CAP = 50;
+/* Gate for paid-only feature entry points. No-ops with an upgrade toast when entitlement() is false (never happens while PLAN==='owner', wired for Phase 2). */
+function requireEntitlement(feature,label){ if(entitlement(feature)) return true; toast((label||'This feature')+' needs a plan upgrade.',true); return false; }
 
 /* ============================================================================
    SUPABASE CONFIG (empty = fully local, Phase 1)
@@ -384,7 +386,7 @@ async function sbBatchUpsert(table,items){
   const u=currentUser();
   const rows=items.map(it=>{ const {id,_updatedAt,...data}=it; const row={id,data,updated_at:new Date().toISOString()}; if(u&&u.id) row.user_id=u.id; return row; });
   const r=await fetch(SB_URL+'/rest/v1/'+table+'?on_conflict=id',{method:'POST',headers:{...SB_HDR,'Prefer':'resolution=merge-duplicates'},body:JSON.stringify(rows)});
-  if(!r.ok) throw new Error('Upsert failed: '+await r.text());
+  if(!r.ok) throw new Error('Upsert failed ('+r.status+'): '+await r.text());
 }
 async function sbFetchAll(table){
   const r=await fetch(SB_URL+'/rest/v1/'+table+'?select=id,data,updated_at&limit=10000&order=updated_at.desc',{headers:SB_HDR});
@@ -415,9 +417,25 @@ async function _flushDirty(){
   if(isLocalhostPreview()||!sbConfigured()) return;
   const jobs=[];
   for(const t of TABLES){ const ids=new Set(_dirty[t]); const rows=DB[t].filter(r=>ids.has(r.id)); if(rows.length) jobs.push({t,ids,rows}); }
-  if(!jobs.length) return; setSync('saving'); let err=false;
-  for(const {t,ids,rows} of jobs){ try{ for(let i=0;i<rows.length;i+=200) await sbBatchUpsert(t,rows.slice(i,i+200)); ids.forEach(id=>_dirty[t].delete(id)); }catch(e){ err=true; setSync('error',e.message); } }
-  _persistDirty(); if(!err) setSync('ok'); flushPendingDeletes().catch(()=>{});
+  if(!jobs.length) return; setSync('saving'); let err=false, poisoned=[];
+  for(const {t,ids,rows} of jobs){
+    for(let i=0;i<rows.length;i+=200){
+      const chunk=rows.slice(i,i+200);
+      try{ await sbBatchUpsert(t,chunk); chunk.forEach(r=>_dirty[t].delete(r.id)); }
+      catch(e){
+        err=true; setSync('error',e.message);
+        // A single bad row must not wedge the whole chunk. Retry per-row so good rows still clear their dirty flag, and only the offending row stays dirty (diagnosable, not a silent full-chunk stall).
+        for(const row of chunk){
+          try{ await sbBatchUpsert(t,[row]); _dirty[t].delete(row.id); }
+          catch(e2){ poisoned.push({table:t,id:row.id,error:e2.message}); }
+        }
+      }
+    }
+  }
+  _persistDirty();
+  if(poisoned.length){ console.error('Sync: poisoned row(s), left dirty for retry:',poisoned); toast(poisoned.length+' trade'+(poisoned.length===1?'':'s')+' failed to sync and will keep retrying. Check console for details.',true); }
+  else if(!err) setSync('ok');
+  flushPendingDeletes().catch(()=>{});
 }
 function mergeTable(cloudRows,localRows,dirtySet){
   if(!dirtySet||dirtySet.size===0) return cloudRows;
@@ -434,6 +452,8 @@ async function loadData(){
   try{ const res=await Promise.all(TABLES.map(t=>sbFetchAll(t))); TABLES.forEach((t,i)=>cloud[t]=res[i]); }
   catch(e){ _cloudReachable=false; setSync('error',e.message); return; }
   const hasCloud=TABLES.some(t=>(cloud[t]||[]).length); if(!hasCloud){ setSync('ok'); return; }
+  // TODO(Phase 2, needs a live Supabase backend to test against): this is table-level max-timestamp reconciliation, not per-row optimistic concurrency.
+  // A single stale local row can currently win or lose against the whole cloud table rather than being resolved row-by-row. Known limitation, revisit once Supabase is wired, do not redesign blind.
   let cloudMs=0; TABLES.forEach(t=>(cloud[t]||[]).forEach(r=>{ const m=+new Date(r._updatedAt||0); if(m>cloudMs) cloudMs=m; }));
   const localMs=+new Date(localStorage.getItem(VKEY+'_time')||0)||0;
   if(local&&localMs>=cloudMs){ setSync('ok'); return; }
@@ -463,7 +483,24 @@ function renameTag(cat,oldT,newT){
   DB.trades.forEach(t=>{ const arr=tradeTags(t,cat); if(arr.some(x=>x.toLowerCase()===lo)){ const seen=new Set(),out=[]; arr.map(x=>x.toLowerCase()===lo?newT:x).forEach(x=>{ const k=x.toLowerCase(); if(!seen.has(k)){ seen.add(k); out.push(x); } }); t[cat]=out; markDirty('trades',t.id); } });
   saveData();
 }
-function deleteTag(cat,tg){ const lo=tg.toLowerCase(); DB.trades.forEach(t=>{ const arr=tradeTags(t,cat); if(arr.some(x=>x.toLowerCase()===lo)){ t[cat]=arr.filter(x=>x.toLowerCase()!==lo); markDirty('trades',t.id); } }); saveData(); }
+const TAG_UNDO_KEY = APP.storageKey + '_tagundo';
+function deleteTag(cat,tg){
+  const lo=tg.toLowerCase();
+  const affected=DB.trades.filter(t=>tradeTags(t,cat).some(x=>x.toLowerCase()===lo));
+  if(!affected.length) return;
+  // Destructive bulk mutation (removes a tag from every trade with no built-in undo): snapshot the affected rows first so the action can be reversed.
+  try{ localStorage.setItem(TAG_UNDO_KEY, JSON.stringify({ ts:Date.now(), cat, tag:tg, rows:JSON.parse(JSON.stringify(affected)) })); }catch(e){}
+  affected.forEach(t=>{ t[cat]=tradeTags(t,cat).filter(x=>x.toLowerCase()!==lo); markDirty('trades',t.id); });
+  saveData();
+}
+function undoDeleteTag(){
+  let snap; try{ snap=JSON.parse(localStorage.getItem(TAG_UNDO_KEY)||'null'); }catch(e){ snap=null; }
+  if(!snap || !Array.isArray(snap.rows) || !snap.rows.length){ toast('Nothing to undo',true); return; }
+  snap.rows.forEach(orig=>{ const i=DB.trades.findIndex(t=>t.id===orig.id); if(i>=0) DB.trades[i]=orig; else DB.trades.push(orig); markDirty('trades',orig.id); });
+  try{ localStorage.removeItem(TAG_UNDO_KEY); }catch(e){}
+  saveData(); renderApp(); if(_view==='journal') openTagManager();
+  toast('Restored "'+snap.tag+'" on '+snap.rows.length+' trade'+(snap.rows.length===1?'':'s'));
+}
 
 /* ============================================================================
    DERIVE  — single source of truth for every computed trade value.
@@ -510,7 +547,7 @@ function computeStats(trades){
    CRUD
    ========================================================================== */
 function upsertTrade(tr){ const i=DB.trades.findIndex(t=>t.id===tr.id); if(i>=0) DB.trades[i]=tr; else DB.trades.push(tr); markDirty('trades',tr.id); saveData(); renderApp(); }
-function deleteTrade(id){ DB.trades=DB.trades.filter(t=>t.id!==id); _dirty.trades.delete(id); _persistDirty(); saveData(); renderApp(); sbDelete('trades',id); }
+function deleteTrade(id){ DB.trades=DB.trades.filter(t=>t.id!==id); _dirty.trades.delete(id); _persistDirty(); saveData(); renderApp(); sbDelete('trades',id).then(ok=>{ if(!ok) flushPendingDeletes().catch(()=>{}); }); }
 
 /* ============================================================================
    FILTER / SORT / VIEW
@@ -536,7 +573,12 @@ function visibleTrades(){
 function applyFilter(){ _filter.q=document.getElementById('search').value; _filter.status=document.getElementById('status-filter').value; _page=1; renderApp(); }
 function sortBy(k){ if(_sort.key===k) _sort.dir*=-1; else { _sort.key=k; _sort.dir=1; } renderApp(); }
 function goPage(p){ _page=p; renderTable(visibleTrades()); }
-function showView(v){ _view=v; document.querySelectorAll('#subnav .seg button').forEach(b=>b.classList.toggle('active',b.dataset.v===v)); renderApp(); }
+function showView(v){
+  if(v==='simulator' && !requireEntitlement('simulator','The simulator')) return;
+  if(v==='reports' && !requireEntitlement('advanced_analytics','Reports')) return;
+  if(v==='coach' && !requireEntitlement('ai_coach','The AI coach')) return;
+  _view=v; document.querySelectorAll('#subnav .seg button').forEach(b=>b.classList.toggle('active',b.dataset.v===v)); renderApp();
+}
 
 /* ============================================================================
    RENDER
@@ -733,10 +775,12 @@ function openTagManager(){
   const sections=TAG_CATS.map(c=>{ const tags=allTags(c.key);
     const rows=tags.length? tags.map(o=>{ const idx=i++; _tagList[idx]={cat:c.key,tag:o.tag}; return '<div class="tag-row"><span class="tag '+c.cls+'">'+escapeHtml(o.tag)+'</span><span class="muted" title="trades">'+o.count+'</span><input id="ren-'+idx+'" value="'+escapeHtml(o.tag)+'" style="flex:1;min-width:70px"><button class="btn btn-sm" onclick="renameTagUI('+idx+')">Save</button><button class="btn btn-sm btn-danger" onclick="deleteTagUI('+idx+')">✕</button></div>'; }).join('') : '<p class="muted">None yet.</p>';
     return '<div style="margin-bottom:14px"><div class="label" style="margin-bottom:6px">'+c.label+'</div>'+rows+'</div>'; }).join('');
-  document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:480px" role="dialog" aria-modal="true"><div class="modal-head"><h3>Manage tags</h3><button class="icon-btn" onclick="closeModal()">✕</button></div><div class="modal-body">'+sections+'<p class="muted">Renaming updates every trade. Rename to an existing tag to merge them.</p></div><div class="modal-foot"><span></span><button class="btn" onclick="closeModal()">Close</button></div></div></div>';
+  let undoSnap=null; try{ undoSnap=JSON.parse(localStorage.getItem(TAG_UNDO_KEY)||'null'); }catch(e){}
+  const undoBtn = undoSnap ? '<button class="btn btn-sm" onclick="undoDeleteTag()">Undo delete "'+escapeHtml(undoSnap.tag)+'"</button>' : '<span></span>';
+  document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:480px" role="dialog" aria-modal="true"><div class="modal-head"><h3>Manage tags</h3><button class="icon-btn" onclick="closeModal()">✕</button></div><div class="modal-body">'+sections+'<p class="muted">Renaming updates every trade. Rename to an existing tag to merge them. Deleting can be undone once, right after it happens.</p></div><div class="modal-foot">'+undoBtn+'<button class="btn" onclick="closeModal()">Close</button></div></div></div>';
 }
 function renameTagUI(i){ const e=_tagList[i]; if(!e) return; const nv=document.getElementById('ren-'+i).value; renameTag(e.cat,e.tag,nv); renderApp(); openTagManager(); toast('Tag updated'); }
-function deleteTagUI(i){ const e=_tagList[i]; if(!e) return; deleteTag(e.cat,e.tag); renderApp(); openTagManager(); toast('Tag removed'); }
+function deleteTagUI(i){ const e=_tagList[i]; if(!e) return; deleteTag(e.cat,e.tag); renderApp(); openTagManager(); toast('Tag removed. Undo available in Tag Manager.'); }
 
 /* ============================================================================
    REPORTS  (breakdowns, P&L calendar, drawdown)
@@ -820,6 +864,7 @@ function renderCoachIdle(){
 }
 async function runCoach(){
   const body=document.getElementById('coach-body'), btn=document.getElementById('coach-run'), key=getKey();
+  if(!requireEntitlement('ai_coach','The AI coach')) return;
   if(!key){ body.innerHTML='<div class="warn">Add your Anthropic API key in Settings (⚙) first.</div>'; return; }
   if(!computeStats(DB.trades).n){ body.innerHTML='<p class="muted">No closed trades to analyse yet.</p>'; return; }
   btn.disabled=true; body.innerHTML='<p class="muted">Analysing your trades…</p>';
@@ -866,6 +911,7 @@ function parseCSV(text){
 function upsertTradeSilent(tr){ DB.trades.push(tr); markDirty('trades',tr.id); }
 function importCSV(){
   const inp=document.getElementById('f-csv'), errEl=document.getElementById('e-csv');
+  if(!requireEntitlement('csv_import','CSV import')) return;
   const file=inp.files&&inp.files[0]; if(!file){ errEl.textContent='Choose a CSV file first'; return; }
   const reader=new FileReader();
   reader.onload=()=>{
@@ -904,11 +950,13 @@ function importCSV(){
    ========================================================================== */
 function applyTheme(t){ document.documentElement.classList.toggle('light',t==='light'); document.querySelector('meta[name=theme-color]').setAttribute('content',t==='light'?'#ffffff':'#0f0f0f'); }
 function toggleTheme(){ const next=document.documentElement.classList.contains('light')?'dark':'light'; localStorage.setItem(APP.storageKey+'_theme',next); applyTheme(next); }
-(function initTheme(){ const saved=localStorage.getItem(APP.storageKey+'_theme'); applyTheme(saved||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark')); })();
+(function initTheme(){ /* single source of truth is lib/theme-init.js (head, pre-paint FOUC guard), just sync the meta theme-color to whatever class it already applied */ applyTheme(document.documentElement.classList.contains('light')?'light':'dark'); })();
 function toast(msg,isErr){ const el=document.createElement('div'); el.className='toast'+(isErr?' err':''); el.textContent=msg; document.getElementById('toasts').appendChild(el); setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),300); },isErr?5000:2500); }
 async function boot(){ document.getElementById('error').classList.add('hidden'); document.getElementById('loading').classList.remove('hidden'); await loadData(); renderApp(); }
 function init(){ document.getElementById('app-name').textContent='Kujira'; document.getElementById('ver').textContent=APP.version; _loadDirty(); boot(); }
 init();
+/* Belt-and-braces retry for queued deletes: covers the case where a delete fails and no further dirty write ever fires _flushDirty. No-op locally (guarded inside flushPendingDeletes). */
+setInterval(()=>{ flushPendingDeletes().catch(()=>{}); }, 60000);
 if ('serviceWorker' in navigator && location.protocol!=='file:'){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
 </script>
 </body>
