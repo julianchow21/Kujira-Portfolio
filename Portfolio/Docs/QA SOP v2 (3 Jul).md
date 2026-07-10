@@ -9,8 +9,8 @@ Supersedes `QA SOP v1 (4 Jun)`. Last updated: 03/07/2026 (app v2.38).
 
 ## How to run a QA pass
 
-1. **Start the preview.** Launch config `investments` (global `.claude/launch.json`), serves
-   the repo root on port 3801. The app lives at `http://localhost:3801/Portfolio/`, not the
+1. **Start the preview.** Launch config `kjr-portfolio` (global `.claude/launch.json`), serves
+   the repo root on port 3807. The app lives at `http://localhost:3807/Portfolio/`, not the
    repo root (the root 404s by design, that is expected).
 2. **Run the automated checks first** (cheap, catches regressions before you open a browser):
    - `npm test` from `Portfolio/`, runs `tests/test-core.js` (money/date/CPF/tax/seed-guard

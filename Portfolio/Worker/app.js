@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.49';
-const APP_DISPLAY_VERSION = 'v2.49 (10 Jul)';
+const APP_VERSION = 'v2.50';
+const APP_DISPLAY_VERSION = 'v2.50 (10 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -933,6 +933,16 @@ function fmtPct(n, dp){
   // Trend arrow + sign so percentage direction is legible without colour (a11y).
   const arrow = v > 0 ? '▲ ' : v < 0 ? '▼ ' : '';
   return arrow + (v >= 0 ? '+' : '') + v.toFixed(dp != null ? dp : 2) + '%';
+}
+
+/* Plain percentage, no arrow and no forced sign (F9): for STATIC values that
+   are not a change over time (a rate, an assumption, a target), where
+   fmtPct's arrow+sign would misread as a trend delta. Genuine deltas (price
+   change, P&L%, savings rate) keep using fmtPct above, untouched. */
+function fmtPctPlain(n, dp){
+  const v = Number(n);
+  if (!isFinite(v)) return '—';
+  return v.toFixed(dp != null ? dp : 2) + '%';
 }
 
 /* Same arrow-plus-sign-plus-colour rule as fmtPct, for the money-value P&L
@@ -2442,7 +2452,9 @@ function renderNav(){
   if (host)  host.innerHTML  = '';
   if (bhost) bhost.innerHTML = '';
 
-  // Desktop topbar: unchanged, every tab except Settings (shown via the cog icon).
+  // Desktop topbar: every tab except Settings (shown via the cog icon).
+  // All tabs render inline first; _layoutDesktopNav() then measures the
+  // strip and moves whatever doesn't fit into the "More" dropdown (F1).
   TABS.forEach(t => {
     if (t.key === 'settings') return;
     const btn = document.createElement('button');
@@ -2473,6 +2485,137 @@ function renderNav(){
   }
 
   renderMoreSheet();
+  _layoutDesktopNav();
+}
+
+/* ─── Desktop nav overflow ("More ▾") ───────────────────────────────────
+   At 1280px and below, the 9-tab strip (Settings excluded) does not fit
+   the topbar. Previously the strip just scrolled off-screen with a fade
+   and no way to jump straight to a hidden tab, and the active tab could
+   itself be scrolled out of view (F1). Every tab renders inline first
+   (see renderNav), then this measures the strip's available width and
+   moves whichever buttons overflow into the "More" dropdown. The active
+   tab is always guaranteed a spot in the visible strip: if it wouldn't
+   otherwise fit, the last tab that did fit is evicted to make room for it
+   (both re-appear in TABS order, one inline, one in the dropdown). Re-run
+   on resize (debounced) and after every renderNav() / showPage(). */
+let _navMoreResizeBound = false;
+function _layoutDesktopNav(){
+  const host = document.getElementById('nav-host');
+  const wrap = document.getElementById('nav-more-wrap');
+  const menu = document.getElementById('nav-more-menu');
+  if (!host || !wrap || !menu) return;
+  // Mobile hides .nav entirely (display:none); nothing to lay out there,
+  // and getBoundingClientRect() would read 0 and wrongly overflow everything.
+  if (getComputedStyle(host).display === 'none'){ wrap.style.display = 'none'; return; }
+
+  const btns = Array.from(host.children);
+  if (!btns.length) return;
+
+  // Reset: put every button back inline before re-measuring, so shrinking
+  // the window back out doesn't leave stale entries stuck in the dropdown.
+  btns.forEach(b => { if (b.style.display === 'none') b.style.display = ''; });
+  menu.innerHTML = '';
+
+  // Available width, measured with the More wrap HIDDEN. #nav-more-wrap is a
+  // flex SIBLING of #nav-host in the topbar row (not nested inside it), so
+  // the moment it becomes visible the flex algorithm itself shrinks
+  // #nav-host by exactly the wrap's width, before any JS runs. Reading
+  // available AFTER showing the wrap (as this used to) already has that
+  // reservation baked in; then subtracting moreBtnWidth a second line down
+  // reserved it twice; up to ~69px of genuinely free strip space (measured
+  // 08/07, More button ~69px wide) was wasted on every layout pass, fitting
+  // fewer tabs than actually fit. Hidden-wrap width is the TRUE full budget;
+  // moreBtnWidth is only subtracted once, and only when a dropdown is
+  // actually needed.
+  wrap.style.display = 'none';
+  const available = host.getBoundingClientRect().width;
+  wrap.style.display = 'flex';
+  const moreBtnWidth = document.getElementById('nav-more-btn').getBoundingClientRect().width + 2;
+  wrap.style.display = 'none'; // back to the reset state until we know a dropdown is needed
+  const cur = (typeof _currentTab !== 'undefined' && _currentTab) ? _currentTab : 'dashboard';
+
+  let used = 0, overflowIdx = new Set();
+  const widths = btns.map(b => b.getBoundingClientRect().width + 2); // +2 gap
+  let budget = available; // shrinks once we know a More button will be needed
+  let needsMore = widths.reduce((s,w) => s+w, 0) > available;
+  if (needsMore) budget = available - moreBtnWidth;
+
+  btns.forEach((b, i) => {
+    if (used + widths[i] > budget){ overflowIdx.add(i); return; }
+    used += widths[i];
+  });
+
+  // Guarantee the active tab is inline: if it landed in overflow, evict the
+  // last-fitted inline tab (by strip position) to free up room instead.
+  const curIdx = btns.findIndex(b => b.dataset.tab === cur);
+  if (curIdx !== -1 && overflowIdx.has(curIdx)){
+    let lastInlineIdx = -1;
+    btns.forEach((b, i) => { if (!overflowIdx.has(i)) lastInlineIdx = i; });
+    if (lastInlineIdx !== -1){
+      overflowIdx.delete(curIdx);
+      overflowIdx.add(lastInlineIdx);
+    }
+  }
+
+  if (overflowIdx.size === 0){ wrap.style.display = 'none'; return; } // everything fits
+
+  btns.forEach((b, i) => {
+    if (!overflowIdx.has(i)) return;
+    b.style.display = 'none';
+    const key = b.dataset.tab;
+    const t = TABS.find(x => x.key === key);
+    if (!t) return;
+    const item = document.createElement('button');
+    item.className = 'nav-btn'; item.dataset.tab = t.key;
+    const chip = PHASE_2_TABS.has(t.key) ? '<span class="phase-chip-mini">P2</span>' : '';
+    item.innerHTML = t.icon + '<span>' + t.label + chip + '</span>';
+    item.onclick = () => { navigate(t.key); closeNavMore(); };
+    menu.appendChild(item);
+  });
+  _updateNavMoreActive();
+
+  if (!_navMoreResizeBound){
+    _navMoreResizeBound = true;
+    let t;
+    window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(_layoutDesktopNav, 120); });
+  }
+}
+
+/* Overflowed tabs keep their .active state inside the dropdown; the More
+   button itself also goes .active when the current tab lives behind it
+   (same pattern as the mobile bottom bar's More button). */
+function _updateNavMoreActive(){
+  const menu = document.getElementById('nav-more-menu');
+  const moreBtn = document.getElementById('nav-more-btn');
+  if (!menu || !moreBtn) return;
+  const cur = (typeof _currentTab !== 'undefined' && _currentTab) ? _currentTab : 'dashboard';
+  let curInMenu = false;
+  menu.querySelectorAll('.nav-btn').forEach(b => {
+    const isCur = b.dataset.tab === cur;
+    b.classList.toggle('active', isCur);
+    if (isCur) curInMenu = true;
+  });
+  moreBtn.classList.toggle('active', curInMenu);
+}
+
+function openNavMore(){
+  const wrap = document.getElementById('nav-more-wrap');
+  const btn  = document.getElementById('nav-more-btn');
+  if (!wrap || wrap.style.display === 'none') return;
+  wrap.classList.add('open');
+  if (btn) btn.setAttribute('aria-expanded', 'true');
+}
+function closeNavMore(){
+  const wrap = document.getElementById('nav-more-wrap');
+  const btn  = document.getElementById('nav-more-btn');
+  if (wrap) wrap.classList.remove('open');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+function toggleNavMore(){
+  const wrap = document.getElementById('nav-more-wrap');
+  if (!wrap) return;
+  if (wrap.classList.contains('open')) closeNavMore(); else openNavMore();
 }
 
 /* Tabs reachable only through the More sheet on mobile: every TABS entry not
@@ -2549,6 +2692,8 @@ function showPage(key){
     b.classList.toggle('active', b.dataset.tab === key);
   });
   closeMoreSheet(); // navigating (incl. from within the sheet) always closes it
+  closeNavMore();   // desktop "More" dropdown: same, closes after a pick
+  _layoutDesktopNav(); // re-run so the newly active tab is guaranteed inline (F1)
   updateCcyToggleUI(); // reflect the new tab's currency
   if (key === 'dashboard') renderDashboard(); // (re)draw charts now the canvas is sized
   if (key === 'projections') renderProjections(); // same reason: canvas needs to be sized/visible
@@ -2564,6 +2709,7 @@ function showPage(key){
   if (key === 'cpf') renderCpf();
   if (key === 'cashflow') renderCashflow();
   if (key === 'insurance') renderInsurance();
+  _refreshTblScrollHints(); // F5: newly-visible tables need their initial fade state set
   if (window.scrollTo) window.scrollTo({ top: 0, behavior: 'instant' });
   // History is owned by the router (navigate/hashchange), not showPage — see
   // the router block above. showPage is now a pure render primitive.
@@ -2726,10 +2872,14 @@ function sgdOrNull(amount, currency){
 }
 
 /* ─── Per-tab display currency ─────────────────────────────────────────
-   Each tab shows values in its own currency: Stocks defaults to USD (most
-   holdings are US-priced), everything else defaults to SGD (CPF, salary,
-   property are SGD by nature). The header toggle controls the active tab's
-   currency and stores a per-tab override.
+   Julian's ruling (F2, 10/07/2026): everything is SGD except anything
+   stock-related. Stocks and Watchlist+ (board) default to USD and keep the
+   header toggle; every other tab (dashboard, cash, cpf, cashflow,
+   realestate, insurance, crypto, projections, settings) is ALWAYS SGD, no
+   toggle shown, no per-tab override honoured, so the control never looks
+   global while silently only applying to one tab. The Cash tab's per-account
+   Balance column is unaffected: it reads the account's own native currency
+   directly from the row (see renderCash), not this render-pass currency.
 
    `_renderCcy` is the currency for the render pass in flight. Every render
    function sets it via setRenderCcy() at its top, so fmt() converts to the
@@ -2739,8 +2889,13 @@ let _dashShowCpf      = false; // default off on every launch — user toggles t
 let _navigatingHistory = false; // true while popstate fires, stops showPage re-pushing
 let _renderCcy        = 'SGD';
 
-function tabDefaultCcy(tab){ return tab === 'stocks' ? 'USD' : (DB.settings.baseCurrency || 'SGD'); }
+/* The only tabs where a USD/SGD choice is meaningful (stock-priced data).
+   Every other tab is forced SGD, see tabDisplayCcy below. */
+const CCY_SCOPED_TABS = new Set(['stocks', 'board']);
+function tabCcyScoped(tab){ return CCY_SCOPED_TABS.has(tab); }
+function tabDefaultCcy(tab){ return tabCcyScoped(tab) ? 'USD' : 'SGD'; }
 function tabDisplayCcy(tab){
+  if (!tabCcyScoped(tab)) return 'SGD'; // hard rule, no stored override can flip this
   const o = DB.settings.tabCurrency || {};
   return o[tab] || tabDefaultCcy(tab);
 }
@@ -2769,9 +2924,13 @@ function fxMissingFor(currency){
   return getFx(from, displayCcy()) == null;
 }
 
-/* Header toggle writes a per-tab override for whichever tab is showing. */
+/* Header toggle writes a per-tab override for whichever tab is showing.
+   Only meaningful on currency-scoped tabs (see CCY_SCOPED_TABS); the toggle
+   itself is hidden everywhere else so this is a defence-in-depth guard, not
+   the only thing stopping a non-stock tab from picking up USD. */
 function setDisplayCcy(ccy){
   if (ccy !== 'SGD' && ccy !== 'USD') return;
+  if (!tabCcyScoped(_currentTab)) return;
   if (!DB.settings.tabCurrency) DB.settings.tabCurrency = {};
   DB.settings.tabCurrency[_currentTab] = ccy;
   saveData();
@@ -2779,7 +2938,15 @@ function setDisplayCcy(ccy){
   updateCcyToggleUI();
 }
 
+/* Toggle only appears where a currency choice actually applies (F2): a
+   control that looks global but silently only affects one tab is worse
+   than no control, so it is hidden rather than shown-but-inert elsewhere. */
 function updateCcyToggleUI(){
+  const scoped = tabCcyScoped(_currentTab);
+  document.querySelectorAll('.ccy-toggle').forEach(el => {
+    el.style.display = scoped ? '' : 'none';
+  });
+  if (!scoped) return;
   const cur = tabDisplayCcy(_currentTab);
   document.querySelectorAll('.ccy-toggle [data-ccy]').forEach(b => {
     b.classList.toggle('active', b.dataset.ccy === cur);
@@ -4667,6 +4834,38 @@ let _stockChartRows = [];
 let _pbHistCache = {};                 // memory-only: { ysym: { range: {ccy, points, fetchedAt} } }
 const _pbCharts = {};                  // canvasId -> Chart instance
 const PB_PALETTE = ['#a78bfa','#2dd4bf','#f59e0b','#f87171','#60a5fa','#34d399','#fb923c','#c084fc','#38bdf8','#4ade80','#facc15','#e879f9'];
+
+/* Single source of truth for asset-class colour, shared by the dashboard
+   allocation bar (renderDashboard) and the Allocation doughnut (custom chart
+   builder, source:'allocation'). Both read the SAME DB (net worth by class)
+   so they must render the SAME colour per class, previously the doughnut
+   coloured slices by position in a sorted-by-value list (PB_PALETTE[i]),
+   which drifted from the bar's fixed per-class colour whenever the largest
+   asset class changed. CSS var names (not literal hex) so both themes stay
+   on-brand and AA-contrast against --bg2, same tokens already used elsewhere. */
+const ASSET_CLASS_COLORS = {
+  Stocks:       '--accent',
+  Cash:         '--blue',
+  CPF:          '--green',
+  'Real Estate':'--amber',
+  Crypto:       '--accent2',
+  Insurance:    '--purple'
+};
+function assetClassColor(cls){ return ASSET_CLASS_COLORS[cls] || '--text3'; }
+
+/* Chart-field colour overrides (F3 coordinator amendment, 10/07/2026):
+   cashflow's Income/Expenses used to fall on plain PB_PALETTE[yi] positions,
+   which collide with resolved ASSET_CLASS_COLORS hexes far more than the
+   first pass caught (PB_PALETTE[1] #2dd4bf IS dark --accent, Stocks) and
+   PB_PALETTE[4] #60a5fa sits 23.6 RGB-units from dark --blue (Cash), both on
+   the same dashboard screen as the allocation bar/doughnut. Verified by
+   Euclidean RGB distance against EVERY ASSET_CLASS_COLORS token resolved in
+   BOTH themes (12 hexes total): these two literal hexes clear >=60 units
+   from all twelve and from each other. Olive-green/red reads as
+   income/expense semantically (matches the P&L KPI strip's pos/neg colour
+   language) without reusing --green (CPF) or --red directly, both of which
+   sit inside the danger zone against other classes/palette members. */
+const PB_FIELD_COLOR_OVERRIDE = { 'cashflow:income': '#65a30d', 'cashflow:expense': '#dc2626' };
 /* D1: these four were device-local localStorage keys (pre-v2.37). They now
    live in DB.settings so they ride sync, export and import like everything
    else. The old key names are kept here only as migration source keys
@@ -5248,13 +5447,19 @@ function _pbDrawCrossSectional(host, cfg, showEmpty, showChart){
   const curSym = _pbCurSym();
   const isRound = cfg.chartType === 'doughnut' || cfg.chartType === 'pie';
   const labels = entries.map(([k]) => k.length > 28 ? k.slice(0,28)+'…' : k);
+  // Allocation source grouped by asset class: colour by class identity (the
+  // shared ASSET_CLASS_COLORS map), not by position in a value-sorted list.
+  // Keeps this doughnut in step with the dashboard allocation bar, which
+  // reads the same underlying figures (see F3, both draw from the same DB).
+  const isClassAlloc = src.key === 'allocation' && cfg.xFields.length === 1 && cfg.xFields[0] === 'assetClass';
+  const roundColorFor = i => isClassAlloc ? _cssVar(assetClassColor(entries[i][0])) : PB_PALETTE[i % PB_PALETTE.length];
   const datasets = cfg.yFields.map((yKey, yi) => {
     const f = flds[yKey];
-    const color = PB_PALETTE[yi % PB_PALETTE.length];
+    const color = PB_FIELD_COLOR_OVERRIDE[src.key + ':' + yKey] || PB_PALETTE[yi % PB_PALETTE.length];
     const values = entries.map(([,v]) => +(_pbVal(v[yKey]||0, f)).toFixed(2));
     const ds = {
       label: f.label, data: values,
-      backgroundColor: isRound ? entries.map((_,i) => PB_PALETTE[i % PB_PALETTE.length]) : color + '55',
+      backgroundColor: isRound ? entries.map((_,i) => roundColorFor(i)) : color + '55',
       borderColor: isRound ? _cssVar('--bg2') : color,
       borderWidth: isRound ? 2 : 1.5,
       borderRadius: cfg.chartType === 'bar' ? 4 : 0,
@@ -6416,7 +6621,7 @@ function renderRealestate(){
       <th class="tl">Name / address</th><th>Value (${displayCcy()})</th><th>Updated</th><th class="tl">Notes</th><th></th>
     </tr></thead><tbody>
       ${list.map(r => `<tr>
-        <td class="tl cell-sym">${kjrEscape(r.name)}</td>
+        <td class="tl cell-sym name-clamp" title="${kjrEscape(r.name)}"><span class="name-clamp-inner">${kjrEscape(r.name)}</span></td>
         <td class="num">${fmt(r.value, {dp:0})}</td>
         <td class="num muted">${r.updatedAt ? fmtDateSG(r.updatedAt) : '—'}</td>
         <td class="tl muted">${kjrEscape(r.notes || '')}</td>
@@ -6976,8 +7181,8 @@ function renderProjections(){
   const negSavings = monthlySavings < 0;
   const assumptionsCard = `<div class="card"><div class="card-head"><h3>Assumptions</h3></div><div class="card-body">
     <div class="tbl-wrap"><table class="holdings"><tbody>
-      <tr><td class="tl">Expected return</td><td class="num">${fmtPct(returnPct,1)}</td></tr>
-      <tr><td class="tl">Inflation</td><td class="num">${fmtPct(inflationPct,1)}</td></tr>
+      <tr><td class="tl">Expected return</td><td class="num">${fmtPctPlain(returnPct,1)}</td></tr>
+      <tr><td class="tl">Inflation</td><td class="num">${fmtPctPlain(inflationPct,1)}</td></tr>
       <tr><td class="tl">FIRE target</td><td class="num">${s.fireTarget!=null ? fmt(Number(s.fireTarget),{dp:0}) + ' (manual override)' : (Number(s.fireMultiple)||25) + '&times; expenses'}</td></tr>
       <tr><td class="tl">Retirement age</td><td class="num">${retirementAge}</td></tr>
       <tr><td class="tl">Annual expenses (derived)</td><td class="num">${expInfo.annual>0 ? fmt(expInfo.annual,{dp:0}) : '—'}${expInfo.excluded ? ' <span class="hint">('+expInfo.excluded+' excluded, FX missing)</span>' : ''}</td></tr>
@@ -6993,14 +7198,16 @@ function renderProjections(){
 }
 
 /* Chart.js line, same destroy-then-create lifecycle as _renderInsPremiumChart.
-   X axis is years: every 12th month is labelled with the calendar year, the
-   rest carry an empty label so the axis stays legible on a 40-year horizon. */
+   X axis is years: every 60th month (5 years) is labelled with the calendar
+   year, the rest carry an empty label. A 40-year horizon is 41 yearly
+   labels, still crammed even sparse-set on a single-row axis (F6), so this
+   thins to one label every 5 years, ~9 labels total. */
 function _renderProjectionChart(liquidSeries, cpfSeries, fireNumber){
   const canvas = document.getElementById('proj-canvas');
   if (!canvas) return;
   const nowYear = new Date().getFullYear();
   const n = liquidSeries.length;
-  const labels = liquidSeries.map((_,m) => (m % 12 === 0) ? String(nowYear + m/12) : '');
+  const labels = liquidSeries.map((_,m) => (m % 60 === 0) ? String(nowYear + m/12) : '');
   const dc = displayCcy();
   const liq = liquidSeries.map(v => +toDisplay(v, 'SGD').toFixed(2));
   const cpf = (cpfSeries||[]).map(v => +toDisplay(v, 'SGD').toFixed(2));
@@ -7165,7 +7372,7 @@ function renderCash(){
       <th class="tl">Notes</th><th></th>
     </tr></thead><tbody>
       ${rows.map(r => `<tr>
-        <td class="tl cell-sym">${kjrEscape(r.c.name)}</td>
+        <td class="tl cell-sym name-clamp" title="${kjrEscape(r.c.name)}"><span class="name-clamp-inner">${kjrEscape(r.c.name)}</span></td>
         <td class="tl"><span class="tag">${kjrEscape(r.c.account || '—')}</span></td>
         <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${r.bal.toLocaleString('en-SG', {maximumFractionDigits:2})}${r.derived ? '<span class="hint" title="Calculated from movements + linked trades"> ◆</span>' : ''}</td>
         <td class="num">${kjrEscape(r.ccy)}</td>
@@ -7361,13 +7568,16 @@ function renderCpf(){
     ? '+' + fmt(accrued, {dp:0}) + ' since ' + (anchor ? fmtDateSG(anchor) : '—') + ' (salary + year-end interest)'
     : (anchor ? 'Anchored ' + fmtDateSG(anchor) : 'Set starting balances in Settings');
 
-  // KPI row — live balance (typed figure auto-grown by salary each payday)
+  // KPI row — live balance (typed figure auto-grown by salary each payday).
+  // Whole dollars (F7): matches every other card in the app (dashboard,
+  // metrics, history subtotals below); fmt()'s default is 2dp, which made
+  // these the one place still showing cents ($92,760.00 vs $92,760 elsewhere).
   balsEl.innerHTML = `<div class="metrics">
-    <div class="metric"><div class="metric-label">Total CPF</div><div class="metric-value">${fmt(total)}</div><div class="metric-sub${accrued > 0.5 ? ' pos' : ''}">${kjrEscape(subLine)}</div></div>
-    <div class="metric"><div class="metric-label">OA · ${DB.settings.cpfRates.OA}%</div><div class="metric-value">${fmt(eff.OA||0)}</div></div>
-    <div class="metric"><div class="metric-label">SA · ${DB.settings.cpfRates.SA}%</div><div class="metric-value">${fmt(eff.SA||0)}</div></div>
-    <div class="metric"><div class="metric-label">MA · ${DB.settings.cpfRates.MA}%</div><div class="metric-value">${fmt(eff.MA||0)}</div></div>
-    <div class="metric"><div class="metric-label">RA · ${DB.settings.cpfRates.RA}%</div><div class="metric-value">${fmt(eff.RA||0)}</div></div>
+    <div class="metric"><div class="metric-label">Total CPF</div><div class="metric-value">${fmt(total,{dp:0})}</div><div class="metric-sub${accrued > 0.5 ? ' pos' : ''}">${kjrEscape(subLine)}</div></div>
+    <div class="metric"><div class="metric-label">OA · ${DB.settings.cpfRates.OA}%</div><div class="metric-value">${fmt(eff.OA||0,{dp:0})}</div></div>
+    <div class="metric"><div class="metric-label">SA · ${DB.settings.cpfRates.SA}%</div><div class="metric-value">${fmt(eff.SA||0,{dp:0})}</div></div>
+    <div class="metric"><div class="metric-label">MA · ${DB.settings.cpfRates.MA}%</div><div class="metric-value">${fmt(eff.MA||0,{dp:0})}</div></div>
+    <div class="metric"><div class="metric-label">RA · ${DB.settings.cpfRates.RA}%</div><div class="metric-value">${fmt(eff.RA||0,{dp:0})}</div></div>
   </div>`;
 
   if (metaEl) metaEl.textContent = anchor ? 'Statement figure as of ' + fmtDateSG(anchor) : 'Not set yet';
@@ -7900,15 +8110,15 @@ function renderDashboard(){
 
   const cashInfo = _cashSGDInfo();
   const classes = [
-    { key:'Stocks',      val:_stockMvSGD(),     color:'--accent' },
-    { key:'Cash',        val:cashInfo.total,    color:'--blue'   },
-    { key:'CPF',         val:_cpfSGD(),         color:'--green'  },
-    { key:'Real Estate', val:_realestateSGD(),  color:'--amber'  }
+    { key:'Stocks',      val:_stockMvSGD(),     color:assetClassColor('Stocks') },
+    { key:'Cash',        val:cashInfo.total,    color:assetClassColor('Cash')   },
+    { key:'CPF',         val:_cpfSGD(),         color:assetClassColor('CPF')    },
+    { key:'Real Estate', val:_realestateSGD(),  color:assetClassColor('Real Estate') }
   ];
   const crypto = _cryptoSGD();
-  if (crypto > 0) classes.push({ key:'Crypto', val:crypto, color:'--accent2' });
+  if (crypto > 0) classes.push({ key:'Crypto', val:crypto, color:assetClassColor('Crypto') });
   const insVal = insuranceCashValueSGD();
-  if (insVal > 0) classes.push({ key:'Insurance', val:insVal, color:'--purple' });
+  if (insVal > 0) classes.push({ key:'Insurance', val:insVal, color:assetClassColor('Insurance') });
   const netFull   = roundMoney(classes.reduce((s,c) => s + c.val, 0));
   const cpfVal    = _cpfSGD();
   const netExCpf  = roundMoney(netFull - cpfVal);
@@ -8218,6 +8428,22 @@ function renderAll(){
     renderDiagnostics();
   }
   if (window.scrollTo) window.scrollTo(sx, sy);
+  _refreshTblScrollHints();
+}
+
+/* Mobile table scroll hint (F5): every h-scroll .tbl-wrap gets a right-edge
+   fade signalling more columns off-screen, hidden once there is nothing
+   left to scroll to (either the table never overflowed, or the user
+   scrolled it to the end). Initial state is set here after every render
+   (innerHTML rebuilds reset scrollLeft to 0); live updates while dragging
+   come from the delegated scroll listener in installEventDelegation(). */
+function _updateTblScrollHint(wrap){
+  const atEnd = wrap.scrollWidth <= wrap.clientWidth + 1
+    || wrap.scrollLeft + wrap.clientWidth >= wrap.scrollWidth - 1;
+  wrap.classList.toggle('tbl-scroll-end', atEnd);
+}
+function _refreshTblScrollHints(){
+  document.querySelectorAll('.tbl-wrap').forEach(_updateTblScrollHint);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -8254,6 +8480,24 @@ function installEventDelegation(){
     const sheet = document.getElementById('more-sheet');
     if (sheet && sheet.classList.contains('open')) closeMoreSheet();
   });
+  // Desktop nav "More" dropdown (F1): Escape and outside-click both close it,
+  // same affordances as every other overlay in the app.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const wrap = document.getElementById('nav-more-wrap');
+    if (wrap && wrap.classList.contains('open')) closeNavMore();
+  });
+  document.addEventListener('click', (e) => {
+    const wrap = document.getElementById('nav-more-wrap');
+    if (wrap && wrap.classList.contains('open') && !wrap.contains(e.target)) closeNavMore();
+  });
+  // Mobile table scroll hint (F5): scroll doesn't bubble, so this listens on
+  // the capture phase at the document root instead of binding one listener
+  // per .tbl-wrap (which gets torn down and recreated on every render).
+  document.addEventListener('scroll', (e) => {
+    const wrap = e.target && e.target.classList && e.target.classList.contains('tbl-wrap') ? e.target : null;
+    if (wrap) _updateTblScrollHint(wrap);
+  }, true);
   // Undo / Redo — skip when focus is inside a text field (let browser handle).
   document.addEventListener('keydown', (e) => {
     const mod = e.ctrlKey || e.metaKey;
@@ -8290,6 +8534,7 @@ function installEventDelegation(){
     navigate:            (el) => navigate(A(el)[0]),
     openMoreSheet:       () => openMoreSheet(),
     closeMoreSheet:      () => closeMoreSheet(),
+    toggleNavMore:       () => toggleNavMore(),
     toggleTheme:         () => toggleTheme(),
     togglePrivacy:       () => togglePrivacy(),
     setThemeChoice:      (el) => setThemeChoice(A(el)[0]),

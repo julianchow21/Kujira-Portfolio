@@ -97,6 +97,21 @@ a{color:var(--blue);text-decoration:none}
 @media (hover:hover){.nav-btn:hover{background:var(--glass-strong);color:var(--text)}}
 .nav-btn.active{background:var(--accent-soft);color:var(--accent);font-weight:500}
 .nav-btn svg{width:15px;height:15px;flex-shrink:0}
+/* Desktop nav overflow (F1): tabs that don't fit the topbar strip move into
+   this dropdown instead of being scrolled off-screen with no affordance.
+   Floating element attached to the topbar, glass per the restyle rules. */
+.nav-more-wrap{position:relative;flex-shrink:0}
+.nav-more-btn{padding:8px 12px;border-radius:var(--radius);border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--text2);transition:all 0.15s;font-family:inherit;display:flex;align-items:center;gap:4px;white-space:nowrap}
+@media (hover:hover){.nav-more-btn:hover{background:var(--glass-strong);color:var(--text)}}
+.nav-more-btn.active{background:var(--accent-soft);color:var(--accent);font-weight:500}
+.nav-more-btn .caret{width:10px;height:10px;flex-shrink:0;transition:transform 0.15s}
+.nav-more-wrap.open .nav-more-btn .caret{transform:rotate(180deg)}
+.nav-more-menu{display:none;position:absolute;top:calc(100% + 6px);left:0;min-width:180px;background:var(--glass-strong);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);box-shadow:0 16px 40px rgba(0,0,0,0.4),inset 0 1px 0 var(--glass-hi);padding:6px;z-index:110;flex-direction:column;gap:1px}
+.nav-more-wrap.open .nav-more-menu{display:flex}
+.nav-more-menu .nav-btn{width:100%;justify-content:flex-start}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .nav-more-menu{background:var(--surface-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
+}
 .topbar-actions{display:flex;align-items:center;gap:8px;margin-left:12px;flex-shrink:0}
 /* Icon buttons grouped into one bordered cluster (see markup): container owns
    the border/radius/background, buttons inside are borderless with dividers. */
@@ -473,6 +488,19 @@ table.holdings th:first-child,table.holdings td:first-child,table.holdings th.tl
 table.holdings td{font-variant-numeric:tabular-nums}
 table.holdings td.cell-sym{font-weight:600}
 table.holdings td.muted{color:var(--text3)}
+/* Long free-text names (Cash account names, Real Estate names) clamp to 2
+   lines with an ellipsis instead of wrapping word-per-line into very tall
+   rows on mobile (F4). Full text is still on the row via title=, and
+   unclamped in the edit modal (a plain form input, not this display cell).
+   -webkit-line-clamp on a <td> directly is unreliable (table-cell layout
+   fights the -webkit-box display it needs), so the clamp lives on an inner
+   span instead, the <td> just constrains the width. */
+table.holdings td.name-clamp{max-width:220px}
+table.holdings td.name-clamp .name-clamp-inner{
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+  overflow:hidden;text-overflow:ellipsis;white-space:normal;word-break:break-word;line-height:1.35
+}
+@media (max-width:640px){table.holdings td.name-clamp{max-width:180px}}
 table.holdings .price-stale{color:var(--text3);font-style:italic}
 table.holdings th.sticky-col,table.holdings td.sticky-col{position:sticky;left:0;background:var(--surface-solid);border-right:1px solid var(--border);z-index:2}
 table.holdings th.sticky-col{z-index:3}
@@ -562,9 +590,14 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   .nav-btn{min-height:44px}
   /* Toast spans the bottom centre so long messages are not squished at the edge. */
   #toast-host{left:16px;right:16px;bottom:calc(24px + env(safe-area-inset-bottom));align-items:center}
-  /* Horizontal-scroll affordance on tables. */
+  /* Horizontal-scroll affordance on tables (F5): the fade signals more
+     columns off to the right, and hides itself once scrolled to the end so
+     it never lies about there being more to see. No backdrop-filter, pure
+     gradient, toggled by a scrolled-end class from the delegated scroll
+     listener in app.js (see _bindTblScrollHints). */
   .tbl-wrap{position:relative}
-  .tbl-wrap::after{content:'';position:sticky;float:right;top:0;right:0;width:28px;height:100%;margin-left:-28px;pointer-events:none;background:linear-gradient(to right,transparent,var(--bg))}
+  .tbl-wrap::after{content:'';position:sticky;float:right;top:0;right:0;width:28px;height:100%;margin-left:-28px;pointer-events:none;background:linear-gradient(to right,transparent,var(--bg));transition:opacity 0.15s;opacity:1}
+  .tbl-wrap.tbl-scroll-end::after{opacity:0}
 }
 /* Only the elements still on the glass treatment need this fallback now
    (.card/.metric/.stat-box/.dash-hero/.h-summary/.mover/.bucket/.hint-block/
@@ -638,6 +671,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <nav class="nav" id="nav-host">
     <!-- nav buttons injected by JS -->
   </nav>
+  <div class="nav-more-wrap" id="nav-more-wrap" style="display:none">
+    <button type="button" class="nav-more-btn" id="nav-more-btn" data-click="toggleNavMore" aria-haspopup="true" aria-expanded="false">
+      <span>More</span><svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <div class="nav-more-menu" id="nav-more-menu"><!-- overflow tabs injected by JS --></div>
+  </div>
   <a href="../Trading/" class="nav-btn tb-cross-app" style="text-decoration:none;border-left:1px solid var(--border);margin-left:4px;padding-left:14px" title="Kujira Trading dashboard">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/></svg><span class="tb-trading-label">Trading</span>
   </a>
@@ -926,10 +965,10 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
         <div class="form-grid">
           <div class="form-group">
             <label class="lbl" for="cfg-base-currency">Base currency</label>
-            <select id="cfg-base-currency" class="fi">
+            <select id="cfg-base-currency" class="fi" disabled title="Fixed to SGD: every tab except Stocks and Watchlist+ always displays SGD">
               <option value="SGD">SGD (Singapore Dollar)</option>
-              <option value="USD">USD (US Dollar)</option>
             </select>
+            <div class="hint" style="margin-top:4px">Fixed to SGD. Stocks and Watchlist+ show USD by default and keep their own currency toggle.</div>
           </div>
           <div class="form-group">
             <label class="lbl" for="cfg-fx-usdsgd">USD → SGD manual override</label>
@@ -1305,8 +1344,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.49"></script>
-<script src="Worker/kjr-sortable.js?v=2.49"></script>
-<script src="Worker/app.js?v=2.49"></script>
+<script src="Worker/kjr-core.js?v=2.50"></script>
+<script src="Worker/kjr-sortable.js?v=2.50"></script>
+<script src="Worker/app.js?v=2.50"></script>
 </body>
 </html>

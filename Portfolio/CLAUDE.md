@@ -18,7 +18,7 @@ Chart.js 4.4.1 (CDN, SRI-pinned). Backend is Google Apps Script + Google Sheets 
 
 | Tab | Key | Status |
 |---|---|---|
-| Dashboard | `dashboard` | Phase 2 locked (parked, code in DOM) |
+| Dashboard | `dashboard` | Live |
 | Stocks | `stocks` | Live |
 | Crypto | `crypto` | Live (v2.47, CoinGecko via Apps Script) |
 | Real Estate | `realestate` | Live |
