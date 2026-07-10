@@ -1,4 +1,4 @@
-# wrangler.toml — MU Yahoo Worker v3
+# wrangler.toml, MU Yahoo Worker v3
 # Deploy with: wrangler deploy
 # (requires Wrangler CLI: npm install -g wrangler && wrangler login)
 
@@ -17,3 +17,10 @@ id = "b79903d38a8f4ca0b7153f37abce0a71"
 # Free plan supports up to 3 cron triggers.
 [triggers]
 crons = ["* * * * *"]
+
+# Secrets (set via `wrangler secret put <NAME>`, never committed here):
+#   TELEGRAM_TOKEN   already required for alerts (existing).
+#   ALERTS_SECRET    NEW as of v3.8. Shared-secret gate on POST /alerts so only the
+#                    Trading app (with the matching Settings value) can write alert
+#                    config. Set with: wrangler secret put ALERTS_SECRET
+#                    Then set the identical value in the Trading app's Settings drawer.

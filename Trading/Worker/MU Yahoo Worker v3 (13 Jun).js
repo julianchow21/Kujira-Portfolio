@@ -2,37 +2,63 @@
 // Cloudflare Worker: CORS proxy + KV-backed Telegram alerts + fundamentals quote cache.
 //
 // New in v3 vs v2:
-//   GET /quote?symbol=X  — crumb-authenticated Yahoo quoteSummary with 15-min KV cache.
+//   GET /quote?symbol=X, crumb-authenticated Yahoo quoteSummary with 15-min KV cache.
 //                          Returns flat JSON: trailingPE, forwardPE, trailingEps,
 //                          marketCap, fiftyTwoWeekHigh, fiftyTwoWeekLow.
 //
 // Deployment:
 //   1. wrangler deploy   (KV namespace and secrets already configured from v2)
-//   2. curl "<worker-url>/quote?symbol=MU" — should return {ok:true,...}
+//   2. curl "<worker-url>/quote?symbol=MU" (should return {ok:true,...})
 
-const ALLOWED_ORIGIN = "*"; // tighten to "https://<you>.github.io" once hosted
+// Origin allowlist (Julian's GitHub Pages origin, from repo remote julianchow21/Kujira-Portfolio).
+// If you host elsewhere too (e.g. a custom domain or local preview), add it here.
+const ALLOWED_ORIGINS = new Set([
+  "https://julianchow21.github.io",
+]);
 const INTERVALS = new Set(["1m","2m","5m","15m","30m","60m","90m","1h","1d","1wk","1mo"]);
 const RANGES    = new Set(["1d","5d","1mo","3mo","6mo","1y","2y","5y","max"]);
 const SYMBOL_RE = /^[A-Z.\-]{1,12}$/;
 const CROSS_TYPES = new Set(["rsi_above","rsi_below","price_vwap_above","price_vwap_below","ema_bull","ema_bear"]);
 const DESKTOP_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-function corsHeaders(methods = "GET, OPTIONS") {
+// Basic per-IP + per-symbol rate limit (KV-backed, short-window counter).
+const RATE_LIMIT_MAX = 30;       // max requests
+const RATE_LIMIT_WINDOW_S = 60;  // per this many seconds
+
+function corsHeaders(methods = "GET, OPTIONS", origin = null) {
   return {
-    "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+    "Access-Control-Allow-Origin": origin || "null",
     "Access-Control-Allow-Methods": methods,
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-Alerts-Secret",
     "Cache-Control": "no-store",
+    "Vary": "Origin",
   };
 }
-function jsonResp(data, status = 200) {
+function resolveOrigin(request) {
+  const origin = request.headers.get("Origin");
+  return origin && ALLOWED_ORIGINS.has(origin) ? origin : null;
+}
+async function checkRateLimit(env, key) {
+  if (!env.MU_ALERTS) return true; // fail-open if KV unavailable, matches existing pattern
+  const rlKey = "rl:" + key;
+  try {
+    const cur = await env.MU_ALERTS.get(rlKey);
+    const count = cur ? parseInt(cur, 10) : 0;
+    if (count >= RATE_LIMIT_MAX) return false;
+    await env.MU_ALERTS.put(rlKey, String(count + 1), { expirationTtl: RATE_LIMIT_WINDOW_S });
+    return true;
+  } catch (e) {
+    return true; // fail-open on KV error, don't block legitimate traffic on an infra hiccup
+  }
+}
+function jsonResp(data, status = 200, origin = null) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json", ...corsHeaders("GET, POST, OPTIONS") },
+    headers: { "Content-Type": "application/json", ...corsHeaders("GET, POST, OPTIONS", origin) },
   });
 }
-function err(status, description) {
-  return jsonResp({ chart: { result: null, error: { description } } }, status);
+function err(status, description, origin = null) {
+  return jsonResp({ chart: { result: null, error: { description } } }, status, origin);
 }
 
 // ---- Crumb acquisition ----
@@ -252,55 +278,74 @@ function isMarketWindow() {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const origin = resolveOrigin(request);
 
     if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders("GET, POST, OPTIONS") });
+      return new Response(null, { headers: corsHeaders("GET, POST, OPTIONS", origin) });
     }
 
-    // GET /quote?symbol=X — fundamentals via Yahoo quoteSummary with crumb + KV cache
+    // Per-IP rate limit, applies to every route below (short KV-backed counter).
+    const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+
+    // GET /quote?symbol=X, fundamentals via Yahoo quoteSummary with crumb + KV cache
     if (request.method === "GET" && url.pathname === "/quote") {
-      if (!env.MU_ALERTS) return jsonResp({ ok: false, error: "KV not configured" }, 503);
+      if (!env.MU_ALERTS) return jsonResp({ ok: false, error: "KV not configured" }, 503, origin);
       const sym = (url.searchParams.get("symbol") || "MU").toUpperCase();
-      if (!SYMBOL_RE.test(sym)) return jsonResp({ ok: false, error: "bad symbol" }, 400);
+      if (!SYMBOL_RE.test(sym)) return jsonResp({ ok: false, error: "bad symbol" }, 400, origin);
+      if (!(await checkRateLimit(env, ip + ":" + sym))) {
+        return jsonResp({ ok: false, error: "rate limited" }, 429, origin);
+      }
 
       const cacheKey = "quote:" + sym;
       const TTL_MS = 15 * 60 * 1000;
       try {
         const cached = await env.MU_ALERTS.get(cacheKey, { type: "json" });
-        if (cached?.ts && Date.now() - cached.ts < TTL_MS) return jsonResp(cached.data);
+        if (cached?.ts && Date.now() - cached.ts < TTL_MS) return jsonResp(cached.data, 200, origin);
       } catch (e) {}
 
       try {
         const data = await fetchQuoteSummary(sym, env);
         await env.MU_ALERTS.put(cacheKey, JSON.stringify({ ts: Date.now(), data }), { expirationTtl: 3600 });
-        return jsonResp(data);
+        return jsonResp(data, 200, origin);
       } catch (e) {
-        return jsonResp({ ok: false, error: String(e) }, 502);
+        // Negative-cache the failure briefly so an outage doesn't trigger a crumb-acquisition
+        // thundering herd on every client refresh.
+        const FAIL_TTL_S = 45;
+        try {
+          await env.MU_ALERTS.put(cacheKey, JSON.stringify({ ts: Date.now(), data: { ok: false, error: String(e) } }), { expirationTtl: FAIL_TTL_S });
+        } catch (e2) {}
+        return jsonResp({ ok: false, error: String(e) }, 502, origin);
       }
     }
 
     // GET /test-telegram
     if (request.method === "GET" && url.pathname === "/test-telegram") {
-      if (!env.TELEGRAM_TOKEN) return jsonResp({ ok: false, error: "TELEGRAM_TOKEN secret not set" }, 503);
-      if (!env.MU_ALERTS)      return jsonResp({ ok: false, error: "KV not configured" }, 503);
+      if (!env.TELEGRAM_TOKEN) return jsonResp({ ok: false, error: "TELEGRAM_TOKEN secret not set" }, 503, origin);
+      if (!env.MU_ALERTS)      return jsonResp({ ok: false, error: "KV not configured" }, 503, origin);
       const data = await env.MU_ALERTS.get("alerts:MU", { type: "json" });
       const chatId = data?.chatId;
-      if (!chatId) return jsonResp({ ok: false, error: "No chatId stored — sync alerts from the dashboard first" }, 400);
+      if (!chatId) return jsonResp({ ok: false, error: "No chatId stored, sync alerts from the dashboard first" }, 400, origin);
       try {
         await sendTelegram(env.TELEGRAM_TOKEN, chatId, "MU Dashboard\nTelegram connection test.");
-        return jsonResp({ ok: true, chatId });
-      } catch (e) { return jsonResp({ ok: false, error: String(e) }, 502); }
+        return jsonResp({ ok: true, chatId }, 200, origin);
+      } catch (e) { return jsonResp({ ok: false, error: String(e) }, 502, origin); }
     }
 
-    // POST /alerts
+    // POST /alerts, requires shared-secret auth (X-Alerts-Secret header) so only Julian's
+    // own app instance can register/overwrite alert config and Telegram chatId.
     if (request.method === "POST" && url.pathname === "/alerts") {
+      if (!env.ALERTS_SECRET) return err(503, "ALERTS_SECRET not configured", origin);
+      const supplied = request.headers.get("X-Alerts-Secret") || "";
+      if (supplied !== env.ALERTS_SECRET) return err(401, "unauthorized", origin);
+      if (!(await checkRateLimit(env, ip + ":alerts-post"))) return err(429, "rate limited", origin);
+
       let body;
-      try { body = await request.json(); } catch (e) { return err(400, "bad JSON"); }
+      try { body = await request.json(); } catch (e) { return err(400, "bad JSON", origin); }
       const { symbol, chatId, alerts } = body || {};
-      if (!symbol || !SYMBOL_RE.test(symbol.toUpperCase())) return err(400, "bad symbol");
-      if (!chatId) return err(400, "chatId required");
-      if (!Array.isArray(alerts)) return err(400, "alerts must be array");
-      if (!env.MU_ALERTS) return err(503, "KV binding MU_ALERTS not configured");
+      if (!symbol || !SYMBOL_RE.test(symbol.toUpperCase())) return err(400, "bad symbol", origin);
+      if (!chatId) return err(400, "chatId required", origin);
+      if (!Array.isArray(alerts)) return err(400, "alerts must be array", origin);
+      if (!env.MU_ALERTS) return err(503, "KV binding MU_ALERTS not configured", origin);
       const sym = symbol.toUpperCase();
       const stored = {
         chatId, symbol: sym,
@@ -312,25 +357,28 @@ export default {
         updatedAt: Date.now(),
       };
       await env.MU_ALERTS.put("alerts:" + sym, JSON.stringify(stored));
-      return jsonResp({ ok: true, count: alerts.length });
+      return jsonResp({ ok: true, count: alerts.length }, 200, origin);
     }
 
     // GET /alerts?symbol=X
     if (request.method === "GET" && url.pathname === "/alerts") {
-      if (!env.MU_ALERTS) return err(503, "KV binding MU_ALERTS not configured");
+      if (!env.MU_ALERTS) return err(503, "KV binding MU_ALERTS not configured", origin);
       const sym = (url.searchParams.get("symbol") || "MU").toUpperCase();
       const data = await env.MU_ALERTS.get("alerts:" + sym, { type: "json" });
-      return jsonResp(data || { alerts: [] });
+      return jsonResp(data || { alerts: [] }, 200, origin);
     }
 
-    // GET / — Yahoo chart proxy
+    // GET /, Yahoo chart proxy
     const symbol   = (url.searchParams.get("symbol") || "MU").toUpperCase();
     const interval = url.searchParams.get("interval") || "1m";
     const range    = url.searchParams.get("range") || "1d";
     const pre      = url.searchParams.get("includePrePost") === "true";
 
     if (!SYMBOL_RE.test(symbol) || !INTERVALS.has(interval) || !RANGES.has(range)) {
-      return err(400, "bad params");
+      return err(400, "bad params", origin);
+    }
+    if (!(await checkRateLimit(env, ip + ":" + symbol))) {
+      return err(429, "rate limited", origin);
     }
 
     const target = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol)
@@ -344,10 +392,10 @@ export default {
       const body = await resp.text();
       return new Response(body, {
         status: resp.status,
-        headers: { "Content-Type": "application/json", ...corsHeaders() },
+        headers: { "Content-Type": "application/json", ...corsHeaders("GET, OPTIONS", origin) },
       });
     } catch (e) {
-      return err(502, String(e));
+      return err(502, String(e), origin);
     }
   },
 
@@ -367,7 +415,7 @@ export default {
 
       let result;
       try { result = await fetchYahoo(data.symbol, "1m", "1d", true); }
-      catch (e) { continue; }
+      catch (e) { console.error("scheduled: fetchYahoo failed for " + data.symbol + ": " + String(e)); continue; }
 
       const snap = parseAndSnap(result);
       if (!snap || snap.price == null) continue;
