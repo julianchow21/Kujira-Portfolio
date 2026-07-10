@@ -191,10 +191,20 @@ const MAX_BODY_BYTES   = 400000;
 const MAX_ARRAY_LEN    = 5000;      // any one table capped, beyond is anomalous
 const MAX_STRING_LEN   = 5000;      // single string field cap
 
+/* Returns { clean, strippedKeys, truncatedPaths } instead of just the clean
+   object, so doPost can report back what it silently used to drop/cut. This
+   was previously silent: a typo'd top-level key or an oversize note field
+   would vanish with no signal, and the client had no way to warn the user
+   their data didn't round-trip intact. Nothing about what's allowed or
+   capped has changed, only that the caller now finds out. */
 function sanitisePayload_(data) {
-  // Strip unknown top-level keys
+  // Strip unknown top-level keys, and remember which ones we dropped.
   const clean = {};
-  Object.keys(data || {}).forEach(k => { if (ALLOWED_KEYS[k]) clean[k] = data[k]; });
+  const strippedKeys = [];
+  Object.keys(data || {}).forEach(k => {
+    if (ALLOWED_KEYS[k]) clean[k] = data[k];
+    else strippedKeys.push(k);
+  });
   // Hard caps on arrays, protect against accidental runaway
   ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash'].forEach(t => {
     if (Array.isArray(clean[t]) && clean[t].length > MAX_ARRAY_LEN) {
@@ -202,16 +212,25 @@ function sanitisePayload_(data) {
     }
   });
   // Truncate any string field >5KB (defensive, the frontend already caps)
-  truncateStringsDeep_(clean, MAX_STRING_LEN);
-  return clean;
+  const truncatedPaths = [];
+  truncateStringsDeep_(clean, MAX_STRING_LEN, '', truncatedPaths);
+  return { clean, strippedKeys, truncatedPaths };
 }
 
-function truncateStringsDeep_(obj, cap) {
+/* path accumulates a dotted/bracketed breadcrumb (e.g. "stocks[3].notes") so
+   the caller can tell the user roughly which field got cut, not just that
+   something somewhere did. */
+function truncateStringsDeep_(obj, cap, path, truncatedPaths) {
   if (!obj || typeof obj !== 'object') return;
   Object.keys(obj).forEach(k => {
     const v = obj[k];
-    if (typeof v === 'string' && v.length > cap) obj[k] = v.slice(0, cap);
-    else if (v && typeof v === 'object') truncateStringsDeep_(v, cap);
+    const childPath = Array.isArray(obj) ? (path + '[' + k + ']') : (path ? path + '.' + k : k);
+    if (typeof v === 'string' && v.length > cap) {
+      obj[k] = v.slice(0, cap);
+      if (truncatedPaths) truncatedPaths.push(childPath);
+    } else if (v && typeof v === 'object') {
+      truncateStringsDeep_(v, cap, childPath, truncatedPaths);
+    }
   });
 }
 
@@ -238,7 +257,7 @@ function doPost(e) {
       return json_({ error: 'Sheet busy, try again' });
     }
 
-    let clean, stamp;
+    let clean, stamp, strippedKeys, truncatedPaths;
     try {
       const sh = getSheet_();
 
@@ -246,6 +265,11 @@ function doPost(e) {
       // current server stamp. Mismatch, reject so the UI can offer pull-or-force.
       // syncPayload() (app.js) always includes lastSeenRemoteAt, including on the
       // beforeunload flush, so an unload write is checked the same as any other.
+      // Note: a falsy lastSeenRemoteAt (undefined/''/0) skips this check entirely,
+      // which is correct for a genuine first push (nothing to compare against yet)
+      // but is indistinguishable here from a client that simply omitted the field
+      // by mistake or bug. This is a deliberate soft spot, not a proven-safe one,
+      // flagged rather than silently relied upon.
       if (data.lastSeenRemoteAt) {
         const currentRemoteAt = sh.getRange('C1').getValue();
         if (currentRemoteAt && String(currentRemoteAt) !== data.lastSeenRemoteAt) {
@@ -258,7 +282,10 @@ function doPost(e) {
       }
 
       // Drop unknown keys, cap oversize arrays + strings
-      clean = sanitisePayload_(data);
+      const sanitised = sanitisePayload_(data);
+      clean = sanitised.clean;
+      strippedKeys = sanitised.strippedKeys;
+      truncatedPaths = sanitised.truncatedPaths;
 
       stamp = new Date().toISOString();
       writePayloadRaw_(sh, JSON.stringify(clean));
@@ -274,7 +301,15 @@ function doPost(e) {
       Logger.log('refreshViews_ error: ' + viewErr.message);
     }
 
-    return json_({ ok: true, savedAt: stamp });
+    // strippedKeys/truncated surface what sanitisePayload_ silently used to
+    // drop/cut, so the client can warn the user their data didn't round-trip
+    // intact. Both are omitted (not just empty) on the common case so the
+    // response shape stays small; a client that doesn't check for them sees
+    // no behaviour change.
+    const resp = { ok: true, savedAt: stamp };
+    if (strippedKeys && strippedKeys.length) resp.strippedKeys = strippedKeys;
+    if (truncatedPaths && truncatedPaths.length) { resp.truncated = true; resp.truncatedPaths = truncatedPaths; }
+    return json_(resp);
   } catch (err) {
     return json_({ error: err.message });
   }
@@ -668,6 +703,19 @@ function sortByField_(arr, field) {
   return arr.slice().sort((a, b) => String(b[field] || '').localeCompare(String(a[field] || '')));
 }
 
+/* Formula-injection guard for view-tab body cells. Only string values are the
+   injection vector, numbers/booleans/objects are already coerced to safe
+   types before this runs. A leading apostrophe is Sheets' own text-format
+   hint on setValues: it stores/displays the rest of the string as literal
+   text and hides the apostrophe itself, so "=IMPORTXML(...)" (or a stray
+   +, -, @ or tab-led string) renders inert instead of executing as a live
+   formula. Applied per-cell rather than setNumberFormat('@') on the whole
+   body range so numeric columns (shares, avgCost, balances, amounts) stay
+   native numbers, right-aligned and summable/sortable numerically, same
+   class of guard as the payload/chunk cells (see comment near line 98) but
+   scoped to just the cells that need it. */
+const deFormula_ = v => (typeof v === 'string' && /^[=+\-@\t]/.test(v)) ? "'" + v : v;
+
 /* Generic write: header row + body rows from schema, single setValues per. */
 function writeTable_(tabName, rows) {
   const sh = getOrCreate_(tabName);
@@ -685,8 +733,8 @@ function writeTable_(tabName, rows) {
     if (v == null) return '';
     if (typeof v === 'number') return v;
     if (typeof v === 'boolean') return v ? 'true' : 'false';
-    if (typeof v === 'object') return JSON.stringify(v);
-    return String(v);
+    if (typeof v === 'object') return deFormula_(JSON.stringify(v));
+    return deFormula_(String(v));
   }));
   sh.getRange(2, 1, body.length, headers.length).setValues(body);
   sh.autoResizeColumns(1, headers.length);
@@ -701,7 +749,9 @@ function writeCpfBalances_(tabName, balances) {
   sh.setFrozenRows(1);
   const b = balances || {};
   const ts = b.updatedAt || '';
-  const rows = ['OA','SA','MA','RA'].map(acc => [acc, Number(b[acc] || 0), ts]);
+  // account (col 1) is a hardcoded literal ('OA'/'SA'/'MA'/'RA'), never
+  // user input, so it needs no guard; balance stays a native number.
+  const rows = ['OA','SA','MA','RA'].map(acc => [acc, Number(b[acc] || 0), deFormula_(String(ts))]);
   sh.getRange(2, 1, rows.length, headers.length).setValues(rows);
   sh.autoResizeColumns(1, headers.length);
 }
@@ -714,7 +764,12 @@ function writeTrash_(tabName, rows) {
   sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#1e1e1e').setFontColor('#e8e8e8');
   sh.setFrozenRows(1);
   if (!Array.isArray(rows) || !rows.length) return;
-  const body = rows.map(r => [r.id || '', r.table || '', r.ts || '', JSON.stringify(r.data || {})]);
+  const body = rows.map(r => [
+    deFormula_(String(r.id || '')),
+    deFormula_(String(r.table || '')),
+    deFormula_(String(r.ts || '')),
+    deFormula_(JSON.stringify(r.data || {}))
+  ]);
   sh.getRange(2, 1, body.length, headers.length).setValues(body);
   sh.autoResizeColumns(1, headers.length);
 }
@@ -734,7 +789,8 @@ function writeSettings_(tabName, settings) {
       if (v != null && typeof v === 'object' && !Array.isArray(v)) {
         flatten(prefix + k + '.', v);
       } else {
-        rows.push([prefix + k, Array.isArray(v) ? JSON.stringify(v) : (v == null ? '' : String(v))]);
+        const cell = Array.isArray(v) ? JSON.stringify(v) : (v == null ? '' : String(v));
+        rows.push([deFormula_(prefix + k), deFormula_(cell)]);
       }
     });
   };

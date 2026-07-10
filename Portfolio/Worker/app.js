@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.48';
-const APP_DISPLAY_VERSION = 'v2.48 (4 Jul)';
+const APP_VERSION = 'v2.49';
+const APP_DISPLAY_VERSION = 'v2.49 (10 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -884,6 +884,18 @@ function kjrSafeString(s, maxLen){
   return v;
 }
 
+/* Ticker/symbol format guard for stocks/watchlist/crypto Symbol fields.
+   Letters, digits, dot, hyphen, 1-10 chars: covers plain tickers (AAPL),
+   SGX codes (D05), dotted share classes (BRK.B), and common crypto tickers
+   (WBTC). kjrEscape on render already neutralises HTML/script injection;
+   this is a separate data-quality guard so garbage input never corrupts
+   price lookups, CSV exports, or matching logic upstream of render. */
+const TICKER_RE = /^[A-Za-z0-9.-]{1,10}$/;
+function _isValidTicker(s){
+  if (s == null) return false;
+  return TICKER_RE.test(String(s));
+}
+
 
 /* Money formatter and the single currency-conversion point for the app.
    Values are stored and computed in SGD; fmt converts to the active display
@@ -1038,9 +1050,15 @@ function saveLocal(){
   return false;
 }
 
+/* Returns true (loaded), false (nothing stored, genuinely empty), or the
+   string 'corrupt' (something was stored but JSON.parse failed). Callers
+   MUST branch on 'corrupt' separately from false: false is safe to treat as
+   "seed an empty DB", but 'corrupt' means there was recoverable data that
+   must not be silently overwritten (see boot()). */
 function loadLocal(){
+  let raw;
   try {
-    const raw = localStorage.getItem(LK_DB);
+    raw = localStorage.getItem(LK_DB);
     if (!raw) return false;
     const obj = JSON.parse(raw);
     DB = mergeDefaults(obj);
@@ -1052,7 +1070,20 @@ function loadLocal(){
     return true;
   } catch (e) {
     console.error('localStorage read failed', e);
-    return false;
+    // Stash the raw corrupt string under its own key rather than letting the
+    // caller overwrite LK_DB with an empty DB. The stashed copy is the only
+    // remaining path to recovery (manual inspection, or a future "recover"
+    // UI), so keep it even if the stash itself fails for some reason.
+    if (raw){
+      try {
+        const stashKey = 'LK_DB_CORRUPT_' + Date.now();
+        localStorage.setItem(stashKey, raw);
+        console.warn('[loadLocal] corrupt DB stashed at', stashKey);
+      } catch (stashErr) {
+        console.error('[loadLocal] failed to stash corrupt DB', stashErr);
+      }
+    }
+    return 'corrupt';
   }
 }
 
@@ -1542,10 +1573,18 @@ window.addEventListener('beforeunload', () => {
   // never fire a real network write on close.
   if (isLocalPreview()) { setSyncStatus('local', 'Preview, sync disabled'); return; }
   const payload = JSON.stringify(syncPayload());
+  // fetch() only throws synchronously for a handful of pre-flight cases (bad
+  // URL, CSP block); a network failure or server error rejects the returned
+  // Promise ASYNCHRONOUSLY, after this function has already returned during
+  // page unload. A bare try/catch around the call never sees that rejection,
+  // so the sendBeacon fallback below was dead code. Attach a real .catch() so
+  // a failed keepalive fetch reliably falls back to sendBeacon.
+  const beacon = () => { try { navigator.sendBeacon(url, new Blob([payload], { type: 'text/plain' })); } catch (__) {} };
   try {
-    fetch(url, { method:'POST', body:payload, keepalive:true, headers:{ 'Content-Type':'text/plain;charset=utf-8' } });
+    fetch(url, { method:'POST', body:payload, keepalive:true, headers:{ 'Content-Type':'text/plain;charset=utf-8' } })
+      .catch(beacon);
   } catch (_) {
-    try { navigator.sendBeacon(url, new Blob([payload], { type: 'text/plain' })); } catch (__) {}
+    beacon();
   }
 });
 
@@ -1907,7 +1946,7 @@ function loadSettingsForm(){
   setV('cfg-target-cpf',        tg.cpf || '');
   setV('cfg-target-realestate', tg.realestate || '');
   setV('cfg-target-crypto',     tg.crypto || '');
-  setV('cfg-rebalance-threshold', s.rebalanceThreshold || 5);
+  setV('cfg-rebalance-threshold', s.rebalanceThreshold != null ? s.rebalanceThreshold : 5);
   setV('cfg-ef-target',         s.efTarget || '');
   updateTargetSumHint();
   // Income tax
@@ -1982,7 +2021,10 @@ function saveSettingsFromForm(){
   s.targets.cpf        = clampPct('cfg-target-cpf');
   s.targets.realestate = clampPct('cfg-target-realestate');
   s.targets.crypto     = clampPct('cfg-target-crypto');
-  s.rebalanceThreshold = numOrNull('cfg-rebalance-threshold') || 5;
+  // A typed 0 is a legitimate strict setting ("rebalance on any drift"), so
+  // use an explicit null check (not `|| 5`) which would otherwise revert an
+  // intentional 0 back to the default.
+  s.rebalanceThreshold = numOrNull('cfg-rebalance-threshold') ?? 5;
   s.efTarget           = numOrNull('cfg-ef-target');
   // Income tax
   if (!s.tax) s.tax = {};
@@ -2264,6 +2306,24 @@ function importBackupFromFile(input){
       input.value = '';
       return;
     }
+    // Data-safety rule: snapshot the CURRENT DB before this destructive bulk
+    // action overwrites it. The confirm() dialog above only suggests a manual
+    // export, which is easy to skip under time pressure; an automatic,
+    // recoverable copy means a bad/wrong backup file is never a dead end
+    // beyond the volatile in-memory undo stack. Stash key mirrors the
+    // corrupt-DB recovery convention (loadLocal()).
+    let snapshotKey = null;
+    try {
+      snapshotKey = 'LK_DB_PRE_IMPORT_' + Date.now();
+      localStorage.setItem(snapshotKey, JSON.stringify(localPersistPayload()));
+    } catch (snapErr) {
+      console.error('[importBackupFromFile] pre-import snapshot failed', snapErr);
+      if (!confirm('Could not save a safety snapshot of your current data (storage may be full). Import anyway?')) {
+        input.value = '';
+        return;
+      }
+      snapshotKey = null;
+    }
     try {
       DB = mergeDefaults(parsed);   // same validation path as a cloud pull
       saveLocal();
@@ -2273,7 +2333,7 @@ function importBackupFromFile(input){
       navigate('dashboard');
       const meta = document.getElementById('backup-meta');
       if (meta) meta.textContent = 'Imported ' + _isoDate(new Date());
-      showToast('Backup imported', 'success');
+      showToast('Backup imported' + (snapshotKey ? '. Your previous data is safely stashed if you need to recover it.' : ''), 'success');
     } catch (e) {
       showToast('Import failed: ' + (e && e.message ? e.message : e), 'error');
     }
@@ -2493,6 +2553,17 @@ function showPage(key){
   if (key === 'dashboard') renderDashboard(); // (re)draw charts now the canvas is sized
   if (key === 'projections') renderProjections(); // same reason: canvas needs to be sized/visible
   if (key === 'settings') { loadSettingsForm(); renderDiagnostics(); }
+  // renderAll() now gates these 6 renderers on their page being active (see
+  // renderAll's _isPageActive), so a tab that was hidden during the last
+  // renderAll() call would otherwise show stale data until the next DB
+  // mutation. Render on tab-show so switching to any of them is always fresh.
+  if (key === 'stocks' || key === 'board') renderStocks();
+  if (key === 'crypto') renderCrypto();
+  if (key === 'realestate') renderRealestate();
+  if (key === 'cash') renderCash();
+  if (key === 'cpf') renderCpf();
+  if (key === 'cashflow') renderCashflow();
+  if (key === 'insurance') renderInsurance();
   if (window.scrollTo) window.scrollTo({ top: 0, behavior: 'instant' });
   // History is owned by the router (navigate/hashchange), not showPage — see
   // the router block above. showPage is now a pure render primitive.
@@ -2537,6 +2608,16 @@ function toggleTheme(){
 const EYE_SVG     = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_OFF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 function privacyOn(){ return localStorage.getItem(LK_PRIVACY) === '1'; }
+/* Chart.js renders tooltips straight to <canvas>, so the DOM blur/hover-reveal
+   CSS above (html.privacy ...) cannot touch it, an amount would show in clear
+   text on hover even with privacy mode on. Every Chart.js tooltip label
+   callback must call this to mask the money portion of its own string when
+   privacy is active. There is no hover-to-reveal for canvas text (no DOM
+   element to hover), so masked means masked, consistent with "cannot read
+   off the screen" being the point of the mode. */
+function _privacyMaskLabel(label){
+  return privacyOn() ? '••••' : label;
+}
 function applyPrivacy(on){
   document.documentElement.classList.toggle('privacy', !!on);
   const btn = document.getElementById('privacy-toggle');
@@ -3021,7 +3102,11 @@ async function refreshCryptoPrices(){
     // No saveData(): same reasoning as refreshStockPrices, _priceCache is
     // memory-only, so there is nothing to persist and nothing worth pushing.
     renderCrypto();
-    showToast('Crypto: ' + ok + ' refreshed', 'success');
+    // Report configured coins that came back with no price too (typo'd or
+    // delisted coingeckoId), not just how many succeeded, so a silent gap
+    // in the ledger doesn't hide behind an all-green "N refreshed" toast.
+    const missing = ids.length - ok;
+    showToast('Crypto: ' + ok + ' refreshed' + (missing > 0 ? ', ' + missing + ' missing' : ''), missing > 0 ? 'error' : 'success');
   } catch (err) {
     showToast('Crypto refresh failed: ' + err.message, 'error');
   } finally {
@@ -3428,6 +3513,17 @@ function openEntityModal(table, existingId, defaultsOverride){
   const schema = ENTITY_SCHEMAS[table];
   if (!schema) return;
   const list = DB[table] || [];
+  // Row-vanished guard: existingId was passed (an Edit click) but the row is
+  // no longer in DB[table] (deleted concurrently, e.g. another tab/device).
+  // Silently falling through to the "Add new" branch below would reopen the
+  // modal as a blank form with a fresh id under an "Edit"-triggered click,
+  // confusing the user and risking an accidental duplicate if they fill it
+  // in without realising this is not the row they clicked. Refuse instead
+  // and say why.
+  if (existingId && !list.find(x => x.id === existingId)){
+    showToast('That entry no longer exists, it may have been deleted elsewhere', 'error');
+    return;
+  }
   const existing = existingId ? list.find(x => x.id === existingId) : null;
   const item = existing ? Object.assign({}, existing) : Object.assign({ id: uid(table) }, schema.defaults, defaultsOverride || {});
   _modalState = { table, item, isNew: !existing };
@@ -3589,12 +3685,23 @@ function entityModalSave(){
   // Numbers get isFinite checks; non-finite becomes null and trips required.
   const body = document.getElementById('em-body');
   let invalidDateLabel = null;   // non-blank but calendar-invalid date (e.g. 2026-02-30): block save, distinct from "left blank"
+  let rangeViolationLabel = null; // non-blank number outside schema min/max (e.g. negative shares): block save, not silently clamped
   for (const f of schema.fields){
     const el = body.querySelector(`[data-fkey="${f.key}"]`);
     if (!el) continue;
     const raw = el.value;
     if (f.type === 'number') {
-      item[f.key] = kjrSafeNumber(raw);
+      const min = f.min != null ? Number(f.min) : null;
+      const max = f.max != null ? Number(f.max) : null;
+      const parsed = kjrSafeNumber(raw, { min, max });
+      // kjrSafeNumber returns null both for "blank" and "out of range". Only
+      // flag a violation when the raw input was actually non-blank and finite
+      // but fell outside the schema bound, e.g. a negative shares/amount.
+      if (parsed == null && raw !== '' && raw != null && isFinite(Number(raw))){
+        const v = Number(raw);
+        if ((min != null && v < min) || (max != null && v > max)) rangeViolationLabel = f.label;
+      }
+      item[f.key] = parsed;
     } else if (f.type === 'select' || f.type === 'date') {
       // Selects: must be one of the declared options. Date: ISO yyyy-mm-dd
       // format plus a real calendar check (kjrValidDate), not just the shape.
@@ -3616,6 +3723,7 @@ function entityModalSave(){
   }
 
   if (invalidDateLabel){ showToast('Invalid date: ' + invalidDateLabel, 'error'); return; }
+  if (rangeViolationLabel){ showToast(rangeViolationLabel + ' is out of the allowed range', 'error'); return; }
 
   // Validate required
   for (const f of schema.fields){
@@ -3627,6 +3735,18 @@ function entityModalSave(){
   }
 
   if (schema.afterRead) schema.afterRead(item);
+
+  // Ticker format guard: stocks/watchlist/crypto all key off a free-text
+  // "Symbol" field with no format check, so it happily accepts HTML, garbage,
+  // or anything else typed in. kjrEscape on render already neutralises XSS,
+  // but a garbage symbol still corrupts price lookups and CSV/report output.
+  // afterRead has already trimmed + uppercased it above, so validate the
+  // normalised value: letters, digits, dot, hyphen, 1-10 chars (covers plain
+  // tickers like AAPL, SGX codes like D05, and dotted forms like BRK.B).
+  if ((table === 'stocks' || table === 'watchlist' || table === 'crypto') && !_isValidTicker(item.symbol)){
+    showToast('Symbol "' + item.symbol + '" looks invalid, use letters/digits/.- only (1-10 chars)', 'error');
+    return;
+  }
 
   // Over-sell guard: warn (but allow) if a sell exceeds shares held as of its
   // date. Out-of-order or correcting entries are legitimate, so this confirms
@@ -3675,17 +3795,30 @@ function entityModalSave(){
   item.updatedAt = new Date().toISOString();
   if (isNew) item.createdAt = item.updatedAt;
 
+  // Row-vanished guard: if this was an edit of an existing row but it is no
+  // longer in DB[table] (deleted concurrently, e.g. another tab/device, or a
+  // sync pulled a version without it), findIndex returns -1. Silently
+  // dropping the edit while still showing "Saved" is a false-success data
+  // loss. Re-insert the user's edited item instead so their work is not
+  // discarded, and say so plainly rather than pretending nothing happened.
+  let rowWasGone = false;
   if (isNew){
     if (!DB[table]) DB[table] = [];
     DB[table].push(item);
   } else {
     const idx = DB[table].findIndex(x => x.id === item.id);
-    if (idx >= 0) DB[table][idx] = item;
+    if (idx >= 0){
+      DB[table][idx] = item;
+    } else {
+      rowWasGone = true;
+      if (!item.createdAt) item.createdAt = item.updatedAt;
+      (DB[table] = DB[table] || []).push(item);
+    }
   }
   saveData();
   closeEntityModal();
   renderAll();
-  showToast(isNew ? 'Added' : 'Saved', 'success');
+  showToast(rowWasGone ? 'This entry was deleted elsewhere, your edit was restored as a new entry' : (isNew ? 'Added' : 'Saved'), rowWasGone ? 'error' : 'success');
 
   // A stock/watchlist row added (or repointed at a new symbol) has no cached
   // quote yet, so its price + fundamentals cells render as '—'. Fire a silent
@@ -3777,8 +3910,16 @@ let _ledgerView    = 'flat'; // 'flat' or 'by-stock'
 
 /* ─── CSV helpers ─────────────────────────────────────────────────────── */
 function downloadCSV(filename, headers, rows){
+  // CSV-injection guard: a cell starting with =, +, -, or @ is interpreted as
+  // a formula by Excel/Sheets on open. Prefix with a single quote to force
+  // text (Excel/Sheets both strip a leading ' when displaying, standard
+  // CSV-injection mitigation). Runs BEFORE the existing quote/comma/newline
+  // escaping so a formula-looking value that also contains a comma still
+  // gets both protections.
   const esc = v => {
-    const s = v == null ? '' : String(v).replace(/"/g,'""');
+    let s = v == null ? '' : String(v);
+    if (/^[=+\-@]/.test(s)) s = "'" + s;
+    s = s.replace(/"/g,'""');
     return /[",\n]/.test(s) ? '"'+s+'"' : s;
   };
   const lines = [headers.map(esc).join(',')].concat(rows.map(r => r.map(esc).join(',')));
@@ -3949,7 +4090,7 @@ function ibkrConfirmImport(){
   overlay.classList.remove('open');
 
   const now = new Date().toISOString();
-  let addedTrades = 0, addedStocks = 0;
+  let addedTrades = 0, addedStocks = 0, rejected = 0;
 
   // Create stubs for new-stock entries (unique by symbol)
   const newStockSymbols = {};
@@ -3968,16 +4109,24 @@ function ibkrConfirmImport(){
     addedStocks++;
   });
 
-  // Commit new trades, plus any dup rows the user explicitly ticked.
+  // Commit new trades, plus any dup rows the user explicitly ticked. Defence
+  // in depth: shares/price/fees must be finite and non-negative even though
+  // ibkrExtractTrades already Math.abs()'s them, since this same commit path
+  // reads from a JSON blob stashed on the DOM (overlay.dataset.matched) that
+  // could in principle be tampered with or extended by a future importer.
   matched.forEach((t, idx) => {
     if (t.status === 'dup' && !forcedDupIdx.has(idx)) return;   // skip un-ticked dups
     if (t.status === 'new-stock' || t.status === 'new' || (t.status === 'dup' && forcedDupIdx.has(idx))){
       const stockId = t.stockId || newStockSymbols[t.symbol];
       if (!stockId) return;
+      const shares = Number(t.shares), price = Number(t.price), fees = Number(t.fees) || 0;
+      if (!isFinite(shares) || shares < 0 || !isFinite(price) || price < 0 || !isFinite(fees) || fees < 0){
+        rejected++; return;
+      }
       (DB.stockTxns = DB.stockTxns || []).push({
         id: uid('stockTxns'), stockId,
         date: t.date, side: t.side,
-        shares: t.shares, price: t.price, fees: t.fees || 0,
+        shares, price, fees,
         cashAccountId: '', notes: '', createdAt: now, updatedAt: now
       });
       addedTrades++;
@@ -3986,7 +4135,7 @@ function ibkrConfirmImport(){
 
   saveData();
   renderAll();
-  showToast(`Imported ${addedTrades} trade${addedTrades !== 1 ? 's' : ''}${addedStocks ? ' + ' + addedStocks + ' new stock' + (addedStocks !== 1 ? 's' : '') : ''}`);
+  showToast(`Imported ${addedTrades} trade${addedTrades !== 1 ? 's' : ''}${addedStocks ? ' + ' + addedStocks + ' new stock' + (addedStocks !== 1 ? 's' : '') : ''}${rejected ? ', ' + rejected + ' rejected (invalid shares/price)' : ''}`);
 }
 
 /* ─── Insurance CSV import (manual SGFinDex mapper) ─────────────────────
@@ -5136,7 +5285,10 @@ function _pbDrawCrossSectional(host, cfg, showEmpty, showChart){
         tooltip:{ callbacks:{ label: t => {
           const yKey = cfg.yFields[t.datasetIndex] || cfg.yFields[0];
           const raw = (t.parsed && typeof t.parsed.y === 'number') ? t.parsed.y : t.parsed;
-          return ' ' + t.dataset.label + ': ' + kjrFmtMeasure(raw, flds[yKey], curSym);
+          const f = flds[yKey];
+          const isMoney = !f || !f.unit || f.unit === 'money';
+          const val = (isMoney && privacyOn()) ? '••••' : kjrFmtMeasure(raw, f, curSym);
+          return ' ' + t.dataset.label + ': ' + val;
         } } } },
       scales }
   });
@@ -5215,7 +5367,7 @@ async function _pbDrawTimeSeries(host, cfg, showEmpty, showChart){
     options:{ responsive:true, maintainAspectRatio:false, animation:{duration:300}, interaction:{mode:'index',intersect:false},
       plugins:{ legend:{ position:'top', labels:{ color:_cssVar('--text2'), font:{size:11}, padding:10, usePointStyle:true,
                   filter: it => !/ avg cost$/.test(it.text) } },
-        tooltip:{ callbacks:{ label: t => ' ' + t.dataset.label + ': ' + curSym + (Number(t.parsed.y)||0).toLocaleString('en-SG',{maximumFractionDigits:2}) } } },
+        tooltip:{ callbacks:{ label: t => ' ' + t.dataset.label + ': ' + _privacyMaskLabel(curSym + (Number(t.parsed.y)||0).toLocaleString('en-SG',{maximumFractionDigits:2})) } } },
       scales:{ x:{ ticks:{ color:axisColor, font:{size:10}, maxTicksLimit:8 }, grid:{ display:false } },
                y:{ ticks:{ color:axisColor, font:{size:10}, callback:v => curSym + kjrFmtAxis(v, {unit:'count'}, curSym) }, grid:{ color:gridColor } } }
     }
@@ -5251,7 +5403,7 @@ function _pbDrawInternalSeries(host, cfg, showEmpty, showChart){
       interaction:{ mode:'index', intersect:false },
       plugins:{
         legend:{ display: ser.stacked || ser.datasets.length > 1, position:'bottom', labels:{ color:_cssVar('--text2'), font:{size:11}, boxWidth:12, padding:12 } },
-        tooltip:{ callbacks:{ label: c => ' ' + c.dataset.label + ': ' + fmt(c.parsed.y, { noConvert:true, dp:0 }) } }
+        tooltip:{ callbacks:{ label: c => ' ' + c.dataset.label + ': ' + _privacyMaskLabel(fmt(c.parsed.y, { noConvert:true, dp:0 })) } }
       },
       scales:{
         x:{ stacked:ser.stacked, ticks:{ color:axisColor, font:{size:10}, maxTicksLimit:6 }, grid:{ display:false } },
@@ -6300,6 +6452,13 @@ function setCoverageTarget(key,val){
   DB.settings.coverageTargets=next;
   saveData(); renderInsurance(); loadSettingsForm();
 }
+/* Trailing-12-month income, returned as the RAW SUM, no extrapolation. A
+   populated-month-count divisor (or an elapsed-time divisor) both explode
+   for a new/sparse logger: 2 real entries totalling S$4,000 must show as
+   S$4,000, not S$24,000 or S$48,000. This is honest and understated for a
+   partial year, and converges to the true run rate as more months land.
+   Falls back to all-time rows if nothing falls in the trailing 12mo window
+   (e.g. a user who stopped logging), same as before. */
 function annualIncomeSGD(){
   const inc=(DB.income||[]).filter(i=>i.date&&isFinite(Number(i.gross)));
   if(!inc.length) return 0;
@@ -6307,19 +6466,15 @@ function annualIncomeSGD(){
   const cutISO=_isoDateSG(cutoff);
   let rows=inc.filter(i=>i.date>=cutISO);
   if(!rows.length) rows=inc;
-  const byMonth={};
-  rows.forEach(i=>{ const m=String(i.date).slice(0,7); byMonth[m]=(byMonth[m]||0)+(Number(i.gross)||0); });
-  const months=Object.keys(byMonth).length||1;
-  const total=Object.values(byMonth).reduce((s,v)=>s+v,0);
-  return months>=12?total:(total/months)*12;
+  return rows.reduce((s,i)=>s+(Number(i.gross)||0),0);
 }
 /* ═══════════════════════════════════════════════════════════════════════
    PROJECTIONS (Phase 6), derivation helpers. Pure reads of DB, no rendering.
    ═══════════════════════════════════════════════════════════════════════ */
-/* Trailing-12-month expenses, annualised by distinct months present (same
-   shape as annualIncomeSGD). excluded counts rows skipped for an
-   unconvertible currency (expenseAmountSgdOrNull returning null), so the
-   assumptions card can flag it rather than silently understating spend. */
+/* Trailing-12-month expenses, returned as the RAW SUM, no extrapolation (see
+   annualIncomeSGD). excluded counts rows skipped for an unconvertible
+   currency (expenseAmountSgdOrNull returning null), so the assumptions card
+   can flag it rather than silently understating spend. */
 function annualExpensesSGD(){
   const all = (DB.expenses||[]).filter(x=>x.date);
   if (!all.length) return { annual:0, excluded:0 };
@@ -6327,21 +6482,19 @@ function annualExpensesSGD(){
   const cutISO=_isoDateSG(cutoff);
   let rows = all.filter(x=>x.date>=cutISO);
   if (!rows.length) rows = all;
-  const byMonth={}; let excluded=0;
+  let excluded=0, total=0;
   rows.forEach(x=>{
     const sgd = expenseAmountSgdOrNull(x);
     if (sgd == null){ excluded++; return; }
-    const m=String(x.date).slice(0,7); byMonth[m]=(byMonth[m]||0)+sgd;
+    total += sgd;
   });
-  const months=Object.keys(byMonth).length||1;
-  const total=Object.values(byMonth).reduce((s,v)=>s+v,0);
-  const annual = months>=12 ? total : (total/months)*12;
-  return { annual, excluded };
+  return { annual: total, excluded };
 }
 
-/* Trailing-12-month average monthly savings: per distinct month present in
-   either income or expenses, take-home (incomeNet) minus expenses, averaged.
-   Negative is allowed and returned honestly (see Phase 6 methodology). */
+/* Trailing-12-month average monthly savings: total take-home (incomeNet)
+   minus total expenses over the window, divided by a FIXED 12 (not elapsed
+   or populated months). Negative is allowed and returned honestly (see
+   Phase 6 methodology). */
 function derivedMonthlySavingsSGD(){
   const cutoff=new Date(); cutoff.setFullYear(cutoff.getFullYear()-1);
   const cutISO=_isoDateSG(cutoff);
@@ -6350,13 +6503,10 @@ function derivedMonthlySavingsSGD(){
   let incRows = inc.filter(i=>i.date>=cutISO);
   let expRows = exp.filter(x=>x.date>=cutISO);
   if (!incRows.length && !expRows.length){ incRows = inc; expRows = exp; }
-  const byMonth = {};
-  incRows.forEach(i=>{ const m=String(i.date).slice(0,7); (byMonth[m]=byMonth[m]||{inc:0,exp:0}).inc += incomeNet(i); });
-  expRows.forEach(x=>{ const sgd = expenseAmountSgdOrNull(x); if (sgd==null) return; const m=String(x.date).slice(0,7); (byMonth[m]=byMonth[m]||{inc:0,exp:0}).exp += sgd; });
-  const keys = Object.keys(byMonth);
-  if (!keys.length) return 0;
-  const totalNet = keys.reduce((s,m)=>s+(byMonth[m].inc-byMonth[m].exp),0);
-  return totalNet / keys.length;
+  if (!incRows.length && !expRows.length) return 0;
+  const totalInc = incRows.reduce((s,i)=>s+incomeNet(i),0);
+  const totalExp = expRows.reduce((s,x)=>{ const sgd=expenseAmountSgdOrNull(x); return sgd==null?s:s+sgd; },0);
+  return (totalInc-totalExp) / 12;
 }
 
 /* FIRE number: manual override wins, else trailing-12mo annualised expenses x
@@ -6691,7 +6841,7 @@ function _renderInsPremiumChart(series){
       responsive:true, maintainAspectRatio:false, animation:{duration:300},
       plugins:{
         legend:{ display:false },
-        tooltip:{ callbacks:{ label: c => ' ' + fmt(c.parsed.y, { noConvert:true, dp:0 }) } }
+        tooltip:{ callbacks:{ label: c => ' ' + _privacyMaskLabel(fmt(c.parsed.y, { noConvert:true, dp:0 })) } }
       },
       scales:{
         x:{ ticks:{ color:axisColor, font:{size:10} }, grid:{ display:false } },
@@ -6870,7 +7020,7 @@ function _renderProjectionChart(liquidSeries, cpfSeries, fireNumber){
       interaction:{ mode:'index', intersect:false },
       plugins:{
         legend:{ position:'top', labels:{ color:_cssVar('--text2'), font:{size:11}, padding:10, usePointStyle:true } },
-        tooltip:{ callbacks:{ label: c => ' ' + (c.dataset.label||'') + ': ' + (c.parsed.y==null?'—':fmt(c.parsed.y,{noConvert:true,dp:0})) } }
+        tooltip:{ callbacks:{ label: c => ' ' + (c.dataset.label||'') + ': ' + (c.parsed.y==null?'—':_privacyMaskLabel(fmt(c.parsed.y,{noConvert:true,dp:0}))) } }
       },
       scales:{
         x:{ ticks:{ color:axisColor, font:{size:10}, autoSkip:false, maxRotation:0 }, grid:{ display:false } },
@@ -7231,7 +7381,7 @@ function renderCpf(){
   const yrSel = document.getElementById('cpf-filter-year');
   if (yrSel){
     const prev = yrSel.value;
-    yrSel.innerHTML = '<option value="">All years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
+    yrSel.innerHTML = '<option value="">All years</option>' + years.map(y => `<option value="${kjrEscape(y)}">${kjrEscape(y)}</option>`).join('');
     if (prev && years.includes(prev)) yrSel.value = prev;
   }
   const fYear = (yrSel && yrSel.value) || '';
@@ -7344,7 +7494,7 @@ function renderCashflow(){
   const years = Array.from(new Set([...allIncome, ...allExpenses].map(r => String(r.date || '').slice(0,4)).filter(Boolean))).sort().reverse();
   if (yrSel){
     const prev = yrSel.value;
-    yrSel.innerHTML = '<option value="">All years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
+    yrSel.innerHTML = '<option value="">All years</option>' + years.map(y => `<option value="${kjrEscape(y)}">${kjrEscape(y)}</option>`).join('');
     if (prev && years.includes(prev)) yrSel.value = prev;
   }
   const fYear = yrSel?.value || '';
@@ -7937,7 +8087,10 @@ function renderTargetAllocation(classes, net){
   if (targetSum <= 0 || net <= 0){ el.innerHTML = ''; return; }
 
   const keyMap = { Stocks:'stocks', Cash:'cash', CPF:'cpf', 'Real Estate':'realestate', Crypto:'crypto' };
-  const thr = Number(DB.settings.rebalanceThreshold) || 5;
+  // Explicit null check, not `|| 5`: a typed 0 ("flag any drift at all") is a
+  // legitimate strict setting and must not be silently reverted to 5.
+  const rawThr = DB.settings.rebalanceThreshold;
+  const thr = (rawThr != null && isFinite(Number(rawThr))) ? Number(rawThr) : 5;
   const rows = [];
   const alerts = [];
   classes.forEach(c => {
@@ -8032,21 +8185,34 @@ function renderSummary(items){
 /* ═══════════════════════════════════════════════════════════════════════
    RENDER ALL — top-level redraw
    ═══════════════════════════════════════════════════════════════════════ */
+/* Is DB[table]-owning page `key` the one currently on screen? Mirrors the
+   existing Settings gate below. Used to skip re-rendering the 8 tabs that
+   are display:none on any given call, since their DOM churn was previously
+   wasted work on every single save/sync. showPage() (tab switch) calls the
+   matching renderer directly so a gated tab is never stale when it becomes
+   visible, see the render-on-tab-show calls there. */
+function _isPageActive(key){
+  const el = document.getElementById('page-' + key);
+  return !!(el && el.classList.contains('active'));
+}
 function renderAll(){
   // Preserve scroll position: renderAll rebuilds table innerHTML, which would
   // otherwise jump the page to the top on a background sync or cross-tab update.
   // Navigation scroll-to-top is handled separately in showPage().
   const sx = window.scrollX, sy = window.scrollY;
   updateCcyToggleUI();
-  renderDashboard();
-  renderStocks();
-  renderCrypto();
-  renderRealestate();
-  renderCash();
-  renderCpf();
-  renderCashflow();
-  renderInsurance();
-  renderProjections();
+  renderDashboard(); // self-checks visibility internally (dash-networth lookup), always safe to call
+  // renderStocks() also drives renderWatchlist/renderBoard/renderDividendTimeline/
+  // renderStockTxns internally, and renderBoard() targets the SEPARATE
+  // #page-board (Watchlist+) page, so gate on either page being active.
+  if (_isPageActive('stocks') || _isPageActive('board')) renderStocks();
+  if (_isPageActive('crypto')) renderCrypto();
+  if (_isPageActive('realestate')) renderRealestate();
+  if (_isPageActive('cash')) renderCash();
+  if (_isPageActive('cpf')) renderCpf();
+  if (_isPageActive('cashflow')) renderCashflow();
+  if (_isPageActive('insurance')) renderInsurance();
+  if (_isPageActive('projections')) renderProjections();
   if (document.getElementById('page-settings').classList.contains('active')) {
     loadSettingsForm();
     renderDiagnostics();
@@ -8281,7 +8447,16 @@ async function boot(){
   // Render immediately so the app is interactive fast. The heavy salary/snapshot
   // engines and the network pull are deferred below — neither blocks first paint.
   const had = loadLocal();
-  if (!had) saveLocal(); // seed empty DB so localStorage has the canonical shape
+  if (had === 'corrupt'){
+    // Do NOT saveLocal() here: that would overwrite LK_DB with the fresh
+    // empty DB() and permanently discard whatever was recoverable. The raw
+    // string is already stashed under LK_DB_CORRUPT_<timestamp> by
+    // loadLocal(); warn the user so they know to ask for help recovering it,
+    // and continue running on the in-memory empty DB for this session only.
+    showToast('Your local data was unreadable and has been quarantined, not deleted. Check Settings > Diagnostics or contact support to recover it.', 'error');
+  } else if (!had) {
+    saveLocal(); // genuinely empty (first run): seed so localStorage has the canonical shape
+  }
   migrateDeviceLocalChartState(); // D1: one-time pickup of the old localStorage chart/layout keys
   updateCcyToggleUI();
   renderAll();

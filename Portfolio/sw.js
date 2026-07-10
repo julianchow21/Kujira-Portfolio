@@ -7,15 +7,15 @@
    index.html is network-first (self-healing) but the rest are cache-first and
    will be served stale forever otherwise. */
 
-const CACHE_NAME = 'kjr-portfolio-v2.48';
+const CACHE_NAME = 'kjr-portfolio-v2.49';
 const CHART_JS_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
 
 const CORE_ASSETS = [
   './index.html',
   './Worker/theme-init.js',
-  './Worker/app.js?v=2.48',
-  './Worker/kjr-core.js?v=2.48',
-  './Worker/kjr-sortable.js?v=2.48',
+  './Worker/app.js?v=2.49',
+  './Worker/kjr-core.js?v=2.49',
+  './Worker/kjr-sortable.js?v=2.49',
   './Worker/manifest.webmanifest',
   './Worker/whale-icon.png',
   CHART_JS_URL,
@@ -93,7 +93,11 @@ self.addEventListener('fetch', (e) => {
       }
       return fresh;
     } catch {
-      return cached || new Response('', { status: 504 });
+      // Not in cache and the network fetch failed: give a small explicit
+      // body + Content-Type so this reads as a clear offline signal in
+      // devtools/network tab, not a broken/empty asset.
+      return cached || new Response('Offline, asset not cached and network unavailable.',
+        { status: 504, headers: { 'Content-Type': 'text/plain' } });
     }
   })());
 });

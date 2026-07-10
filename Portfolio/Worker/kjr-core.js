@@ -465,6 +465,15 @@ function computeStockPosition(openingShares, openingAvgCost, sortedTxns){
 /* ─── IBKR Activity Statement CSV import ───────────────────────────────
    parseCSV: minimal RFC 4180 parser — handles quoted fields, doubled-quote
    escapes, CRLF + LF line endings. Returns array of string arrays.
+   Malformed input (a quote opened but never closed before EOF) used to
+   silently swallow the rest of the file into one giant cell, masking a
+   truncated/corrupt upload. It is now detected: the still-open field is
+   closed at end-of-input (same as before, so the row count and content
+   callers already depend on is unchanged) AND the returned array carries a
+   non-enumerable `.malformed = true` marker so a caller that cares (e.g.
+   ibkrExtractTrades) can detect and surface it. Plain array semantics
+   (rows.length, rows[0], for..of, .map) are all unaffected, this is
+   additive, not a signature change, so existing app.js callers keep working.
    ibkrNum: strips thousands commas from an IBKR numeric cell and returns a
    finite float, or null on junk.
    ibkrExtractTrades: filters a parseCSV result down to Trades/Data/Order rows
@@ -474,6 +483,7 @@ function computeStockPosition(openingShares, openingAvgCost, sortedTxns){
 function parseCSV(text){
   const rows = [];
   let row = [], cell = '', inQ = false;
+  let malformed = false;
   for (let i = 0; i < text.length; i++){
     const c = text[i];
     if (inQ){
@@ -485,11 +495,23 @@ function parseCSV(text){
     else if (c === '\n' || c === '\r'){
       if (c === '\r' && text[i+1] === '\n') i++;
       row.push(cell); cell = '';
+      // A blank line (every cell empty/undefined) is dropped rather than
+      // pushed as a row of empty strings. Intentional: IBKR statements are
+      // riddled with blank separator lines between sections, and downstream
+      // consumers (ibkrExtractTrades, the insurance CSV mapper) index rows
+      // positionally, so a stray blank row would misalign everything after it.
       if (row.some(Boolean)) rows.push(row);
       row = [];
     } else cell += c;
   }
+  if (inQ) malformed = true; // quote opened but never closed before EOF
   if (row.some(Boolean) || cell){ row.push(cell); rows.push(row); }
+  if (malformed){
+    // Non-enumerable: invisible to JSON.stringify, Object.keys, for..in and
+    // array iteration/length, so every existing caller that treats the
+    // return value as a plain string[][] keeps working unchanged.
+    Object.defineProperty(rows, 'malformed', { value: true, enumerable: false });
+  }
   return rows;
 }
 
@@ -501,10 +523,15 @@ function ibkrNum(s){
 }
 
 function ibkrExtractTrades(rows){
-  // Find the Trades header row to build column name → index map
+  // Find the Trades header row to build column name -> index map
   let colMap = null;
   const trades = [];
   let skipped = 0;
+  // Surfaces parseCSV's malformed-quote marker (see parseCSV) as an explicit,
+  // named field on the return value. Additive: existing callers that
+  // destructure only { trades, skipped } are unaffected; a caller that wants
+  // to warn the user about a truncated/corrupt upload can check `truncated`.
+  const truncated = !!(rows && rows.malformed);
 
   for (const row of rows){
     if (row[0] !== 'Trades') continue;
@@ -548,7 +575,7 @@ function ibkrExtractTrades(rows){
     });
   }
 
-  return { trades, skipped };
+  return { trades, skipped, truncated };
 }
 
 function ibkrMatchTrades(parsed, stocks, existingTxns){

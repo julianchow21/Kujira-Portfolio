@@ -146,6 +146,41 @@ function runTests() {
     assert.strictEqual(res.allocated, false);
   });
 
+  // 4b. Direct boundary tests for the CPF age seams via the exported pure
+  // rate/allocation lookups, locking in each `<=` cutoff exactly at the
+  // boundary age and the first age past it (35/45/50/55/60/65/70).
+  test('cpfContribRatesForAge - boundary ages 55/56, 60/61, 65/66, 70/71', () => {
+    assert.deepStrictEqual(core.cpfContribRatesForAge(55), { employer:17.0, employee:20.0 }); // <=55 band
+    assert.deepStrictEqual(core.cpfContribRatesForAge(56), { employer:16.0, employee:18.0 }); // 55<age<=60
+    assert.deepStrictEqual(core.cpfContribRatesForAge(60), { employer:16.0, employee:18.0 }); // <=60 band
+    assert.deepStrictEqual(core.cpfContribRatesForAge(61), { employer:12.5, employee:12.5 }); // 60<age<=65
+    assert.deepStrictEqual(core.cpfContribRatesForAge(65), { employer:12.5, employee:12.5 }); // <=65 band
+    assert.deepStrictEqual(core.cpfContribRatesForAge(66), { employer:9.0,  employee:7.5  }); // 65<age<=70
+    assert.deepStrictEqual(core.cpfContribRatesForAge(70), { employer:9.0,  employee:7.5  }); // <=70 band
+    assert.deepStrictEqual(core.cpfContribRatesForAge(71), { employer:7.5,  employee:5.0  }); // >70 band
+  });
+
+  test('cpfContribRatesForAge - null/undefined age treated as <=55 band', () => {
+    assert.deepStrictEqual(core.cpfContribRatesForAge(null), { employer:17.0, employee:20.0 });
+    assert.deepStrictEqual(core.cpfContribRatesForAge(undefined), { employer:17.0, employee:20.0 });
+  });
+
+  test('cpfAllocationForAge - boundary ages 35/36, 45/46, 50/51, 55/56', () => {
+    assert.deepStrictEqual(core.cpfAllocationForAge(35), { OA:23.0, SA:6.0,  MA:8.0  }); // <=35 band
+    assert.deepStrictEqual(core.cpfAllocationForAge(36), { OA:21.0, SA:7.0,  MA:9.0  }); // 35<age<=45
+    assert.deepStrictEqual(core.cpfAllocationForAge(45), { OA:21.0, SA:7.0,  MA:9.0  }); // <=45 band
+    assert.deepStrictEqual(core.cpfAllocationForAge(46), { OA:19.0, SA:8.0,  MA:10.0 }); // 45<age<=50
+    assert.deepStrictEqual(core.cpfAllocationForAge(50), { OA:19.0, SA:8.0,  MA:10.0 }); // <=50 band
+    assert.deepStrictEqual(core.cpfAllocationForAge(51), { OA:15.0, SA:11.5, MA:10.5 }); // 50<age<=55
+    assert.deepStrictEqual(core.cpfAllocationForAge(55), { OA:15.0, SA:11.5, MA:10.5 }); // <=55 band
+    assert.strictEqual(core.cpfAllocationForAge(56), null); // >55, not automated
+  });
+
+  test('cpfAllocationForAge - null age treated as <=35 band, no allocation past 55', () => {
+    assert.deepStrictEqual(core.cpfAllocationForAge(null), { OA:23.0, SA:6.0, MA:8.0 });
+    assert.strictEqual(core.cpfAllocationForAge(60), null);
+  });
+
   // 5. Testing incomeNet
   test('incomeNet - uses typed net when present', () => {
     assert.strictEqual(core.incomeNet({ net: 6400, gross: 8000, employeeCPF: 1600 }), 6400);
@@ -288,6 +323,59 @@ function runTests() {
       ['AAPL', 'Q3 "beat", raised guidance'],
       ['D05', 'plain']
     ]);
+  });
+
+  test('parseCSV - legitimate embedded newline inside a properly-closed quote is preserved, not flagged malformed', () => {
+    const rows = core.parseCSV('sym,note\na,"line one\nline two",b\n');
+    assert.deepStrictEqual(rows, [['sym', 'note'], ['a', 'line one\nline two', 'b']]);
+    assert.strictEqual(rows.malformed, undefined);
+  });
+
+  test('parseCSV - unterminated quote at end of input is detected and closes the field', () => {
+    // The quote on the last cell is never closed. Before the fix this silently
+    // swallowed the rest of the (in this case, nonexistent) file into one cell.
+    const rows = core.parseCSV('a,b,"unterminated\nstill-in-the-quote');
+    // Still returns a plain array (backward compatible with existing app.js callers)...
+    assert.strictEqual(Array.isArray(rows), true);
+    assert.deepStrictEqual(rows, [['a', 'b', 'unterminated\nstill-in-the-quote']]);
+    // ...but the caller can now detect the file was malformed via the marker.
+    assert.strictEqual(rows.malformed, true);
+  });
+
+  test('parseCSV - unterminated quote marker is non-enumerable (invisible to JSON/iteration)', () => {
+    const rows = core.parseCSV('a,"b\n');
+    assert.strictEqual(rows.malformed, true);
+    assert.strictEqual(JSON.stringify(rows), '[["a","b\\n"]]'); // marker never serialises
+    assert.deepStrictEqual(Object.keys(rows), ['0']); // marker never shows up via for..in/Object.keys
+  });
+
+  test('parseCSV - well-formed input never sets the malformed marker', () => {
+    const rows = core.parseCSV('a,b,c\n');
+    assert.strictEqual(rows.malformed, undefined);
+  });
+
+  test('parseCSV - all-empty-cells rows are dropped, a row with any content is kept', () => {
+    const rows = core.parseCSV('a,b,c\n,,\nd,e,f\n\n');
+    assert.deepStrictEqual(rows, [['a', 'b', 'c'], ['d', 'e', 'f']]);
+  });
+
+  test('parseCSV - a row with at least one non-empty cell is kept even if others are blank', () => {
+    const rows = core.parseCSV('a,,c\n,,\n');
+    assert.deepStrictEqual(rows, [['a', '', 'c']]);
+  });
+
+  test('ibkrExtractTrades - surfaces truncated:true when fed a malformed parseCSV result', () => {
+    const rows = core.parseCSV('Trades,Header,DataDiscriminator,Asset Category,Symbol,Currency,Date/Time,Quantity,T. Price,Comm/Fee\nTrades,Data,"Order,Stocks,AAPL,USD,2024-01-15');
+    const { trades, skipped, truncated } = core.ibkrExtractTrades(rows);
+    assert.strictEqual(truncated, true);
+    assert.strictEqual(Array.isArray(trades), true);
+    assert.strictEqual(typeof skipped, 'number');
+  });
+
+  test('ibkrExtractTrades - truncated is false on well-formed input', () => {
+    const rows = core.parseCSV('Trades,Header,DataDiscriminator,Asset Category,Symbol,Currency,Date/Time,Quantity,T. Price,Comm/Fee\n');
+    const { truncated } = core.ibkrExtractTrades(rows);
+    assert.strictEqual(truncated, false);
   });
 
   // 12. Testing CONSTANTS_VERIFIED_FOR (D6: ageing signal)

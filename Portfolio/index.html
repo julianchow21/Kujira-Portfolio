@@ -7,8 +7,13 @@
 <!-- Content Security Policy: lock down what this page can load and connect to.
      If a future XSS slipped past kjrEscape, the attacker still cannot exfil
      data to a third-party domain, connect-src restricts fetches to Apps Script
-     only. 'unsafe-inline' is still required for inline event handlers + styles;
-     future hardening could move to script hashes for stricter CSP. -->
+     only. script-src has NO 'unsafe-inline': all former inline event handlers
+     were replaced by the delegated dispatcher in installEventDelegation()
+     (see app.js), so script-src is 'self' plus the Chart.js CDN only.
+     style-src still needs 'unsafe-inline' for inline style="" attributes used
+     throughout the app's rendered markup; that is a lower-severity relaxation
+     (CSS injection, not script execution) and a separate future hardening
+     item if it is ever tackled. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://script.google.com https://*.googleusercontent.com https://script.googleusercontent.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none';">
 <title>Kujira Portfolio</title>
 <link rel="manifest" href="Worker/manifest.webmanifest">
@@ -864,7 +869,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-body">
         <div class="form-grid">
           <div class="form-group full">
-            <label class="lbl">Apps Script Web App URL</label>
+            <label class="lbl" for="cfg-sync-url">Apps Script Web App URL</label>
             <div style="display:flex;gap:6px;align-items:stretch">
               <input type="password" id="cfg-sync-url" class="fi" placeholder="https://script.google.com/macros/s/.../exec" spellcheck="false" autocomplete="off" aria-label="Apps Script Web App URL" style="flex:1">
               <button type="button" class="btn" id="btn-toggle-url" data-click="toggleSyncUrlReveal" title="Show/hide URL" style="min-width:88px">Show</button>
@@ -920,14 +925,14 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-body">
         <div class="form-grid">
           <div class="form-group">
-            <label class="lbl">Base currency</label>
+            <label class="lbl" for="cfg-base-currency">Base currency</label>
             <select id="cfg-base-currency" class="fi">
               <option value="SGD">SGD (Singapore Dollar)</option>
               <option value="USD">USD (US Dollar)</option>
             </select>
           </div>
           <div class="form-group">
-            <label class="lbl">USD → SGD manual override</label>
+            <label class="lbl" for="cfg-fx-usdsgd">USD → SGD manual override</label>
             <input type="number" step="0.0001" id="cfg-fx-usdsgd" class="fi" placeholder="e.g. 1.3520">
             <div class="hint">Leave blank to auto-fetch via Yahoo Finance.</div>
           </div>
@@ -941,27 +946,27 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-body">
         <div class="form-grid">
           <div class="form-group">
-            <label class="lbl">Death (× annual income)</label>
+            <label class="lbl" for="cfg-cov-death-mult">Death (× annual income)</label>
             <input type="number" step="1" id="cfg-cov-death-mult" class="fi" data-change="setCovDeathMult">
           </div>
           <div class="form-group">
-            <label class="lbl">TPD (× annual income)</label>
+            <label class="lbl" for="cfg-cov-tpd-mult">TPD (× annual income)</label>
             <input type="number" step="1" id="cfg-cov-tpd-mult" class="fi" data-change="setCovTpdMult">
           </div>
           <div class="form-group">
-            <label class="lbl">Critical illness (× annual income)</label>
+            <label class="lbl" for="cfg-cov-ci-mult">Critical illness (× annual income)</label>
             <input type="number" step="1" id="cfg-cov-ci-mult" class="fi" data-change="setCovCiMult">
           </div>
           <div class="form-group">
-            <label class="lbl">Income protection (% of monthly)</label>
+            <label class="lbl" for="cfg-cov-income-pct">Income protection (% of monthly)</label>
             <input type="number" step="1" id="cfg-cov-income-pct" class="fi" data-change="setCovIncomePct">
           </div>
           <div class="form-group">
-            <label class="lbl">Long-term care target (SGD/mo)</label>
+            <label class="lbl" for="cfg-cov-ltc-target">Long-term care target (SGD/mo)</label>
             <input type="number" step="1" id="cfg-cov-ltc-target" class="fi" data-change="setCovLtcTarget">
           </div>
           <div class="form-group">
-            <label class="lbl">Hospitalisation target ward</label>
+            <label class="lbl" for="cfg-cov-hosp-ward">Hospitalisation target ward</label>
             <select id="cfg-cov-hosp-ward" class="fi" data-change="setCovHospWard">
               <option value="B1">B1</option>
               <option value="A">A</option>
@@ -985,27 +990,27 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-body">
         <div class="form-grid">
           <div class="form-group">
-            <label class="lbl">Birth year</label>
+            <label class="lbl" for="cfg-birth-year">Birth year</label>
             <input type="number" id="cfg-birth-year" class="fi" placeholder="1990" min="1900" max="2099">
           </div>
           <div class="form-group">
-            <label class="lbl">Target retirement age</label>
+            <label class="lbl" for="cfg-retirement-age">Target retirement age</label>
             <input type="number" id="cfg-retirement-age" class="fi" placeholder="65" min="40" max="100">
           </div>
           <div class="form-group">
-            <label class="lbl">Expected return % p.a.</label>
+            <label class="lbl" for="cfg-expected-return">Expected return % p.a.</label>
             <input type="number" step="0.01" id="cfg-expected-return" class="fi" placeholder="6.00">
           </div>
           <div class="form-group">
-            <label class="lbl">Inflation % p.a.</label>
+            <label class="lbl" for="cfg-inflation">Inflation % p.a.</label>
             <input type="number" step="0.01" id="cfg-inflation" class="fi" placeholder="3.00">
           </div>
           <div class="form-group">
-            <label class="lbl">FIRE multiple (× annual expenses)</label>
+            <label class="lbl" for="cfg-fire-multiple">FIRE multiple (× annual expenses)</label>
             <input type="number" step="0.5" id="cfg-fire-multiple" class="fi" placeholder="25">
           </div>
           <div class="form-group">
-            <label class="lbl">FIRE target SGD (overrides multiple)</label>
+            <label class="lbl" for="cfg-fire-target">FIRE target SGD (overrides multiple)</label>
             <input type="number" step="1000" id="cfg-fire-target" class="fi" placeholder="2000000">
           </div>
         </div>
@@ -1018,29 +1023,29 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-body">
         <div class="form-grid">
           <div class="form-group full">
-            <label class="lbl">Employer</label>
+            <label class="lbl" for="cfg-salary-employer">Employer</label>
             <input type="text" id="cfg-salary-employer" class="fi" placeholder="e.g. Acme Pte Ltd" maxlength="80">
           </div>
           <div class="form-group">
-            <label class="lbl">Gross monthly SGD</label>
+            <label class="lbl" for="cfg-salary-gross">Gross monthly SGD</label>
             <input type="number" step="0.01" id="cfg-salary-gross" class="fi" placeholder="8000">
             <div class="hint">Before CPF. Take-home and CPF split are derived automatically.</div>
           </div>
           <div class="form-group">
-            <label class="lbl">Start date</label>
+            <label class="lbl" for="cfg-salary-start">Start date</label>
             <input type="date" id="cfg-salary-start" class="fi">
           </div>
           <div class="form-group">
-            <label class="lbl">End date (optional)</label>
+            <label class="lbl" for="cfg-salary-end">End date (optional)</label>
             <input type="date" id="cfg-salary-end" class="fi">
             <div class="hint">Leave blank if still employed.</div>
           </div>
           <div class="form-group">
-            <label class="lbl">Annual bonus SGD (optional)</label>
+            <label class="lbl" for="cfg-salary-bonus">Annual bonus SGD (optional)</label>
             <input type="number" step="0.01" id="cfg-salary-bonus" class="fi" placeholder="e.g. one month AWS">
           </div>
           <div class="form-group">
-            <label class="lbl">Bonus month</label>
+            <label class="lbl" for="cfg-salary-bonus-month">Bonus month</label>
             <select id="cfg-salary-bonus-month" class="fi">
               <option value="">None</option>
               <option value="1">January</option>
@@ -1059,17 +1064,17 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
             <div class="hint">Bonus auto-entry arrives in a later step. Stored for now.</div>
           </div>
           <div class="form-group">
-            <label class="lbl">Take-home lands in</label>
+            <label class="lbl" for="cfg-salary-account">Take-home lands in</label>
             <select id="cfg-salary-account" class="fi"></select>
             <div class="hint">Pick an SGD cash account. Each payday the saved share of your take-home is auto-deposited here, starting next payday (no backdating).</div>
           </div>
           <div class="form-group">
-            <label class="lbl">Save % each payday</label>
+            <label class="lbl" for="cfg-salary-savepct">Save % each payday</label>
             <input type="number" step="1" min="0" max="100" id="cfg-salary-savepct" class="fi" placeholder="50">
             <div class="hint">The rest is your spending share. It is always logged as a Discretionary expense so your savings rate stays accurate.</div>
           </div>
           <div class="form-group">
-            <label class="lbl">Spending half goes to (optional)</label>
+            <label class="lbl" for="cfg-salary-discretionary">Spending half goes to (optional)</label>
             <select id="cfg-salary-discretionary" class="fi"></select>
             <div class="hint">Add the account in Cash first (e.g. UOB). When set, the full take-home lands in your salary account, the spending share is transferred here, then assumed spent so it nets to zero. Leave as none to just deposit the saved share.</div>
           </div>
@@ -1083,19 +1088,19 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-body">
         <div class="form-grid">
           <div class="form-group">
-            <label class="lbl">Residency</label>
+            <label class="lbl" for="cfg-tax-residency">Residency</label>
             <select id="cfg-tax-residency" class="fi" data-change="renderTaxEstimate">
               <option value="resident">Singapore resident (citizen / PR)</option>
               <option value="non-resident">Non-resident (higher of 15% flat / graduated)</option>
             </select>
           </div>
           <div class="form-group">
-            <label class="lbl">Total reliefs (SGD)</label>
+            <label class="lbl" for="cfg-tax-reliefs">Total reliefs (SGD)</label>
             <input type="number" step="1" min="0" id="cfg-tax-reliefs" class="fi" placeholder="1000" data-input="renderTaxEstimate">
             <div class="hint">Earned income relief ($1,000 default). Add NSman, course fees, etc. Reliefs reduce chargeable income.</div>
           </div>
           <div class="form-group full">
-            <label class="lbl">Manual annual tax override (SGD, optional)</label>
+            <label class="lbl" for="cfg-tax-manual">Manual annual tax override (SGD, optional)</label>
             <input type="number" step="1" min="0" id="cfg-tax-manual" class="fi" placeholder="Leave blank to use computed estimate" data-input="renderTaxEstimate">
             <div class="hint">If you know your actual NOA figure, enter it here to override the estimate.</div>
           </div>
@@ -1109,10 +1114,10 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-head"><h3>CPF starting balances</h3><span class="hint" id="cfg-cpf-anchor-meta"></span></div>
       <div class="card-body">
         <div class="form-grid">
-          <div class="form-group"><label class="lbl">OA</label><input type="number" step="0.01" id="cpf-bal-OA" class="fi"></div>
-          <div class="form-group"><label class="lbl">SA</label><input type="number" step="0.01" id="cpf-bal-SA" class="fi"></div>
-          <div class="form-group"><label class="lbl">MA</label><input type="number" step="0.01" id="cpf-bal-MA" class="fi"></div>
-          <div class="form-group"><label class="lbl">RA</label><input type="number" step="0.01" id="cpf-bal-RA" class="fi"></div>
+          <div class="form-group"><label class="lbl" for="cpf-bal-OA">OA</label><input type="number" step="0.01" id="cpf-bal-OA" class="fi"></div>
+          <div class="form-group"><label class="lbl" for="cpf-bal-SA">SA</label><input type="number" step="0.01" id="cpf-bal-SA" class="fi"></div>
+          <div class="form-group"><label class="lbl" for="cpf-bal-MA">MA</label><input type="number" step="0.01" id="cpf-bal-MA" class="fi"></div>
+          <div class="form-group"><label class="lbl" for="cpf-bal-RA">RA</label><input type="number" step="0.01" id="cpf-bal-RA" class="fi"></div>
         </div>
         <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <button class="btn btn-primary" data-click="saveCpfBalances">Save starting balances</button>
@@ -1125,12 +1130,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-head"><h3>CPF interest rates</h3><span class="hint">Defaults follow the official board rates.</span></div>
       <div class="card-body">
         <div class="form-grid">
-          <div class="form-group"><label class="lbl">OA % p.a.</label><input type="number" step="0.01" id="cfg-cpf-oa" class="fi"></div>
-          <div class="form-group"><label class="lbl">SA % p.a.</label><input type="number" step="0.01" id="cfg-cpf-sa" class="fi"></div>
-          <div class="form-group"><label class="lbl">MA % p.a.</label><input type="number" step="0.01" id="cfg-cpf-ma" class="fi"></div>
-          <div class="form-group"><label class="lbl">RA % p.a.</label><input type="number" step="0.01" id="cfg-cpf-ra" class="fi"></div>
-          <div class="form-group"><label class="lbl">Extra interest on first S$60k</label><input type="number" step="0.01" id="cfg-cpf-extra60" class="fi"></div>
-          <div class="form-group"><label class="lbl">Extra +1% on first S$30k (age 55+)</label><input type="number" step="0.01" id="cfg-cpf-extra30" class="fi"></div>
+          <div class="form-group"><label class="lbl" for="cfg-cpf-oa">OA % p.a.</label><input type="number" step="0.01" id="cfg-cpf-oa" class="fi"></div>
+          <div class="form-group"><label class="lbl" for="cfg-cpf-sa">SA % p.a.</label><input type="number" step="0.01" id="cfg-cpf-sa" class="fi"></div>
+          <div class="form-group"><label class="lbl" for="cfg-cpf-ma">MA % p.a.</label><input type="number" step="0.01" id="cfg-cpf-ma" class="fi"></div>
+          <div class="form-group"><label class="lbl" for="cfg-cpf-ra">RA % p.a.</label><input type="number" step="0.01" id="cfg-cpf-ra" class="fi"></div>
+          <div class="form-group"><label class="lbl" for="cfg-cpf-extra60">Extra interest on first S$60k</label><input type="number" step="0.01" id="cfg-cpf-extra60" class="fi"></div>
+          <div class="form-group"><label class="lbl" for="cfg-cpf-extra30">Extra +1% on first S$30k (age 55+)</label><input type="number" step="0.01" id="cfg-cpf-extra30" class="fi"></div>
         </div>
         <div style="margin-top:14px"><button class="btn btn-primary" data-click="saveSettings">Save</button></div>
       </div>
@@ -1140,13 +1145,13 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-head"><h3>Target allocation &amp; emergency fund</h3><span class="hint">Drives the rebalancing + emergency fund widgets on the Dashboard.</span></div>
       <div class="card-body">
         <div class="form-grid">
-          <div class="form-group"><label class="lbl">Stocks target %</label><input type="number" step="1" min="0" max="100" id="cfg-target-stocks" class="fi" placeholder="0" data-input="updateTargetSumHint"></div>
-          <div class="form-group"><label class="lbl">Cash target %</label><input type="number" step="1" min="0" max="100" id="cfg-target-cash" class="fi" placeholder="0" data-input="updateTargetSumHint"></div>
-          <div class="form-group"><label class="lbl">CPF target %</label><input type="number" step="1" min="0" max="100" id="cfg-target-cpf" class="fi" placeholder="0" data-input="updateTargetSumHint"></div>
-          <div class="form-group"><label class="lbl">Real estate target %</label><input type="number" step="1" min="0" max="100" id="cfg-target-realestate" class="fi" placeholder="0" data-input="updateTargetSumHint"></div>
-          <div class="form-group"><label class="lbl">Crypto target %</label><input type="number" step="1" min="0" max="100" id="cfg-target-crypto" class="fi" placeholder="0" data-input="updateTargetSumHint"></div>
-          <div class="form-group"><label class="lbl">Rebalance tolerance (pts)</label><input type="number" step="1" min="1" max="50" id="cfg-rebalance-threshold" class="fi" placeholder="5"></div>
-          <div class="form-group"><label class="lbl">Emergency fund target (SGD)</label><input type="number" step="1000" min="0" id="cfg-ef-target" class="fi" placeholder="30000"></div>
+          <div class="form-group"><label class="lbl" for="cfg-target-stocks">Stocks target %</label><input type="number" step="1" min="0" max="100" id="cfg-target-stocks" class="fi" placeholder="0" data-input="updateTargetSumHint"></div>
+          <div class="form-group"><label class="lbl" for="cfg-target-cash">Cash target %</label><input type="number" step="1" min="0" max="100" id="cfg-target-cash" class="fi" placeholder="0" data-input="updateTargetSumHint"></div>
+          <div class="form-group"><label class="lbl" for="cfg-target-cpf">CPF target %</label><input type="number" step="1" min="0" max="100" id="cfg-target-cpf" class="fi" placeholder="0" data-input="updateTargetSumHint"></div>
+          <div class="form-group"><label class="lbl" for="cfg-target-realestate">Real estate target %</label><input type="number" step="1" min="0" max="100" id="cfg-target-realestate" class="fi" placeholder="0" data-input="updateTargetSumHint"></div>
+          <div class="form-group"><label class="lbl" for="cfg-target-crypto">Crypto target %</label><input type="number" step="1" min="0" max="100" id="cfg-target-crypto" class="fi" placeholder="0" data-input="updateTargetSumHint"></div>
+          <div class="form-group"><label class="lbl" for="cfg-rebalance-threshold">Rebalance tolerance (pts)</label><input type="number" step="1" min="0" max="50" id="cfg-rebalance-threshold" class="fi" placeholder="5"></div>
+          <div class="form-group"><label class="lbl" for="cfg-ef-target">Emergency fund target (SGD)</label><input type="number" step="1000" min="0" id="cfg-ef-target" class="fi" placeholder="30000"></div>
         </div>
         <div class="hint" id="cfg-target-sum" style="margin-top:8px"></div>
         <div style="margin-top:14px"><button class="btn btn-primary" data-click="saveSettings">Save</button></div>
@@ -1300,8 +1305,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.48"></script>
-<script src="Worker/kjr-sortable.js?v=2.48"></script>
-<script src="Worker/app.js?v=2.48"></script>
+<script src="Worker/kjr-core.js?v=2.49"></script>
+<script src="Worker/kjr-sortable.js?v=2.49"></script>
+<script src="Worker/app.js?v=2.49"></script>
 </body>
 </html>

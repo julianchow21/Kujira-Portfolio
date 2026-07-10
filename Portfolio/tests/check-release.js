@@ -65,6 +65,37 @@ const appJs = fs.readFileSync(APP_JS_PATH, 'utf8');
       pass('index.html script "' + src + '" matches sw.js CORE_ASSETS entry "' + expected + '"');
     }
   });
+
+  /* ─── 1b. Reverse direction: every LOCAL .js entry in sw.js CORE_ASSETS
+     must be referenced by an index.html <script src> tag. Catches a stale
+     leftover CORE_ASSETS entry (e.g. a deleted or renamed Worker script)
+     that the forward check above can never see, since it only walks
+     index.html outward. Non-script CORE_ASSETS entries ('./index.html' and
+     static assets pulled in via <link>/<img> like manifest.webmanifest and
+     whale-icon.png, not <script src>) are intentionally out of scope here,
+     same as the forward check only looking at <script src> tags. ────────── */
+  const coreAssetEntries = [];
+  const entryRe = /['"](\.\/[^'"]+)['"]/g;
+  let em;
+  while ((em = entryRe.exec(coreAssetsBody))) coreAssetEntries.push(em[1]);
+
+  const localJsEntries = coreAssetEntries.filter((u) => u !== './index.html' && /\.js(\?|$)/.test(u));
+  if (!localJsEntries.length) {
+    fail('found no local .js entries in sw.js CORE_ASSETS, check the regex or the array moved');
+    return;
+  }
+
+  const indexScriptSet = new Set(localSrcs.map((src) => './' + src));
+  localJsEntries.forEach((entry) => {
+    if (!indexScriptSet.has(entry)) {
+      fail(
+        'sw.js CORE_ASSETS has "' + entry + '" but index.html has no matching <script src> tag. ' +
+        'Remove the stale CORE_ASSETS entry or add the missing script tag.'
+      );
+    } else {
+      pass('sw.js CORE_ASSETS entry "' + entry + '" matches an index.html script tag');
+    }
+  });
 })();
 
 /* ─── 2. sw.js CACHE_NAME equals 'kjr-portfolio-' + APP_VERSION. ────────
