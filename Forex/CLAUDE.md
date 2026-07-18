@@ -29,7 +29,7 @@ Inherited from the starter, keep the gotchas true: preview guard at the TOP of t
 
 - `index.html` — the app.
 - `schema.sql` — Supabase tables + RLS (trades, profiles).
-- `sw.js`, `manifest.webmanifest`, `icon.svg` — PWA shell. Bump `CACHE` in `sw.js` on every ship.
+- `sw.js`, `manifest.webmanifest`, `icon.svg` — PWA shell. Bump `CACHE` in `sw.js` on every ship: `CACHE` is `kjr-forex-v` + the `APP.version` badge number, bump it together with `APP.version` in `index.html`, enforced by `tests/check-release.js`.
 - `lib/` — vendored shared engines.
 - `SPEC.md` — product + tech spec (doubles as the PRD). Disposable once the build settles.
 

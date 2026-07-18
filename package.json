@@ -2,6 +2,6 @@
   "name": "kujira-portfolio-monorepo",
   "private": true,
   "scripts": {
-    "test": "npm test --prefix Portfolio && node \"Trading/tests/test-trading.js\" && node \"Trading/tests/test-worker.js\" && node \"Forex/tests/test-forex.js\""
+    "test": "npm test --prefix Portfolio && node \"Trading/tests/test-trading.js\" && node \"Trading/tests/test-worker.js\" && node \"Forex/tests/test-forex.js\" && node \"Forex/tests/check-release.js\""
   }
 }
