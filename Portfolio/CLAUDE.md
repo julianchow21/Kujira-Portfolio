@@ -55,7 +55,7 @@ Glass layer (both themes): `--glass`, `--glass-strong`, `--glass-border`, `--gla
 - `Worker/` support sources (see Architecture), plus `manifest.webmanifest` and `whale-icon.png` for PWA install
 - `tests/`, node + browser unit tests (`node tests/test-core.js` from the app folder, `tests.html` in a browser)
 - `Docs/`, QA SOP and point-in-time docs. Feature backlog lives in `~/Claude Projects/Claude/tasks/todo.md`, never in a local file
-- `../Trading/` and `../Journal/`, sibling apps with their own CLAUDE.md, cross-linked with relative paths
+- `../Trading/` and `../Forex/`, sibling apps with their own CLAUDE.md, cross-linked with relative paths
 - Repo-root `CLAUDE.md` documents monorepo-wide commands and app boundaries, `AGENTS.md` is a symlink to it
 
 ## Gotchas

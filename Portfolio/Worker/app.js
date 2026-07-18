@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.50';
-const APP_DISPLAY_VERSION = 'v2.50 (10 Jul)';
+const APP_VERSION = 'v2.51';
+const APP_DISPLAY_VERSION = 'v2.51 (18 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -2635,8 +2635,8 @@ function renderMoreSheet(){
   const crossApp = ''
     + '<a class="btn more-sheet-row" href="../Trading/" style="text-decoration:none">'
     + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/></svg><span>Trading</span></a>'
-    + '<a class="btn more-sheet-row" href="../Journal/" style="text-decoration:none">'
-    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>Journal</span></a>';
+    + '<a class="btn more-sheet-row" href="../Forex/" style="text-decoration:none">'
+    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>Forex</span></a>';
   body.innerHTML = rows + crossApp;
 }
 
