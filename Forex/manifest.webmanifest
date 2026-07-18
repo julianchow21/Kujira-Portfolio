@@ -1,7 +1,7 @@
 {
-  "name": "Kujira Journal",
-  "short_name": "Journal",
-  "description": "Kujira Journal — trading journal and analytics",
+  "name": "Kujira Forex",
+  "short_name": "Forex",
+  "description": "Kujira Forex, forex trading journal and analytics",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

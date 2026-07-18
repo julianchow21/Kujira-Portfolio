@@ -1,6 +1,6 @@
-# Kujira Journal
+# Kujira Forex
 
-Multi-tenant SaaS trading journal (TraderSync-style). Phase 1 is single-user (Julian), architected to scale into multi-user plus Stripe billing with no rework. Full spec in `SPEC.md`. Sibling app in the Kujira/Portfolio repo, served at `/Journal/`.
+Multi-tenant SaaS trading journal (TraderSync-style). Phase 1 is single-user (Julian), architected to scale into multi-user plus Stripe billing with no rework. Full spec in `SPEC.md`. Sibling app in the Kujira/Portfolio repo, served at `/Forex/`.
 
 ## Architecture
 
@@ -35,11 +35,11 @@ Inherited from the starter, keep the gotchas true: preview guard at the TOP of t
 
 ## Topbar
 
-Three-way segmented control: Trading | Journal | Portfolio, sibling links in the same repo.
+Three-way segmented control: Trading | Forex | Portfolio, sibling links in the same repo.
 
 ## Hosting
 
-Static, GitHub Pages from the Kujira/Portfolio repo at `/Journal/`. Phase 2 adds a Cloudflare Worker for Stripe webhooks.
+Static, GitHub Pages from the Kujira/Portfolio repo at `/Forex/`. Phase 2 adds a Cloudflare Worker for Stripe webhooks.
 
 ## Build status
 

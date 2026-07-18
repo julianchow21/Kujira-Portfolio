@@ -1,5 +1,5 @@
 -- ===========================================================================
--- Kujira Journal — Supabase schema
+-- Kujira Forex — Supabase schema
 -- Phase 1 is single-user and fully local (no cloud needed). Run this when you
 -- enable cloud sync. Written for the multi-user target (RLS option C), so the
 -- jump to Phase 2 (accounts + billing) needs no schema rewrite.

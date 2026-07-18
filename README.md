@@ -102,7 +102,7 @@ This repo hosts three apps on one GitHub Pages site, each in its own folder. The
 |---|---|
 | `Portfolio/` | The Kujira Portfolio app. Top level: `index.html`, `sw.js`, `Docs/`, own CLAUDE.md. Supporting files live in `Worker/`: `app.js`, `kjr-core.js`, `apps-script.gs` (backend for your Code.gs), PWA assets, shared `whale-icon.png`. |
 | `Trading/` | Kujira Trading, a separate SPA for MU day-trade tracking. Own CLAUDE.md and docs. |
-| `Journal/` | Kujira Journal, the trading-journal app. Own CLAUDE.md and docs. |
+| `Forex/` | Kujira Forex, the forex trading-journal app. Own CLAUDE.md and docs. |
 | `README.md`, `PRIVACY.md`, `SECURITY.md` | Repo-level docs at root. |
 | `PRIVACY.md` | Privacy notice. |
 | `SECURITY.md` | Threat model and security policy. |

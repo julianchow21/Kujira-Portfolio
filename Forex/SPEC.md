@@ -1,4 +1,4 @@
-# Kujira Journal — Build Spec
+# Kujira Forex — Build Spec
 
 v0.1 draft, 15 Jun 2026. Status: for review, no code written yet.
 
@@ -23,12 +23,12 @@ Out of scope (deliberately):
 
 ## 2. Architecture
 
-- Sibling app in the existing repo: `Kujira/Portfolio/Journal/index.html`. Single-file SPA, no framework, no bundler, matching Trading and Portfolio.
+- Sibling app in the existing repo: `Kujira/Portfolio/Forex/index.html`. Single-file SPA, no framework, no bundler, matching Trading and Portfolio.
 - Scaffold via the `newproject` skill from the hardened web-app-starter template.
 - Reuse the shared Kujira core (`kjr-core.js`) the Portfolio app already uses for Supabase auth and dirty-flag sync. Do not fork a second sync path.
 - Charts via TradingView Lightweight Charts v5.2.0, the same version and global the Trading app loads.
 - Dark theme only. Port the existing design tokens (`--bg*`, `--green`, `--red`, `--accent` #2dd4bf, `--blue`, `--amber`, `--radius`).
-- Topbar segmented control becomes three-way: Trading | Journal | Portfolio. Update the same control in the Trading and Portfolio files so the set is consistent.
+- Topbar segmented control becomes three-way: Trading | Forex | Portfolio. Update the same control in the Trading and Portfolio files so the set is consistent.
 - Price data for chart markers reuses the Trading app's Worker proxy (`/chart`), not the public proxies.
 
 ## 3. Data model
@@ -139,7 +139,7 @@ This app stores user data, so the full bar applies, unlike the read-only Trading
 
 ## 9. Build order
 
-1. Scaffold `Journal/` from the starter, wire the three-way topbar, port tokens.
+1. Scaffold `Forex/` from the starter, wire the three-way topbar, port tokens.
 2. Trade data model + localStorage + `deriveTrade()`.
 3. Add/edit/delete modal with validation.
 4. Trades table with filters, sort, pagination.

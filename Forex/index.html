@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://api.anthropic.com; base-uri 'none'; object-src 'none'; frame-ancestors 'none';">
 <meta name="theme-color" content="#0f0f0f">
-<title>Kujira Journal</title>
+<title>Kujira Forex</title>
 <script src="lib/theme-init.js?v=1.0"></script>
 <link rel="icon" href="icon.svg">
 <link rel="manifest" href="manifest.webmanifest">
@@ -203,7 +203,7 @@ th.sortable.desc::after{content:'\25BC'}
   </div>
   <nav class="tb-tabs" aria-label="Switch app">
     <a class="tb-tab" href="../Trading/">Trading</a>
-    <a class="tb-tab active" href="./" aria-current="page">Journal</a>
+    <a class="tb-tab active" href="./" aria-current="page">Forex</a>
     <a class="tb-tab" href="../Portfolio/">Portfolio</a>
   </nav>
   <div class="spacer"></div>
@@ -306,14 +306,14 @@ th.sortable.desc::after{content:'\25BC'}
 <div id="toasts"></div>
 <div id="modal-root"></div>
 
-<script src="lib/kjr-format.js?v=1.0"></script>
+<script src="lib/kjr-format.js?v=1.1"></script>
 <script src="lib/kjr-calendar.js?v=1.0"></script>
 
 <script>
 /* ============================================================================
    APP CONFIG
    ========================================================================== */
-const APP = { name:'Kujira Journal', storageKey:'kjr_journal_v1', version:'v0.5 (10 Jul)' };
+const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.7 (18 Jul)' };
 const CCY = '$';
 const TABLES = ['trades'];
 const PAGE_SIZE = 25;
@@ -465,11 +465,11 @@ async function loadData(){
 /* ============================================================================
    FORMATTERS
    ========================================================================== */
-function money(n,sign){ if(n==null||n===''||isNaN(n)) return '—'; const a=Math.abs(Number(n)).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); return (n<0?'-':(sign?'+':''))+CCY+a; }
-function priceFmt(n){ return (n==null||n===''||isNaN(n))?'—':CCY+Number(n).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-function num(n){ return (n==null||n==='')?'—':Number(n).toLocaleString('en-GB'); }
-function pct(n){ return (n==null||isNaN(n))?'—':Number(n).toFixed(1)+'%'; }
-function fmtDate(iso){ if(!iso) return '—'; const d=new Date(iso); if(isNaN(d)) return '—'; const p=x=>String(x).padStart(2,'0'); return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(2); }
+function money(n,sign){ if(n==null||n===''||isNaN(n)) return '\u2014'; const a=Math.abs(Number(n)).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); return (n<0?'-':(sign?'+':''))+CCY+a; }
+function priceFmt(n){ return (n==null||n===''||isNaN(n))?'\u2014':CCY+Number(n).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function num(n){ return (n==null||n==='')?'\u2014':Number(n).toLocaleString('en-GB'); }
+function pct(n){ return (n==null||isNaN(n))?'\u2014':Number(n).toFixed(1)+'%'; }
+function fmtDate(iso){ if(!iso) return '\u2014'; const d=new Date(iso); if(isNaN(d)) return '\u2014'; const p=x=>String(x).padStart(2,'0'); return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(2); }
 function toLocalInput(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return ''; const p=x=>String(x).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes()); }
 
 /* ============================================================================
@@ -503,7 +503,7 @@ function undoDeleteTag(){
 }
 
 /* ============================================================================
-   DERIVE  — single source of truth for every computed trade value.
+   DERIVE, single source of truth for every computed trade value.
    ========================================================================== */
 function deriveTrade(t){
   const sign=t.side==='short'?-1:1, mult=Number(t.contractMultiplier)||1;
@@ -515,13 +515,13 @@ function deriveTrade(t){
     gross=(xp-ep)*q*sign*mult; net=gross-fees;
     if(t.stopPrice!=null&&t.stopPrice!==''){ const risk=Math.abs(ep-Number(t.stopPrice))*q*mult; if(risk>0) rMultiple=net/risk; }
     holdingMs=new Date(t.exitAt)-new Date(t.entryAt);
-    const basis=ep*q*mult; if(basis>0) returnPct=(gross/basis)*100*sign;
+    const basis=ep*q*mult; if(basis>0) returnPct=(gross/basis)*100;
   }
   return {status,gross,net,rMultiple,holdingMs,returnPct,sign,mult};
 }
 
 /* ============================================================================
-   STATS ENGINE  — over the CLOSED trades in the given set.
+   STATS ENGINE, over the CLOSED trades in the given set.
    ========================================================================== */
 function computeStats(trades){
   const closed=trades.map(t=>({t,d:deriveTrade(t)})).filter(x=>x.d.status==='closed');
@@ -603,13 +603,13 @@ function renderApp(){
 
 function statCard(label,valHtml,sub){ return '<div class="stat"><div class="label">'+label+'</div><div class="val">'+valHtml+'</div>'+(sub?'<div class="sub">'+escapeHtml(sub)+'</div>':'')+'</div>'; }
 function renderDashboard(s){
-  const pf=s.profitFactor==null?'—':(isFinite(s.profitFactor)?s.profitFactor.toFixed(2):'∞');
+  const pf=s.profitFactor==null?'\u2014':(isFinite(s.profitFactor)?s.profitFactor.toFixed(2):'∞');
   document.getElementById('dash').innerHTML=[
     statCard('Net P&L','<span class="'+(s.netPnl>=0?'pos':'neg')+'">'+money(s.netPnl,true)+'</span>', s.n+' closed · '+s.openCount+' open'),
     statCard('Win rate', pct(s.winRate), s.wins+'W / '+s.losses+'L'+(s.be?(' / '+s.be+'BE'):'')),
-    statCard('Profit factor', pf, 'payoff '+(s.payoff==null?'—':s.payoff.toFixed(2))),
+    statCard('Profit factor', pf, 'payoff '+(s.payoff==null?'\u2014':s.payoff.toFixed(2))),
     statCard('Expectancy','<span class="'+(s.expCcy>=0?'pos':'neg')+'">'+money(s.expCcy,true)+'</span>', (s.expR==null?'no R data':s.expR.toFixed(2)+'R')+' / trade'),
-    statCard('Avg win / loss','<span class="pos">'+money(s.avgWin)+'</span> / <span class="neg">'+money(s.avgLoss)+'</span>', 'largest '+(s.largestWin==null?'—':money(s.largestWin,true))),
+    statCard('Avg win / loss','<span class="pos">'+money(s.avgWin)+'</span> / <span class="neg">'+money(s.avgLoss)+'</span>', 'largest '+(s.largestWin==null?'\u2014':money(s.largestWin,true))),
     statCard('Max drawdown','<span class="neg">'+(s.maxDD>0?'-'+money(s.maxDD):money(0))+'</span>','peak to trough'),
   ].join('');
   document.getElementById('eq-body').innerHTML=svgEquity(s.equity);
@@ -626,7 +626,7 @@ function svgEquity(cum){
 }
 
 const COLS=[ {k:'symbol',label:'Symbol'},{k:'side',label:'Side'},{k:'entryAt',label:'Entry'},{k:'qty',label:'Qty',num:true},{k:'entryPrice',label:'Entry',num:true},{k:'exitPrice',label:'Exit',num:true},{k:'net',label:'Net P&L',num:true},{k:'r',label:'R',num:true},{k:'status',label:'Status'},{k:'tags',label:'Tags',sortable:false} ];
-function rowTagsHtml(t){ const chips=[]; TAG_CATS.forEach(c=>tradeTags(t,c.key).forEach(tag=>chips.push('<span class="tag '+c.cls+'">'+escapeHtml(tag)+'</span>'))); if(!chips.length) return '<span class="muted">—</span>'; return chips.slice(0,4).join('')+(chips.length>4?'<span class="muted"> +'+(chips.length-4)+'</span>':''); }
+function rowTagsHtml(t){ const chips=[]; TAG_CATS.forEach(c=>tradeTags(t,c.key).forEach(tag=>chips.push('<span class="tag '+c.cls+'">'+escapeHtml(tag)+'</span>'))); if(!chips.length) return '<span class="muted">\u2014</span>'; return chips.slice(0,4).join('')+(chips.length>4?'<span class="muted"> +'+(chips.length-4)+'</span>':''); }
 function renderTable(rows){
   document.getElementById('head-row').innerHTML=COLS.map(c=> c.sortable===false
     ? '<th>'+c.label+'</th>'
@@ -641,9 +641,9 @@ function renderTable(rows){
     +'<td>'+fmtDate(t.entryAt)+'</td>'
     +'<td class="num">'+num(t.quantity)+'</td>'
     +'<td class="num">'+priceFmt(t.entryPrice)+'</td>'
-    +'<td class="num">'+(d.status==='closed'?priceFmt(t.exitPrice):'—')+'</td>'
-    +'<td class="num '+(d.net==null?'':(d.net>=0?'pos':'neg'))+'">'+(d.net==null?'—':money(d.net,true))+'</td>'
-    +'<td class="num">'+(d.rMultiple==null?'—':d.rMultiple.toFixed(2)+'R')+'</td>'
+    +'<td class="num">'+(d.status==='closed'?priceFmt(t.exitPrice):'\u2014')+'</td>'
+    +'<td class="num '+(d.net==null?'':(d.net>=0?'pos':'neg'))+'">'+(d.net==null?'\u2014':money(d.net,true))+'</td>'
+    +'<td class="num">'+(d.rMultiple==null?'\u2014':d.rMultiple.toFixed(2)+'R')+'</td>'
     +'<td><span class="chip '+d.status+'">'+(d.status==='open'?'Open':'Closed')+'</span></td>'
     +'<td class="tags-cell">'+rowTagsHtml(t)+'</td></tr>'; }).join('');
   document.getElementById('pager').innerHTML= pages>1
@@ -681,7 +681,7 @@ function renderSimulator(){
   eq.innerHTML=svgDualEquity(base.equity,sim.equity);
 }
 function renderCompare(base,sim){
-  const fmtv=(f,v)=> f==='money'?money(v,true) : f==='pct'?pct(v) : f==='pf'?(v==null?'—':isFinite(v)?v.toFixed(2):'∞') : f==='ddneg'?(v>0?'-'+money(v):money(0)) : String(v);
+  const fmtv=(f,v)=> f==='money'?money(v,true) : f==='pct'?pct(v) : f==='pf'?(v==null?'\u2014':isFinite(v)?v.toFixed(2):'∞') : f==='ddneg'?(v>0?'-'+money(v):money(0)) : String(v);
   const rows=[
     {k:'netPnl',l:'Net P&L',f:'money',hi:true},{k:'winRate',l:'Win rate',f:'pct',hi:true},
     {k:'profitFactor',l:'Profit factor',f:'pf',hi:true},{k:'expCcy',l:'Expectancy',f:'money',hi:true},
@@ -689,7 +689,7 @@ function renderCompare(base,sim){
   ];
   let html='<div class="cmp"><div class="ch">Metric</div><div class="ch cv">Baseline</div><div class="ch cv">Simulated</div><div class="ch cv">Δ</div>';
   for(const r of rows){
-    const b=base[r.k], s=sim[r.k]; let dHtml='—';
+    const b=base[r.k], s=sim[r.k]; let dHtml='\u2014';
     if(r.hi!==null && typeof b==='number' && typeof s==='number' && isFinite(b) && isFinite(s)){
       const diff=s-b; const good = r.hi ? diff>0 : diff<0; const cls = diff===0?'':(good?'pos':'neg');
       const dv = r.f==='pct' ? (diff>=0?'+':'')+diff.toFixed(1)+'%' : r.f==='pf' ? (diff>=0?'+':'')+diff.toFixed(2) : money(diff,true);

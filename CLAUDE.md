@@ -10,7 +10,7 @@ Monorepo of 4 static SPAs hosted on GitHub Pages. No framework, no bundler, no b
 - **Node unit tests (core logic):** `node Portfolio/tests/test-core.js`
 - **Release consistency check:** `node Portfolio/tests/check-release.js`, run before every ship. Asserts index.html script tags match sw.js CORE_ASSETS exactly (including `?v=` strings), sw.js CACHE_NAME equals `kjr-portfolio-` + APP_VERSION, and APP_VERSION agrees with APP_DISPLAY_VERSION
 - **Browser unit tests (sortable):** open `Portfolio/tests/tests.html` in a browser
-- `Portfolio/package.json` "test" script now runs test-core.js then check-release.js (`npm test` from `Portfolio/`). The old broken stub is gone.
+- `Portfolio/package.json` "test" script now runs test-core.js, test-app.js (pure app.js helpers via extraction harness), then check-release.js (`npm test` from `Portfolio/`). The old broken stub is gone.
 - No lint/typecheck/format scripts. `Portfolio/.eslintrc.json` exists but is not wired to any command.
 
 ## App boundaries
@@ -19,13 +19,13 @@ Monorepo of 4 static SPAs hosted on GitHub Pages. No framework, no bundler, no b
 |-----|-----------|-------------|---------|
 | **Portfolio/** | `index.html` | `Worker/app.js` (app logic), `Worker/kjr-core.js` (pure), `Worker/kjr-sortable.js` (drag sort) | Google Apps Script (`Worker/apps-script.gs`) |
 | **Trading/** | `index.html` (all in one) | - | Cloudflare Worker (`Trading/Worker/`) for Yahoo proxy |
-| **Journal/** | `index.html` (all in one) | `lib/kjr-format.js`, `lib/kjr-calendar.js` (vendored shared engines), `schema.sql` (Supabase) | Supabase (Phase 2) |
+| **Forex/** | `index.html` (all in one) | `lib/kjr-format.js`, `lib/kjr-calendar.js` (vendored shared engines), `schema.sql` (Supabase) | Supabase (Phase 2) |
 
 Every app has its own `CLAUDE.md` with architecture notes, gotchas, and design tokens. **Read the app's CLAUDE.md before modifying it.**
 
 ## Cross-app linkage
 
-All apps share a topbar with a three-way segmented control linking `Trading`, `Journal`, and `Portfolio` via relative paths (`../Trading/`, `../Journal/`, `../Portfolio/`). If you change topbar layout, update all three.
+All apps share a topbar with a three-way segmented control linking `Trading`, `Forex`, and `Portfolio` via relative paths (`../Trading/`, `../Forex/`, `../Portfolio/`). If you change topbar layout, update all three.
 
 ## Critical constraints
 
@@ -49,7 +49,7 @@ All apps share a topbar with a three-way segmented control linking `Trading`, `J
 - No hardcoded Apps Script URL (`grep -i 'AKfycb' index.html` returns nothing).
 - CSP meta tag present and match against live URL.
 
-## Data safety rules (Portfolio & Journal)
+## Data safety rules (Portfolio & Forex)
 
 These are hard-learned loss classes; every data-storing app must uphold them:
 
@@ -63,7 +63,7 @@ These are hard-learned loss classes; every data-storing app must uphold them:
 
 - `APP_VERSION` and `APP_DISPLAY_VERSION` live in `Portfolio/Worker/app.js:14-15`. Bump both on every deploy.
 - `PHASE_2_TABS` hides locked tabs from the nav but their DOM markup remains intact; code is preserved, not deleted.
-- Portfolio uses dark theme **default** with warm light opt-in. Trading and Journal use dark only. Don't apply one app's theme default to another.
+- Portfolio uses dark theme **default** with warm light opt-in. Trading and Forex use dark only. Don't apply one app's theme default to another.
 
 ## Trading app specifics
 
@@ -73,7 +73,7 @@ These are hard-learned loss classes; every data-storing app must uphold them:
 - Trading's current price, header, and indicators are always driven by the 1m session (`lastCore`). The timeframe selector only changes the chart (`lastChart`). Do not wire header or alerts to `curTf`.
 - Prefer `onclick =` over `addEventListener` for idempotent handler assignment (fixes listener stacking from `renderToggles` re-entrancy).
 
-## Journal app specifics
+## Forex app specifics
 
 - `currentUser()` is the only place that asks "who is this". It returns local owner now, Supabase Auth user in Phase 2.
 - `entitlement(feature)` is the paywall gate. It returns `true` for everything while single-user. Every paid-only feature must call it.
@@ -101,7 +101,7 @@ These extend or override the master `CLAUDE.md` rules for this repo.
 
 ### Version badge
 
-- Bump the version badge on every deploy. Each app has its own: Portfolio (`APP_DISPLAY_VERSION` in `Worker/app.js:15`), Trading (inline in `index.html`), Journal (inline in `index.html`). Match the badge version to the commit message version.
+- Bump the version badge on every deploy. Each app has its own: Portfolio (`APP_DISPLAY_VERSION` in `Worker/app.js:15`), Trading (inline in `index.html`), Forex (inline in `index.html`). Match the badge version to the commit message version.
 
 ### GitHub push
 
@@ -125,4 +125,4 @@ These extend or override the master `CLAUDE.md` rules for this repo.
 ## Conventions
 
 - All apps use the Kujira design token system: `--bg/bg2/bg3/bg4`, `--text/text2/text3`, `--red/green/blue/amber`, `--accent`, `--radius`, `--glass*` (Portfolio, floating elements only since v2.39), `--surface-solid` (Portfolio dense tables)
-- Portfolio dark theme default (`--accent:#2dd4bf` teal); warm light opt-in (`--accent:#c15f3c` terracotta). Trading/Journal: dark only, `--accent:#2dd4bf`.
+- Portfolio dark theme default (`--accent:#2dd4bf` teal); warm light opt-in (`--accent:#c15f3c` terracotta). Trading/Forex: dark only, `--accent:#2dd4bf`.
