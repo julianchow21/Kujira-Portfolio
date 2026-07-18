@@ -44,7 +44,7 @@ Client-side from the series: `ema()`, `rsi()` (Wilder), `macd()` (12/26/9), `vwa
 
 - Lightweight Charts fit-after-setData: call the fit inside `requestAnimationFrame` after `setData`, otherwise a timeframe switch fits against the previous layout. See `refitChart()`
 - Multi-day intraday axis: use `tickMarkFormatter`'s second arg (`tickMarkType`), <=2 is a date boundary so show the date, >=3 shows the clock
-- Market clock is DST-aware via Intl (`America/New_York`), holidays not handled (only weekends show "Closed")
+- Market clock is DST-aware via Intl (`America/New_York`). NYSE holidays and half days ARE handled (`NYSE_HOLIDAYS`/`NYSE_HALF_DAYS`, hardcoded through 2028, extend before 2029)
 - `.topbar` has z-index:100 so the settings drawer (z-index:201) and scrim paint above the backdrop-filter topbar
 - Chart axis and crosshair times are ET (market time), not SGT
 - Volume series has `lastValueVisible:false` so it does not paint a stray `$0.00` price tag
