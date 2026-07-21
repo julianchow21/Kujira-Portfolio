@@ -558,7 +558,14 @@ function ibkrExtractTrades(rows){
     const qty  = ibkrNum(get('Quantity'));
     const px   = ibkrNum(get('T. Price'));
     const comm = ibkrNum(get('Comm/Fee'));
-    if (qty == null || px == null) { skipped++; continue; }
+    // QA #Low: a qty of exactly 0 (no shares actually traded) used to fall
+    // through here since only null was checked, then `side: qty > 0 ? 'buy'
+    // : 'sell'` classified it as a 0-share sell. NOTE: the QA report's own
+    // suggested guard ("qty <= 0") would be wrong here, IBKR quantities are
+    // SIGNED (negative = sell, see the sign test below and side:qty>0?...),
+    // so qty <= 0 would also skip every genuine sell trade. Only qty === 0
+    // is the real bug.
+    if (qty == null || px == null || qty === 0) { skipped++; continue; }
 
     // IBKR DateTime format: "2024-01-15, 10:30:00" — take only the date part
     const rawDt = get('Date/Time');
@@ -633,7 +640,16 @@ function kjrChartAggregate(items, xFields, yFields, fields, sort, topN){
     yFields.forEach(k => {
       const f = fields[k];
       if (!f) return;
-      const v = parseFloat(f.get(item)) || 0;
+      // QA #Low: a genuinely unpriced row (get() returns null/undefined, no
+      // quote yet) used to coerce to 0 via `|| 0` AND still count toward n,
+      // a real sentinel-vs-zero conflation that silently dragged 'avg'
+      // measures (P&L%, yield) down every time a row had no price. Excluded
+      // from both sum and n here, sum is unaffected either way (0 contributes
+      // nothing), avg's denominator now only counts rows with a real value.
+      const raw = f.get(item);
+      if (raw === null || raw === undefined || raw === '') return;
+      const v = parseFloat(raw);
+      if (!isFinite(v)) return;
       grouped[xKey][k].sum += v;
       grouped[xKey][k].n   += 1;
     });

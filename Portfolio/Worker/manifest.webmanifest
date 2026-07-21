@@ -7,8 +7,8 @@
   "id": "../",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#0f0f0f",
-  "theme_color": "#0f0f0f",
+  "background_color": "#131722",
+  "theme_color": "#131722",
   "icons": [
     {
       "src": "whale-icon.png",

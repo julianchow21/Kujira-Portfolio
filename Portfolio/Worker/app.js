@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.51';
-const APP_DISPLAY_VERSION = 'v2.51 (18 Jul)';
+const APP_VERSION = 'v2.52';
+const APP_DISPLAY_VERSION = 'v2.52 (21 Jul)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -66,7 +66,11 @@ function _ageOnYear(year){
 function _salaryPayMonths(){
   const sal = DB.settings && DB.settings.salary;
   if (!sal || !sal.grossMonthly || !sal.startDate) return { sal:null, months:[] };
-  const todayYM = _isoDate(new Date()).slice(0, 7);
+  // QA low-priority: SG-local "today", matching _isoDateSG everywhere else,
+  // not the device's own timezone. A payday-gating boundary this far off
+  // (whole months) rarely flips on the UTC/SGT offset alone, but staying on
+  // one convention avoids a day-boundary edge case for travelling users.
+  const todayYM = _isoDateSG(new Date()).slice(0, 7);
   const startYM = sal.startDate.slice(0, 7);
   let endYM = sal.endDate ? sal.endDate.slice(0, 7) : todayYM;
   if (endYM > todayYM) endYM = todayYM;
@@ -86,7 +90,7 @@ function generateAutoSalaryEntries(){
   const byPeriod = {};
   DB.income.forEach(e => { if (e.auto === 'salary' && e.period) byPeriod[e.period] = e; });
 
-  const today = _isoDate(new Date());
+  const today = _isoDateSG(new Date()); // QA low-priority: align with the rest of the app's SG-local convention
   let changed = 0;
   months.forEach(ym => {
     const [y, m] = ym.split('-').map(Number);
@@ -137,7 +141,7 @@ function generateAutoCpfEntries(){
   // so net worth grows forward without double-counting the statement figure.
   const anchor = _cpfAnchorDate();
 
-  const today = _isoDate(new Date());
+  const today = _isoDateSG(new Date()); // QA low-priority: align with the rest of the app's SG-local convention
   let changed = 0, skippedSenior = false;
   months.forEach(ym => {
     const [y, m] = ym.split('-').map(Number);
@@ -223,7 +227,7 @@ function generateAutoCpfInterest(){
   let changed = startLen - DB.cpfHistory.length;
 
   const anchorYM = anchor.slice(0,7);
-  const today    = _isoDate(new Date());
+  const today    = _isoDateSG(new Date()); // QA low-priority: align with the rest of the app's SG-local convention
   const firstYM  = _nextYM(anchorYM);
   // Whole months that have fully ended; a year is only credited once its
   // December is in this list (i.e. the year is genuinely over).
@@ -350,7 +354,7 @@ function generateAutoSalaryCashEntries(){
   const cashByKey = {}; DB.cashTxns.forEach(e => { if (e.auto === 'salaryCash' && e.period && e.role) cashByKey[e.period + '|' + e.role] = e; });
   const expByKey  = {}; DB.expenses.forEach(e => { if (e.auto === 'salaryCash' && e.period) expByKey[e.period] = e; });
 
-  const today = _isoDate(new Date());
+  const today = _isoDateSG(new Date()); // QA low-priority: align with the rest of the app's SG-local convention
   let changed = 0;
   const keepKeys = {};   // period|role rows we (re)created this run
   const processed = {};
@@ -967,10 +971,23 @@ function fmtCompact(n){
   return cur + Math.round(v).toLocaleString('en-SG');
 }
 
+/* QA #Med-4: a bare date-only string ('YYYY-MM-DD', no time component) is
+   parsed as UTC midnight by the Date constructor (ISO 8601 spec). Reading
+   that back through LOCAL getters (getDate/getMonth/getFullYear, as
+   fmtDateSG does below) then renders the PREVIOUS day in any UTC-negative
+   timezone, e.g. new Date('2026-03-31') is 30 March local in New York.
+   Full timestamps (updatedAt and friends, which carry a real time
+   component) are unaffected by that pitfall and keep parsing normally,
+   only the bare-date shape needs the manual local-midnight build below. */
+function _parseDateOnlyLocal(s){
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(s);
+}
+
 function fmtDateSG(d){
   // DD/MM/YYYY per Singapore convention
   if (!d) return '';
-  const dt = (d instanceof Date) ? d : new Date(d);
+  const dt = (d instanceof Date) ? d : _parseDateOnlyLocal(d);
   if (isNaN(dt.getTime())) return String(d);
   const dd = String(dt.getDate()).padStart(2,'0');
   const mm = String(dt.getMonth()+1).padStart(2,'0');
@@ -1168,6 +1185,17 @@ let _sanitiseInvalidDateCount = 0;   // recovered-date counter, reset per mergeD
 function _sanitiseList(arr, table){
   if (!Array.isArray(arr)) return [];
   const dateFields = _DATE_FIELDS_BY_TABLE[table];
+  // QA #Med-3: number-typed sheet fields were interpolated into innerHTML
+  // unescaped (e.g. shares, crypto amount), trusting them to already be
+  // numbers. A corrupt sheet or hostile payload could smuggle HTML through
+  // one instead. ENTITY_SCHEMAS is the single source of truth for which
+  // fields are numeric, coerce every one of them here so nothing downstream
+  // (renderers, net worth, snapshots) ever sees an uncoerced value again.
+  // Blank/absent stays untouched, several numeric fields are meaningfully
+  // optional (e.g. divPerShare "leave blank for non-payers"), only a
+  // present-but-invalid value (a string, NaN, Infinity) gets clamped to 0.
+  const schema = ENTITY_SCHEMAS[table];
+  const numericFields = schema ? schema.fields.filter(f => f.type === 'number').map(f => f.key) : null;
   return arr.map(item => {
     if (!item || typeof item !== 'object') return null;
     const safe = Object.assign({}, item);
@@ -1175,6 +1203,14 @@ function _sanitiseList(arr, table){
     if (dateFields){
       dateFields.forEach(k => {
         if (safe[k] && !kjrValidDate(safe[k])){ safe[k] = null; _sanitiseInvalidDateCount++; }
+      });
+    }
+    if (numericFields){
+      numericFields.forEach(k => {
+        const v = safe[k];
+        if (v === null || v === undefined || v === '') return;
+        const n = Number(v);
+        safe[k] = isFinite(n) ? n : 0;
       });
     }
     return safe;
@@ -1238,7 +1274,13 @@ function saveData(){
   saveLocal();
   if (_syncTimer) clearTimeout(_syncTimer);
   if (!getSyncUrl()) { setSyncStatus('local'); return; }
-  _syncTimer = setTimeout(pushToRemote, SYNC_DEBOUNCE_MS);
+  // Null the flag the moment the debounce actually fires, not just when a
+  // newer saveData() cancels it. Without this, _syncTimer stays truthy
+  // forever after the first save in a session (setTimeout doesn't self-clear
+  // its own id), which would make any "is a save still pending" check below
+  // (see pullFromRemote, #High-1) fire on every pull rather than only while
+  // a save is genuinely in flight.
+  _syncTimer = setTimeout(() => { _syncTimer = null; pushToRemote(); }, SYNC_DEBOUNCE_MS);
   setSyncStatus('syncing'); // visual feedback before debounce fires
 }
 
@@ -1359,12 +1401,12 @@ function setStrictConflicts(on){
 
 async function pushToRemote(){
   const url = getSyncUrl();
-  if (!url) { setSyncStatus('local'); return; }
+  if (!url) { setSyncStatus('local'); return false; }
   // Preview guard (AGENTS.md data-safety rule 1): never let a localhost/file:
   // session push to a real sheet, even if a live sync URL ends up in
   // localStorage (e.g. pasted for debugging). Timers and dirty state stay
   // untouched here, only the network write is skipped.
-  if (isLocalPreview()) { setSyncStatus('local', 'Preview, sync disabled'); return; }
+  if (isLocalPreview()) { setSyncStatus('local', 'Preview, sync disabled'); return false; }
 
   if (_activeSyncController) { try { _activeSyncController.abort(); } catch(_){} }
   const controller = new AbortController();
@@ -1381,7 +1423,7 @@ async function pushToRemote(){
     }
     if (body.length > PAYLOAD_HARD_CAP) {
       setSyncStatus('failed', 'Payload exceeds sync limit.');
-      return;
+      return false;
     }
 
     const pushSignal = (AbortSignal.any && AbortSignal.timeout)
@@ -1398,7 +1440,7 @@ async function pushToRemote(){
       // page, error page, etc.). Don't crash — log and set failed status.
       console.warn('[sync] non-JSON push response, status', parsed.status, 'body starts:', parsed.text.slice(0, 100));
       setSyncStatus('failed', 'Backend returned non-JSON (status ' + parsed.status + ')');
-      return;
+      return false;
     }
     const data = parsed.data;
     if (data.error) {
@@ -1410,7 +1452,7 @@ async function pushToRemote(){
       if (/Payload too large/i.test(data.error)) {
         setSyncStatus('failed', 'Backend out of date, redeploy Apps Script.');
         showToast('Backend out of date, redeploy Apps Script (see README) to sync larger payloads.', 'error');
-        return;
+        return false;
       }
       throw new Error(data.error);
     }
@@ -1423,7 +1465,7 @@ async function pushToRemote(){
       // restore the modal for multi-device usage.
       if (strictConflictsEnabled()) {
         showConflictModal({ remoteAt: data.remoteAt, lastSeenRemoteAt: data.lastSeenRemoteAt, stashedBody: body });
-        return;
+        return false;
       }
       // Before force-pushing, verify the remote actually holds the same data.
       // A conflict is usually just clock drift or a Sheets cell-format quirk,
@@ -1441,11 +1483,11 @@ async function pushToRemote(){
         // Can't verify, don't force-push blind.
         setSyncStatus('failed', 'Could not verify cloud state, use Settings to Pull or Push');
         showToast('Sync conflict, could not verify the cloud copy. Use Settings to Pull or Push.', 'error');
-        return;
+        return false;
       }
       if (_isMaterialDivergence(JSON.parse(body), remoteSnapshot)) {
         showConflictModal({ remoteAt: data.remoteAt, lastSeenRemoteAt: data.lastSeenRemoteAt, stashedBody: body });
-        return;
+        return false;
       }
       // Effectively identical data, safe to auto-recover with one retry. The
       // first attempt sometimes 404s on
@@ -1478,31 +1520,34 @@ async function pushToRemote(){
             _resyncToastShown = true;
             showToast('Sync resynchronised', 'success');
           }
-          return;
+          return true;
         }
         console.warn('[sync] auto-recovery exhausted retries', r);
         setSyncStatus('failed', 'Auto-recovery failed, try Pull from cloud');
         showToast('Sync failed, Settings → Pull from cloud to recover', 'error');
+        return false;
       } catch (recoverErr) {
         console.warn('[sync] auto-recovery threw:', recoverErr.message);
         setSyncStatus('failed', recoverErr.message);
+        return false;
       } finally {
         _conflictResolvingNow = false;
       }
-      return;
     }
     const stamp = data.savedAt || new Date().toISOString();
     localStorage.setItem(LK_SYNC_TS, stamp);
     setLastPull(stamp, 'server');  // push response gives us the real server stamp
     setSyncStatus('synced');
+    return true;
   } catch (err) {
-    if (err.name === 'AbortError') return; // superseded by a newer push
+    if (err.name === 'AbortError') return false; // superseded by a newer push
     if (err.name === 'TimeoutError') {
       setSyncStatus('failed', 'Push timed out after 30 s');
       showToast('Push timed out. Will retry on next save.', 'error');
     } else {
       setSyncStatus('failed', err.message);
     }
+    return false;
   } finally {
     if (_activeSyncController === controller) _activeSyncController = null;
   }
@@ -1511,6 +1556,33 @@ async function pushToRemote(){
 async function pullFromRemote(opts){
   const url = getSyncUrl();
   if (!url) { setSyncStatus('local'); return false; }
+  // #High-1 data safety: a pull racing a pending debounced save must not
+  // clobber in-flight local edits. saveData() already wrote them to
+  // localStorage, but the 800 ms _syncTimer debounce means they may not have
+  // reached the remote sheet yet. Left unchecked, DB = mergeDefaults(data)
+  // below overwrites the in-memory DB (then, via saveLocal(), the persisted
+  // copy too) with the stale remote state, discarding the unsaved edit with
+  // no warning at all.
+  // Fix: flush the pending save first, same "cancel the timer, act now"
+  // pattern the conflict modal's cf-pull/cf-force handlers already use
+  // (below, in showConflictModal). Only continue into the destructive pull
+  // once the edit is confirmed safely on the remote. If the flush itself
+  // fails, or it surfaces a genuine conflict (showConflictModal already
+  // opens its own modal in that case), bail out of this pull instead of
+  // risking the edit, the conflict modal or the next save cycle resolves it
+  // instead.
+  if (_syncTimer) {
+    clearTimeout(_syncTimer);
+    _syncTimer = null;
+    const flushed = await pushToRemote();
+    if (!flushed) {
+      if (!document.getElementById('conflict-modal')) {
+        setSyncStatus('failed', 'Could not save pending edits before pulling, try again');
+        showToast('You have unsaved local changes that could not be synced yet. Pull cancelled so they are not overwritten, try again shortly.', 'error');
+      }
+      return false;
+    }
+  }
   setSyncStatus('syncing');
   try {
     const resp = await fetch(url, {
@@ -1743,7 +1815,11 @@ async function manualPull(){
 async function manualPush(){
   if (!getSyncUrl()) { showToast('Set the Apps Script URL first', 'error'); return; }
   await pushToRemote();
-  if (document.getElementById('sync-pill').classList.contains('s-synced')) showToast('Pushed to cloud', 'success');
+  // QA low-priority: guard the lookup, an absent pill (markup not yet
+  // painted, or removed) used to throw here and silently swallow the
+  // "Pushed to cloud" toast.
+  const pill = document.getElementById('sync-pill');
+  if (pill && pill.classList.contains('s-synced')) showToast('Pushed to cloud', 'success');
 }
 
 function saveSyncUrlFromForm(){
@@ -2021,7 +2097,7 @@ function saveSettingsFromForm(){
   s.salarySavePct = _savePct == null ? 50 : Math.max(0, Math.min(100, _savePct));
   // Stamp the enable date the first time an account is set, so deposits start
   // from the next payday and never backfill over the typed opening balance.
-  if (s.salaryAccountId && !s.salaryCashEnabledAt) s.salaryCashEnabledAt = _isoDate(new Date());
+  if (s.salaryAccountId && !s.salaryCashEnabledAt) s.salaryCashEnabledAt = _isoDateSG(new Date()); // QA low-priority: same SG-local convention, this boundary feeds generateAutoSalaryCashEntries
   if (!s.salaryAccountId) s.salaryCashEnabledAt = '';   // off resets the boundary
   // Target allocation + emergency fund
   if (!s.targets) s.targets = {};
@@ -2560,6 +2636,20 @@ function _layoutDesktopNav(){
 
   if (overflowIdx.size === 0){ wrap.style.display = 'none'; return; } // everything fits
 
+  // A dropdown IS genuinely needed: restore the wrap to visible. This line
+  // was missing entirely (F1 desktop-nav-overflow bug): every path below
+  // populated the menu and bound the resize handler, but the wrap itself
+  // stayed at the 'none' set above (line ~2611) forever, so openNavMore()'s
+  // `wrap.style.display === 'none'` gate always bailed and the More trigger
+  // was unclickable dead weight the moment anything overflowed.
+  // #nav-more-wrap's own CSS rule (index.html) declares only
+  // position/flex-shrink, no display at all, so there is no stylesheet
+  // "flex" value to restore here (the temporary 'flex' a few lines up was
+  // only ever a measurement convenience for #nav-more-btn's width). Clearing
+  // the inline override lets the normal block default apply, same as any
+  // other div, rather than hardcoding a display value the CSS never asked for.
+  wrap.style.display = '';
+
   btns.forEach((b, i) => {
     if (!overflowIdx.has(i)) return;
     b.style.display = 'none';
@@ -2724,11 +2814,26 @@ function currentTheme(){
 function applyTheme(t){
   document.documentElement.classList.toggle('dark', t === 'dark');
   updateThemeUI(t);
-  // iOS Safari + installed-app chrome paint from this meta tag. Read the
-  // actual --bg the class toggle just applied rather than hardcoding the two
-  // hex values here as well, so the two can never drift apart.
-  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  // iOS Safari + installed-app chrome paint from this meta tag. index.html
+  // ships two OS-media-conditional theme-color tags (light/dark) as a no-JS
+  // default (see the handoff comment above them there), but that only
+  // tracks the OS colour scheme, not this in-app manual toggle: a light-OS
+  // user who picks dark in-app got the wrong chrome colour, since the
+  // browser reads whichever tag's `media` currently matches the OS setting,
+  // not whichever one JS last touched. Two media-conditional tags plus a JS
+  // override can fight (some browsers re-evaluate the media match live if
+  // the OS scheme flips while the tab stays open), so collapse down to the
+  // one JS-controlled tag: keep the first, strip its `media` attribute so
+  // it always applies regardless of OS setting, and drop any others.
+  // Idempotent, already-collapsed calls are a harmless no-op.
+  const metas = document.querySelectorAll('meta[name="theme-color"]');
+  for (let i = 1; i < metas.length; i++) metas[i].remove();
+  const themeMeta = metas[0] || null;
   if (themeMeta) {
+    themeMeta.removeAttribute('media');
+    // Read the actual --bg the class toggle just applied rather than
+    // hardcoding the two hex values here too, so the meta and the real
+    // background can never drift apart.
     const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
     if (bg) themeMeta.setAttribute('content', bg);
   }
@@ -2886,7 +2991,6 @@ function sgdOrNull(amount, currency){
    right currency even when renderAll() paints every tab in one go. */
 let _currentTab       = 'stocks';
 let _dashShowCpf      = false; // default off on every launch — user toggles to include CPF
-let _navigatingHistory = false; // true while popstate fires, stops showPage re-pushing
 let _renderCcy        = 'SGD';
 
 /* The only tabs where a USD/SGD choice is meaningful (stock-priced data).
@@ -3035,21 +3139,31 @@ let _cryptoRefreshInFlight = false;
    can't "undo" a market price. Stack capped at 20 to bound memory. */
 const UNDO_MAX = 20;
 let _undoStack = [], _redoStack = [];
+// QA low-priority: snapshots used to JSON.stringify(DB) directly, which
+// includes _priceCache, a transient, refetchable mirror of Yahoo/CoinGecko
+// quotes (same reasoning as localPersistPayload, reused here). A 20-deep
+// undo stack pinned that in memory for no reason; strip it going in, it
+// repopulates on the next price refresh regardless of undo state.
+function _undoSnapshot(){ return JSON.stringify(localPersistPayload()); }
 function pushUndo(){
-  _undoStack.push(JSON.stringify(DB));
+  _undoStack.push(_undoSnapshot());
   if (_undoStack.length > UNDO_MAX) _undoStack.shift();
   _redoStack = [];
 }
 function undoAction(){
   if (!_undoStack.length){ showToast('Nothing to undo'); return; }
-  _redoStack.push(JSON.stringify(DB));
+  _redoStack.push(_undoSnapshot());
+  const prevPriceCache = DB._priceCache;
   DB = JSON.parse(_undoStack.pop());
+  DB._priceCache = prevPriceCache || {}; // carry the live cache forward, same as pullFromRemote
   saveData(); renderAll(); showToast('Undone', 'success');
 }
 function redoAction(){
   if (!_redoStack.length){ showToast('Nothing to redo'); return; }
-  _undoStack.push(JSON.stringify(DB));
+  _undoStack.push(_undoSnapshot());
+  const prevPriceCache = DB._priceCache;
   DB = JSON.parse(_redoStack.pop());
+  DB._priceCache = prevPriceCache || {}; // carry the live cache forward, same as pullFromRemote
   saveData(); renderAll(); showToast('Redone', 'success');
 }
 
@@ -3186,7 +3300,7 @@ async function refreshStockPrices(opts = {}){
     const symbols = Array.from(new Set(
       DB.stocks.map(yahooSymbol).concat((DB.watchlist || []).map(yahooSymbol)).filter(Boolean)
     ));
-    if (!symbols.length){ showToast('No valid symbols', 'error'); return; }
+    if (!symbols.length){ if (!opts.silent) showToast('No valid symbols', 'error'); return; }
     const url = getSyncUrl() + (getSyncUrl().includes('?') ? '&' : '?') +
                 'action=prices&symbols=' + encodeURIComponent(symbols.join(','));
     const resp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
@@ -3212,7 +3326,12 @@ async function refreshStockPrices(opts = {}){
     // fill in when they land, and a miss leaves the '—' tokens (non-fatal).
     refreshFundamentals(symbols);
   } catch (err) {
-    showToast('Price refresh failed: ' + err.message, 'error');
+    // QA low-priority: the silent hourly auto-tick (autoRefreshTick calls
+    // this with { silent:true }) still surfaced this toast on every failed
+    // background refresh, e.g. a flaky connection, spamming a toast the user
+    // never asked to see. A manual refresh (not silent) still reports it.
+    if (!opts.silent) showToast('Price refresh failed: ' + err.message, 'error');
+    else console.warn('[auto] silent price refresh failed:', err.message);
   } finally {
     _stockRefreshInFlight = false;
     if (btn) btn.disabled = false;
@@ -3486,7 +3605,7 @@ const ENTITY_SCHEMAS = {
         hint:'Buys debit this account, sells credit it. Use a same-currency account.' },
       { key:'notes',   label:'Notes', type:'textarea' }
     ],
-    defaults: { date: new Date().toISOString().slice(0,10), side:'buy', fees:0, cashAccountId:'' }
+    defaults: { date: _isoDateSG(new Date()), side:'buy', fees:0, cashAccountId:'' }
   },
   watchlist: {
     title: 'watchlist ticker',
@@ -3560,7 +3679,7 @@ const ENTITY_SCHEMAS = {
         hint:'Only for transfers where the two accounts use different currencies. Leave blank if same currency.' },
       { key:'notes',  label:'Notes', type:'textarea' }
     ],
-    defaults: { date: new Date().toISOString().slice(0,10), type:'deposit', fromAccountId:'' }
+    defaults: { date: _isoDateSG(new Date()), type:'deposit', fromAccountId:'' }
   },
   cpfHistory: {
     title: 'CPF entry',
@@ -3576,7 +3695,7 @@ const ENTITY_SCHEMAS = {
       { key:'source',   label:'Source / reference', type:'text', placeholder:'March salary, year-end interest, etc.' },
       { key:'notes',    label:'Notes', type:'textarea' }
     ],
-    defaults: { type:'contribution', account:'OA', date: new Date().toISOString().slice(0,10) },
+    defaults: { type:'contribution', account:'OA', date: _isoDateSG(new Date()) },
     afterRead: (item) => {
       // Normalise sign by type so storage is uniformly signed: withdrawals are
       // always outflows, contributions/interest are always inflows. Transfers
@@ -3603,7 +3722,7 @@ const ENTITY_SCHEMAS = {
       { key:'source',       label:'Source / employer', type:'text', placeholder:'ACME Corp' },
       { key:'notes',        label:'Notes', type:'textarea' }
     ],
-    defaults: { date: new Date().toISOString().slice(0,10) }
+    defaults: { date: _isoDateSG(new Date()) }
   },
   expenses: {
     title: 'expense',
@@ -3618,7 +3737,7 @@ const ENTITY_SCHEMAS = {
       { key:'merchant',    label:'Merchant',     type:'text',  placeholder:'NTUC FairPrice' },
       { key:'notes',       label:'Notes',        type:'textarea' }
     ],
-    defaults: { date: new Date().toISOString().slice(0,10), currency:'SGD', category:'Other' }
+    defaults: { date: _isoDateSG(new Date()), currency:'SGD', category:'Other' }
   },
   insurance:{
     title:'policy',
@@ -3843,7 +3962,6 @@ function closeEntityModal(){
 
 function entityModalSave(){
   if (!_modalState) return;
-  pushUndo();
   const { table, item, isNew } = _modalState;
   const schema = ENTITY_SCHEMAS[table];
 
@@ -3961,6 +4079,14 @@ function entityModalSave(){
 
   item.updatedAt = new Date().toISOString();
   if (isNew) item.createdAt = item.updatedAt;
+
+  // QA low-priority: pushUndo() used to fire at the top of this function,
+  // before any validation, so a cancelled confirm() or a rejected save
+  // (invalid date, out-of-range number, missing required field, invalid
+  // ticker) still burned an undo slot for a change that never happened.
+  // Every guard above this point can already return without saving, so the
+  // snapshot only makes sense here, right before the DB is actually mutated.
+  pushUndo();
 
   // Row-vanished guard: if this was an edit of an existing row but it is no
   // longer in DB[table] (deleted concurrently, e.g. another tab/device, or a
@@ -4255,6 +4381,12 @@ function ibkrConfirmImport(){
       .map(el => Number(el.getAttribute('data-ibkr-dup')))
   );
   overlay.classList.remove('open');
+
+  // QA #Med-6: unlike insuranceImportConfirm (one pushUndo() before its batch
+  // loop), this import had no undo snapshot at all, a bad IBKR file could not
+  // be reversed. One snapshot before both loops below covers the whole batch
+  // (new stock stubs + trades) as a single undo step, same pattern.
+  pushUndo();
 
   const now = new Date().toISOString();
   let addedTrades = 0, addedStocks = 0, rejected = 0;
@@ -4892,10 +5024,15 @@ const PB_HOLDINGS_FIELDS = {
   marketValue:{ label:'Market Value',    type:'meas', agg:'sum', unit:'money', get: r => r.mv ?? 0 },
   costBasis:  { label:'Cost Basis',      type:'meas', agg:'sum', unit:'money', get: r => r.cost ?? 0 },
   unrealPnl:  { label:'Unrealised P&L',  type:'meas', agg:'sum', unit:'money', get: r => r.pl ?? 0 },
-  pnlPct:     { label:'P&L %',           type:'meas', agg:'avg', unit:'pct',   get: r => (r.plPct ?? 0) * 100 },
+  // QA #Low (kjr-core.js:kjrChartAggregate): these two are 'avg' measures, so
+  // an unpriced row (r.plPct/r.divYieldCur genuinely null, not zero) must stay
+  // null here rather than coerce to 0, otherwise it silently counts as a real
+  // 0% in the average and drags it down. kjrChartAggregate now excludes a
+  // null get() result from both the sum and the n denominator.
+  pnlPct:     { label:'P&L %',           type:'meas', agg:'avg', unit:'pct',   get: r => r.plPct == null ? null : r.plPct * 100 },
   shares:     { label:'Shares',          type:'meas', agg:'sum', unit:'count', get: r => r.shares ?? 0 },
   divIncome:  { label:'Annual Dividend', type:'meas', agg:'sum', unit:'money', get: r => r.divAnnualSgd ?? 0 },
-  divYield:   { label:'Dividend Yield',  type:'meas', agg:'avg', unit:'pct',   get: r => (r.divYieldCur ?? 0) * 100 },
+  divYield:   { label:'Dividend Yield',  type:'meas', agg:'avg', unit:'pct',   get: r => r.divYieldCur == null ? null : r.divYieldCur * 100 },
   weightPct:  { label:'Portfolio Weight',type:'meas', agg:'sum', unit:'pct',   get: r => (r.weight ?? 0) * 100 },
   posCount:   { label:'Position Count',  type:'meas', agg:'sum', unit:'count', get: () => 1 },
 };
@@ -4932,7 +5069,11 @@ function _pbRangeCutoff(rangeKey){
   const n = {ONE_MONTH:1, THREE_MONTHS:3, SIX_MONTHS:6, ONE_YEAR:12}[rangeKey];
   if (!n) return null;
   const d = new Date(); d.setMonth(d.getMonth() - n);
-  return d.toISOString().slice(0,10);
+  // QA #Med-4: toISOString() converts to UTC before slicing, shifting the
+  // cutoff a calendar day off the user's actual local "N months ago" date
+  // in any non-UTC timezone. _isoDateSG is the app's one local-date-string
+  // convention, reuse it rather than a second UTC-based one.
+  return _isoDateSG(d);
 }
 function _pbNetWorthSeries(cfg){
   const snaps = (DB.snapshots||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
@@ -5542,7 +5683,10 @@ async function _pbDrawTimeSeries(host, cfg, showEmpty, showChart){
     const map = {};
     h.points.forEach(p => {
       const t = Number(p.t); if (!isFinite(t)) return;
-      const d = new Date(t).toISOString().slice(0,10);
+      // QA #Med-4: bucket by local calendar day, not toISOString()'s UTC day
+      // (same drift class as the cutoff above), so a point near midnight
+      // doesn't land on the wrong day's bucket for non-UTC users.
+      const d = _isoDateSG(new Date(t));
       const base = cfg.tsValue === 'positionValue' ? (p.c * (r.shares||0)) : p.c;
       map[d] = +toDisplay(base, pxCcy).toFixed(2);
     });
@@ -5984,7 +6128,21 @@ function renderSectorAllocation(rows, anyPriceMissing){
 
   const bar = entries.map(e =>
     `<div class="alloc-seg" style="width:${e.pct}%;background:${e.color}" title="${kjrEscape(e.sector)} ${e.pct.toFixed(1)}%"></div>`).join('');
-  const legend = entries.map(e =>
+
+  // Legend cap (QA #Med-2): with 25+ sectors tagged, the legend list drowned
+  // the card and ran under the mobile bottom tab bar. Drop rows that round
+  // to "0.0%" (a real position too small to show, not a real gap in the
+  // data), then cap the rest to the top 8 by value with the remainder
+  // rolled into one "Other" row. The stacked bar above is untouched, every
+  // segment still renders there, this only shortens the text legend below it.
+  const legendSource = entries.filter(e => e.pct >= 0.05);
+  let legendEntries = legendSource;
+  if (legendSource.length > 8) {
+    const top = legendSource.slice(0, 8);
+    const restV = legendSource.slice(8).reduce((a, e) => a + e.v, 0);
+    legendEntries = top.concat([{ sector: 'Other', v: restV, pct: safeRatio(restV, total), color: 'var(--border2)' }]);
+  }
+  const legend = legendEntries.map(e =>
     `<span class="alloc-key"><span class="alloc-dot" style="background:${e.color}"></span>${kjrEscape(e.sector)} ${e.pct.toFixed(1)}%</span>`).join('');
 
   // Cyclical / defensive / sensitive split (sectorClass from kjr-core.js).
@@ -6367,7 +6525,7 @@ function renderDividendTimeline(rows){
       <td class="tl">${fmtDateSG(r.s.divExDate)}</td>
       <td class="tl">${r.s.divPayDate ? fmtDateSG(r.s.divPayDate) : '—'}</td>
       <td class="num">${r.shares.toLocaleString('en-SG', {maximumFractionDigits:4})}</td>
-      <td class="num">${toSGD(Number(r.s.divPerShare), r.ccy) != null ? fmt(toSGD(Number(r.s.divPerShare), r.ccy)) : '—'}</td>
+      <td class="num">${fmt(toSGD(Number(r.s.divPerShare), r.ccy))}</td>
       <td class="num">${fmt(estIncome, {dp:0})}</td>
     </tr>`;
   }).join('');
@@ -6968,14 +7126,26 @@ function renderInsurance(){
     </div></div>`;
   }
 
-  const today = new Date();
-  const horizon = new Date(today.getTime() + 90*864e5);
-  const due = list.filter(p => p.premiumDue && new Date(p.premiumDue) >= today && new Date(p.premiumDue) <= horizon)
+  // QA #Med-5 + #Med-4: compare ISO date STRINGS throughout (same convention
+  // as renderDividendTimeline above), never a date-only string against a
+  // Date that carries the current time-of-day. The old `new Date(p.premiumDue)
+  // >= today` compared UTC-midnight-of-due-date against "now" (with hours
+  // already elapsed), so a policy due TODAY read as in the past and was
+  // hidden all day. String comparison side-steps that AND the UTC-midnight/
+  // local-getter mismatch fmtDateSG had (#Med-4). Also adds the missing
+  // Active-only filter, a Lapsed/Surrendered policy's old due date should
+  // never surface here as if a payment were still owed.
+  const todayISO = _isoDateSG(new Date());
+  const horizonISO = _isoDateSG(new Date(Date.now() + 90 * 86400000));
+  const due = list.filter(p => p.status === 'Active' && p.premiumDue && p.premiumDue >= todayISO && p.premiumDue <= horizonISO)
     .sort((a,b) => String(a.premiumDue).localeCompare(String(b.premiumDue)));
   let renew = '';
   if (due.length){
     renew = `<div class="card"><div class="card-head"><h3>Upcoming premiums <span class="page-sub">next 90 days</span></h3></div><div class="card-body"><div class="tbl-wrap"><table class="holdings"><tbody>${
-      due.map(p => `<tr><td class="tl cell-sym">${kjrEscape(p.insurer||'?')}</td><td class="tl">${kjrEscape(p.plan||p.type||'')}</td><td class="num">${fmtDateSG(p.premiumDue)} (in ${Math.max(0,Math.ceil((new Date(p.premiumDue)-today)/864e5))}d)</td><td class="num">${p.premium?fmt(Number(p.premium),{dp:0}):'—'}</td></tr>`).join('')
+      due.map(p => {
+        const days = Math.round((_parseDateOnlyLocal(p.premiumDue) - _parseDateOnlyLocal(todayISO)) / 86400000);
+        return `<tr><td class="tl cell-sym">${kjrEscape(p.insurer||'?')}</td><td class="tl">${kjrEscape(p.plan||p.type||'')}</td><td class="num">${fmtDateSG(p.premiumDue)} (${days <= 0 ? 'due today' : 'in ' + days + 'd'})</td><td class="num">${p.premium?fmt(Number(p.premium),{dp:0}):'—'}</td></tr>`;
+      }).join('')
     }</tbody></table></div></div></div>`;
   }
   el.innerHTML = head + `<div class="card-body">${summary}</div>` + table + premCard + renew + renderCoverageAdequacy();
@@ -7008,7 +7178,12 @@ function _insurancePremiumSchedule(list){
       for (let i = 0; i < 12; i++) series[i] += amt;
       return;
     }
-    const due = p.premiumDue ? new Date(p.premiumDue) : null;
+    // QA #Med-4: local-midnight parse, not the extraction harness's
+    // dependency (_insurancePremiumSchedule is combined stand-alone in
+    // tests/test-app.js), so this stays a literal inline parse rather than
+    // calling out to fmtDateSG's _parseDateOnlyLocal helper.
+    const _m = p.premiumDue ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(p.premiumDue) : null;
+    const due = _m ? new Date(Number(_m[1]), Number(_m[2]) - 1, Number(_m[3])) : (p.premiumDue ? new Date(p.premiumDue) : null);
     if (!due || isNaN(due.getTime())){ excluded++; return; }
     const step = freq === 'Quarterly' ? 3 : freq === 'Semi-annual' ? 6 : 12; // Annual + fallback
     // dueIdx is the anchor month's offset from the window start. A FUTURE due
@@ -7507,7 +7682,7 @@ function _cpfMonthEnds(){
   const anchor = _cpfAnchorDate();
   if (!anchor) return [];
   const start = new Date(anchor.slice(0,7) + '-01T00:00:00');
-  const today = _isoDate(new Date());
+  const today = _isoDateSG(new Date()); // QA low-priority: align with the rest of the app's SG-local convention
   const out = [];
   let y = start.getFullYear(), m = start.getMonth() + 1;   // 1-based month
   const now = new Date();
@@ -7535,7 +7710,7 @@ function saveCpfBalancesFromForm(){
   // and accrual restarts from here. runSalaryEngine then prunes now-stale auto
   // rows and grows forward from the next payday.
   DB.cpfBalances.updatedAt  = new Date().toISOString();
-  DB.cpfBalances.anchorDate = _isoDate(new Date());
+  DB.cpfBalances.anchorDate = _isoDateSG(new Date()); // QA low-priority: same SG-local convention as the accrual engines that read this anchor
   runSalaryEngine();
   saveData();
   renderAll();
@@ -8491,6 +8666,29 @@ function installEventDelegation(){
     const wrap = document.getElementById('nav-more-wrap');
     if (wrap && wrap.classList.contains('open') && !wrap.contains(e.target)) closeNavMore();
   });
+  // Backdrop-close for the four overlays with real teardown work, handed over
+  // from the index.html pass: entity-modal/stock-cols-modal/board-cols-modal
+  // (focus-trap listener removal + focus restoration, see closeEntityModal/
+  // closeColumns) and setup-wizard (sets the wizard-dismissed localStorage
+  // flag, see closeSetupWizard). Routing these through the generic
+  // overlayBackdropClose ACTION (a bare classList.remove('open')) would skip
+  // all of that. These four overlay elements carry no data-click attribute of
+  // their own (unlike more-sheet/ibkr-preview-overlay/ins-import-overlay,
+  // which do and are fine with the generic handler), so this is a small
+  // dedicated id -> close-fn lookup rather than a markup change to index.html.
+  // e.target is the deepest element actually under the cursor, so this only
+  // fires for a literal click on the overlay's own backdrop area, never a
+  // click that landed on the .modal panel or anything inside it.
+  const BACKDROP_CLOSE_FNS = {
+    'entity-modal':     closeEntityModal,
+    'stock-cols-modal': () => closeColumns('stocks'),
+    'board-cols-modal': () => closeColumns('board'),
+    'setup-wizard':     closeSetupWizard
+  };
+  document.addEventListener('click', (e) => {
+    const fn = BACKDROP_CLOSE_FNS[e.target && e.target.id];
+    if (fn) fn();
+  });
   // Mobile table scroll hint (F5): scroll doesn't bubble, so this listens on
   // the capture phase at the document root instead of binding one listener
   // per .tbl-wrap (which gets torn down and recreated on every render).
@@ -8752,7 +8950,13 @@ function whenIdle(fn){
    pill and the DOM reconcile are handled inside pullFromRemote(); we only chain
    the salary re-run because the remote payload may carry updated salary config. */
 function revalidateFromRemote(opts){
-  return pullFromRemote(opts).then(ok => { if (ok) runSalaryEngine({ rerender: true }); });
+  // QA low-priority: no .catch meant a throw inside the .then callback
+  // (runSalaryEngine) became an unhandled promise rejection. pullFromRemote
+  // itself already resolves rather than rejects in every path, this guards
+  // the chained callback too.
+  return pullFromRemote(opts)
+    .then(ok => { if (ok) runSalaryEngine({ rerender: true }); })
+    .catch(err => console.warn('[sync] revalidateFromRemote failed:', err && err.message));
 }
 
 document.addEventListener('DOMContentLoaded', boot);

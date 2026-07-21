@@ -14,12 +14,18 @@
      throughout the app's rendered markup; that is a lower-severity relaxation
      (CSS injection, not script execution) and a separate future hardening
      item if it is ever tackled. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://script.google.com https://*.googleusercontent.com https://script.googleusercontent.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://script.google.com https://*.googleusercontent.com https://script.googleusercontent.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none';">
 <title>Kujira Portfolio</title>
 <link rel="manifest" href="Worker/manifest.webmanifest">
 <link rel="icon" type="image/png" href="Worker/whale-icon.png">
 <link rel="apple-touch-icon" href="Worker/whale-icon.png">
-<meta name="theme-color" content="#0f0f0f">
+<!-- No JS in this file may set this dynamically (owned by app.js/theme-init.js,
+     out of scope here), so this follows the OS colour-scheme preference via
+     media queries rather than the in-app manual toggle. See QA fix c handoff
+     note: a one-line update in theme-init.js/app.js's theme toggle would make
+     this track the manual choice exactly. -->
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf9f6">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#131722">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <!-- Subresource Integrity: jsdelivr serves Chart.js with this exact hash.
@@ -32,8 +38,10 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
-  /* Default = warm light theme (cream + terracotta), ported from the prototype.
-     Dark lives in html.dark below and is opt-in via the theme toggle. */
+  /* :root holds the warm light theme's tokens (cream + terracotta), ported
+     from the prototype. Light is the OPT-IN theme though: theme-init.js adds
+     html.dark by default unless the user has chosen light, so html.dark's
+     tokens below are what most users see at runtime. */
   --bg:#faf9f6;--bg2:#ffffff;--bg3:#f4f2ec;--bg4:#eae7dd;
   --border:#e7e3da;--border2:#d8d3c6;
   --text:#1f1d1a;--text2:#6b665e;--text3:#9a958b;
@@ -79,9 +87,20 @@ body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;
 a{color:var(--blue);text-decoration:none}
 @media (hover:hover){a:hover{text-decoration:underline}}
 
+/* Visually-hidden but still in the accessibility tree (screen-reader-only). */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* FOCUS-VISIBLE, shared ring for topbar/chrome controls that .btn's own rule
+   (below) doesn't cover. Inset, not outset: several of these controls sit
+   inside an overflow:hidden parent (.icon-btn-group, .ccy-toggle,
+   .theme-toggle, .nav's own scroll clipping), and an outset box-shadow or the
+   UA default outline gets silently clipped there. Inset never does. */
+.icon-btn:focus,.nav-btn:focus,.ccy-toggle button:focus,.theme-toggle button:focus,.sync-pill:focus,.logo:focus,.tb-tab:focus{outline:none}
+.icon-btn:focus-visible,.nav-btn:focus-visible,.ccy-toggle button:focus-visible,.theme-toggle button:focus-visible,.sync-pill:focus-visible,.logo:focus-visible,.tb-tab:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
+
 /* TOPBAR */
 .topbar{background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border-bottom:1px solid var(--glass-border);padding:env(safe-area-inset-top) 24px 0;display:flex;align-items:center;gap:0;height:56px;height:calc(56px + env(safe-area-inset-top));position:sticky;top:0;z-index:100}
-.logo{font-weight:800;font-size:16px;letter-spacing:0.2px;margin-right:32px;display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);cursor:pointer}
+.logo{font-weight:800;font-size:16px;letter-spacing:0.2px;margin-right:32px;display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);cursor:pointer;background:none;border:none;padding:0;font-family:inherit;text-align:left}
 .logo:hover,.logo:focus{text-decoration:none;outline:none}
 .logo-whale{height:44px;width:44px;flex-shrink:0;border-radius:8px;object-fit:cover}
 .logo-name{display:flex;flex-direction:column;line-height:1.1}
@@ -106,7 +125,7 @@ a{color:var(--blue);text-decoration:none}
 .nav-more-btn.active{background:var(--accent-soft);color:var(--accent);font-weight:500}
 .nav-more-btn .caret{width:10px;height:10px;flex-shrink:0;transition:transform 0.15s}
 .nav-more-wrap.open .nav-more-btn .caret{transform:rotate(180deg)}
-.nav-more-menu{display:none;position:absolute;top:calc(100% + 6px);left:0;min-width:180px;background:var(--glass-strong);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);box-shadow:0 16px 40px rgba(0,0,0,0.4),inset 0 1px 0 var(--glass-hi);padding:6px;z-index:110;flex-direction:column;gap:1px}
+.nav-more-menu{display:none;position:absolute;top:calc(100% + 6px);left:0;min-width:180px;background:var(--glass-strong);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi);padding:6px;z-index:110;flex-direction:column;gap:1px}
 .nav-more-wrap.open .nav-more-menu{display:flex}
 .nav-more-menu .nav-btn{width:100%;justify-content:flex-start}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
@@ -128,6 +147,16 @@ a{color:var(--blue);text-decoration:none}
 @media (hover:none){
   .icon-btn-group .icon-btn{width:44px;height:44px}
 }
+
+/* CROSS-APP SWITCHER, three-way segmented pill matching Trading/Forex's
+   .tb-tabs component (see AGENTS.md, Cross-app linkage), restyled on
+   Portfolio's own tokens rather than Forex's raw values. Hidden below 768px:
+   the bottom tab bar's More sheet already offers Trading/Forex there. */
+.tb-tabs{display:flex;gap:2px;background:var(--bg3);border:1px solid var(--border);border-radius:999px;padding:3px;flex-shrink:0;margin-left:8px}
+.tb-tab{padding:5px 12px;border-radius:999px;font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;border:none;background:none;text-decoration:none;white-space:nowrap;font-family:inherit}
+@media (hover:hover){.tb-tab:hover{color:var(--text);text-decoration:none}}
+.tb-tab.active{background:var(--accent);color:var(--on-accent)}
+@media (max-width:1300px){.tb-tab{padding:5px 9px}}
 
 /* TOUCH PRESS STATES, coarse-pointer devices get no :hover feedback today
    (every hover rule above is gated behind (hover:hover)), so taps on .btn/
@@ -166,9 +195,10 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
    text label (Local only / Syncing… / Synced 2m / Sync failed) moves into the
    dashboard hero subline instead (setSyncStatus keeps both in step); the pill
    itself stays reachable and clickable from every tab via its dot + title. */
-.sync-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;border:1px solid var(--glass-border);background:var(--glass);font-size:12px;font-weight:600;color:var(--text2);font-family:inherit;cursor:pointer;transition:all 0.15s;white-space:nowrap}
-#sync-pill-label{display:none}
-.sync-pill{padding:7px 9px}
+.sync-pill{display:inline-flex;align-items:center;gap:6px;padding:7px 9px;border-radius:999px;border:1px solid var(--glass-border);background:var(--glass);font-size:12px;font-weight:600;color:var(--text2);font-family:inherit;cursor:pointer;transition:all 0.15s;white-space:nowrap}
+/* Text label stays in the accessibility tree (screen readers announce state)
+   even though the pill is dot-only for sighted users on every width. */
+#sync-pill-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media (hover:hover){.sync-pill:hover{background:var(--glass-strong);color:var(--text)}}
 .sync-pill::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--text3);flex-shrink:0}
 .sync-pill.s-local::before{background:var(--text3)}
@@ -178,6 +208,13 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
 .sync-pill.s-syncing{color:var(--amber)}
 .sync-pill.s-synced{color:var(--green);border-color:var(--green-border)}
 .sync-pill.s-failed{color:var(--red);border-color:var(--red-border)}
+/* Never colour-alone: a distinct glyph per state alongside the dot, so the
+   state also reads by shape for colour-blind/greyscale viewing. */
+.sync-pill::after{font-size:10px;line-height:1;flex-shrink:0}
+.sync-pill.s-local::after{content:'\2013'}
+.sync-pill.s-syncing::after{content:'\21bb'}
+.sync-pill.s-synced::after{content:'\2713'}
+.sync-pill.s-failed::after{content:'\2715'}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
 
 /* MAIN */
@@ -244,7 +281,7 @@ tbody tr:first-child td{border-top:none}
 @media (hover:hover){.btn-danger:hover{background:var(--red);color:#fff}}
 .btn-sm{padding:4px 10px;font-size:12px}
 .btn-ghost{background:transparent;border-color:transparent}
-@media (hover:hover){.btn-ghost:hover{background:rgba(255,255,255,0.07);border-color:transparent}}
+@media (hover:hover){.btn-ghost:hover{background:color-mix(in srgb,var(--text) 7%,transparent);border-color:transparent}}
 
 /* FORMS */
 .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
@@ -255,7 +292,7 @@ input.fi,select.fi,textarea.fi{padding:8px 11px;border:1px solid var(--glass-bor
 /* iOS date inputs: strip UA intrinsic sizing and centred value text */
 input.fi[type=date]{-webkit-appearance:none;appearance:none;min-width:0;max-width:100%;text-align:left}
 input.fi[type=date]::-webkit-date-and-time-value{text-align:left;margin:0}
-input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(45,212,191,0.4)}
+input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 40%,transparent)}
 input[type=checkbox],input[type=radio]{accent-color:var(--accent)}
 textarea.fi{resize:vertical;min-height:70px}
 .hint{font-size:12px;color:var(--text3);line-height:1.5}
@@ -297,7 +334,7 @@ textarea.fi{resize:vertical;min-height:70px}
 
 /* PHASE CHIP */
 .phase-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;background:var(--accent-soft);border:1px solid var(--accent-border);color:var(--accent);font-size:12px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase}
-.phase-chip-mini{display:inline-block;padding:1px 5px;border-radius:6px;background:var(--accent-soft);border:1px solid var(--accent-border);color:var(--accent);font-size:12px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase;margin-left:4px;line-height:1.2}
+.phase-chip-mini{display:inline-block;padding:1px 5px;border-radius:var(--radius);background:var(--accent-soft);border:1px solid var(--accent-border);color:var(--accent);font-size:12px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase;margin-left:4px;line-height:1.2}
 .ccy-toggle{display:inline-flex;border:1px solid var(--glass-border);border-radius:999px;overflow:hidden;background:var(--glass)}
 .ccy-toggle button{padding:5px 11px;border:none;background:transparent;color:var(--text3);font-size:12px;font-weight:700;letter-spacing:0.3px;cursor:pointer;font-family:inherit;transition:all 0.15s}
 @media (hover:hover){.ccy-toggle button:hover{color:var(--text)}}
@@ -319,7 +356,7 @@ textarea.fi{resize:vertical;min-height:70px}
 .sw-step ol{margin-left:20px;margin-bottom:10px}
 .sw-step li{margin-bottom:6px;font-size:13px;color:var(--text2)}
 .sw-step code{font-family:'SF Mono','Fira Code',monospace;background:var(--bg3);padding:1px 6px;border-radius:4px;font-size:12px;color:var(--text)}
-.sw-step pre{font-family:'SF Mono','Fira Code',monospace;background:var(--bg3);padding:10px;border-radius:6px;font-size:12px;max-height:160px;overflow:auto;color:var(--text);border:1px solid var(--border)}
+.sw-step pre{font-family:'SF Mono','Fira Code',monospace;background:var(--bg3);padding:10px;border-radius:var(--radius);font-size:12px;max-height:160px;overflow:auto;color:var(--text);border:1px solid var(--border)}
 .sw-step .actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
 .sw-step input.fi{margin-top:8px}
 
@@ -348,7 +385,7 @@ textarea.fi{resize:vertical;min-height:70px}
 /* Insurance family-view group header row (Feature 2). Solid token, matches
    the register table's in-flow surface. */
 .ins-group-row td{background:var(--bg3);font-weight:600;font-size:12px;color:var(--text2)}
-.cov-pill{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:8px;border:1px solid transparent;white-space:nowrap}
+.cov-pill{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:var(--radius);border:1px solid transparent;white-space:nowrap}
 .cov-pill.covered{color:var(--green);background:var(--green-soft);border-color:var(--green-border)}
 .cov-pill.partial{color:var(--amber);background:var(--amber-soft);border-color:var(--amber-border)}
 .cov-pill.gap{color:var(--red);background:var(--red-soft);border-color:var(--red-border)}
@@ -374,7 +411,7 @@ textarea.fi{resize:vertical;min-height:70px}
 .tag.warn{color:var(--amber);border-color:var(--amber-border);background:var(--amber-soft)}
 .tag.muted{color:var(--tx3);border-color:var(--border);background:transparent}
 .warn-row td{background:color-mix(in srgb,var(--amber-soft) 30%,transparent)}
-.alert-warn{background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);padding:.5rem .75rem;border-radius:var(--radius);font-size:.85rem}
+.alert-warn{background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);padding:8px 12px;border-radius:var(--radius);font-size:14px}
 .integrity-bar{margin-top:14px;border-radius:var(--radius-lg);padding:12px 16px;font-size:13px;border:1px solid var(--border)}
 .integrity-bar.bad{background:var(--amber-soft);border-color:var(--amber-border)}
 .integrity-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--green-border);background:var(--green-soft);color:var(--green);white-space:nowrap}
@@ -390,7 +427,7 @@ textarea.fi{resize:vertical;min-height:70px}
    dashboard-only tweaks below are scoped under #dash-assets to avoid bleeding
    into that unrelated component. */
 .alloc-bar{display:flex;gap:6px;height:46px;margin-bottom:16px}
-.alloc-seg{display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.2px;border-radius:8px;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:0 10px;transition:flex-grow 0.3s ease,filter 0.15s;cursor:default}
+.alloc-seg{display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.2px;border-radius:var(--radius);min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:0 10px;transition:flex-grow 0.3s ease,filter 0.15s;cursor:default}
 @media (hover:hover){.alloc-seg:hover{filter:brightness(1.1)}}
 .alloc-legend{display:flex;flex-wrap:wrap;gap:8px 18px}
 .alloc-legend-item{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2)}
@@ -529,7 +566,7 @@ a.btn,a.btn:hover{text-decoration:none}
 .alloc-split{margin-top:8px;font-size:12px;color:var(--text3)}
 .alloc-warn{margin-top:8px;display:inline-block;font-size:12px;color:var(--amber);background:var(--amber-soft);border:1px solid var(--amber-border);border-radius:var(--radius);padding:3px 9px}
 /* Sector class chips in the holdings table */
-.sec-chip{display:inline-block;font-size:12px;font-weight:700;letter-spacing:0.3px;padding:1px 6px;border-radius:8px;vertical-align:1px}
+.sec-chip{display:inline-block;font-size:12px;font-weight:700;letter-spacing:0.3px;padding:1px 6px;border-radius:var(--radius);vertical-align:1px}
 .sec-cyclical{color:var(--amber);background:var(--amber-soft);border:1px solid var(--amber-border)}
 .sec-defensive{color:var(--green);background:var(--green-soft);border:1px solid var(--green-border)}
 .sec-sensitive{color:var(--blue);background:var(--blue-soft);border:1px solid var(--blue-border)}
@@ -537,17 +574,17 @@ a.btn,a.btn:hover{text-decoration:none}
 .wl-note{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wl-hit{display:inline-block;font-size:12px;font-weight:700;color:var(--green);background:var(--green-soft);border:1px solid var(--green-border);border-radius:8px;padding:1px 7px;margin-left:5px}
 /* Filter bar */
-.filter-bar{display:flex;gap:.5rem;flex-wrap:wrap;padding:.5rem 1rem;align-items:center;border-bottom:1px solid var(--border)}
-input.fi-sm,select.fi-sm{padding:.25rem .5rem;font-size:.85rem;height:2rem;min-width:0;width:auto}
+.filter-bar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 16px;align-items:center;border-bottom:1px solid var(--border)}
+input.fi-sm,select.fi-sm{padding:4px 8px;font-size:14px;height:32px;min-width:0;width:auto}
 /* Totals row */
 tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 /* Ledger view toggle */
-.btn-active{background:var(--accent);color:#000;border-color:var(--accent)}
-.ledger-group-row td{background:var(--glass);font-size:.8rem;padding:.35rem 1rem;border-top:1px solid var(--border)}
-.subtotal-row td{background:color-mix(in srgb,var(--glass) 60%,transparent);font-size:.8rem;font-style:italic;border-bottom:1px solid var(--border)}
+.btn-active{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.ledger-group-row td{background:var(--glass);font-size:13px;padding:6px 16px;border-top:1px solid var(--border)}
+.subtotal-row td{background:color-mix(in srgb,var(--glass) 60%,transparent);font-size:13px;font-style:italic;border-bottom:1px solid var(--border)}
 /* Dividend card */
-.badge-muted{background:var(--glass);color:var(--tx2);font-size:.75rem;padding:.1rem .4rem;border-radius:999px;font-weight:500;vertical-align:middle}
-.card-hint{padding:.5rem 1rem;font-size:.8rem;color:var(--tx3);border-top:1px solid var(--border)}
+.badge-muted{background:var(--glass);color:var(--tx2);font-size:12px;padding:2px 6px;border-radius:999px;font-weight:500;vertical-align:middle}
+.card-hint{padding:8px 16px;font-size:13px;color:var(--tx3);border-top:1px solid var(--border)}
 .col-mgr-row{display:flex;align-items:center;gap:10px;padding:6px 2px;border-bottom:1px solid var(--border)}
 .col-mgr-row:last-child{border-bottom:none}
 .col-mgr-move{display:inline-flex;gap:2px;flex-shrink:0}
@@ -575,12 +612,14 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   .nav{display:none}
   .topbar-actions{margin-left:auto;gap:6px}
   .docs-link{display:none}  /* topbar too tight on mobile; docs link lives in Settings instead */
-  /* Cross-app links move into the More sheet (B2) below this width, so drop
-     them from the topbar entirely rather than just hiding their label. */
-  .tb-cross-app{display:none}
+  /* Cross-app switcher moves into the More sheet (B2) below this width, so
+     drop it from the topbar entirely, the bottom tab bar is already full. */
+  .tb-tabs{display:none}
   .ccy-toggle button{padding:5px 9px}
   .main{padding:14px;padding-bottom:88px}
-  .bottom-tab-bar{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border-top:1px solid var(--glass-border);padding:6px 4px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;z-index:90}
+  /* Opaque backing (F-report: scrolling page text was bleeding through behind
+     the tab labels at 375px on the translucent --glass background). */
+  .bottom-tab-bar{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--surface-solid);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border-top:1px solid var(--glass-border);padding:6px 4px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;z-index:90}
   .bottom-tab-bar .nav-btn{flex-direction:column;gap:2px;font-size:12px;padding:6px 8px;min-width:0;flex:1}
   .bottom-tab-bar .nav-btn svg{width:18px;height:18px}
   /* iOS zoom trap: inputs under 16px make Safari auto-zoom on focus. */
@@ -612,7 +651,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 .cb-drop-zone.drag-over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
 .cb-drop-zone.has-value{border-style:solid;border-color:var(--accent);background:var(--accent-soft)}
 .cb-drop-label{font-size:12px}
-.cb-field-pill{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;font-size:12px;color:var(--text2);cursor:grab;transition:all 0.15s;user-select:none}
+.cb-field-pill{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);font-size:12px;color:var(--text2);cursor:grab;transition:all 0.15s;user-select:none}
 .cb-field-pill:hover{border-color:var(--accent);color:var(--text);background:var(--bg4)}
 .cb-field-pill:active{cursor:grabbing;opacity:0.7}
 .cb-field-pill .pill-icon{font-size:13px}
@@ -622,7 +661,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 .cb-axis-chip button{background:none;border:none;color:var(--on-accent);cursor:pointer;font-size:14px;line-height:1;padding:0 0 0 2px;opacity:0.7}
 .cb-axis-chip button:hover{opacity:1}
 .cb-head-actions{flex-wrap:wrap}
-.cb-period-btn{font-size:12px;padding:3px 9px;border:1px solid var(--border2);background:var(--bg2);color:var(--text2);border-radius:6px;cursor:pointer}
+.cb-period-btn{font-size:12px;padding:3px 9px;border:1px solid var(--border2);background:var(--bg2);color:var(--text2);border-radius:var(--radius);cursor:pointer}
 .cb-period-btn.active{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
 .saved-chart-card{position:relative;margin-bottom:16px}
 @media (max-width:720px){
@@ -641,7 +680,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   position:absolute;top:50%;left:-40px;transform:translateY(-50%);
   width:28px;height:40px;
   display:flex;align-items:center;justify-content:center;
-  background:var(--accent,#a78bfa);border:1px solid var(--border);border-radius:9px;
+  background:var(--accent,#a78bfa);border:1px solid var(--border);border-radius:var(--radius);
   cursor:grab;font-size:15px;color:var(--on-accent,#fff);z-index:40;
   touch-action:none;user-select:none;box-shadow:0 3px 10px rgba(0,0,0,.4);
 }
@@ -658,16 +697,18 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 </head>
 <body>
 
+<h1 class="sr-only">Kujira Portfolio</h1>
+
 <!-- TOPBAR -->
 <header class="topbar">
-  <a class="logo" data-click="navigate" data-a0="dashboard">
+  <button type="button" class="logo" data-click="navigate" data-a0="dashboard">
     <img class="logo-whale" src="Worker/whale-icon.png" alt="Kujira">
     <div class="logo-name">
       <span>KUJIRA</span>
       <span>Portfolio</span>
       <span id="logo-version"></span>
     </div>
-  </a>
+  </button>
   <nav class="nav" id="nav-host">
     <!-- nav buttons injected by JS -->
   </nav>
@@ -677,12 +718,11 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     </button>
     <div class="nav-more-menu" id="nav-more-menu"><!-- overflow tabs injected by JS --></div>
   </div>
-  <a href="../Trading/" class="nav-btn tb-cross-app" style="text-decoration:none;border-left:1px solid var(--border);margin-left:4px;padding-left:14px" title="Kujira Trading dashboard">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/></svg><span class="tb-trading-label">Trading</span>
-  </a>
-  <a href="../Forex/" class="nav-btn tb-cross-app" style="text-decoration:none" title="Kujira Forex">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span class="tb-trading-label">Forex</span>
-  </a>
+  <nav class="tb-tabs" aria-label="Switch app">
+    <a class="tb-tab" href="../Trading/">Trading</a>
+    <a class="tb-tab" href="../Forex/">Forex</a>
+    <a class="tb-tab active" href="./" aria-current="page">Portfolio</a>
+  </nav>
   <div class="topbar-actions">
     <div class="ccy-toggle" role="group" aria-label="Display currency">
       <button type="button" data-ccy="SGD" data-click="setDisplayCcy" data-a0="SGD">SGD</button>
@@ -711,7 +751,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
   <!-- DASHBOARD -->
   <section class="page" id="page-dashboard">
-    <div class="page-head"><div><div class="page-title">Dashboard</div></div><div style="display:flex;align-items:center;gap:10px"><button id="dash-arrange-btn" class="btn btn-sm btn-ghost" data-click="toggleArrange" style="display:none">Arrange</button><div id="dash-integrity-pill"></div></div></div>
+    <div class="page-head"><div><h2 class="page-title">Dashboard</h2></div><div style="display:flex;align-items:center;gap:10px"><button id="dash-arrange-btn" class="btn btn-sm btn-ghost" data-click="toggleArrange" style="display:none">Arrange</button><div id="dash-integrity-pill"></div></div></div>
     <div id="dash-integrity"></div>
     <div id="dash-stack">
       <div id="dash-networth" data-wid="networth"></div>
@@ -728,7 +768,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- STOCKS -->
   <section class="page" id="page-stocks">
     <div class="page-head">
-      <div><div class="page-title">Stocks</div></div>
+      <div><h2 class="page-title">Stocks</h2></div>
     </div>
     <div id="stocks-summary"></div>
     <div id="stocks-body"></div>
@@ -740,7 +780,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- WATCHLIST+ BOARD, Yahoo-style customisable view over the watchlist tickers -->
   <section class="page" id="page-board">
     <div class="page-head">
-      <div><div class="page-title">Watchlist+</div><div class="page-sub">Your watchlist tickers in a customisable board. Pick and reorder columns with ⚙ Columns.</div></div>
+      <div><h2 class="page-title">Watchlist+</h2><div class="page-sub">Your watchlist tickers in a customisable board. Pick and reorder columns with ⚙ Columns.</div></div>
       <div class="h-toolbar">
         <button class="btn" data-click="refreshStockPrices">↻ Refresh prices</button>
         <button class="btn" data-click="openColumns" data-a0="board" id="btn-board-cols">⚙ Columns</button>
@@ -752,7 +792,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- CRYPTO -->
   <section class="page" id="page-crypto">
     <div class="page-head">
-      <div><div class="page-title">Crypto</div><div class="page-sub">Coin holdings priced in SGD via CoinGecko.</div></div>
+      <div><h2 class="page-title">Crypto</h2><div class="page-sub">Coin holdings priced in SGD via CoinGecko.</div></div>
       <div class="h-toolbar">
         <button class="btn btn-primary" data-click="openEntity" data-a0="crypto">＋ Add coin</button>
         <button class="btn" data-click="refreshCryptoPrices" id="btn-refresh-crypto">↻ Refresh prices</button>
@@ -767,7 +807,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- REAL ESTATE -->
   <section class="page" id="page-realestate">
     <div class="page-head">
-      <div><div class="page-title">Real Estate</div><div class="page-sub">Lump values, manual updates.</div></div>
+      <div><h2 class="page-title">Real Estate</h2><div class="page-sub">Lump values, manual updates.</div></div>
       <div class="h-toolbar">
         <button class="btn btn-primary" data-click="openEntity" data-a0="realestate">＋ Add property</button>
       </div>
@@ -779,7 +819,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- INSURANCE -->
   <section class="page" id="page-insurance">
     <div class="page-head">
-      <div><div class="page-title">Insurance</div><div class="page-sub">Life, health, and general policies, plus a protection adequacy check.</div></div>
+      <div><h2 class="page-title">Insurance</h2><div class="page-sub">Life, health, and general policies, plus a protection adequacy check.</div></div>
     </div>
     <div id="insurance-root"></div>
   </section>
@@ -787,7 +827,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- CASH -->
   <section class="page" id="page-cash">
     <div class="page-head">
-      <div><div class="page-title">Cash</div><div class="page-sub">Bank accounts, fixed deposits, foreign currency.</div></div>
+      <div><h2 class="page-title">Cash</h2><div class="page-sub">Bank accounts, fixed deposits, foreign currency.</div></div>
       <div class="h-toolbar">
         <button class="btn btn-primary" data-click="openEntity" data-a0="cash">＋ Add account</button>
         <button class="btn" data-click="refreshFx" id="btn-refresh-fx">↻ Refresh FX</button>
@@ -802,7 +842,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- CPF -->
   <section class="page" id="page-cpf">
     <div class="page-head">
-      <div><div class="page-title">CPF</div><div class="page-sub">OA, SA, MA, RA balances with full transaction history.</div></div>
+      <div><h2 class="page-title">CPF</h2><div class="page-sub">OA, SA, MA, RA balances with full transaction history.</div></div>
     </div>
     <div id="cpf-balances"></div>
     <div class="hint" id="cpf-balances-meta" style="margin:-4px 2px 14px"></div>
@@ -811,8 +851,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-head">
         <h3>Transaction history</h3>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <select class="filter-sel fi" id="cpf-filter-year" style="padding:5px 9px;font-size:12px;width:auto;min-width:90px" data-change="renderCpf"></select>
-          <select class="filter-sel fi" id="cpf-filter-type" style="padding:5px 9px;font-size:12px;width:auto;min-width:120px" data-change="renderCpf">
+          <select class="fi" id="cpf-filter-year" style="padding:5px 9px;font-size:12px;width:auto;min-width:90px" data-change="renderCpf" aria-label="Filter by year"></select>
+          <select class="fi" id="cpf-filter-type" style="padding:5px 9px;font-size:12px;width:auto;min-width:120px" data-change="renderCpf" aria-label="Filter by transaction type">
             <option value="">All types</option>
             <option value="contribution">Contribution</option>
             <option value="interest">Interest</option>
@@ -820,7 +860,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
             <option value="withdrawal">Withdrawal</option>
             <option value="adjustment">Adjustment</option>
           </select>
-          <select class="filter-sel fi" id="cpf-filter-account" style="padding:5px 9px;font-size:12px;width:auto;min-width:90px" data-change="renderCpf">
+          <select class="fi" id="cpf-filter-account" style="padding:5px 9px;font-size:12px;width:auto;min-width:90px" data-change="renderCpf" aria-label="Filter by CPF account">
             <option value="">All accounts</option>
             <option value="OA">OA</option><option value="SA">SA</option><option value="MA">MA</option><option value="RA">RA</option>
           </select>
@@ -834,9 +874,9 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- CASHFLOW -->
   <section class="page" id="page-cashflow">
     <div class="page-head">
-      <div><div class="page-title">P&amp;L</div><div class="page-sub">Monthly income, per-transaction expenses, savings rate.</div></div>
+      <div><h2 class="page-title">P&amp;L</h2><div class="page-sub">Monthly income, per-transaction expenses, savings rate.</div></div>
       <div class="h-toolbar">
-        <select class="filter-sel fi" id="cf-filter-year" style="padding:5px 9px;font-size:12px;width:auto;min-width:90px" data-change="renderCashflow"></select>
+        <select class="fi" id="cf-filter-year" style="padding:5px 9px;font-size:12px;width:auto;min-width:90px" data-change="renderCashflow" aria-label="Filter by year"></select>
         <button class="btn btn-primary" data-click="openEntity" data-a0="income">＋ Add income</button>
         <button class="btn btn-primary" data-click="openEntity" data-a0="expenses">＋ Add expense</button>
       </div>
@@ -864,7 +904,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-head">
         <h3>Expenses</h3>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <select class="filter-sel fi" id="cf-filter-category" style="padding:5px 9px;font-size:12px;width:auto;min-width:120px" data-change="renderCashflow">
+          <select class="fi" id="cf-filter-category" style="padding:5px 9px;font-size:12px;width:auto;min-width:120px" data-change="renderCashflow" aria-label="Filter by category">
             <option value="">All categories</option>
           </select>
           <span class="hint" id="cf-expense-meta"></span>
@@ -876,13 +916,13 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
   <!-- PROJECTIONS -->
   <section class="page" id="page-projections">
-    <div class="page-head"><div><div class="page-title">Projections</div><div class="page-sub">FIRE number, retirement readiness, CPF growth. Figures in today's dollars.</div></div></div>
+    <div class="page-head"><div><h2 class="page-title">Projections</h2><div class="page-sub">FIRE number, retirement readiness, CPF growth. Figures in today's dollars.</div></div></div>
     <div id="projections-root"></div>
   </section>
 
   <!-- SETTINGS -->
   <section class="page" id="page-settings">
-    <div class="page-head"><div><div class="page-title">Settings</div><div class="page-sub">Sync, assumptions, theme.</div></div></div>
+    <div class="page-head"><div><h2 class="page-title">Settings</h2><div class="page-sub">Sync, assumptions, theme.</div></div></div>
 
     <div class="settings-grid">
 
@@ -1251,10 +1291,10 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- MOBILE "MORE" SHEET: the tabs and cross-app links that don't fit the
      5-button bottom bar. Slides up from the bottom, reuses the .overlay
      pattern so Escape/backdrop-click behave like every other modal. -->
-<div class="overlay more-sheet-overlay" id="more-sheet" data-click="overlayBackdropClose">
+<div class="overlay more-sheet-overlay" id="more-sheet" data-click="overlayBackdropClose" role="dialog" aria-modal="true" aria-labelledby="more-sheet-title">
   <div class="modal more-sheet">
     <div class="modal-head">
-      <h3>More</h3>
+      <h3 id="more-sheet-title">More</h3>
       <button class="btn-ghost btn btn-sm" data-click="closeMoreSheet" aria-label="Close">✕</button>
     </div>
     <div class="modal-body" id="more-sheet-body"></div>
@@ -1263,11 +1303,11 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
 <!-- ENTITY MODAL (shared across Stocks/Crypto/RealEstate/Cash) -->
 <!-- IBKR import preview, dynamically populated by ibkrShowPreview() -->
-<div class="overlay" id="ibkr-preview-overlay" data-click="overlayBackdropClose"></div>
+<div class="overlay" id="ibkr-preview-overlay" data-click="overlayBackdropClose" role="dialog" aria-modal="true" aria-label="IBKR import preview"></div>
 <!-- Insurance CSV import (manual SGFinDex mapper), dynamically populated by openInsuranceImport()/insuranceImportShowMapper()/insuranceImportShowPreview() -->
-<div class="overlay" id="ins-import-overlay" data-click="overlayBackdropClose"></div>
+<div class="overlay" id="ins-import-overlay" data-click="overlayBackdropClose" role="dialog" aria-modal="true" aria-label="Insurance import"></div>
 
-<div class="overlay" id="entity-modal">
+<div class="overlay" id="entity-modal" role="dialog" aria-modal="true" aria-labelledby="em-title">
   <div class="modal">
     <div class="modal-head">
       <h3 id="em-title">Add</h3>
@@ -1313,10 +1353,10 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 </div>
 
 <!-- SETUP WIZARD, 4-step onboarding for first-time users -->
-<div class="overlay" id="setup-wizard">
+<div class="overlay" id="setup-wizard" role="dialog" aria-modal="true" aria-labelledby="setup-wizard-title">
   <div class="modal" style="max-width:620px">
     <div class="modal-head">
-      <h3>Welcome, let's get you set up</h3>
+      <h3 id="setup-wizard-title">Welcome, let's get you set up</h3>
       <button class="btn-ghost btn btn-sm" data-click="closeSetupWizard" aria-label="Close">✕</button>
     </div>
     <div class="modal-body">
@@ -1344,8 +1384,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.51"></script>
-<script src="Worker/kjr-sortable.js?v=2.51"></script>
-<script src="Worker/app.js?v=2.51"></script>
+<script src="Worker/kjr-core.js?v=2.52"></script>
+<script src="Worker/kjr-sortable.js?v=2.52"></script>
+<script src="Worker/app.js?v=2.52"></script>
 </body>
 </html>

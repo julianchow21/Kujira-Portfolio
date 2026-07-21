@@ -25,7 +25,17 @@ Every app has its own `CLAUDE.md` with architecture notes, gotchas, and design t
 
 ## Cross-app linkage
 
-All apps share a topbar with a three-way segmented control linking `Trading`, `Forex`, and `Portfolio` via relative paths (`../Trading/`, `../Forex/`, `../Portfolio/`). If you change topbar layout, update all three.
+All apps share a topbar with a three-way segmented control linking `Trading`, `Forex`, and `Portfolio`. The pattern is:
+
+```html
+<nav class="tb-tabs" aria-label="Switch app">
+  <a class="tb-tab active" href="./" aria-current="page">Trading</a>
+  <a class="tb-tab" href="../Forex/">Forex</a>
+  <a class="tb-tab" href="../Portfolio/">Portfolio</a>
+</nav>
+```
+
+Fixed order: Trading, Forex, Portfolio. Every entry is a real anchor (no `<span>`). The current app's entry uses `href="./"` with `class="tb-tab active"` and `aria-current="page"`. Other apps use relative paths `../Trading/`, `../Forex/`, or `../Portfolio/`. If you change the topbar in one app, update all three.
 
 ## Critical constraints
 
@@ -63,7 +73,7 @@ These are hard-learned loss classes; every data-storing app must uphold them:
 
 - `APP_VERSION` and `APP_DISPLAY_VERSION` live in `Portfolio/Worker/app.js:14-15`. Bump both on every deploy.
 - `PHASE_2_TABS` hides locked tabs from the nav but their DOM markup remains intact; code is preserved, not deleted.
-- Portfolio uses dark theme **default** with warm light opt-in. Trading and Forex use dark only. Don't apply one app's theme default to another.
+- Portfolio uses dark theme **default** with warm light opt-in. Forex has both dark and light themes with a toggle. Trading uses dark only. Don't apply one app's theme default to another.
 
 ## Trading app specifics
 
@@ -117,7 +127,7 @@ These extend or override the master `CLAUDE.md` rules for this repo.
 
 - **Feature backlog:** `~/Claude Projects/Claude/tasks/todo.md` (external path, **never** in a local file)
 - Each app's `CLAUDE.md` (architecture, tabs, data layer, gotchas, design tokens)
-- `Portfolio/Docs/QA SOP v2 (3 Jul).md` (QA runbook, seed data instructions, invariants)
+- `Portfolio/Docs/QA SOP.md` (QA runbook, seed data instructions, invariants)
 - `SECURITY.md` (threat model, audit checklist; run before each release)
 - `README.md` (user-facing setup walkthrough)
 - `.claude/` and `.wrangler/` are **gitignored**; don't rely on them being committed
@@ -125,4 +135,4 @@ These extend or override the master `CLAUDE.md` rules for this repo.
 ## Conventions
 
 - All apps use the Kujira design token system: `--bg/bg2/bg3/bg4`, `--text/text2/text3`, `--red/green/blue/amber`, `--accent`, `--radius`, `--glass*` (Portfolio, floating elements only since v2.39), `--surface-solid` (Portfolio dense tables)
-- Portfolio dark theme default (`--accent:#2dd4bf` teal); warm light opt-in (`--accent:#c15f3c` terracotta). Trading/Forex: dark only, `--accent:#2dd4bf`.
+- Portfolio dark theme default (`--accent:#2dd4bf` teal); warm light opt-in (`--accent:#c15f3c` terracotta). Trading uses dark only with `--accent:#2962FF` and `--accent2:#1565C0` (TradingView blue convention), `--radius:6px/--radius-lg:8px`. Forex has dark and light themes both with `--accent:#2dd4bf` (dark) and `--accent:#0d9488` (light).

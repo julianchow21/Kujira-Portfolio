@@ -42,7 +42,7 @@ DB = mergeDefaults(seed); saveLocal(); runSalaryEngine({}); renderAll(); })()
 
 4. **Assert numbers, do not eyeball.** Pull computed values via eval and check them against
    the invariant table below. Screenshots are for layout, not for accuracy.
-5. **Walk every tab**: Dashboard, Stocks, Cash, CPF, P&L, Real Estate, Settings. Check
+5. **Walk every tab**: Dashboard, Stocks, Crypto, Real Estate, Insurance, Cash, CPF, P&L, Projections, Settings. Check
    golden path + empty state + both themes (dark default, warm light opt-in) + both currencies
    (SGD/USD) + mobile widths (430, 390, 375).
 6. **Check the console on every tab.** Zero errors is the bar.

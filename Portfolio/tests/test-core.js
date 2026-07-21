@@ -570,6 +570,19 @@ function runTests() {
     assert.strictEqual(trades[1].shares, 5); // sign stripped, side carries direction
   });
 
+  test('ibkrExtractTrades - zero-quantity row skipped (QA #Low), negative (sell) quantity still kept', () => {
+    const csv = 'Trades,Header,DataDiscriminator,Asset Category,Symbol,Currency,Date/Time,Quantity,T. Price,Comm/Fee\n' +
+      'Trades,Data,Order,Stocks,AAPL,USD,2024-01-15,0,150.25,-1.5\n' +    // qty 0 -> skipped, not a 0-share sell
+      'Trades,Data,Order,Stocks,MSFT,USD,2024-01-16,-5,300.50,-1.2\n';   // genuine sell (negative qty) -> kept
+    const rows = core.parseCSV(csv);
+    const { trades, skipped } = core.ibkrExtractTrades(rows);
+    assert.strictEqual(skipped, 1);
+    assert.strictEqual(trades.length, 1);
+    assert.strictEqual(trades[0].symbol, 'MSFT');
+    assert.strictEqual(trades[0].side, 'sell');
+    assert.strictEqual(trades[0].shares, 5);
+  });
+
   // 21. Testing ibkrMatchTrades
   test('ibkrMatchTrades - symbol match is case-insensitive against existing stocks', () => {
     const trades = [{ symbol: 'AAPL', currency: 'USD', date: '2024-01-15', side: 'buy', shares: 10, price: 150.25, fees: 1.5 }];
@@ -652,6 +665,29 @@ function runTests() {
 
   test('kjrChartAggregate - empty input returns empty array', () => {
     assert.deepStrictEqual(core.kjrChartAggregate([], ['cat'], ['sumVal'], CHART_FIELDS), []);
+  });
+
+  test('kjrChartAggregate - null/undefined measure values excluded from avg denominator, not counted as 0 (QA #Low)', () => {
+    // Group A: one real value (10) and one genuinely unpriced row (null),
+    // e.g. a holding with no quote yet. The unpriced row must not drag the
+    // average down to 5, the average of the ONE real value is still 10.
+    const items = [
+      { cat: 'A', val: 10 },
+      { cat: 'A', val: null },
+      { cat: 'B', val: undefined },
+      { cat: 'B', val: undefined }
+    ];
+    const out = core.kjrChartAggregate(items, ['cat'], ['avgVal'], CHART_FIELDS);
+    assert.deepStrictEqual(out, [['A', { avgVal: 10 }], ['B', { avgVal: 0 }]]);
+  });
+
+  test('kjrChartAggregate - null measure values also excluded from sum (net contribution unchanged)', () => {
+    const items = [
+      { cat: 'A', val: 10 },
+      { cat: 'A', val: null }
+    ];
+    const out = core.kjrChartAggregate(items, ['cat'], ['sumVal'], CHART_FIELDS);
+    assert.deepStrictEqual(out, [['A', { sumVal: 10 }]]);
   });
 
   // 23. Testing kjrFmtMeasure / kjrFmtAxis

@@ -166,7 +166,14 @@
       if (edgePx) _scrollStep(e.clientY);
     }
 
-    function _commit() {
+    /* fireCallback: false on a cancelled gesture (pointercancel), the
+       comment here always said "no reorder callback on cancel" but _commit()
+       fired onReorder regardless, so a cancelled drag (interrupted by the OS,
+       a multi-touch conflict, etc, not a deliberate drop) still silently
+       persisted whatever order the placeholder was in when the cancel fired.
+       Code now matches the comment: cleanup always runs, onReorder only
+       fires on a real drop (pointerup) or an explicit disable() mid-drag. */
+    function _commit(fireCallback) {
       if (!dragItem || !placeholder) return;
       _stopScroll();
 
@@ -197,17 +204,17 @@
       dragItem   = null;
       activeId   = null;
 
-      if (onReorder) onReorder(order);
+      if (fireCallback && onReorder) onReorder(order);
     }
 
     function _onPointerUp(e) {
       if (e.pointerId !== activeId) return;
-      _commit();
+      _commit(true);
     }
 
     function _onPointerCancel(e) {
       if (e.pointerId !== activeId) return;
-      _commit(); /* clean up even on cancel; no reorder callback on cancel */
+      _commit(false); /* clean up even on cancel; no reorder callback on cancel */
     }
 
     /* attach delegated listener */
@@ -217,7 +224,10 @@
     function enable()     { enabled = true; }
     function disable()    {
       enabled = false;
-      if (activeId !== null) _commit(); /* cancel in-progress drag */
+      // Explicit true: preserves this call's pre-existing behaviour (persist
+      // wherever the drag had got to) now that _commit takes a fireCallback
+      // arg, only the genuine pointercancel path above is the "no reorder" one.
+      if (activeId !== null) _commit(true); /* cancel in-progress drag */
     }
     function isEnabled()  { return enabled; }
     function isDragging() { return activeId !== null; }
