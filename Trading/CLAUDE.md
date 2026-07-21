@@ -52,7 +52,7 @@ Client-side from the series: `ema()`, `rsi()` (Wilder), `macd()` (12/26/9), `vwa
 
 ## Design tokens
 
-Ported from Investment Tracker: `--bg/bg2/bg3/bg4`, `--green` (gains) / `--red` (losses), `--accent` #2dd4bf (VWAP), `--blue` (EMA9), `--amber` (EMA20), `--radius`. Dark only.
+Ported from Investment Tracker: `--bg/bg2/bg3/bg4`, `--green` (gains) / `--red` (losses), `--accent:#2962FF`, `--accent2:#1565C0` (TradingView blue), `--blue` (EMA9), `--amber` (EMA20), `--radius:6px`, `--radius-lg:8px`. Dark only.
 
 ## Files
 

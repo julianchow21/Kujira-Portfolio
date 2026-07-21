@@ -3,6 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Content Security Policy: script-src needs 'unsafe-inline' because the whole app is one
+     inline <script> block (no build step, no nonce/hash practical for a file that gets
+     hand-edited often) plus unpkg for the chart library (SRI-pinned below). style-src needs
+     'unsafe-inline' for the many style="" attributes in the markup. connect-src whitelists
+     every data path actually used: Yahoo direct, the three public CORS-proxy fallbacks, the
+     Kujira Portfolio Apps Script (appsscript proxy mode), and *.workers.dev for the
+     user-configured Cloudflare Worker (proxyUrl in Settings). The Worker URL is free text, a
+     fixed CSP cannot whitelist an arbitrary origin, so this only covers Cloudflare's default
+     workers.dev subdomain (what this repo's Worker/wrangler.toml deploys to, no custom
+     route configured). A Worker on a custom domain, or any other arbitrary proxyUrl, will be
+     blocked by this CSP and needs a manual connect-src addition. frame-ancestors is
+     intentionally omitted, it is ignored when delivered via meta and only adds console
+     noise. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://query1.finance.yahoo.com https://api.allorigins.win https://api.codetabs.com https://thingproxy.freeboard.io https://script.google.com https://script.googleusercontent.com https://*.workers.dev; base-uri 'none'; form-action 'none'; object-src 'none';">
 <title>Kujira Trading</title>
 <link rel="icon" type="image/png" href="../Portfolio/Worker/whale-icon.png">
 <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"
@@ -20,6 +34,7 @@
   --purple:#9c27b0;
   --accent:#2962FF;--accent2:#1565C0;--accent-soft:#0c1a3d;--accent-border:#162a52;
   --radius:6px;--radius-lg:8px;
+  --topbar-bg:rgba(19,23,34,.95);--topbar-blur:10px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.4;-webkit-font-smoothing:antialiased}
@@ -31,7 +46,7 @@ button{font-family:inherit;cursor:pointer}
 .dim{color:var(--text3)}
 
 /* Topbar */
-.topbar{position:sticky;top:0;z-index:100;background:rgba(19,23,34,.95);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+.topbar{position:sticky;top:0;z-index:100;background:var(--topbar-bg);backdrop-filter:blur(var(--topbar-blur));-webkit-backdrop-filter:blur(var(--topbar-blur));border-bottom:1px solid var(--border)}
 .topbar-in{max-width:1100px;margin:0 auto;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .px-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
 .tick{display:flex;align-items:center;gap:10px;position:relative}
@@ -295,17 +310,17 @@ body.has-alertbar{padding-bottom:56px}
 
 <div class="topbar">
   <div class="topbar-in">
-    <a class="logo" href="../" title="Kujira">
+    <a class="logo" href="../Portfolio/" title="Kujira">
       <img class="logo-whale" src="../Portfolio/Worker/whale-icon.png" alt="Kujira">
       <div class="logo-name"><span>KUJIRA</span><span>Trading</span></div>
     </a>
-    <nav class="tb-tabs">
-      <span class="tb-tab active">Trading</span>
+    <nav class="tb-tabs" aria-label="Switch app">
+      <a class="tb-tab active" href="./" aria-current="page">Trading</a>
       <a class="tb-tab" href="../Forex/" title="Kujira Forex">Forex</a>
       <a class="tb-tab" href="../Portfolio/" title="Kujira Portfolio">Portfolio</a>
     </nav>
     <div class="tb-right">
-      <span class="tb-ver">v3.9 (18 Jul)</span>
+      <span class="tb-ver">v3.10 (21 Jul)</span>
       <button class="iconbtn" id="refreshBtn" title="Refresh now">&#x21bb;</button>
       <button class="iconbtn" id="gearBtn" title="Settings">&#9881;</button>
     </div>
@@ -555,7 +570,7 @@ body.has-alertbar{padding-bottom:56px}
   <span class="warn">For information only, not financial advice.</span>
   Live <span id="footSym">MU</span> data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v3.9 (18 Jul)</span>
+  <span style="margin-left:8px;color:var(--text3)">v3.10 (21 Jul)</span>
 
 </div>
 
