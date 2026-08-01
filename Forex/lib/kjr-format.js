@@ -1,16 +1,24 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   KUJIRA SHARED, kjr-format.js   (KJR_FORMAT_VERSION 1.1)
+   KUJIRA SHARED, kjr-format.js   (KJR_FORMAT_VERSION 1.2)
    Pure, side-effect-free formatting + id helpers shared across Kujira apps.
-   Loaded by a plain <script src="kjr-format.js?v=1.0"> (exposes window.KjrFmt);
+   Loaded by a plain <script src="kjr-format.js?v=1.2"> (exposes window.KjrFmt);
    also require()-able from tests via the module.exports shim at the foot.
    Keep this file PURE: no DOM, no localStorage, no fetch, no app globals.
    Vendored copy, do not fork. Improve the master in the template, bump the
    version, then re-vendor (see ship / housekeep drift-check).
+
+   v1.2 changelog: reconciled a two-way drift between this master and the
+   Journal vendored copy. Journal had added fmtNumber/fmtCurrency (Stage 2a,
+   database block) directly to its own copy without access to this template;
+   this master had independently gained the collision-resistant counter-based
+   uid() (base36 time + 2-char counter + 4 random chars, safe inside a tight
+   bulk-import loop) that Journal's copy still lacked. Both sides folded in,
+   no functionality dropped either way.
    ═══════════════════════════════════════════════════════════════════════ */
 (function (root) {
   'use strict';
 
-  var VERSION = '1.1';
+  var VERSION = '1.2';
 
   /* Two-digit zero pad. pad(3) -> '03'. */
   function pad(n) { return String(n).padStart(2, '0'); }
@@ -48,7 +56,29 @@
     return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
   }
 
-  var api = { VERSION: VERSION, pad: pad, uid: uid, esc: esc, escapeHtml: esc, todayISO: todayISO, isoFromYMD: isoFromYMD, fmtDate: fmtDate, fmtLongDate: fmtLongDate };
+  /* Plain number, thousands separators, no currency symbol. Non-finite/non-number
+     input returns the same "no value" dash fmtDate uses above, never a rendered
+     NaN or a broken string. */
+  function fmtNumber(n) {
+    if (typeof n !== 'number' || !isFinite(n)) return '\u2014';
+    return n.toLocaleString('en-SG', { maximumFractionDigits: 2 });
+  }
+
+  /* Currency, SGD by default (Kujira apps are Singapore-based), via Intl.NumberFormat.
+     Non-finite/non-number input returns the same dash, never "$NaN". A currency code
+     Intl does not recognise falls back to a plain "CODE 1,234.50" shape rather than
+     throwing. */
+  function fmtCurrency(n, currency) {
+    if (typeof n !== 'number' || !isFinite(n)) return '\u2014';
+    var cur = currency || 'SGD';
+    try {
+      return new Intl.NumberFormat('en-SG', { style: 'currency', currency: cur, maximumFractionDigits: 2 }).format(n);
+    } catch (e) {
+      return cur + ' ' + fmtNumber(n);
+    }
+  }
+
+  var api = { VERSION: VERSION, pad: pad, uid: uid, esc: esc, escapeHtml: esc, todayISO: todayISO, isoFromYMD: isoFromYMD, fmtDate: fmtDate, fmtLongDate: fmtLongDate, fmtNumber: fmtNumber, fmtCurrency: fmtCurrency };
 
   root.KjrFmt = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
