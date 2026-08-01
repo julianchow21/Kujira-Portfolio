@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://api.anthropic.com; base-uri 'none'; object-src 'none'; frame-ancestors 'none';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://api.anthropic.com https:; base-uri 'none'; object-src 'none'; frame-ancestors 'none';">
 <meta name="theme-color" content="#0f0f0f">
 <title>Kujira Forex</title>
 <script src="lib/theme-init.js?v=1.0"></script>
@@ -313,7 +313,7 @@ th.sortable.desc::after{content:'\25BC'}
 /* ============================================================================
    APP CONFIG
    ========================================================================== */
-const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.7 (18 Jul)' };
+const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.8 (1 Aug)' };
 const CCY = '$';
 const TABLES = ['trades'];
 const PAGE_SIZE = 25;
@@ -734,6 +734,7 @@ function openTradeModal(id){
     + frow(tagField(t,'emotionTags','Emotion'), tagField(t,'marketTags','Market'))
     + field('notes','Notes',false,'<textarea id="f-notes" placeholder="Setup, context, lessons…">'+escapeHtml(v('notes'))+'</textarea>')
     + '<p class="muted">Leave exit blank for an open position. Both exit date and price are needed to close it.</p>'
+    + (t && t.symbol ? tradeChartSectionHtml(t) : '')
     +'</div>'
     +'<div class="modal-foot"><span>'+(t?'<button class="btn btn-danger" onclick="confirmDeleteTrade(\''+t.id+'\')">Delete</button>':'')+'</span><button class="btn btn-primary" onclick="saveTradeModal(\''+(t?t.id:'')+'\')">Save</button></div>'
     +'</div></div>';
@@ -765,6 +766,130 @@ function saveTradeModal(id){
 function confirmDeleteTrade(id){
   const t=DB.trades.find(x=>x.id===id);
   document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:380px" role="dialog" aria-modal="true"><div class="modal-head"><h3>Delete trade?</h3></div><div class="modal-body"><p style="color:var(--text2)">Delete the <strong>'+escapeHtml(t?t.symbol:'this')+'</strong> trade? This cannot be undone.</p></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="deleteTrade(\''+id+'\');closeModal();toast(\'Trade deleted\')">Delete</button></div></div></div>';
+}
+
+/* ============================================================================
+   TRADE CHART  (M3b: on-demand daily candles + entry/exit markers/price lines)
+   Loaded lazily from CDN on click only, never on modal open. Read-only over
+   trade data, no candle data is persisted anywhere.
+   ========================================================================== */
+const CHART_PROXY_KEY = APP.storageKey + '_chartProxy';
+const CHART_PROXY_DEFAULT = 'https://corsproxy.io/?url={url}';
+function getChartProxy(){ const v=(localStorage.getItem(CHART_PROXY_KEY)||'').trim(); return v||CHART_PROXY_DEFAULT; }
+function resolveProxyUrl(target){ const tmpl=getChartProxy(), enc=encodeURIComponent(target); return tmpl.includes('{url}') ? tmpl.replace('{url}',enc) : tmpl+enc; }
+
+let _lcLoadPromise=null;
+function loadLightweightCharts(){
+  if(window.LightweightCharts) return Promise.resolve();
+  if(_lcLoadPromise) return _lcLoadPromise;
+  _lcLoadPromise=new Promise((resolve,reject)=>{
+    const s=document.createElement('script');
+    s.src='https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js';
+    s.onload=()=>resolve();
+    s.onerror=()=>{ _lcLoadPromise=null; const e=new Error('Could not load the chart library from the CDN.'); e.kind='proxy'; reject(e); };
+    document.head.appendChild(s);
+  });
+  return _lcLoadPromise;
+}
+
+async function fetchCandles(symbol,fromSec,toSec){
+  const target='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(symbol)+'?period1='+fromSec+'&period2='+toSec+'&interval=1d&includePrePost=false';
+  const url=resolveProxyUrl(target);
+  let res;
+  try{ res=await fetch(url); }
+  catch(e){ const err=new Error('The proxy did not respond.'); err.kind='proxy'; throw err; }
+  if(!res.ok){
+    let body=null;
+    try{ body=JSON.parse(await res.text()); }catch(e){ body=null; }
+    if(body&&body.chart&&body.chart.error){ const err=new Error(body.chart.error.description||'Symbol not found'); err.kind='symbol'; throw err; }
+    const err=new Error('The proxy returned HTTP '+res.status+'.'); err.kind='proxy'; throw err;
+  }
+  let json;
+  try{ json=await res.json(); }
+  catch(e){ const err=new Error('The proxy returned a response that could not be read.'); err.kind='proxy'; throw err; }
+  const chart=json&&json.chart;
+  if(chart&&chart.error){ const err=new Error(chart.error.description||'Symbol not found'); err.kind='symbol'; throw err; }
+  const result=chart&&chart.result&&chart.result[0];
+  if(!result||!Array.isArray(result.timestamp)||!result.timestamp.length){ const err=new Error('No price data came back.'); err.kind='symbol'; throw err; }
+  const ts=result.timestamp, q=(result.indicators&&result.indicators.quote&&result.indicators.quote[0])||{};
+  const bars=[];
+  for(let i=0;i<ts.length;i++){
+    const o=q.open&&q.open[i], h=q.high&&q.high[i], l=q.low&&q.low[i], c=q.close&&q.close[i];
+    if(![o,h,l,c].every(x=>typeof x==='number'&&isFinite(x))) continue;
+    const d=new Date(ts[i]*1000);
+    bars.push({ time:d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0'), open:o,high:h,low:l,close:c });
+  }
+  if(!bars.length){ const err=new Error('No usable price bars came back.'); err.kind='symbol'; throw err; }
+  return bars;
+}
+
+let _tradeChart=null;
+function dateStrToSec(s){ const p=s.split('-').map(Number); return Date.UTC(p[0],p[1]-1,p[2])/1000; }
+function nearestBarTime(bars,iso){
+  if(!iso) return null;
+  const target=Math.floor(new Date(iso).getTime()/1000); let best=null,bestDiff=Infinity;
+  bars.forEach(b=>{ const diff=Math.abs(dateStrToSec(b.time)-target); if(diff<bestDiff){ bestDiff=diff; best=b.time; } });
+  return best;
+}
+function tradeChartSectionHtml(t){
+  return '<div class="field"><label>Price chart</label><div id="trade-chart-wrap"><button class="btn" onclick="loadTradeChart(\''+escapeHtml(t.id)+'\')">Load price chart</button></div></div>';
+}
+function chartErrorHtml(t,err){
+  const kind=(err&&err.kind)==='symbol'?'symbol':'proxy';
+  const title=kind==='symbol'?'Symbol not found':'Could not reach the data proxy';
+  const detail=kind==='symbol'
+    ? ('No price data for "'+escapeHtml(t.symbol||'')+'". '+escapeHtml((err&&err.message)||''))
+    : escapeHtml((err&&err.message)||'The chart data proxy did not respond.');
+  return '<div class="state error" style="padding:20px 10px">'
+    +'<div class="big">⚠</div><h3>'+title+'</h3><p>'+detail+'</p>'
+    +'<p class="muted">Check or change the proxy URL in Settings (⚙) if this keeps happening.</p>'
+    +'<button class="btn" onclick="loadTradeChart(\''+escapeHtml(t.id)+'\')">Retry</button></div>';
+}
+async function loadTradeChart(id){
+  if(!requireEntitlement('chart_markers','Chart markers')) return;
+  const t=DB.trades.find(x=>x.id===id), wrap=document.getElementById('trade-chart-wrap');
+  if(!t||!wrap) return;
+  wrap.innerHTML='<p class="muted">Loading chart…</p>';
+  try{
+    await loadLightweightCharts();
+    const d=deriveTrade(t);
+    const fromSec=Math.floor(new Date(t.entryAt).getTime()/1000)-45*86400;
+    const nowSec=Math.floor(Date.now()/1000);
+    const exitSec=t.exitAt?Math.floor(new Date(t.exitAt).getTime()/1000):nowSec;
+    const toSec=Math.min(nowSec, exitSec+15*86400);
+    const bars=await fetchCandles(t.symbol,fromSec,toSec);
+    renderTradeChart(wrap,t,d,bars);
+  }catch(err){
+    if(_tradeChart){ try{ _tradeChart.remove(); }catch(e){} _tradeChart=null; }
+    wrap.innerHTML=chartErrorHtml(t,err);
+  }
+}
+function renderTradeChart(wrap,t,d,bars){
+  if(_tradeChart){ try{ _tradeChart.remove(); }catch(e){} _tradeChart=null; }
+  wrap.innerHTML='<div id="trade-chart-el" style="height:280px;width:100%"></div>';
+  const el=document.getElementById('trade-chart-el');
+  const cs=getComputedStyle(document.documentElement);
+  const col=k=>{ const v=cs.getPropertyValue(k); return v?v.trim():''; };
+  const green=col('--green')||'#4CAF50', red=col('--red')||'#e24b4a', amber=col('--amber')||'#f59e0b', text2=col('--text2')||'#999';
+  const chart=LightweightCharts.createChart(el,{
+    autoSize:true,
+    layout:{ background:{type:'solid',color:'transparent'}, textColor:text2, fontSize:11 },
+    grid:{ vertLines:{visible:false}, horzLines:{visible:false} },
+    rightPriceScale:{ borderColor:text2 },
+    timeScale:{ borderColor:text2 },
+  });
+  _tradeChart=chart;
+  const series=chart.addSeries(LightweightCharts.CandlestickSeries,{ upColor:green,downColor:red,borderVisible:false,wickUpColor:green,wickDownColor:red });
+  series.setData(bars);
+  const markers=[];
+  const entryTime=nearestBarTime(bars,t.entryAt);
+  if(entryTime) markers.push({ time:entryTime, position:'belowBar', color:green, shape:'arrowUp', text:'Entry' });
+  if(d.status==='closed'){ const exitTime=nearestBarTime(bars,t.exitAt); if(exitTime) markers.push({ time:exitTime, position:'aboveBar', color:red, shape:'arrowDown', text:'Exit' }); }
+  if(markers.length) LightweightCharts.createSeriesMarkers(series,markers);
+  if(t.entryPrice!=null&&t.entryPrice!=='') series.createPriceLine({ price:Number(t.entryPrice), color:green, lineWidth:1, lineStyle:LightweightCharts.LineStyle.Solid, title:'Entry' });
+  if(d.status==='closed'&&t.exitPrice!=null&&t.exitPrice!=='') series.createPriceLine({ price:Number(t.exitPrice), color:red, lineWidth:1, lineStyle:LightweightCharts.LineStyle.Solid, title:'Exit' });
+  if(t.stopPrice!=null&&t.stopPrice!=='') series.createPriceLine({ price:Number(t.stopPrice), color:amber, lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, title:'Stop' });
+  requestAnimationFrame(()=>{ requestAnimationFrame(()=>{ if(_tradeChart) _tradeChart.timeScale().fitContent(); }); });
 }
 
 /* ============================================================================
@@ -893,11 +1018,17 @@ function openSettings(){
     + field('akey','Anthropic API key (for the AI coach)',false,'<input id="f-akey" type="password" value="'+escapeHtml(getKey())+'" placeholder="sk-ant-...">')
     + '<div class="warn">Stored only in this browser. Fine for personal use. Before any multi-user launch this must move behind the Worker proxy so the key never reaches the client.</div>'
     + '<div class="field"><label>Import trades from CSV</label><input id="f-csv" type="file" accept=".csv,text/csv"><div class="muted">Auto-maps columns named like symbol, side, qty, entry date, entry price, exit date, exit price, fees, stop. Adds to existing trades.</div><div class="err" id="e-csv"></div></div>'
+    + '<div class="field"><label>Chart data CORS proxy</label><input id="f-chartproxy" type="text" value="'+escapeHtml(localStorage.getItem(CHART_PROXY_KEY)||'')+'" placeholder="'+escapeHtml(CHART_PROXY_DEFAULT)+'"><div class="muted">{url} is replaced with the encoded Yahoo URL. The default is a public proxy and can be flaky. A personal Cloudflare Worker URL can go here later.</div></div>'
     +'</div>'
     +'<div class="modal-foot"><button class="btn" onclick="importCSV()">Import CSV</button><button class="btn btn-primary" onclick="saveSettings()">Save</button></div>'
     +'</div></div>';
 }
-function saveSettings(){ const k=document.getElementById('f-akey').value.trim(); if(k) localStorage.setItem(APP.storageKey+'_anthropicKey',k); else localStorage.removeItem(APP.storageKey+'_anthropicKey'); closeModal(); toast('Settings saved'); if(_view==='coach') renderCoachIdle(); }
+function saveSettings(){
+  const k=document.getElementById('f-akey').value.trim(); if(k) localStorage.setItem(APP.storageKey+'_anthropicKey',k); else localStorage.removeItem(APP.storageKey+'_anthropicKey');
+  const cpEl=document.getElementById('f-chartproxy');
+  if(cpEl){ const cp=cpEl.value.trim(); if(cp && cp!==CHART_PROXY_DEFAULT) localStorage.setItem(CHART_PROXY_KEY,cp); else localStorage.removeItem(CHART_PROXY_KEY); }
+  closeModal(); toast('Settings saved'); if(_view==='coach') renderCoachIdle();
+}
 function parseCSV(text){
   const rows=[]; let i=0, field='', row=[], q=false;
   const pushF=()=>{ row.push(field); field=''; }, pushR=()=>{ pushF(); rows.push(row); row=[]; };
