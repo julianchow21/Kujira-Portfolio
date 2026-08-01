@@ -14,18 +14,21 @@
      throughout the app's rendered markup; that is a lower-severity relaxation
      (CSS injection, not script execution) and a separate future hardening
      item if it is ever tackled. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://script.google.com https://*.googleusercontent.com https://script.googleusercontent.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://script.google.com https://*.googleusercontent.com https://script.googleusercontent.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src 'self' data: https://fonts.gstatic.com; base-uri 'none'; form-action 'none'; object-src 'none';">
 <title>Kujira Portfolio</title>
 <link rel="manifest" href="Worker/manifest.webmanifest">
 <link rel="icon" type="image/png" href="Worker/whale-icon.png">
 <link rel="apple-touch-icon" href="Worker/whale-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;600;700;800&display=swap">
 <!-- No JS in this file may set this dynamically (owned by app.js/theme-init.js,
      out of scope here), so this follows the OS colour-scheme preference via
      media queries rather than the in-app manual toggle. See QA fix c handoff
      note: a one-line update in theme-init.js/app.js's theme toggle would make
      this track the manual choice exactly. -->
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf9f6">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#131722">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4EE">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0B1120">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <!-- Subresource Integrity: jsdelivr serves Chart.js with this exact hash.
@@ -42,15 +45,15 @@
      from the prototype. Light is the OPT-IN theme though: theme-init.js adds
      html.dark by default unless the user has chosen light, so html.dark's
      tokens below are what most users see at runtime. */
-  --bg:#faf9f6;--bg2:#ffffff;--bg3:#f4f2ec;--bg4:#eae7dd;
-  --border:#e7e3da;--border2:#d8d3c6;
+  --bg:#F6F4EE;--bg2:#ffffff;--bg3:#F0EDE4;--bg4:#E8E4D8;
+  --border:#E5E1D8;--border2:#D6D1C4;
   --text:#1f1d1a;--text2:#6b665e;--text3:#9a958b;
   --red:#b13838;--red2:#8f2c2c;--red-soft:#f7e6e6;--red-border:#e6c5c5;
   --green:#2f7d4f;--green-soft:#e6f1ea;--green-border:#bedcc9;
   --blue:#3a5e8c;--blue-soft:#e4ebf4;--blue-border:#c2d3e6;
   --amber:#9a6a14;--amber-soft:#f8efd6;--amber-border:#e7d3a0;
   --purple:#7a4fa3;
-  --accent:#c15f3c;--accent2:#a64f30;--accent-soft:#f4e3da;--accent-border:#e6c5b4;
+  --accent:#0F6E56;--accent2:#0B5743;--accent-soft:#E3EFEA;--accent-border:#BFD9CE;
   --on-accent:#ffffff;
   --radius:8px;--radius-lg:12px;
   --glass:rgba(255,255,255,0.6);--glass-strong:rgba(255,255,255,0.78);
@@ -58,26 +61,27 @@
   --glass-blur:12px;--glass-shadow:0 6px 18px rgba(60,50,40,0.10);
   --shadow-card:0 1px 3px rgba(60,50,40,0.07);
   --surface-solid:#ffffff;
-  --glow1:rgba(193,95,60,0.06);--glow2:rgba(167,139,250,0.05);
+  --glow1:rgba(15,110,86,0.06);--glow2:rgba(240,195,109,0.07);
+  --font-display:'Lexend',-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,system-ui,sans-serif;
   --tx:var(--text);--tx2:var(--text2);--tx3:var(--text3);
 }
 html.dark{
-  --bg:#131722;--bg2:#1e222d;--bg3:#2a2e39;--bg4:#363a45;
-  --border:#2a2a2a;--border2:#333;
-  --text:#e8e8e8;--text2:#999;--text3:#8a8f98;
-  --red:#e24b4a;--red2:#c03333;--red-soft:#2a1515;--red-border:#3a2525;
-  --green:#4CAF50;--green-soft:#1a2a1a;--green-border:#2a3a2a;
-  --blue:#4a9eff;--blue-soft:#0d1f33;--blue-border:#1a2f43;
-  --amber:#f59e0b;--amber-soft:#2a1f0a;--amber-border:#3a2f1a;
+  --bg:#0B1120;--bg2:#111A2E;--bg3:#192440;--bg4:#223052;
+  --border:rgba(148,163,184,0.14);--border2:rgba(148,163,184,0.22);
+  --text:#E8ECF4;--text2:#9AA4BA;--text3:#7C87A0;
+  --red:#e24b4a;--red2:#c03333;--red-soft:#2a1a1e;--red-border:#3a2530;
+  --green:#4CAF50;--green-soft:#152a20;--green-border:#243a2e;
+  --blue:#4a9eff;--blue-soft:#101f33;--blue-border:#1a2f43;
+  --amber:#F0C36D;--amber-soft:#2a2213;--amber-border:#3a3220;
   --purple:#a78bfa;
   --accent:#2dd4bf;--accent2:#14b8a6;--accent-soft:#0d2420;--accent-border:#1a3530;
-  --on-accent:#0f0f0f;
+  --on-accent:#06121F;
   --glass:rgba(255,255,255,0.05);--glass-strong:rgba(255,255,255,0.07);
   --glass-border:rgba(255,255,255,0.11);--glass-hi:rgba(255,255,255,0.07);
   --glass-blur:14px;--glass-shadow:0 8px 22px rgba(0,0,0,0.35);
   --shadow-card:0 1px 3px rgba(0,0,0,0.25);
-  --surface-solid:rgba(30,34,45,0.94);
-  --glow1:rgba(45,212,191,0.16);--glow2:rgba(167,139,250,0.13);
+  --surface-solid:rgba(17,26,46,0.94);
+  --glow1:rgba(45,212,191,0.16);--glow2:rgba(240,195,109,0.10);
   --tx:var(--text);--tx2:var(--text2);--tx3:var(--text3);
 }
 body{font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;transition:background 0.2s,color 0.2s}
@@ -104,15 +108,15 @@ a{color:var(--blue);text-decoration:none}
 .logo:hover,.logo:focus{text-decoration:none;outline:none}
 .logo-whale{height:44px;width:44px;flex-shrink:0;border-radius:8px;object-fit:cover}
 .logo-name{display:flex;flex-direction:column;line-height:1.1}
-.logo-name span:first-child{font-size:14px;font-weight:800;letter-spacing:0.5px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.logo-name span:last-child{font-size:12px;font-weight:400;letter-spacing:0.3px;text-transform:none;color:var(--text3);-webkit-text-fill-color:var(--text3);opacity:0.85;white-space:nowrap}
+.logo-name span:first-child{font-family:var(--font-display);font-size:14px;font-weight:800;letter-spacing:0.5px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.logo-name span:last-child{font-family:var(--font-display);font-size:12px;font-weight:400;letter-spacing:0.3px;text-transform:none;color:var(--text3);-webkit-text-fill-color:var(--text3);opacity:0.85;white-space:nowrap}
 .nav{display:flex;gap:2px;flex:1 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none;position:relative}
 .nav::-webkit-scrollbar{display:none}
 /* Fade tints the topbar's own glass backdrop (not the opaque page --bg, which
    sat one shade off and made the last visible label look chopped off rather
    than "more to scroll"). Same colour-mix trick as the mobile scroll hints. */
 .nav::after{content:'';position:sticky;right:0;align-self:stretch;flex:0 0 24px;margin-left:-24px;pointer-events:none;background:linear-gradient(to right,transparent,color-mix(in srgb,var(--glass) 100%,var(--bg) 60%))}
-.nav-btn{padding:8px 14px;border-radius:var(--radius);border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--text2);transition:all 0.15s;font-family:inherit;display:flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0}
+.nav-btn{padding:8px 14px;border-radius:var(--radius);border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--text2);transition:all 0.15s;font-family:var(--font-display);display:flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0}
 @media (hover:hover){.nav-btn:hover{background:var(--glass-strong);color:var(--text)}}
 .nav-btn.active{background:var(--accent-soft);color:var(--accent);font-weight:500}
 .nav-btn svg{width:15px;height:15px;flex-shrink:0}
@@ -236,15 +240,15 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
   .card-head select.fi-sm{flex:1 1 calc(50% - 4px);min-width:0}
   .card-head .freshness{flex-basis:100%;justify-content:center}
 }
-.card-head h3{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.card-head h3{font-family:var(--font-display);font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
 .card-body{padding:18px}
 
 /* METRICS */
 .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
-.metric{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:16px 18px;text-align:center}
+.metric{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:12px 14px;text-align:left}
 .metric-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px}
-.metric-value{font-size:24px;font-weight:700;letter-spacing:-0.5px;font-variant-numeric:tabular-nums}
-.metric-sub{font-size:12px;color:var(--text2);margin-top:3px;display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap}
+.metric-value{font-family:var(--font-display);font-size:24px;font-weight:700;letter-spacing:-0.5px;font-variant-numeric:tabular-nums}
+.metric-sub{font-size:12px;color:var(--text2);margin-top:3px;display:flex;align-items:center;justify-content:flex-start;gap:6px;flex-wrap:wrap}
 .pos{color:var(--green)}.neg{color:var(--red)}
 
 /* STAT BOX (alt to metric) */
@@ -447,7 +451,7 @@ textarea.fi{resize:vertical;min-height:70px}
    right. */
 .dash-hero{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px 22px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
 .dash-hero-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
-.dash-hero-value{font-size:36px;font-weight:600;letter-spacing:-0.01em;font-variant-numeric:tabular-nums;line-height:1.1}
+.dash-hero-value{font-family:var(--font-display);font-size:36px;font-weight:600;letter-spacing:-0.01em;font-variant-numeric:tabular-nums;line-height:1.1}
 .dash-hero-sub{font-size:12px;color:var(--text2)}
 .dash-hero-chip{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:500;border-radius:999px;padding:2px 9px;margin-left:8px;vertical-align:middle;text-transform:none;letter-spacing:normal}
 .dash-hero-chip.pos{color:var(--green);background:var(--green-soft)}
@@ -1384,8 +1388,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.52"></script>
-<script src="Worker/kjr-sortable.js?v=2.52"></script>
-<script src="Worker/app.js?v=2.52"></script>
+<script src="Worker/kjr-core.js?v=2.55"></script>
+<script src="Worker/kjr-sortable.js?v=2.55"></script>
+<script src="Worker/app.js?v=2.55"></script>
 </body>
 </html>
