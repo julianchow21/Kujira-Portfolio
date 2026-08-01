@@ -1,0 +1,8 @@
+# M7 STUB, NOT DEPLOYED. Stripe webhook seam for Kujira Forex.
+# Deploying needs Julian: a Stripe account, a Forex Supabase project, then
+#   wrangler secret put STRIPE_WEBHOOK_SECRET
+#   wrangler secret put SB_URL
+#   wrangler secret put SB_SERVICE_ROLE_KEY
+name = "kjr-forex-stripe"
+main = "Stripe Webhook Worker v0 (1 Aug).js"
+compatibility_date = "2026-08-01"
