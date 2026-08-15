@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.58';
-const APP_DISPLAY_VERSION = 'v2.58 (16 Aug)';
+const APP_VERSION = 'v2.59';
+const APP_DISPLAY_VERSION = 'v2.59 (16 Aug)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -845,7 +845,6 @@ function freshDB(){
       dashLayout:   []      // dashboard card arrange order (widget ids)
     },
     _priceCache:  {},
-    changelog:    [],
     _meta:        { createdAt: new Date().toISOString(), appVersion: APP_VERSION }
   };
 }
@@ -1043,17 +1042,13 @@ function localPersistPayload(){
 }
 
 /* Resilient local save. If the quota is exceeded we shed disposable data in
-   order (changelog tail, then snapshot history) and retry, so a full disk can
-   never silently drop your holdings, cash, CPF, or trades. */
+   order (snapshot history) and retry, so a full disk can never silently drop
+   your holdings, cash, CPF, or trades. */
 function saveLocal(){
   const attempts = [
     () => JSON.stringify(localPersistPayload()),
-    () => { // drop changelog (rebuildable audit trail)
-      const p = localPersistPayload(); p.changelog = [];
-      return JSON.stringify(p);
-    },
-    () => { // also thin snapshots to the most recent 180 days
-      const p = localPersistPayload(); p.changelog = [];
+    () => { // thin snapshots to the most recent 180 days
+      const p = localPersistPayload();
       if (Array.isArray(p.snapshots) && p.snapshots.length > 180) p.snapshots = p.snapshots.slice(-180);
       return JSON.stringify(p);
     }
@@ -1163,7 +1158,7 @@ function _runMigrations(db){
    Also re-validates ids on every list-typed table — a corrupted sheet or hostile
    payload cannot land an id like "x'); evil(); //" that would break event-delegation
    downstream. Items with invalid ids get a fresh uid() so they're still recoverable. */
-const _LIST_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash','insurance','insuranceRiders'];
+const _LIST_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','trash','insurance','insuranceRiders'];
 
 /* Date-typed fields per list table (per ENTITY_SCHEMAS), used to sanitise
    calendar-invalid dates (e.g. 2026-02-30) coming from the cloud or an
@@ -1369,7 +1364,7 @@ async function safeJson(resp){
    lastSeenRemoteAt, _savedAt, _priceCache (never synced), _meta, appVersion,
    schemaVersion, version. */
 const _DIVERGENCE_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns',
-  'cpfBalances','cpfHistory','income','expenses','snapshots','categories','settings','changelog','trash','insurance','insuranceRiders'];
+  'cpfBalances','cpfHistory','income','expenses','snapshots','categories','settings','trash','insurance','insuranceRiders'];
 function _divergenceSnapshot(obj){
   const src = obj || {};
   const out = {};
@@ -1764,7 +1759,6 @@ function showConflictModal(opts){
       const stamp = data.savedAt || new Date().toISOString();
       localStorage.setItem(LK_SYNC_TS, stamp);
       setLastPull(stamp, 'server');
-      _firstConflictHandled = true;  // any future conflict is real, not drift
       setSyncStatus('synced');
       showToast('Cloud overwritten with local version', 'success');
     } catch (err) {
@@ -2145,7 +2139,7 @@ function renderSalaryRulesEditor(){
     host.innerHTML = rules.map((r, i) => `
       <div class="rule-row" data-rule-idx="${i}">
         <input class="fi" type="text" value="${kjrEscape(r.name||'')}" placeholder="Bucket name" data-rule-field="name" data-input="onSalaryRuleInput">
-        <input class="fi" type="number" step="1" min="0" max="100" value="${r.pct==null?'':r.pct}" placeholder="%" data-rule-field="pct" data-input="onSalaryRuleInput">
+        <input class="fi" type="number" step="1" min="0" max="100" value="${r.pct==null?'':Number(r.pct)}" placeholder="%" data-rule-field="pct" data-input="onSalaryRuleInput">
         <input class="fi" type="text" value="${kjrEscape(r.dest||'')}" placeholder="Destination (optional)" data-rule-field="dest" data-input="onSalaryRuleInput">
         <button class="btn btn-sm btn-danger" data-click="removeSalaryRule" data-a0="${i}" title="Remove">✕</button>
       </div>`).join('');
@@ -5845,7 +5839,7 @@ function pbLoadSaved(){
     const flds = pbFields({ source: srcKey });
     const mode = c.mode === 'timeseries' ? 'timeseries' : 'crosssec';
     return {
-      id: c.id || ('sc_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)),
+      id: kjrSafeId(c.id) || ('sc_' + Date.now() + '_' + Math.random().toString(36).slice(2,6)),
       title: typeof c.title === 'string' ? c.title : 'Chart',
       source: srcKey,
       mode,
@@ -7575,7 +7569,7 @@ function renderCash(){
         <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${r.bal.toLocaleString('en-SG', {maximumFractionDigits:2})}${r.derived ? '<span class="hint" title="Calculated from movements + linked trades"> ◆</span>' : ''}</td>
         <td class="num">${kjrEscape(r.ccy)}</td>
         <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${r.sgd != null ? fmt(r.sgd) : '<span class="price-stale">— FX missing</span>'}</td>
-        ${showApy ? `<td class="num">${r.apy ? r.apy.toFixed(2) + '%' : '—'}</td><td class="num">${r.monthlyInt ? r.c.currency && r.c.currency !== 'SGD' ? r.c.currency + ' ' + r.monthlyInt.toLocaleString('en-SG',{maximumFractionDigits:2}) : fmt(toSGD(r.monthlyInt, r.ccy)) : '—'}</td>` : ''}
+        ${showApy ? `<td class="num">${r.apy ? r.apy.toFixed(2) + '%' : '—'}</td><td class="num">${r.monthlyInt ? r.c.currency && r.c.currency !== 'SGD' ? kjrEscape(r.c.currency) + ' ' + r.monthlyInt.toLocaleString('en-SG',{maximumFractionDigits:2}) : fmt(toSGD(r.monthlyInt, r.ccy)) : '—'}</td>` : ''}
         <td class="tl muted">${kjrEscape(r.c.notes || '')}</td>
         <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cash" data-edit-id="${kjrEscape(r.c.id)}">Edit</button></td>
       </tr>`).join('')}
