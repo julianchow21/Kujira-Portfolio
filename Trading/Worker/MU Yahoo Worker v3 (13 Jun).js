@@ -12,6 +12,8 @@
 
 // Origin allowlist (Julian's GitHub Pages origin, from repo remote julianchow21/Kujira-Portfolio).
 // If you host elsewhere too (e.g. a custom domain or local preview), add it here.
+import { NYSE_HOLIDAYS, NYSE_HALF_DAYS } from "./nyse-holidays.js";
+
 const ALLOWED_ORIGINS = new Set([
   "https://julianchow21.github.io",
 ]);
@@ -267,6 +269,13 @@ function isMarketWindow() {
   const parts = fmt.formatToParts(now);
   const dow  = parts.find(p => p.type === "weekday").value;
   if (dow === "Sat" || dow === "Sun") return false;
+  // NYSE holidays (and half-days, whose early close still counts as a session
+  // for our purposes — flat tape is the problem, not a short session): skip so
+  // alerts never fire on a dead market. Shared list in nyse-holidays.js.
+  const dparts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+  const dmap = {}; dparts.forEach(p => { dmap[p.type] = p.value; });
+  const dateKey = dmap.year + "-" + dmap.month + "-" + dmap.day;
+  if (NYSE_HOLIDAYS.has(dateKey)) return false;
   const h  = parseInt(parts.find(p => p.type === "hour").value);
   const mn = parseInt(parts.find(p => p.type === "minute").value);
   const total = h * 60 + mn;
@@ -352,7 +361,8 @@ export default {
         alerts: alerts.map(a => ({
           id: a.id, type: a.type, value: a.value,
           oneShot: !!a.oneShot, cooldownMs: a.cooldownMs || 0,
-          enabled: true, armed: true, prevCond: null, lastFiredAt: null,
+          enabled: a.enabled !== false, armed: !!a.armed,
+          prevCond: a.prevCond ?? null, lastFiredAt: a.lastFiredAt ?? null,
         })),
         updatedAt: Date.now(),
       };

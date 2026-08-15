@@ -48,10 +48,21 @@ async function updateProfilePlan(env, customerId, plan) {
     body: JSON.stringify({ plan })
   });
 
-  return {
-    synced: res.ok,
-    status: res.status
-  };
+  if (!res.ok) {
+    return { synced: false, status: res.status, reason: 'PATCH failed' };
+  }
+
+  // return=minimal: PostgREST reports how many rows matched in the
+  // Content-Range header (*/N). Zero means no profile carries this
+  // stripe_customer_id — nothing in the repo ever writes it (Forex/CLAUDE.md
+  // blocker), so the buyer would silently stay on 'free'. Fail loudly.
+  const cr = (res.headers.get('content-range') || '').split('/').pop();
+  const matched = cr === '*' ? null : parseInt(cr, 10);
+  if (matched === 0) {
+    return { synced: false, status: res.status, matched: 0, reason: 'matched 0 profiles: stripe_customer_id is never written (see Forex/CLAUDE.md blocker)' };
+  }
+
+  return { synced: true, status: res.status, matched };
 }
 
 export default {
@@ -190,11 +201,14 @@ export default {
       );
     }
 
-    // Sync to Supabase and return result.
+    // Sync to Supabase and return result. A failed attribution (e.g. matched 0
+    // profiles) is a webhook that achieved nothing for the customer — respond
+    // 503 so Stripe retries and the failure is visible, never a silent 200.
     const result = await updateProfilePlan(env, customerId, plan);
+    const ok = !!result.synced;
     return new Response(
       JSON.stringify({ received: true, ...result }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
+      { status: ok ? 200 : 503, headers: { 'Content-Type': 'application/json' } }
     );
   }
 };

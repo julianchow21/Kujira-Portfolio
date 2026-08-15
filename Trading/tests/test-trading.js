@@ -71,16 +71,27 @@ function extractConst(source, name) {
 const FN_NAMES = [
   'ema', 'rsi', 'macd', 'etDateKey', 'isRegularSession', 'vwapSeries', 'vwapBandsData',
   'lastNonNull', 'atrValue', 'isHoliday', 'isHalfDay', 'regularCloseMin',
+  'nyseHolidaySet', 'nyseHalfDaySet',
   'marketStateFromClock', 'etNow', 'etDateStr', 'parseResult',
   'fmtPx', 'fmtNum', 'fmtPct', 'fmtVol', 'fmtCap', 'evalCond', 'alertDesc', 'esc',
 ];
-const CONST_NAMES = ['NYSE_HOLIDAYS', 'NYSE_HALF_DAYS', 'ALERT_LABELS', 'ALERT_NEEDS_VAL', 'CROSS_TYPES'];
+const CONST_NAMES = ['_NYSE_FALLBACK', 'ALERT_LABELS', 'ALERT_NEEDS_VAL', 'CROSS_TYPES'];
 
 // parseResult's company-name fallback chain ends in the module-level `SYMBOL`
 // const (the IIFE-derived default ticker), which is not itself an extraction
 // target (it reads location/localStorage at module load). Stub it to the app's
 // documented default ("MU") so that fallback branch is exercisable, not a ReferenceError.
-let extractedCode = "var SYMBOL = 'MU';\n";
+//
+// NYSE holidays now live in the shared Worker/nyse-holidays.js module (the
+// single source of truth for frontend and Worker). Strip the `export` keywords,
+// eval the declarations, and expose them as window.KjrNyse so the lazy accessors
+// (nyseHolidaySet/nyseHalfDaySet) return the real sets in the sandbox.
+const NYSE_SRC = fs.readFileSync(path.join(__dirname, '..', 'Worker', 'nyse-holidays.js'), 'utf8')
+  .replace(/export\s+/g, '')
+  .replace(/^\/\/.*$/gm, '');
+let extractedCode = NYSE_SRC
+  + "\nvar window = { KjrNyse: { NYSE_HOLIDAYS: NYSE_HOLIDAYS, NYSE_HALF_DAYS: NYSE_HALF_DAYS } };\n"
+  + "var SYMBOL = 'MU';\n";
 const missing = [];
 for (const n of FN_NAMES) {
   try { extractedCode += extractFunction(src, n) + '\n'; }

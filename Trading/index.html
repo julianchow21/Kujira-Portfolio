@@ -320,7 +320,7 @@ body.has-alertbar{padding-bottom:56px}
       <a class="tb-tab" href="../Portfolio/" title="Kujira Portfolio">Portfolio</a>
     </nav>
     <div class="tb-right">
-      <span class="tb-ver">v3.10 (21 Jul)</span>
+      <span class="tb-ver">v3.11 (16 Aug)</span>
       <button class="iconbtn" id="refreshBtn" title="Refresh now">&#x21bb;</button>
       <button class="iconbtn" id="gearBtn" title="Settings">&#9881;</button>
     </div>
@@ -570,14 +570,18 @@ body.has-alertbar{padding-bottom:56px}
   <span class="warn">For information only, not financial advice.</span>
   Live <span id="footSym">MU</span> data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v3.10 (21 Jul)</span>
+  <span style="margin-left:8px;color:var(--text3)">v3.11 (16 Aug)</span>
 
 </div>
+
+<script type="module">
+  import { NYSE_HOLIDAYS, NYSE_HALF_DAYS } from "./Worker/nyse-holidays.js";
+  window.KjrNyse = { NYSE_HOLIDAYS, NYSE_HALF_DAYS };
+</script>
 
 <script>
 "use strict";
 (function(){
-
 /* ====================== Config & state ====================== */
 const SYMBOL = (function(){
   try { var p = new URLSearchParams(location.search).get("symbol"); if (p && p.trim()) return p.trim().toUpperCase(); } catch(e){}
@@ -795,6 +799,10 @@ function marketStateFromClock(){
   if(mod>=closeMin && mod<1200) return "POST";   // close–20:00
   return "CLOSED";
 }
+/* Yahoo reports extended sessions as PREPRE/POSTPOST; every consumer wants
+   the plain PRE/POST. Normalise once so the ext-hours line, the pill and the
+   refresh scheduler all agree instead of each special-casing the long forms. */
+function normMarketState(ms){ if(ms==="PREPRE") return "PRE"; if(ms==="POSTPOST") return "POST"; return ms; }
 function etOffsetMin(){ // minutes ET is offset from UTC (negative west)
   const now=new Date();
   const et=new Date(now.toLocaleString("en-US",{timeZone:"America/New_York"}));
@@ -859,11 +867,16 @@ function requestUrls(p, sym=SYMBOL){
   const t=yahooTarget(p, sym);
   const m=cfg.proxyMode, base=(cfg.proxyUrl||"").trim();
   if((m==="worker"||m==="appsscript") && !base) return []; // configured mode but no URL yet
+  // Same flag as yahooTarget(): forcePrePost means pre/post bars are always
+  // fetched for levels computation, regardless of cfg.extended. The proxy
+  // paths used to drop it, which silently removed PM High/Low from the levels
+  // card whenever a Worker or Apps Script proxy was in use.
+  const pp=(p.forcePrePost||(p.pre&&cfg.extended))?"true":"false";
   if(m==="worker"){
-    return [ { url: base+(base.includes("?")?"&":"?")+"symbol="+encodeURIComponent(sym)+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) } ];
+    return [ { url: base+(base.includes("?")?"&":"?")+"symbol="+encodeURIComponent(sym)+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+pp } ];
   }
   if(m==="appsscript"){
-    return [ { url: base+(base.includes("?")?"&":"?")+"action=chart&symbol="+encodeURIComponent(sym)+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+(p.pre&&cfg.extended) } ];
+    return [ { url: base+(base.includes("?")?"&":"?")+"action=chart&symbol="+encodeURIComponent(sym)+"&interval="+p.interval+"&range="+p.range+"&includePrePost="+pp } ];
   }
   const pub = PUBLIC_PROXIES.map(pp=>({ url: pp.make(t), unwrap: pp.unwrap }));
   if(m==="direct") return [ { url:t }, ...pub ]; // try direct, then fall back to public
@@ -1318,7 +1331,7 @@ function renderHeader(d){
   setText("chgPct", pct==null?"":("("+fmtPct(pct)+")"));
   // extended hours line
   const ext=$("#extLine");
-  const ms=(d.marketState||marketStateFromClock());
+  const ms=normMarketState(d.marketState||marketStateFromClock());
   if((ms==="PRE"||ms==="POST") && d.bars.length){
     const last=d.bars[d.bars.length-1].close;
     const ref=d.price!=null?d.price:d.prevClose;
@@ -1367,7 +1380,7 @@ function renderIndicators(d){
 function setChip(id,[txt,cls]){ const e=document.getElementById(id); if(!e) return; e.textContent=txt; e.className="chip"+(cls?(" "+cls):""); }
 
 function renderMarketPill(d){
-  const ms=(d&&d.marketState)||marketStateFromClock();
+  const ms=normMarketState((d&&d.marketState)||marketStateFromClock());
   const pill=$("#mktPill"), txt=$("#mktTxt");
   let cls="closed", label="Closed";
   if(ms==="REGULAR"){
@@ -1501,7 +1514,10 @@ function autoSyncAlerts(){
     if(isLocalhostPreview()){ renderAlertBarTgChip("preview"); return; }
     renderAlertBarTgChip("syncing");
     const workerUrl=(cfg.proxyUrl||"").replace(/\/$/,"");
-    const payload={ symbol:SYMBOL, chatId:cfg.tgChatId, alerts:alerts.filter(a=>a.enabled).map(a=>({id:a.id,type:a.type,value:a.value,oneShot:!!a.oneShot,cooldownMs:a.cooldownMs||0})) };
+    // Send the full arming state, not just the config. The Worker used to
+    // hard-reset armed/prevCond/lastFiredAt on every sync, which re-armed an
+    // already-tripped alert and re-fired it on the next cron tick (duplicates).
+    const payload={ symbol:SYMBOL, chatId:cfg.tgChatId, alerts:alerts.filter(a=>a.enabled).map(a=>({id:a.id,type:a.type,value:a.value,oneShot:!!a.oneShot,cooldownMs:a.cooldownMs||0,enabled:true,armed:!!a.armed,prevCond:a.prevCond,lastFiredAt:a.lastFiredAt||null})) };
     try{
       const r=await fetch(workerUrl+"/alerts",{method:"POST",headers:{"Content-Type":"application/json","X-Alerts-Secret":cfg.alertsSecret||""},body:JSON.stringify(payload)});
       if(r.ok){ cfg.tgLastSync=Date.now(); saveCfg(); renderAlertBarTgChip("ok"); }
@@ -1585,28 +1601,20 @@ function addAlert(){
 }
 
 /* ====================== NYSE holidays 2026-2028 ======================
-   Source: official NYSE Group holiday and early-closings press release.
-   NOTE: extend these tables with the next year's dates before 2028 lapses,
-   otherwise every US market holiday after the last listed year is treated
-   as a trading day (market clock will be wrong). */
-const NYSE_HOLIDAYS = new Set([
-  "2026-01-01","2026-01-19","2026-02-16","2026-04-03",
-  "2026-05-25","2026-07-03","2026-09-07","2026-11-26","2026-12-25",
-  "2027-01-01","2027-01-18","2027-02-15","2027-03-26",
-  "2027-05-31","2027-06-18","2027-07-05","2027-09-06","2027-11-25","2027-12-24",
-  "2028-01-17","2028-02-21","2028-04-14",
-  "2028-05-29","2028-06-19","2028-07-04","2028-09-04","2028-11-23","2028-12-25",
-]);
-const NYSE_HALF_DAYS = new Set([
-  "2026-07-02","2026-11-27","2026-12-24",
-  "2027-11-26",
-  "2028-07-03","2028-11-24",
-]);
+   Single source of truth: Worker/nyse-holidays.js, shared with the Cloudflare
+   Worker. The module script at the top of this file assigns window.KjrNyse;
+   these accessors read it lazily so the first paint before the module resolves
+   degrades to "trading day" instead of crashing. Extend nyse-holidays.js with
+   the next year's dates before 2028 lapses, otherwise every US market holiday
+   after the last listed year is treated as a trading day (market clock wrong). */
+const _NYSE_FALLBACK = new Set();
+function nyseHolidaySet(){ return (window.KjrNyse && window.KjrNyse.NYSE_HOLIDAYS) || _NYSE_FALLBACK; }
+function nyseHalfDaySet(){ return (window.KjrNyse && window.KjrNyse.NYSE_HALF_DAYS) || _NYSE_FALLBACK; }
 function etDateStr(){ // today's date in ET as YYYY-MM-DD
   return new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York"}).format(new Date());
 }
-function isHoliday(d){ return NYSE_HOLIDAYS.has(d); }
-function isHalfDay(d){ return NYSE_HALF_DAYS.has(d); }
+function isHoliday(d){ return nyseHolidaySet().has(d); }
+function isHalfDay(d){ return nyseHalfDaySet().has(d); }
 function regularCloseMin(d){ return isHalfDay(d)?780:960; } // 13:00 or 16:00 ET in minutes
 
 /* ====================== Daily series (ATR + prev day levels) ====================== */
@@ -1929,7 +1937,7 @@ async function loadChart(){
   }
 }
 function currentIntervalMs(){
-  const st=marketStateFromClock();
+  const st=normMarketState(marketStateFromClock());
   if(st==="REGULAR") return Math.max(5,cfg.refreshSec)*1000;
   if(st==="PRE"||st==="POST") return Math.max(30,cfg.refreshSec)*1000;
   return 5*60*1000; // closed: gentle poll to catch the open

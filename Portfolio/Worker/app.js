@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.57';
-const APP_DISPLAY_VERSION = 'v2.57 (16 Aug)';
+const APP_VERSION = 'v2.58';
+const APP_DISPLAY_VERSION = 'v2.58 (16 Aug)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -3999,7 +3999,24 @@ function entityModalSave(){
       if (f.type === 'select') {
         const optList = f.optionsFn ? (f.optionsFn() || []) : (f.options || []);
         const allowed = optList.map(o => String(Array.isArray(o) ? o[0] : o));
-        item[f.key] = allowed.includes(String(raw)) ? String(raw) : (f.default || allowed[0] || '');
+        if (allowed.includes(String(raw))){
+          item[f.key] = String(raw);
+        } else if (raw === '' || raw == null){
+          item[f.key] = f.default || '';
+        } else if (f.default){
+          // Optional link with an explicit "unset" default: degrade to it
+          // rather than guessing at a surviving entry.
+          item[f.key] = f.default;
+        } else if (f.required){
+          // Required foreign key (stock/cash account) was deleted between
+          // modal-open and save. Silently re-attributing the row to allowed[0]
+          // is data corruption with a success toast — refuse instead so the
+          // user can re-pick.
+          showToast(f.label + ' no longer exists. Pick one from the list and save again.', 'error');
+          return;
+        } else {
+          item[f.key] = '';
+        }
       } else if (f.type === 'date') {
         if (raw && !kjrValidDate(raw)) invalidDateLabel = f.label;
         item[f.key] = kjrValidDate(raw) ? raw : '';

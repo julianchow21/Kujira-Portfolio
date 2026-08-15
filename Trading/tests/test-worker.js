@@ -71,6 +71,13 @@ const CONST_NAMES = ['INTERVALS', 'RANGES', 'SYMBOL_RE', 'CROSS_TYPES'];
 
 let extractedCode = '';
 const missing = [];
+// isMarketWindow() now consults the shared holiday list (nyse-holidays.js),
+// which the Worker imports. Prepend the declarations (export stripped) so the
+// extracted function can reference NYSE_HOLIDAYS in the sandbox.
+const NYSE_SRC = fs.readFileSync(path.join(__dirname, '..', 'Worker', 'nyse-holidays.js'), 'utf8')
+  .replace(/export\s+/g, '')
+  .replace(/^\/\/.*$/gm, '');
+extractedCode += NYSE_SRC + '\n';
 for (const n of FN_NAMES) {
   try { extractedCode += extractFunction(src, n, SRC_PATH) + '\n'; }
   catch (e) { missing.push(n + ' (function): ' + e.message); }

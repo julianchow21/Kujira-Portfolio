@@ -313,7 +313,7 @@ th.sortable.desc::after{content:'\25BC'}
 /* ============================================================================
    APP CONFIG
    ========================================================================== */
-const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.9 (16 Aug)' };
+const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.10 (16 Aug)' };
 const CCY = '$';
 const TABLES = ['trades'];
 const PAGE_SIZE = 25;
@@ -518,6 +518,11 @@ function num(n){ return (n==null||n==='')?'\u2014':Number(n).toLocaleString('en-
 function pct(n){ return (n==null||isNaN(n))?'\u2014':Number(n).toFixed(1)+'%'; }
 function fmtDate(iso){ if(!iso) return '\u2014'; const d=new Date(iso); if(isNaN(d)) return '\u2014'; const p=x=>String(x).padStart(2,'0'); return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(2); }
 function toLocalInput(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return ''; const p=x=>String(x).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes()); }
+/* Shared local-day key: every calendar/report bucket must use the trader's
+   local date, not the UTC slice of the stored ISO string. A close between
+   00:00 and 08:00 SGT used to land on the previous day's tile while the table
+   and day-of-week stats showed the local day. */
+function localDateKey(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return ''; const p=x=>String(x).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
 
 /* ============================================================================
    TAGS (derived from trades, no separate store needed for single-user)
@@ -642,16 +647,17 @@ function renderApp(){
   show('view-simulator', _view==='simulator');
   show('view-reports', _view==='reports');
   show('view-coach', _view==='coach');
-  if(jr && total>0){ const rows=visibleTrades(); renderDashboard(computeStats(rows)); renderTable(rows); }
+  if(jr && total>0){ const rows=visibleTrades(); renderDashboard(computeStats(rows), _filter.q.trim()!=='' || _filter.status!=='all'); renderTable(rows); }
   if(_view==='simulator') renderSimulator();
   if(_view==='reports') renderReports();
   if(_view==='coach') renderCoachIdle();
 }
 
 function statCard(label,valHtml,sub){ return '<div class="stat"><div class="label">'+label+'</div><div class="val">'+valHtml+'</div>'+(sub?'<div class="sub">'+escapeHtml(sub)+'</div>':'')+'</div>'; }
-function renderDashboard(s){
+function renderDashboard(s, filtered){
   const pf=s.profitFactor==null?'\u2014':(isFinite(s.profitFactor)?s.profitFactor.toFixed(2):'∞');
-  document.getElementById('dash').innerHTML=[
+  document.getElementById('dash').innerHTML=(filtered?'<div class="label" style="grid-column:1/-1;color:var(--amber)">Stats reflect the active filter, not your full journal</div>':'')
+  +[
     statCard('Net P&L','<span class="'+(s.netPnl>=0?'pos':'neg')+'">'+money(s.netPnl,true)+'</span>', s.n+' closed · '+s.openCount+' open'),
     statCard('Win rate', pct(s.winRate), s.wins+'W / '+s.losses+'L'+(s.be?(' / '+s.be+'BE'):'')),
     statCard('Profit factor', pf, 'payoff '+(s.payoff==null?'\u2014':s.payoff.toFixed(2))),
@@ -971,7 +977,7 @@ function bdCard(title, entries){
   return '<div class="bd-card"><div class="label">'+title+'</div>'+rows+'</div>';
 }
 let _cal=null;
-function dayPnlMap(){ const m={}; closedDerived().forEach(({t,d})=>{ const iso=(t.exitAt||t.entryAt).slice(0,10); (m[iso]=m[iso]||{net:0,n:0}); m[iso].net+=d.net; m[iso].n++; }); return m; }
+function dayPnlMap(){ const m={}; closedDerived().forEach(({t,d})=>{ const iso=localDateKey(t.exitAt||t.entryAt); (m[iso]=m[iso]||{net:0,n:0}); m[iso].net+=d.net; m[iso].n++; }); return m; }
 function renderReports(){
   const dow=bucketBy(t=>DOW[new Date(t.entryAt).getDay()]);
   const dowEntries=DOW.slice(1).concat(DOW[0]).filter(k=>dow.has(k)).map(k=>[k,dow.get(k)]);

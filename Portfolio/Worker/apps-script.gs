@@ -326,6 +326,21 @@ function doPost(e) {
    latest pre/post market trade: we take the last non-null close and classify
    it against the regular session window. Pre/post is best-effort, it only
    appears for US tickers during extended hours and may be null otherwise. */
+
+/* CacheService.putAll caps at 100 key/value pairs per call (and 100KB per
+   entry). A holdings+watchlist union over 100 tickers would throw and kill
+   the WHOLE quotes/fundamentals response, not just the excess symbols. Chunk
+   the writes so an overflow degrades gracefully instead of failing the batch
+   (the client shows "Price refresh failed" on a full throw). */
+function putAllChunked_(cache, map, ttlSec) {
+  const keys = Object.keys(map);
+  for (let i = 0; i < keys.length; i += 50) {
+    const slice = {};
+    keys.slice(i, i + 50).forEach(function (k) { slice[k] = map[k]; });
+    try { cache.putAll(slice, ttlSec); } catch (e) { /* per-chunk failure: skip, next refresh refills */ }
+  }
+}
+
 function fetchYahooQuotes_(symbolsCsv) {
   const symbols = String(symbolsCsv || '').split(',').map(s => s.trim()).filter(Boolean);
   if (!symbols.length) return { quotes: {} };
@@ -410,7 +425,7 @@ function fetchYahooQuotes_(symbolsCsv) {
       }
     });
     if (Object.keys(toCache).length) {
-      cache.putAll(toCache, PRICE_CACHE_TTL_SEC);
+      putAllChunked_(cache, toCache, PRICE_CACHE_TTL_SEC);
     }
   }
 
@@ -576,7 +591,7 @@ function fetchYahooFundamentals_(symbolsCsv) {
       }
     });
     if (Object.keys(toCache).length) {
-      cache.putAll(toCache, FUND_CACHE_TTL_SEC);
+      putAllChunked_(cache, toCache, FUND_CACHE_TTL_SEC);
     }
   }
 
@@ -880,7 +895,7 @@ function fetchYahooHistory_(symbolsCsv, range) {
     });
 
     if (Object.keys(toCache).length) {
-      try { cache.putAll(toCache, FUND_CACHE_TTL_SEC); } catch (_) {}
+      putAllChunked_(cache, toCache, FUND_CACHE_TTL_SEC);
     }
   }
 
