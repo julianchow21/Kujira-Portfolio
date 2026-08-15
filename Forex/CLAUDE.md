@@ -14,6 +14,12 @@ Single-file SPA, all CSS/JS/HTML in `index.html`. No framework, no bundler. Buil
 - `profiles` table (plan, stripe_customer_id) stubbed in `schema.sql` so adding Stripe later only writes to it.
 - `FREE_TRADE_CAP` constant present, unused while owner, enforced in Phase 2.
 
+### Phase 2 cutover checklist (before enabling RLS / auth)
+
+- **Backfill `user_id`.** Phase 1 rows were written with `user_id` NULL (stamped only when `currentUser().id` exists). Enabling the `own trades` policies before backfilling hides the whole journal. Run `migrations/phase2-user-id-backfill.sql` as the owner first.
+- **Server timestamps.** `sbBatchUpsert` no longer sends `updated_at`; the server stamps inserts and the `set_updated_at()` trigger in `schema.sql` advances it on updates, and the client echoes it back via `Prefer: return=representation`. The schema trigger must be applied or re-syncs of edited rows keep their old timestamp.
+- **Stripe blocker.** Nothing writes `profiles.stripe_customer_id`, so `checkout.session.completed` matches zero rows and buyers stay on `free` silently. Wire customer capture at Checkout Session creation before taking real money. The webhook now fails loudly (503, `matched 0 profiles`) when it cannot attribute a customer.
+
 ### Data layer
 
 Inherited from the starter, keep the gotchas true: preview guard at the TOP of the flush, snapshot dirty IDs before any await, localStorage-first and reconcile by timestamp (never by count), never sync a local preview, echo the server timestamp for concurrency, mobile CSS after base rules, no backdrop-filter on the topbar, derived values single-source.

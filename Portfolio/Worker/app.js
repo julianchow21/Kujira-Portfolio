@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.56';
-const APP_DISPLAY_VERSION = 'v2.56 (2 Aug)';
+const APP_VERSION = 'v2.57';
+const APP_DISPLAY_VERSION = 'v2.57 (16 Aug)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1753,8 +1753,14 @@ function showConflictModal(opts){
         headers:{ 'Content-Type':'text/plain;charset=utf-8' },
         body: JSON.stringify(obj)
       });
-      const data = await resp.json();
-      if (data.error) throw new Error(data.error);
+    const parsed = await safeJson(resp);
+    if (!parsed.ok){
+      setSyncStatus('failed', 'Backend returned a non-JSON response');
+      showToast('Cloud returned a non-JSON response. The sync URL may be wrong, or the Apps Script backend is not deployed. Check the sync URL in Settings.', 'error');
+      return false;
+    }
+    const data = parsed.data;
+    if (data.error) throw new Error(data.error);
       const stamp = data.savedAt || new Date().toISOString();
       localStorage.setItem(LK_SYNC_TS, stamp);
       setLastPull(stamp, 'server');
@@ -8169,7 +8175,12 @@ function autoSnapshot(){
   const today = _isoDateSG(new Date());
   const has = (DB.snapshots || []).some(s => s.date === today);
   if (has) return;
-  takeSnapshot({ noSave: true }); // boot already persists; avoid an extra sync
+  // Persist on this path, not on an unrelated caller's save. boot() runs
+  // runSalaryEngine() first, and its saveData() only fires on a changed day
+  // (payday/CPF/cash event) and runs before this mutation, so relying on it
+  // silently dropped the snapshot on an ordinary day (chart had ~1 point per
+  // payday). takeSnapshot() now saves, including a debounced cloud push.
+  takeSnapshot();
 }
 
 /* ── Dashboard arrange mode ─────────────────────────────────────────────── */
