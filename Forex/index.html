@@ -14,7 +14,7 @@
 :root{
   --bg:#0f0f0f;--bg2:#161616;--bg3:#1e1e1e;--bg4:#252525;
   --border:#2a2a2a;--border2:#333;
-  --text:#e8e8e8;--text2:#999;--text3:#666;
+  --text:#e8e8e8;--text2:#999;--text3:#7f7f7f;
   --red:#e24b4a;--red-soft:#2a1515;
   --green:#4CAF50;--green-soft:#1a2a1a;
   --blue:#4a9eff;--blue-soft:#0d1f33;
@@ -25,7 +25,7 @@
 html.light{
   --bg:#f0f2f5;--bg2:#ffffff;--bg3:#f5f6f8;--bg4:#eaecef;
   --border:#e0e2e6;--border2:#d0d3d8;
-  --text:#111318;--text2:#555b66;--text3:#9099a6;
+  --text:#111318;--text2:#555b66;--text3:#6e7784;
   --red:#d63b3a;--red-soft:#fde8e8;
   --green:#2e8b3e;--green-soft:#e6f4e8;
   --blue:#1a6fd4;--blue-soft:#e0ecfb;
@@ -191,23 +191,24 @@ th.sortable.desc::after{content:'\25BC'}
   .cmp{grid-template-columns:1.2fr 1fr 1fr 1fr;font-size:12px}
   th,td{padding:8px 9px}
   th{font-size:10px}
+  input,select,textarea{font-size:16px} /* prevent iOS auto-zoom on focus */
 }
 </style>
 </head>
 <body>
 
 <header class="topbar">
-  <div class="logo" onclick="location.reload()">
+  <a class="logo" href="./" aria-label="Kujira Forex">
     <svg class="logo-mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset=".5" stop-color="#a78bfa"/><stop offset="1" stop-color="#f472b6"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#lg)"/><path d="M9 18c3 3 11 3 14 0" stroke="#04201c" stroke-width="2.2" fill="none" stroke-linecap="round"/><circle cx="12" cy="13" r="1.5" fill="#04201c"/></svg>
     <span class="logo-name" id="app-name">Kujira</span>
-  </div>
+  </a>
   <nav class="tb-tabs" aria-label="Switch app">
     <a class="tb-tab" href="../Trading/">Trading</a>
     <a class="tb-tab active" href="./" aria-current="page">Forex</a>
     <a class="tb-tab" href="../Portfolio/">Portfolio</a>
   </nav>
   <div class="spacer"></div>
-  <span class="sync" id="sync"></span>
+  <span class="sync" id="sync" aria-live="polite" role="status"></span>
   <span class="ver" id="ver"></span>
   <button class="icon-btn" id="theme-btn" title="Toggle theme" onclick="toggleTheme()">◐</button>
 </header>
@@ -303,7 +304,7 @@ th.sortable.desc::after{content:'\25BC'}
   </section>
 </main>
 
-<div id="toasts"></div>
+<div id="toasts" aria-live="polite" role="status"></div>
 <div id="modal-root"></div>
 
 <script src="lib/kjr-format.js?v=1.2"></script>
@@ -313,7 +314,7 @@ th.sortable.desc::after{content:'\25BC'}
 /* ============================================================================
    APP CONFIG
    ========================================================================== */
-const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.11 (16 Aug)' };
+const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.12 (16 Aug)' };
 const CCY = '$';
 const TABLES = ['trades'];
 const PAGE_SIZE = 25;
@@ -623,7 +624,7 @@ function visibleTrades(){
   return rows;
 }
 function applyFilter(){ _filter.q=document.getElementById('search').value; _filter.status=document.getElementById('status-filter').value; _page=1; renderApp(); }
-function sortBy(k){ if(_sort.key===k) _sort.dir*=-1; else { _sort.key=k; _sort.dir=1; } renderApp(); }
+function sortBy(k){ if(_sort.key===k) _sort.dir*=-1; else { _sort.key=k; _sort.dir=1; } _page=1; renderApp(); }
 function goPage(p){ _page=p; renderTable(visibleTrades()); }
 function showView(v){
   if(v==='simulator' && !requireEntitlement('simulator','The simulator')) return;
@@ -683,12 +684,12 @@ function rowTagsHtml(t){ const chips=[]; TAG_CATS.forEach(c=>tradeTags(t,c.key).
 function renderTable(rows){
   document.getElementById('head-row').innerHTML=COLS.map(c=> c.sortable===false
     ? '<th>'+c.label+'</th>'
-    : '<th class="sortable '+(c.num?'num':'')+' '+(_sort.key===c.k?(_sort.dir>0?'asc':'desc'):'')+'" onclick="sortBy(\''+c.k+'\')">'+c.label+'</th>').join('');
+    : '<th class="sortable '+(c.num?'num':'')+' '+(_sort.key===c.k?(_sort.dir>0?'asc':'desc'):'')+'" aria-sort="'+(_sort.key===c.k?(_sort.dir>0?'ascending':'descending'):'none')+'" onclick="sortBy(\''+c.k+'\')">'+c.label+'</th>').join('');
   const noRows=rows.length===0; show('noresults',noRows); show('tbl-wrap',!noRows); show('pager',!noRows);
   if(noRows){ document.getElementById('rows').innerHTML=''; return; }
   const pages=Math.max(1,Math.ceil(rows.length/PAGE_SIZE)); if(_page>pages)_page=pages; if(_page<1)_page=1;
   const start=(_page-1)*PAGE_SIZE, pageRows=rows.slice(start,start+PAGE_SIZE);
-  document.getElementById('rows').innerHTML=pageRows.map(t=>{ const d=deriveTrade(t); return '<tr onclick="openTradeModal(\''+t.id+'\')">'
+  document.getElementById('rows').innerHTML=pageRows.map(t=>{ const d=deriveTrade(t); return '<tr onclick="openTradeModal(\''+t.id+'\')" tabindex="0" role="button" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openTradeModal(\''+t.id+'\')}" aria-label="Edit '+escapeHtml(t.symbol||'this')+' trade">'
     +'<td><strong>'+escapeHtml(t.symbol||'')+'</strong></td>'
     +'<td><span class="chip '+(t.side==='short'?'short':'long')+'">'+(t.side==='short'?'Short':'Long')+'</span></td>'
     +'<td>'+fmtDate(t.entryAt)+'</td>'
@@ -768,6 +769,9 @@ function field(k,label,req,inputHtml){ return '<div class="field"><label>'+label
 function frow(a,b){ return '<div class="frow">'+a+b+'</div>'; }
 function tagField(t,catKey,label){ const cur=t?tradeTags(t,catKey).join(', '):''; const opts=allTags(catKey).map(o=>'<option value="'+escapeHtml(o.tag)+'">').join(''); return field(catKey,label,false,'<input id="f-'+catKey+'" list="dl-'+catKey+'" value="'+escapeHtml(cur)+'" placeholder="comma separated"><datalist id="dl-'+catKey+'">'+opts+'</datalist>'); }
 function openTradeModal(id){
+  // Phase 2 gate: while owner this no-ops; once plans are wired, free users
+  // hitting the cap get an upgrade toast instead of an entry point that errors later.
+  if(!requireEntitlement('unlimited_trades','Logging trades')) return;
   const t=id?DB.trades.find(x=>x.id===id):null; const v=k=>(t&&t[k]!=null&&t[k]!=='')?String(t[k]):'';
   document.getElementById('modal-root').innerHTML=
     '<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog" aria-modal="true">'
@@ -791,9 +795,28 @@ function openTradeModal(id){
     +'</div>'
     +'<div class="modal-foot"><span>'+(t?'<button class="btn btn-danger" onclick="confirmDeleteTrade(\''+t.id+'\')">Delete</button>':'')+'</span><button class="btn btn-primary" onclick="saveTradeModal(\''+(t?t.id:'')+'\')">Save</button></div>'
     +'</div></div>';
+  wireModal(t?'Edit trade':'Log trade');
   const f=document.getElementById('f-symbol'); if(f) f.focus();
 }
-function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
+/* Modal a11y: accessible name + Escape-to-close + a Tab focus trap, wired on
+   every modal-build site. One consistent pattern across all modals. */
+let _modalKeyTrap=null;
+function wireModal(label){
+  const root=document.getElementById('modal-root'), m=root&&root.querySelector('.modal');
+  if(m&&label) m.setAttribute('aria-label',label);
+  if(_modalKeyTrap&&root) root.removeEventListener('keydown',_modalKeyTrap);
+  _modalKeyTrap=function(e){
+    if(e.key==='Escape'){ e.preventDefault(); closeModal(); return; }
+    if(e.key!=='Tab'||!root) return;
+    const f=Array.from(root.querySelectorAll('.modal input:not([disabled]),.modal select:not([disabled]),.modal textarea:not([disabled]),.modal button:not([disabled])')).filter(el=>el.offsetParent!==null);
+    if(!f.length) return;
+    const first=f[0],last=f[f.length-1];
+    if(e.shiftKey){ if(document.activeElement===first){ e.preventDefault(); last.focus(); } }
+    else if(document.activeElement===last){ e.preventDefault(); first.focus(); }
+  };
+  root.addEventListener('keydown',_modalKeyTrap);
+}
+function closeModal(){ const root=document.getElementById('modal-root'); if(_modalKeyTrap&&root){ root.removeEventListener('keydown',_modalKeyTrap); _modalKeyTrap=null; } if(root) root.innerHTML=''; }
 function saveTradeModal(id){
   const g=k=>document.getElementById('f-'+k);
   const setErr=(k,m)=>{ const e=document.getElementById('e-'+k); if(e) e.textContent=m||''; const f=g(k); if(f) f.classList.toggle('invalid',!!m); return !m; };
@@ -819,6 +842,7 @@ function saveTradeModal(id){
 function confirmDeleteTrade(id){
   const t=DB.trades.find(x=>x.id===id);
   document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:380px" role="dialog" aria-modal="true"><div class="modal-head"><h3>Delete trade?</h3></div><div class="modal-body"><p style="color:var(--text2)">Delete the <strong>'+escapeHtml(t?t.symbol:'this')+'</strong> trade? This cannot be undone.</p></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="deleteTrade(\''+id+'\');closeModal();toast(\'Trade deleted\')">Delete</button></div></div></div>';
+  wireModal('Delete trade');
 }
 
 /* ============================================================================
@@ -960,6 +984,7 @@ function openTagManager(){
   let undoSnap=null; try{ undoSnap=JSON.parse(localStorage.getItem(TAG_UNDO_KEY)||'null'); }catch(e){}
   const undoBtn = undoSnap ? '<button class="btn btn-sm" onclick="undoDeleteTag()">Undo delete "'+escapeHtml(undoSnap.tag)+'"</button>' : '<span></span>';
   document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:480px" role="dialog" aria-modal="true"><div class="modal-head"><h3>Manage tags</h3><button class="icon-btn" onclick="closeModal()">✕</button></div><div class="modal-body">'+sections+'<p class="muted">Renaming updates every trade. Rename to an existing tag to merge them. Deleting can be undone once, right after it happens.</p></div><div class="modal-foot">'+undoBtn+'<button class="btn" onclick="closeModal()">Close</button></div></div></div>';
+  wireModal('Manage tags');
 }
 function renameTagUI(i){ const e=_tagList[i]; if(!e) return; const nv=document.getElementById('ren-'+i).value; renameTag(e.cat,e.tag,nv); renderApp(); openTagManager(); toast('Tag updated'); }
 function deleteTagUI(i){ const e=_tagList[i]; if(!e) return; deleteTag(e.cat,e.tag); renderApp(); openTagManager(); toast('Tag removed. Undo available in Tag Manager.'); }
@@ -1079,12 +1104,24 @@ function openSettings(){
     +'</div>'
     +'<div class="modal-foot"><button class="btn" onclick="importCSV()">Import CSV</button><button class="btn btn-primary" onclick="saveSettings()">Save</button></div>'
     +'</div></div>';
+  wireModal('Settings');
 }
 function saveSettings(){
   const k=document.getElementById('f-akey').value.trim(); if(k) localStorage.setItem(APP.storageKey+'_anthropicKey',k); else localStorage.removeItem(APP.storageKey+'_anthropicKey');
   const cpEl=document.getElementById('f-chartproxy');
   if(cpEl){ const cp=cpEl.value.trim(); if(cp && cp!==CHART_PROXY_DEFAULT) localStorage.setItem(CHART_PROXY_KEY,cp); else localStorage.removeItem(CHART_PROXY_KEY); }
   closeModal(); toast('Settings saved'); if(_view==='coach') renderCoachIdle();
+}
+/* Explicit date parsing so CSV imports do not depend on the JS engine's
+   locale: ISO first, then DD/MM/YYYY (documented order), both with optional
+   time, else a plain Date parse. */
+function parseImportDate(s){
+  s=String(s||'').trim(); if(!s) return null;
+  let m=/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{1,2}))?/.exec(s);
+  if(m){ const d=new Date(+m[1],+m[2]-1,+m[3],m[4]?+m[4]:0,m[5]?+m[5]:0); return isNaN(d)?null:d; }
+  m=/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:[T ](\d{1,2}):(\d{1,2}))?/.exec(s);
+  if(m){ const d=new Date(+m[3],+m[2]-1,+m[1],m[4]?+m[4]:0,m[5]?+m[5]:0); return isNaN(d)?null:d; }
+  const d=new Date(s); return isNaN(d)?null:d;
 }
 function parseCSV(text){
   const rows=[]; let i=0, field='', row=[], q=false;
@@ -1116,13 +1153,17 @@ function importCSV(){
       for(let r=1;r<rows.length;r++){ const c=rows[r];
         const sym=(c[ix.symbol]||'').trim().toUpperCase(), qty=Number(c[ix.qty]), ep=Number(c[ix.entryPrice]);
         if(!sym||!(qty>0)||!(ep>0)){ skip++; continue; }
-        const eAtRaw=ix.entryAt>=0?c[ix.entryAt]:'', eAt=eAtRaw?new Date(eAtRaw):new Date();
-        if(isNaN(eAt)){ skip++; continue; }
+        const eAtRaw=ix.entryAt>=0?c[ix.entryAt]:'', eAt=eAtRaw?parseImportDate(eAtRaw):new Date();
+        if(!eAt){ skip++; continue; }
         const sideRaw=(ix.side>=0?c[ix.side]:'').toLowerCase(), side=/short|sell/.test(sideRaw)?'short':'long';
         const xAtRaw=ix.exitAt>=0?c[ix.exitAt]:'', xpRaw=ix.exitPrice>=0?c[ix.exitPrice]:'';
-        const hasExit=xAtRaw&&xpRaw!==''&&!isNaN(new Date(xAtRaw))&&Number(xpRaw)>0;
+        let exitAt='', exitPrice='';
+        if(xAtRaw&&xpRaw!==''&&Number(xpRaw)>0){
+          const xAt=parseImportDate(xAtRaw);
+          if(xAt){ if(xAt<eAt){ skip++; continue; } exitAt=xAt.toISOString(); exitPrice=Number(xpRaw); }
+        }
         upsertTradeSilent({ id:uid(), symbol:sym, side, quantity:qty, entryAt:eAt.toISOString(), entryPrice:ep,
-          exitAt:hasExit?new Date(xAtRaw).toISOString():'', exitPrice:hasExit?Number(xpRaw):'',
+          exitAt, exitPrice,
           stopPrice:(ix.stop>=0&&Number(c[ix.stop])>0)?Number(c[ix.stop]):'', fees:(ix.fees>=0&&!isNaN(Number(c[ix.fees]))&&c[ix.fees]!=='')?Number(c[ix.fees]):0,
           notes:'', setupTags:[],mistakeTags:[],emotionTags:[],marketTags:[], contractMultiplier:1, createdAt:now, updatedAt:now });
         ok++;

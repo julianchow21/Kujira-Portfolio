@@ -47,7 +47,7 @@
      tokens below are what most users see at runtime. */
   --bg:#F6F4EE;--bg2:#ffffff;--bg3:#F0EDE4;--bg4:#E8E4D8;
   --border:#E5E1D8;--border2:#D6D1C4;
-  --text:#1f1d1a;--text2:#6b665e;--text3:#9a958b;
+  --text:#1f1d1a;--text2:#6b665e;--text3:#7b766c;
   --red:#b13838;--red2:#8f2c2c;--red-soft:#f7e6e6;--red-border:#e6c5c5;
   --green:#2f7d4f;--green-soft:#e6f1ea;--green-border:#bedcc9;
   --blue:#3a5e8c;--blue-soft:#e4ebf4;--blue-border:#c2d3e6;
@@ -713,7 +713,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <span id="logo-version"></span>
     </div>
   </button>
-  <nav class="nav" id="nav-host">
+  <nav class="nav" id="nav-host" aria-label="Primary navigation">
     <!-- nav buttons injected by JS -->
   </nav>
   <div class="nav-more-wrap" id="nav-more-wrap" style="display:none">
@@ -1290,7 +1290,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 </main>
 
 <!-- MOBILE BOTTOM TAB BAR -->
-<nav class="bottom-tab-bar" id="bottom-nav"></nav>
+<nav class="bottom-tab-bar" id="bottom-nav" aria-label="Primary navigation (mobile)"></nav>
 
 <!-- MOBILE "MORE" SHEET: the tabs and cross-app links that don't fit the
      5-button bottom bar. Slides up from the bottom, reuses the .overlay
@@ -1388,8 +1388,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.59"></script>
-<script src="Worker/kjr-sortable.js?v=2.59"></script>
-<script src="Worker/app.js?v=2.59"></script>
+<script src="Worker/kjr-core.js?v=2.60"></script>
+<script src="Worker/kjr-sortable.js?v=2.60"></script>
+<script src="Worker/app.js?v=2.60"></script>
 </body>
 </html>

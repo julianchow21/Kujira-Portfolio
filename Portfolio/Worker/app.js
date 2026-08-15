@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.59';
-const APP_DISPLAY_VERSION = 'v2.59 (16 Aug)';
+const APP_VERSION = 'v2.60';
+const APP_DISPLAY_VERSION = 'v2.60 (16 Aug)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1708,7 +1708,7 @@ function showConflictModal(opts){
   wrap.id = 'conflict-modal';
   wrap.className = 'overlay open';
   wrap.innerHTML = `
-    <div class="modal" style="max-width:520px">
+    <div class="modal" style="max-width:520px" role="dialog" aria-modal="true">
       <div class="modal-head"><h3>⚠ Sync conflict</h3></div>
       <div class="modal-body">
         <div style="color:var(--text2);line-height:1.6">Someone (or another tab) updated the cloud sheet ${kjrEscape(remoteAgo)}. Your local edits haven't been saved yet.</div>
@@ -1723,6 +1723,18 @@ function showConflictModal(opts){
       </div>
     </div>`;
   document.body.appendChild(wrap);
+  // Keyboard access: Escape dismisses (same as Keep editing), Tab is trapped
+  // so focus cannot escape the modal, and the default action gets initial focus.
+  wrap.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape'){ e.preventDefault(); const b = wrap.querySelector('[data-click="dismissConflict"]'); if (b) b.click(); return; }
+    if (e.key !== 'Tab') return;
+    const btns = Array.from(wrap.querySelectorAll('button')).filter(el => el.offsetParent !== null);
+    if (!btns.length) return;
+    const first = btns[0], last = btns[btns.length - 1];
+    if (e.shiftKey){ if (document.activeElement === first){ e.preventDefault(); last.focus(); } }
+    else if (document.activeElement === last){ e.preventDefault(); first.focus(); }
+  });
+  const _cfFirst = wrap.querySelector('button'); if (_cfFirst) _cfFirst.focus();
   document.getElementById('cf-pull').onclick = async () => {
     wrap.remove();
     // Same cancellation as cf-force below: a debounced or in-flight push
@@ -3922,6 +3934,8 @@ function renderField(f, value){
   const required = f.required ? ' required' : '';
   const hint = f.hint ? `<div class="hint">${kjrEscape(f.hint)}</div>` : '';
   const full = (f.type === 'textarea') ? ' style="grid-column:1/-1"' : '';
+  // Bind the label to the control so screen readers announce the field name.
+  const fid = 'emf-' + f.key;
   let input = '';
   if (f.type === 'select'){
     // optionsFn lets schemas defer choices to render time (e.g. categories pulled from DB)
@@ -3930,9 +3944,9 @@ function renderField(f, value){
       const [val,lbl] = Array.isArray(o) ? o : [o,o];
       return `<option value="${kjrEscape(val)}"${String(val) === String(v) ? ' selected' : ''}>${kjrEscape(lbl)}</option>`;
     }).join('');
-    input = `<select class="fi" data-fkey="${f.key}"${required}>${opts}</select>`;
+    input = `<select class="fi" id="${fid}" data-fkey="${f.key}"${required}>${opts}</select>`;
   } else if (f.type === 'textarea'){
-    input = `<textarea class="fi" data-fkey="${f.key}" placeholder="${kjrEscape(f.placeholder||'')}">${safeV}</textarea>`;
+    input = `<textarea class="fi" id="${fid}" data-fkey="${f.key}" placeholder="${kjrEscape(f.placeholder||'')}">${safeV}</textarea>`;
   } else {
     const step = f.step ? ` step="${kjrEscape(f.step)}"` : '';
     const min  = f.min != null ? ` min="${kjrEscape(f.min)}"` : '';
@@ -3946,9 +3960,9 @@ function renderField(f, value){
       listAttr = ` list="${dlId}"`;
       listEl = `<datalist id="${dlId}">${f.datalist.map(o => `<option value="${kjrEscape(o)}"></option>`).join('')}</datalist>`;
     }
-    input = `<input class="fi" type="${inputType}" data-fkey="${f.key}"${step}${min}${listAttr} value="${safeV}" placeholder="${kjrEscape(f.placeholder||'')}"${required}>${listEl}`;
+    input = `<input class="fi" id="${fid}" type="${inputType}" data-fkey="${f.key}"${step}${min}${listAttr} value="${safeV}" placeholder="${kjrEscape(f.placeholder||'')}"${required}>${listEl}`;
   }
-  return `<div class="form-group"${full}><label class="lbl">${kjrEscape(f.label)}${f.required ? ' *' : ''}</label>${input}${hint}</div>`;
+  return `<div class="form-group"${full}><label class="lbl" for="${fid}">${kjrEscape(f.label)}${f.required ? ' *' : ''}</label>${input}${hint}</div>`;
 }
 
 function closeEntityModal(){
@@ -5807,6 +5821,9 @@ async function fetchStockHistory(ysyms, range){
     const data = await resp.json();
     if (data.error && !data.history) throw new Error(data.error);
     const now = new Date().toISOString();
+    // Bounded cache: a long-lived tab switching many symbols/ranges must not
+    // accumulate history forever. Simple whole-cache reset above a symbol cap.
+    if (Object.keys(_pbHistCache).length > 40) _pbHistCache = {};
     Object.entries(data.history || {}).forEach(([sym, h]) => {
       if (!h || h.error) return;
       if (!_pbHistCache[sym]) _pbHistCache[sym] = {};
@@ -5988,7 +6005,7 @@ function _pbConfirm(msg, onYes){
   const ov = document.createElement('div');
   ov.id = 'pb-confirm-ov';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9900;display:flex;align-items:center;justify-content:center';
-  ov.innerHTML = `<div class="card" style="padding:20px 22px;max-width:300px;width:88%">
+  ov.innerHTML = `<div class="card" role="dialog" aria-modal="true" aria-label="Confirm delete" style="padding:20px 22px;max-width:300px;width:88%">
     <div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:16px">${msg}</div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-sm" id="pb-cf-no">Cancel</button>
@@ -5999,6 +6016,17 @@ function _pbConfirm(msg, onYes){
   ov.querySelector('#pb-cf-no').onclick = close;
   ov.querySelector('#pb-cf-yes').onclick = () => { close(); onYes(); };
   ov.addEventListener('click', e => { if (e.target === ov) close(); });
+  // Keyboard access: Escape cancels, focus lands on Cancel, Tab is trapped.
+  ov.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape'){ e.preventDefault(); close(); return; }
+    if (e.key !== 'Tab') return;
+    const btns = Array.from(ov.querySelectorAll('button')).filter(el => el.offsetParent !== null);
+    if (!btns.length) return;
+    const first = btns[0], last = btns[btns.length - 1];
+    if (e.shiftKey){ if (document.activeElement === first){ e.preventDefault(); last.focus(); } }
+    else if (document.activeElement === last){ e.preventDefault(); first.focus(); }
+  });
+  const _pbNo = ov.querySelector('#pb-cf-no'); if (_pbNo) _pbNo.focus();
 }
 
 function pbSetSource(val){

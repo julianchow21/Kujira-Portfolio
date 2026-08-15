@@ -26,7 +26,7 @@
 :root{
   --bg:#131722;--bg2:#1e222d;--bg3:#2a2e39;--bg4:#363a45;
   --border:#2a2e39;--border2:#363a45;
-  --text:#d1d4dc;--text2:#787b86;--text3:#4f5966;
+  --text:#d1d4dc;--text2:#868994;--text3:#808a97;
   --red:#ef5350;--red2:#c43030;--red-soft:#2a1515;--red-border:#3d2222;
   --green:#26a69a;--green-soft:#0d2220;--green-border:#163530;
   --blue:#29B6F6;--blue-soft:#0d1e2e;--blue-border:#163040;
@@ -39,6 +39,7 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.4;-webkit-font-smoothing:antialiased}
 body{padding:0 0 60px;min-height:100vh}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .wrap{max-width:1100px;margin:0 auto;padding:14px}
 button{font-family:inherit;cursor:pointer}
 .mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
@@ -129,7 +130,7 @@ button{font-family:inherit;cursor:pointer}
 .seg button.on{background:var(--bg4);color:var(--text)}
 .seg button:not(.on):hover{color:var(--text)}
 .toggles{display:flex;gap:6px;flex-wrap:wrap}
-#togglesDyn{display:inline-flex;gap:4px;align-items:center;position:relative}
+#togglesDyn{display:inline-flex;gap:4px;align-items:center;position:relative;z-index:0}
 .ind-drop{position:absolute;top:calc(100% + 4px);right:0;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,.55);z-index:202;min-width:185px;padding:4px 0}
 .ind-drop-row{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;font-size:12px;color:var(--text)}
 .ind-drop-row:hover{background:var(--bg4)}
@@ -201,7 +202,8 @@ input[type=number]{width:96px}
 .al-x{background:none;border:none;color:var(--text3);font-size:16px;padding:2px 6px;border-radius:6px}
 .al-x:hover{color:var(--red);background:var(--red-soft)}
 .switch{position:relative;width:34px;height:19px;flex:none}
-.switch input{display:none}
+.switch input{position:absolute;inset:0;margin:0;opacity:0;width:34px;height:19px;cursor:pointer;z-index:1}
+.switch input:focus-visible+.tk{outline:2px solid var(--accent);outline-offset:2px}
 .switch .tk{position:absolute;inset:0;background:var(--bg4);border:1px solid var(--border2);border-radius:999px;transition:.15s}
 .switch .tk:before{content:"";position:absolute;width:13px;height:13px;left:2px;top:2px;background:var(--text3);border-radius:50%;transition:.15s}
 .switch input:checked+.tk{background:var(--accent-soft);border-color:var(--accent-border)}
@@ -248,8 +250,8 @@ input[type=number]{width:96px}
 .lev-tick-a{width:3px!important;height:16px!important;top:-5px!important}
 .lev-tick-lbl{position:absolute;bottom:calc(100% + 3px);left:50%;transform:translateX(-50%);font-size:11px;font-weight:800;line-height:1;white-space:nowrap;z-index:2}
 .lev-tick-px{position:absolute;top:calc(100% + 3px);left:50%;transform:translateX(-50%);font-size:9px;font-weight:600;line-height:1;white-space:nowrap;color:var(--text3);z-index:2}
-.lev-pin{position:absolute;top:-7px;width:4px;height:20px;background:#2dd4bf;border-radius:2px;transform:translateX(-50%);z-index:3;box-shadow:0 0 8px rgba(45,212,191,.8)}
-.lev-pin-px{position:absolute;bottom:-24px;transform:translateX(-50%);font-size:12px;font-weight:800;white-space:nowrap;color:#2dd4bf;z-index:4}
+.lev-pin{position:absolute;top:-7px;width:4px;height:20px;background:var(--accent);border-radius:2px;transform:translateX(-50%);z-index:3;box-shadow:0 0 8px rgba(41,98,255,.55)}
+.lev-pin-px{position:absolute;bottom:-24px;transform:translateX(-50%);font-size:12px;font-weight:800;white-space:nowrap;color:var(--accent);z-index:4}
 .lev-tip{position:absolute;bottom:calc(100% + 6px);background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius);font-size:11px;padding:4px 8px;white-space:nowrap;pointer-events:none;z-index:10;color:var(--text)}
 .lev-legend{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:11px;color:var(--text3)}
 .lev-key b{font-weight:800;margin-right:3px}
@@ -282,6 +284,7 @@ input[type=number]{width:96px}
   #chart{height:300px}.chart-empty{height:300px}
   .tick .nm{display:none}
   .calc-grid{grid-template-columns:1fr 1fr}
+  select,input[type=number],input[type=text]{font-size:16px} /* prevent iOS auto-zoom on focus */
 }
 
 /* Bottom alert bar */
@@ -304,6 +307,10 @@ body.has-alertbar{padding-bottom:56px}
 .toast-action{display:inline-flex;align-items:center;gap:10px}
 .toast-action .tundo{background:none;border:1px solid var(--amber-border);color:var(--amber);border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer}
 .toast-action .tundo:hover{background:var(--amber-soft)}
+@media (prefers-reduced-motion: reduce){
+  *,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+  .pulse,.al-row.fire{animation:none!important}
+}
 </style>
 </head>
 <body>
@@ -320,14 +327,15 @@ body.has-alertbar{padding-bottom:56px}
       <a class="tb-tab" href="../Portfolio/" title="Kujira Portfolio">Portfolio</a>
     </nav>
     <div class="tb-right">
-      <span class="tb-ver">v3.11 (16 Aug)</span>
-      <button class="iconbtn" id="refreshBtn" title="Refresh now">&#x21bb;</button>
-      <button class="iconbtn" id="gearBtn" title="Settings">&#9881;</button>
+      <span class="tb-ver">v3.12 (16 Aug)</span>
+      <button class="iconbtn" id="refreshBtn" title="Refresh now" aria-label="Refresh now">&#x21bb;</button>
+      <button class="iconbtn" id="gearBtn" title="Settings" aria-label="Settings">&#9881;</button>
     </div>
   </div>
 </div>
 
-<div class="wrap">
+<div class="wrap" role="main">
+  <h1 class="sr-only">MU Day Trading</h1>
 
   <div class="banner" id="errBanner"></div>
 
@@ -519,12 +527,12 @@ body.has-alertbar{padding-bottom:56px}
 
   <div class="fld row-between">
     <div><label style="margin:0">Include pre / post-market</label><div class="hint">Show extended-hours bars on intraday timeframes.</div></div>
-    <label class="switch"><input type="checkbox" id="extToggle"><span class="tk"></span></label>
+    <label class="switch"><input type="checkbox" id="extToggle" aria-label="Include pre / post-market"><span class="tk"></span></label>
   </div>
 
   <div class="fld row-between">
     <div><label style="margin:0">Sound on alert</label><div class="hint">Short beep when an alert fires.</div></div>
-    <label class="switch"><input type="checkbox" id="soundToggle"><span class="tk"></span></label>
+    <label class="switch"><input type="checkbox" id="soundToggle" aria-label="Sound on alert"><span class="tk"></span></label>
   </div>
 
   <hr style="border:none;border-top:1px solid var(--border);margin:20px 0 16px">
@@ -533,7 +541,7 @@ body.has-alertbar{padding-bottom:56px}
 
   <div class="fld row-between">
     <div><label style="margin:0">Enable push alerts</label><div class="hint">Auto-sync your enabled alerts to the Worker on each change.</div></div>
-    <label class="switch"><input type="checkbox" id="tgToggle"><span class="tk"></span></label>
+    <label class="switch"><input type="checkbox" id="tgToggle" aria-label="Enable push alerts"><span class="tk"></span></label>
   </div>
 
   <div class="fld">
@@ -564,13 +572,13 @@ body.has-alertbar{padding-bottom:56px}
   <button id="abarTg" class="abar-tg">TG off</button>
 </div>
 
-<div class="toasts" id="toasts"></div>
+<div class="toasts" id="toasts" aria-live="polite" role="status"></div>
 
 <div class="foot">
   <span class="warn">For information only, not financial advice.</span>
   Live <span id="footSym">MU</span> data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v3.11 (16 Aug)</span>
+  <span style="margin-left:8px;color:var(--text3)">v3.12 (16 Aug)</span>
 
 </div>
 
@@ -584,7 +592,7 @@ body.has-alertbar{padding-bottom:56px}
 (function(){
 /* ====================== Config & state ====================== */
 const SYMBOL = (function(){
-  try { var p = new URLSearchParams(location.search).get("symbol"); if (p && p.trim()) return p.trim().toUpperCase(); } catch(e){}
+  try { var p = new URLSearchParams(location.search).get("symbol"); if (p && p.trim() && /^[A-Z.\-]{1,12}$/.test(p.trim())) return p.trim().toUpperCase(); } catch(e){}
   try { var c = JSON.parse(localStorage.getItem("mu_cfg") || "{}");
     if (c.defaultSymbol && /^[A-Z.\-]{1,12}$/.test(c.defaultSymbol)) return c.defaultSymbol; } catch(e){}
   return "MU";
@@ -932,7 +940,7 @@ function parseResult(result){
   return {
     meta:m, bars, prevClose, price, sessionOpen,
     dayHigh:m.regularMarketDayHigh, dayLow:m.regularMarketDayLow,
-    volume:m.regularMarketVolume!=null?m.regularMarketVolume:(bars.reduce((s,b)=>s+(b.volume||0),0)),
+    volume:m.regularMarketVolume!=null?m.regularMarketVolume:(bars.filter(b=>isRegularSession(b.time)).reduce((s,b)=>s+(b.volume||0),0)),
     marketState:m.marketState, marketTime:m.regularMarketTime,
     name:m.shortName||m.longName||m.symbol||SYMBOL,
     fiftyTwoWeekHigh:m.fiftyTwoWeekHigh!=null?m.fiftyTwoWeekHigh:null,
@@ -1042,6 +1050,13 @@ let customPriceLines=[];   // price lines for user-placed custom levels
 let lastRS=null, lastRSFetchTime=0; // RS (SMH) data
 const RS_SYMBOL="SMH";
 const C = {};
+function prefersReducedMotion(){ return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+function hexToRgba(hex, alpha){
+  hex=(hex||'').replace('#','');
+  if(hex.length===3) hex=hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  const n=parseInt(hex,16); if(isNaN(n)) return 'rgba(0,0,0,'+alpha+')';
+  return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+alpha+')';
+}
 function readTokens(){
   const cs=getComputedStyle(document.documentElement);
   ["green","red","blue","amber","accent","text2","text3","border","border2","bg2"].forEach(k=>{
@@ -1093,13 +1108,13 @@ function initChart(){
   const LC=LightweightCharts;
   const dollarFmt={type:'custom',formatter:p=>"$"+Number(p).toFixed(2),minMove:0.01};
   sLine=chart.addSeries(LC.AreaSeries,{
-    topColor:'rgba(45,212,191,0.12)', bottomColor:'rgba(45,212,191,0.01)',
-    lineColor:'#2dd4bf', lineWidth:2,
-    priceLineVisible:true, priceLineColor:'#2dd4bf',
+    topColor:hexToRgba(C.accent,0.12), bottomColor:hexToRgba(C.accent,0.01),
+    lineColor:C.accent, lineWidth:2,
+    priceLineVisible:true, priceLineColor:C.accent,
     priceLineStyle:LightweightCharts.LineStyle.Solid, priceLineWidth:1,
     lastValueVisible:true,
     crosshairMarkerVisible:true, crosshairMarkerRadius:4,
-    crosshairMarkerBorderColor:'#2dd4bf', crosshairMarkerBackgroundColor:'#2dd4bf',
+    crosshairMarkerBorderColor:C.accent, crosshairMarkerBackgroundColor:C.accent,
     priceFormat:dollarFmt,
   });
   dayBands=new DayBands(); sLine.attachPrimitive(dayBands);
@@ -1146,13 +1161,16 @@ function initChart(){
   applyGrid();
   // Pulse the current-price line — slow sine breathe over 3.2s
   if(_pulseTick) clearInterval(_pulseTick);
+  if(prefersReducedMotion()){ _pulseTick=null; }
+  else {
   const PULSE_MS=3200;
   _pulseTick=setInterval(()=>{
     if(!sLine||document.hidden) return;
     const ph=(Date.now()%PULSE_MS)/PULSE_MS;
     const a=0.30+0.70*(0.5+0.5*Math.sin(ph*2*Math.PI));
-    sLine.applyOptions({priceLineColor:"rgba(45,212,191,"+a.toFixed(3)+")"});
+    sLine.applyOptions({priceLineColor:hexToRgba(C.accent, a.toFixed(3))});
   },120);
+  }
   // Tap-to-place custom levels
   const tapPop=document.getElementById("tapPop");
   const tapPxEl=document.getElementById("tapPx");
@@ -1236,7 +1254,7 @@ function applyChartStyle(){
     sLine.applyOptions({lineColor:"transparent",topColor:"transparent",bottomColor:"transparent",crosshairMarkerVisible:false,lastValueVisible:false,priceLineVisible:false});
     if(sCandle) sCandle.applyOptions({visible:true,lastValueVisible:true,priceLineVisible:true});
   } else {
-    sLine.applyOptions({lineColor:"#2dd4bf",topColor:"rgba(45,212,191,0.12)",bottomColor:"rgba(45,212,191,0.01)",crosshairMarkerVisible:true,lastValueVisible:true,priceLineVisible:true});
+    sLine.applyOptions({lineColor:C.accent,topColor:hexToRgba(C.accent,0.12),bottomColor:hexToRgba(C.accent,0.01),crosshairMarkerVisible:true,lastValueVisible:true,priceLineVisible:true});
     if(sCandle) sCandle.applyOptions({visible:false,lastValueVisible:false,priceLineVisible:false});
   }
   const btn=$("#styleBtn");
@@ -1568,7 +1586,7 @@ function renderAlerts(){
     const badges=(a.oneShot?'<span class="al-badge">1×</span>':'')+
       (a.cooldownMs?'<span class="al-badge">⏱'+Math.round(a.cooldownMs/60000)+'m</span>':'');
     return '<div class="al-row" data-id="'+a.id+'">'
-      +'<label class="switch"><input type="checkbox" '+(a.enabled?"checked":"")+' data-tgl="'+a.id+'"><span class="tk"></span></label>'
+      +'<label class="switch"><input type="checkbox" aria-label="Toggle alert" '+(a.enabled?"checked":"")+' data-tgl="'+a.id+'"><span class="tk"></span></label>'
       +'<span class="desc">'+esc(alertDesc(a))+badges+'</span>'
       +'<span class="st '+st[0]+'">'+st[1]+'</span>'
       +'<button class="al-x" data-del="'+a.id+'" title="Delete">&times;</button>'
@@ -1997,10 +2015,12 @@ async function testConnection(){
     const m=res.result.meta||{};
     out.className="testout ok";
     out.textContent="Connected. "+(m.symbol||SYMBOL)+" "+fmtPx(m.regularMarketPrice)+" via "+proxyLabelShort()+".";
+    saveCfg(); // persist the tested-and-approved values so they survive a reload
   }else{
     out.className="testout err";
     out.textContent="Failed: "+res.error;
     cfg.proxyMode=prev.mode; cfg.proxyUrl=prev.url; // revert on failure
+    $("#proxyMode").value=prev.mode; $("#proxyUrl").value=prev.url; // and the drawer inputs, so the UI matches cfg
   }
 }
 function saveSettingsFromDrawer(){
