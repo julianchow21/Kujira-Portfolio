@@ -85,9 +85,9 @@ These are hard-learned loss classes; every data-storing app must uphold them:
 
 ## Forex app specifics
 
-- `currentUser()` is the only place that asks "who is this". It returns local owner now, Supabase Auth user in Phase 2.
+- `currentUser()` is the only place that asks "who is this". It returns `{id:null}` today (local owner), a Supabase Auth user in Phase 2.
 - `entitlement(feature)` is the paywall gate. It returns `true` for everything while single-user. Every paid-only feature must call it.
-- `user_id` on every table row, stamped in `sbBatchUpsert`. Phase 2 swaps anon key for user JWT (one line, marked in the file).
+- `user_id` is a column on every table, but `sbBatchUpsert` only stamps it when `currentUser().id` exists, so **every Phase 1 row is written with `user_id` NULL**. Do not read this line as "rows carry a user id", they do not yet. Enabling the `own trades` RLS policies before backfilling would hide the entire journal. Run `Forex/migrations/phase2-user-id-backfill.sql` as the owner first, see `Forex/CLAUDE.md` for the cutover order. Phase 2 also swaps the anon key for the user JWT in `SB_HDR` (one line, marked in the file).
 - `lib/kjr-format.js` and `lib/kjr-calendar.js` are vendored shared engines; configured, not forked.
 
 ## Insurance
