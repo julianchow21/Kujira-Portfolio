@@ -74,6 +74,7 @@ See [SECURITY.md](./SECURITY.md) for the threat model and audit checklist. Short
 - The app's static HTML is locked down with CSP and SRI. A future XSS would still be unable to exfiltrate data to a third-party domain.
 - All user input is sanitised (string/number/id checks) before being stored.
 - The Apps Script validates payloads against a schema allowlist and caps array/string sizes.
+- Optional device encryption protects the browser database, cached prices, Apps Script URL and recovery snapshots with a passphrase that is never stored. It does not encrypt the Google Sheet or downloaded JSON backups.
 - **You** are responsible for keeping your Apps Script URL secret.
 
 To report a security issue, please open a private security advisory on the GitHub repo or email the maintainer.

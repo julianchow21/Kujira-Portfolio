@@ -49,4 +49,4 @@ Static, GitHub Pages from the Kujira/Portfolio repo at `/Forex/`. Phase 2 adds a
 
 ## Build status
 
-Phase 1 (single-user) in progress. Milestones M0 to M4 tracked in `~/Claude Projects/Claude/tasks/todo.md`.
+Phase 1 (single-user) is implemented, QA-verified and shipped as v0.13 on 29/08/2026. Phase 2 (multi-user authentication, cloud cutover and billing) remains deliberately disabled. Milestones M5 to M10 are tracked in `~/Claude Projects/Claude/tasks/todo.md`.

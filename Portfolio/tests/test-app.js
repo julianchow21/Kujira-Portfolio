@@ -132,6 +132,12 @@ const COMBINED_SRC = [
    Math/Number/isFinite/Date/JSON etc. are intrinsic to any new V8 context,
    no need to inject them. */
 function freshSandbox(dbOverrides){
+  const fakeStorage = {
+    _data: new Map(),
+    getItem(k){ return this._data.has(k) ? this._data.get(k) : null; },
+    setItem(k,v){ this._data.set(k, String(v)); },
+    removeItem(k){ this._data.delete(k); }
+  };
   const sandbox = {
     DB: Object.assign({
       settings: Object.assign({
@@ -152,12 +158,8 @@ function freshSandbox(dbOverrides){
     _activeSyncController: null,
     _activeSyncCompletions: new Set(),
     _localBase: null,
-    localStorage: {
-      _data: new Map(),
-      getItem(k){ return this._data.has(k) ? this._data.get(k) : null; },
-      setItem(k,v){ this._data.set(k, String(v)); },
-      removeItem(k){ this._data.delete(k); }
-    },
+    localStorage: fakeStorage,
+    protectedStorage: fakeStorage,
     sessionStorage: {
       _data: new Map(),
       getItem(k){ return this._data.has(k) ? this._data.get(k) : null; },
@@ -776,7 +778,7 @@ async function runTests(){
     const src = extractFunction('resetLocalConfirm');
     const waitAt = src.indexOf('await _cancelSyncForReset()');
     const snapshotAt = src.indexOf('LK_DB_PRE_RESET_');
-    const clearAt = src.indexOf('localStorage.removeItem(LK_DB)');
+    const clearAt = src.indexOf('protectedStorage.removeItem(LK_DB)');
     assert.ok(waitAt >= 0 && snapshotAt > waitAt && clearAt > snapshotAt);
     assert.strictEqual(src.includes('removeItem(LK_LAST_PULL)'), false);
     assert.strictEqual(src.includes('removeItem(LK_LAST_PULL_SRC)'), false);

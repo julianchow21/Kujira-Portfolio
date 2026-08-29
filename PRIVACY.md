@@ -1,6 +1,6 @@
 # Privacy notice
 
-Last updated: 27/05/2026.
+Last updated: 30/08/2026.
 
 ## What this app is, technically
 
@@ -16,10 +16,10 @@ There is no analytics script. No telemetry. No error reporting that leaves your 
 
 Two places, and only two places:
 
-1. **Your browser's local storage**, on the device you're using right now. This is sandboxed per origin — only this app, in this browser, can read it. Closing the browser tab does not delete it; clearing site data does.
+1. **Your browser's local storage**, on the device you're using right now. This is sandboxed per origin. Closing the browser tab does not delete it; clearing site data does. You can optionally encrypt the sensitive browser copy with a device passphrase in Settings. The passphrase is not stored, and an unlocked tab can still display its in-memory data.
 2. **The Google Sheet you created and own.** Only people you explicitly share that sheet with can access it. The Apps Script you deployed is the only path between the app and the sheet, and you own that script too.
 
-A copy of your Google Apps Script Web App URL is stored in your browser's local storage so the app knows where to sync. This URL is the credential — treat it like a password.
+A copy of your Google Apps Script Web App URL is stored in your browser so the app knows where to sync. This URL is the credential — treat it like a password. When optional device encryption is enabled, the URL is stored inside the encrypted vault.
 
 ## Where your data is sent
 

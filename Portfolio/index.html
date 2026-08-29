@@ -310,6 +310,7 @@ textarea.fi{resize:vertical;min-height:70px}
 /* MODAL */
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
 .overlay.open{display:flex}
+#vault-gate{z-index:300}
 .modal{background:var(--glass-strong);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);width:100%;max-width:560px;max-height:90vh;max-height:calc(90vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));max-height:90dvh;max-height:calc(90dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,0.5),inset 0 1px 0 var(--glass-hi);display:flex;flex-direction:column}
 .modal-head{padding:16px 20px;border-bottom:1px solid var(--glass-border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .modal-head h3{font-size:15px;font-weight:600}
@@ -984,6 +985,47 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       </div>
     </div>
 
+    <div class="card full">
+      <div class="card-head">
+        <h3>Device encryption</h3>
+        <span class="hint" id="vault-status">Off</span>
+      </div>
+      <div class="card-body">
+        <p class="hint" style="margin-bottom:12px">Optionally encrypt this browser's portfolio data, cached prices, Apps Script URL, and recovery snapshots. The passphrase is never stored. Your Google Sheet and downloaded JSON backups remain separate and are not encrypted by this setting.</p>
+        <div id="vault-off-panel">
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="lbl" for="vault-new-passphrase">New passphrase</label>
+              <input type="password" id="vault-new-passphrase" class="fi" minlength="12" maxlength="256" autocomplete="new-password" aria-describedby="vault-passphrase-hint">
+            </div>
+            <div class="form-group">
+              <label class="lbl" for="vault-confirm-passphrase">Confirm passphrase</label>
+              <input type="password" id="vault-confirm-passphrase" class="fi" minlength="12" maxlength="256" autocomplete="new-password" aria-describedby="vault-passphrase-hint">
+            </div>
+          </div>
+          <p class="hint" id="vault-passphrase-hint" style="margin-top:8px">Use 12 to 256 characters. If you forget it, the encrypted browser copy cannot be recovered. Keep a separate backup or retain your Google Sheet.</p>
+          <div style="margin-top:12px"><button class="btn btn-primary" data-click="enableVaultProtection">Enable encryption</button></div>
+        </div>
+        <div id="vault-on-panel" style="display:none">
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="lbl" for="vault-change-passphrase">New passphrase</label>
+              <input type="password" id="vault-change-passphrase" class="fi" minlength="12" maxlength="256" autocomplete="new-password">
+            </div>
+            <div class="form-group">
+              <label class="lbl" for="vault-change-confirm">Confirm new passphrase</label>
+              <input type="password" id="vault-change-confirm" class="fi" minlength="12" maxlength="256" autocomplete="new-password">
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button class="btn" data-click="changeVaultPassphrase">Change passphrase</button>
+            <button class="btn" data-click="lockVaultNow">Lock now</button>
+            <button class="btn btn-danger" data-click="disableVaultProtection">Turn off encryption</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-head"><h3>Backup &amp; restore</h3><span class="hint">Download a full copy, or load one back.</span></div>
       <div class="card-body">
@@ -1383,6 +1425,33 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   </div>
 </div>
 
+<!-- DEVICE ENCRYPTION UNLOCK GATE, shown before any protected value is read -->
+<div class="overlay" id="vault-gate" role="dialog" aria-modal="true" aria-labelledby="vault-gate-title" aria-describedby="vault-gate-copy">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head"><h3 id="vault-gate-title">Unlock Portfolio</h3></div>
+    <form id="vault-unlock-form">
+      <div class="modal-body">
+        <p class="hint" id="vault-gate-copy" style="margin-bottom:14px">This browser's portfolio data is encrypted. Enter the device passphrase to continue.</p>
+        <div class="form-group">
+          <label class="lbl" for="vault-unlock-passphrase">Passphrase</label>
+          <input type="password" id="vault-unlock-passphrase" class="fi" maxlength="256" autocomplete="current-password" required>
+        </div>
+        <p class="hint" id="vault-unlock-error" role="alert" style="min-height:20px;margin-top:8px"></p>
+        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+          <p class="hint" style="margin-bottom:8px">Forgotten passphrase? Reset downloads an encrypted recovery file before deleting this browser's copy. You can later restore the file if you remember the passphrase. Cloud data and downloaded backups are not deleted.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="btn btn-sm" id="vault-export-btn">Download encrypted vault</button>
+            <button type="button" class="btn btn-sm" id="vault-import-btn">Restore encrypted vault</button>
+            <input type="file" id="vault-import-input" accept="application/json,.json" aria-label="Restore encrypted vault file" style="display:none">
+            <button type="button" class="btn btn-danger btn-sm" id="vault-reset-btn">Reset this browser</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="submit" class="btn btn-primary" id="vault-unlock-btn">Unlock</button></div>
+    </form>
+  </div>
+</div>
+
 <!-- TOAST HOST -->
 <div id="toast-host" aria-live="polite" role="status"></div>
 
@@ -1391,8 +1460,9 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.61"></script>
-<script src="Worker/kjr-sortable.js?v=2.61"></script>
-<script src="Worker/app.js?v=2.61"></script>
+<script src="Worker/kjr-core.js?v=2.62"></script>
+<script src="Worker/kjr-sortable.js?v=2.62"></script>
+<script src="Worker/kjr-vault.js?v=2.62"></script>
+<script src="Worker/app.js?v=2.62"></script>
 </body>
 </html>

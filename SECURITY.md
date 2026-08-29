@@ -24,7 +24,7 @@ This is a static HTML/JS app distributed via GitHub Pages. It has no backend tha
 | Cross-app localStorage leak | Medium | **Partially mitigated**. Portfolio, Trading and Forex share one GitHub Pages origin, so a same-origin compromise could read sibling-app localStorage. Distinct storage keys prevent accidental collisions, but they are not a security boundary. |
 | Malformed payload corrupts the sheet | Low | **Mitigated**. Apps Script `doPost` rejects writes when unknown top-level keys or size caps would alter the submitted data. It caps each array at 5000 entries, each string at 5 KB and the wire body at 400,000 characters. |
 | Apps Script URL leaked via screenshot, tutorial, or screen-share | High | **Documented** — the URL field is a password input by default with a reveal-with-confirmation toggle. The URL is also redacted from the diagnostics panel. Ultimately the user must guard it. |
-| Lost or stolen device with unlocked browser | Medium | **Documented, not mitigated** — standard web-app risk. Future hardening could add a passphrase-derived encryption layer on localStorage. |
+| Lost or stolen device with browser access | Medium | **Optionally mitigated** — Settings can encrypt the local database, cached prices, Apps Script URL and recovery snapshots with a passphrase-derived AES-GCM vault. The passphrase and derived key are not stored. Protection applies while the vault is locked; an already-unlocked tab can still display its in-memory data. |
 | Compromised Apps Script via malicious paste | High | **User responsibility**. The user must paste only the official `Portfolio/Worker/apps-script.gs` from this repo. Verify the file against the reviewed release before deploying it. |
 
 ## Frontend hardening
@@ -37,6 +37,8 @@ This is a static HTML/JS app distributed via GitHub Pages. It has no backend tha
     - `kjrSafeNumber(s, opts)` — coerces to finite float with optional min/max
 - **Output escaping**: every place user data hits the DOM uses `kjrEscape()` for HTML context. Edit buttons use `data-edit-table` + `data-edit-id` attributes with a delegated handler that re-validates the id — no user data is ever interpolated into a JS context.
 - **URL redaction**: error messages and diagnostics scrub any `script.google.com/macros/s/.../exec` URL fragments.
+- **Optional device encryption**: `Worker/kjr-vault.js` derives a non-exportable AES-256-GCM key with PBKDF2-HMAC-SHA-256 and a unique 16-byte salt. Each encrypted save uses a new 12-byte IV. Enabling encryption writes, decrypts and compares the encrypted copy before removing plaintext. The passphrase never enters localStorage, the vault fails closed on startup, and pending encrypted writes trigger the browser's leave-page warning.
+- **Encryption boundary**: the optional vault protects sensitive browser storage only. It does not encrypt the user's Google Sheet, plaintext JSON exports, harmless appearance preferences, or data already visible in an unlocked tab. Losing the passphrase makes the encrypted browser copy unrecoverable, so the unlock gate supports exporting and restoring the encrypted envelope before a local reset.
 
 ## Backend (Apps Script) hardening
 

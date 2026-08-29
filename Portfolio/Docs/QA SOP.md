@@ -116,13 +116,22 @@ These are the checks that catch finance bugs. Add a new one whenever a feature a
 
 ## Storage / data-safety invariants
 
-- **Never persist `_priceCache` to localStorage.** It is transient and re-fetchable; it
-  blew the ~5MB quota and blocked saving real data (v0.9.5 fix). It lives in memory only.
+- **Never persist `_priceCache` inside the canonical `LK_DB` payload.** It is transient and
+  re-fetchable; including it in the main payload blew the ~5MB quota and blocked saving real
+  data (v0.9.5 fix). A capped last-known-price cache may live under `LK_PRICE_CACHE`, separately
+  from the canonical data, and is protected by the optional encrypted vault.
 - **`saveLocal()` must degrade, not fail.** On QuotaExceededError it sheds disposable data
   (changelog, then old snapshots) and retries so financial entries are never the casualty.
 - **One writer of truth per derived value.** If a value is derived from movements, EVERY
   consumer calls the same derive function. Never one view derives, another reads a raw field.
-- Write-then-reload round-trip: edits persist to localStorage and survive a reload.
+- Write-then-reload round-trip: edits persist and survive a reload with encryption both off and on.
+- Encrypted migration is write, decrypt, compare, then plaintext removal. A failed migration
+  leaves the plaintext source untouched and encryption off.
+- With encryption on, `LK_DB`, `LK_SYNC_URL`, `LK_PRICE_CACHE` and every `LK_DB_*` recovery key
+  exist only inside `LK_VAULT`. Wrong-passphrase boot never seeds an empty DB, and a pending
+  encrypted write activates the browser's leave-page warning.
+- Lock, unlock, passphrase change, disable, encrypted-envelope export/restore and typed reset
+  each get a browser pass before release. Downloaded JSON backups remain plaintext by design.
 - Preview/localhost must never sync to the production Sheet. `isLocalPreview()` guards the
   top of `pushToRemote`, the beforeunload flush, and the seed push path (pulls stay allowed).
 - **Saved charts and dashboard layout live in `DB.settings`** (`settings.savedCharts`,

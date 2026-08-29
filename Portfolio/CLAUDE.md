@@ -9,6 +9,7 @@ Personal net-worth tracker: SGX/US stocks, crypto, real estate, insurance, cash,
 - `Worker/app.js`, the app logic
 - `Worker/kjr-core.js`, pure, side-effect-free logic (no DOM, no localStorage, no fetch). Loaded as a `<script src>` global in the browser, also `require()`-able from `tests/` under node. **Keep pure.**
 - `Worker/kjr-sortable.js`, drag-sort helper
+- `Worker/kjr-vault.js`, optional passphrase-derived AES-GCM protection for sensitive browser storage
 - `Worker/theme-init.js`, blocking theme init (FOUC guard)
 - `Worker/apps-script.gs`, Google Apps Script backend deployed as a Web App. Handles `read`, `write`, `backup`, `restore`, `seed`, and `fundamentals` actions. Julian re-deploys manually at script.google.com after every `.gs` change.
 
@@ -38,6 +39,8 @@ Chart.js 4.4.1 (CDN, SRI-pinned). Backend is Google Apps Script + Google Sheets 
 
 **Sync flow:** `pullFromRemote()` reconciles the Google Sheet on boot, `pushToRemote()` writes after a debounced local save. Apps Script `doGet` reads, `doPost` writes. `seedDecision()` (in kjr-core) prevents accidental overwrites on first run.
 
+**Optional device encryption:** `kjr-vault.js` protects the local DB, price cache, Apps Script URL and `LK_DB_*` recovery snapshots. It keeps its derived key only in the unlocked tab, serialises writes through one authenticated encryption queue, and verifies ciphertext before deleting plaintext during migration. Boot must await the unlock gate before `loadLocal()`. Do not bypass `protectedStorage` for a sensitive key, and do not treat a locked vault as an empty first run.
+
 ## Key constants
 
 - `APP_VERSION` and `APP_DISPLAY_VERSION`, bump together on every deploy, the display value is shown in the topbar badge
@@ -66,3 +69,4 @@ Glass layer (both themes): `--glass`, `--glass-strong`, `--glass-border`, `--gla
 - A key in `PHASE_2_TABS` hides that tab's UI while leaving its markup in the DOM. The set is empty today
 - CSP `connect-src` restricts fetches to Apps Script only. New external fetches need a CSP update
 - Service worker pre-cache URLs must match the `index.html` script tags exactly, including `?v=` query strings, or offline `caches.match` misses
+- Sensitive browser keys use `protectedStorage`, not native `localStorage`. Web Crypto is asynchronous, so encrypted saves stay ordered through the vault queue and `beforeunload` warns while a save is pending

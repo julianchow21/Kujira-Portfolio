@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.61';
-const APP_DISPLAY_VERSION = 'v2.61 (29 Aug)';
+const APP_VERSION = 'v2.62';
+const APP_DISPLAY_VERSION = 'v2.62 (30 Aug)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -29,6 +29,27 @@ const LK_LOSSY_SYNC_BLOCK = 'kjr-pf-lossy-sync-block-v1'; // old backend acknowl
 const LK_THEME     = 'kjr-pf-theme-v1';
 const LK_PRIVACY   = 'kjr-pf-privacy-v1';   // blur all money figures (shoulder-surfing guard)
 const LK_PRICE_CACHE = 'kjr-pf-price-cache-v1'; // persisted separately so first paint uses last-known prices
+const LK_VAULT     = 'kjr-pf-encrypted-vault-v1';
+
+/* Optional encrypted-at-rest storage. The facade stays synchronous for the
+   existing app code by keeping an unlocked in-memory map, while kjr-vault.js
+   serialises authenticated AES-GCM snapshots through one ordered async queue.
+   Only sensitive values use the facade. Harmless preferences stay in native
+   localStorage so the lock screen can retain the chosen theme. */
+const _vaultManager = window.KjrVault ? window.KjrVault.createManager({
+  storage: window.localStorage,
+  crypto: window.crypto,
+  envelopeKey: LK_VAULT,
+  sensitiveKeys: [LK_DB, LK_SYNC_URL, LK_PRICE_CACHE],
+  sensitivePrefixes: ['LK_DB_'],
+  onError: err => {
+    console.error('[vault] encrypted save failed', err);
+    if (document.readyState !== 'loading') {
+      showToast('Encrypted local save failed. Keep this tab open and export a backup before retrying.', 'error');
+    }
+  }
+}) : null;
+const protectedStorage = _vaultManager ? _vaultManager.storage : window.localStorage;
 
 /* Sync constants. PAYLOAD_HARD_CAP is a soft cap now the backend chunks large
    payloads across sheet cells (Worker/apps-script.gs writePayloadRaw_), it no
@@ -1155,7 +1176,7 @@ function mergeConcurrentLocalState(base, local, incoming, preferLocal){
 }
 function _readStoredLocalPayload(){
   try {
-    const raw = localStorage.getItem(LK_DB);
+    const raw = protectedStorage.getItem(LK_DB);
     return raw ? JSON.parse(raw) : null;
   } catch (_) { return null; }
 }
@@ -1163,7 +1184,7 @@ function _stashLocalConflicts(conflicts){
   if (!conflicts || !conflicts.length) return null;
   const key = 'LK_DB_CONFLICT_' + Date.now() + '_' + (++_localConflictSeq);
   try {
-    localStorage.setItem(key, JSON.stringify({ createdAt: new Date().toISOString(), conflicts }));
+    protectedStorage.setItem(key, JSON.stringify({ createdAt: new Date().toISOString(), conflicts }));
     showToast('Another tab changed the same entry. The later change won and the earlier value was stashed for recovery.', 'error');
     return key;
   } catch (err) {
@@ -1190,12 +1211,12 @@ function _writeLocalPayload(payload, conflicts, opts){
   for (let i = 0; i < attempts.length; i++){
     try {
       const serialised = attempts[i]();
-      localStorage.setItem(LK_DB, serialised);
+      protectedStorage.setItem(LK_DB, serialised);
       _localBase = JSON.parse(serialised);
       _stashLocalConflicts(conflicts);
       if (i > 0) showToast('Saved. Trimmed old history to fit local storage.', 'success');
       // Persist price cache separately so the first paint on reload uses last-known prices
-      try { localStorage.setItem(LK_PRICE_CACHE, JSON.stringify(DB._priceCache || {})); } catch (_) {}
+      try { protectedStorage.setItem(LK_PRICE_CACHE, JSON.stringify(DB._priceCache || {})); } catch (_) {}
       return true;
     } catch (e) {
       if (e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || '')) && i < attempts.length - 1) {
@@ -1235,14 +1256,14 @@ function saveLocal(opts){
 function loadLocal(){
   let raw;
   try {
-    raw = localStorage.getItem(LK_DB);
+    raw = protectedStorage.getItem(LK_DB);
     if (!raw) return false;
     const obj = JSON.parse(raw);
     DB = mergeDefaults(obj);
     _localBase = _cloneLocalValue(localPersistPayload());
     // Restore last-known prices so first paint shows market value, not cost basis
     try {
-      const pc = localStorage.getItem(LK_PRICE_CACHE);
+      const pc = protectedStorage.getItem(LK_PRICE_CACHE);
       if (pc) DB._priceCache = Object.assign({}, JSON.parse(pc), DB._priceCache);
     } catch (_) {}
     return true;
@@ -1255,7 +1276,7 @@ function loadLocal(){
     if (raw){
       try {
         const stashKey = 'LK_DB_CORRUPT_' + Date.now();
-        localStorage.setItem(stashKey, raw);
+        protectedStorage.setItem(stashKey, raw);
         console.warn('[loadLocal] corrupt DB stashed at', stashKey);
       } catch (stashErr) {
         console.error('[loadLocal] failed to stash corrupt DB', stashErr);
@@ -1447,7 +1468,7 @@ function saveData(){
    SYNC — Apps Script JSON blob, optimistic concurrency
    Pattern lifted from Send Ops, schema identifier swapped.
    ═══════════════════════════════════════════════════════════════════════ */
-function getSyncUrl(){ return (localStorage.getItem(LK_SYNC_URL) || '').trim(); }
+function getSyncUrl(){ return (protectedStorage.getItem(LK_SYNC_URL) || '').trim(); }
 
 /* AGENTS.md data-safety rule 1: never let a preview origin push to the cloud.
    Origin isolation (localhost never shares a sync URL with the live site)
@@ -1459,8 +1480,8 @@ function isLocalPreview(){
   return location.protocol === 'file:' || h === 'localhost' || h === '127.0.0.1';
 }
 function setSyncUrl(u){
-  if (u) localStorage.setItem(LK_SYNC_URL, u.trim());
-  else   localStorage.removeItem(LK_SYNC_URL);
+  if (u) protectedStorage.setItem(LK_SYNC_URL, u.trim());
+  else   protectedStorage.removeItem(LK_SYNC_URL);
   updateSyncStatusPill();
 }
 
@@ -1907,7 +1928,7 @@ async function _handleRemovedLocalStorage(){
   let recoveryKey = null;
   try {
     recoveryKey = 'LK_DB_PRE_REMOTE_RESET_' + Date.now();
-    localStorage.setItem(recoveryKey, JSON.stringify(localPersistPayload()));
+    protectedStorage.setItem(recoveryKey, JSON.stringify(localPersistPayload()));
   } catch (snapshotErr) {
     console.error('[storage reset] support-recovery snapshot failed', snapshotErr);
     try {
@@ -1948,13 +1969,41 @@ async function _handleRemovedLocalStorage(){
    blob. The originating tab then receives that reconciled value, finds it
    identical and does not echo it, which prevents ping-pong loops. */
 window.addEventListener('storage', (e) => {
+  if (e.key === LK_VAULT && _vaultManager) {
+    // Enabling, disabling, or changing the passphrase in another tab changes
+    // the storage mode for this whole origin. A locked tab cannot safely
+    // interpret that transition, so reload into the unlock gate. An unlocked
+    // tab can decrypt a same-passphrase update and run the existing three-way
+    // DB merge before persisting the reconciled encrypted snapshot.
+    if (!e.newValue || !_vaultManager.isUnlocked()) {
+      location.reload();
+      return;
+    }
+    _vaultManager.applyExternalEnvelope(e.newValue).then(entries => {
+      const raw = entries[LK_DB] || null;
+      if (localStorage.getItem(LK_RESET_SYNC_BLOCK) || !raw) {
+        return _handleRemovedLocalStorage();
+      }
+      _reconcileIncomingLocalStorage(raw);
+      renderAll();
+      return null;
+    }).catch(err => {
+      console.error('[vault] cross-tab update failed', err);
+      showToast(err && err.code === 'reunlock-required'
+        ? 'The encryption passphrase changed in another tab. Reloading so you can unlock again.'
+        : 'Could not apply an encrypted update from another tab. Reloading to protect your data.', 'error');
+      setTimeout(() => location.reload(), 500);
+    });
+    return;
+  }
   if (e.key !== LK_DB) return;
+  if (_vaultManager && _vaultManager.isEnabled()) return;
   if (_conflictResolvingNow) return;
   if (localStorage.getItem(LK_RESET_SYNC_BLOCK)) {
     // A stale tab can race the reset event and write its old blob after the
     // primary key was removed. Delete that resurrection immediately. The
     // remove event then tells the stale writer to follow the reset too.
-    if (e.newValue) localStorage.removeItem(LK_DB);
+    if (e.newValue) protectedStorage.removeItem(LK_DB);
     _handleRemovedLocalStorage().catch(err => console.error('[storage reset] failed', err));
     return;
   }
@@ -2267,6 +2316,206 @@ function maybeShowWizardOnBoot(){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   OPTIONAL DEVICE ENCRYPTION
+   AES-GCM protects the local database, price cache, Apps Script URL, and
+   technical recovery snapshots. PBKDF2 derives a non-exportable key from a
+   passphrase that is never stored. The Google Sheet remains independently
+   readable through the user's Google account, so this is device-at-rest
+   protection rather than end-to-end encryption of the cloud copy.
+   ═══════════════════════════════════════════════════════════════════════ */
+function _vaultSetMessage(id, message, isError){
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = message || '';
+  el.style.color = isError ? 'var(--red)' : '';
+}
+
+function _downloadVaultEnvelope(){
+  try {
+    const raw = _vaultManager.exportEnvelope();
+    const blob = new Blob([raw], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'kujira-portfolio-encrypted-vault-' + _isoDate(new Date()) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  } catch (err) {
+    _vaultSetMessage('vault-unlock-error', err && err.message ? err.message : String(err), true);
+    return false;
+  }
+}
+
+function _importVaultEnvelope(input){
+  const file = input && input.files && input.files[0];
+  if (!file || !_vaultManager) return;
+  const reader = new FileReader();
+  reader.onerror = () => {
+    _vaultSetMessage('vault-unlock-error', 'Could not read that encrypted vault file.', true);
+    input.value = '';
+  };
+  reader.onload = () => {
+    try {
+      const raw = String(reader.result || '');
+      if (!confirm('Replace this browser\'s encrypted vault with the selected file? The current encrypted copy will be overwritten.')) {
+        input.value = '';
+        return;
+      }
+      if (!_downloadVaultEnvelope()) {
+        _vaultSetMessage('vault-unlock-error', 'Restore cancelled because the current encrypted vault could not be downloaded first.', true);
+        input.value = '';
+        return;
+      }
+      _vaultManager.replaceEnvelope(raw);
+      location.reload();
+    } catch (err) {
+      _vaultSetMessage('vault-unlock-error', err && err.message ? err.message : 'That is not a valid encrypted vault file.', true);
+      input.value = '';
+    }
+  };
+  reader.readAsText(file);
+}
+
+function _resetEncryptedBrowserData(){
+  if (!_vaultManager) return;
+  const answer = prompt(
+    'This deletes the encrypted copy in this browser after downloading an encrypted recovery file. Your Google Sheet and other downloaded backups are not deleted.\n\n' +
+    'Type RESET to continue.'
+  );
+  if (answer !== 'RESET') return;
+  if (!_downloadVaultEnvelope()) {
+    _vaultSetMessage('vault-unlock-error', 'Reset cancelled because the encrypted recovery file could not be downloaded.', true);
+    return;
+  }
+  _vaultManager.resetEncryptedData();
+  location.reload();
+}
+
+function showVaultUnlockGate(){
+  const gate = document.getElementById('vault-gate');
+  const form = document.getElementById('vault-unlock-form');
+  const pass = document.getElementById('vault-unlock-passphrase');
+  const unlockBtn = document.getElementById('vault-unlock-btn');
+  const exportBtn = document.getElementById('vault-export-btn');
+  const importBtn = document.getElementById('vault-import-btn');
+  const importInput = document.getElementById('vault-import-input');
+  const resetBtn = document.getElementById('vault-reset-btn');
+  if (!gate || !form || !pass || !unlockBtn) {
+    return Promise.reject(new Error('The encryption unlock screen is missing.'));
+  }
+  gate.classList.add('open');
+  if (!_vaultManager) {
+    _vaultSetMessage('vault-unlock-error', 'The encryption module did not load. Protected data was left untouched. Reload while online.', true);
+    unlockBtn.disabled = true;
+    return new Promise(() => {});
+  }
+  if (exportBtn) exportBtn.onclick = () => _downloadVaultEnvelope();
+  if (importBtn && importInput) importBtn.onclick = () => importInput.click();
+  if (importInput) importInput.onchange = () => _importVaultEnvelope(importInput);
+  if (resetBtn) resetBtn.onclick = () => _resetEncryptedBrowserData();
+  return new Promise(resolve => {
+    form.onsubmit = async event => {
+      event.preventDefault();
+      unlockBtn.disabled = true;
+      _vaultSetMessage('vault-unlock-error', 'Unlocking…', false);
+      try {
+        await _vaultManager.unlock(pass.value);
+        pass.value = '';
+        gate.classList.remove('open');
+        _vaultSetMessage('vault-unlock-error', '', false);
+        resolve(true);
+      } catch (err) {
+        pass.value = '';
+        _vaultSetMessage('vault-unlock-error', err && err.message ? err.message : 'Could not unlock protected data.', true);
+        pass.focus();
+      } finally {
+        unlockBtn.disabled = false;
+      }
+    };
+    setTimeout(() => pass.focus(), 0);
+  });
+}
+
+function updateVaultSettingsUI(){
+  const status = document.getElementById('vault-status');
+  const off = document.getElementById('vault-off-panel');
+  const on = document.getElementById('vault-on-panel');
+  const enabled = !!(_vaultManager && _vaultManager.isEnabled());
+  const unlocked = !!(_vaultManager && _vaultManager.isUnlocked());
+  if (status) {
+    status.textContent = enabled ? (unlocked ? 'On · unlocked in this tab' : 'On · locked') : 'Off';
+    status.style.color = enabled ? 'var(--green)' : '';
+  }
+  if (off) off.style.display = enabled ? 'none' : '';
+  if (on) on.style.display = enabled ? '' : 'none';
+}
+
+async function enableVaultProtection(){
+  if (!_vaultManager) { showToast('Web Crypto is unavailable, so device encryption cannot be enabled.', 'error'); return; }
+  const pass = document.getElementById('vault-new-passphrase');
+  const confirmPass = document.getElementById('vault-confirm-passphrase');
+  const value = pass ? pass.value : '';
+  if (value !== (confirmPass ? confirmPass.value : '')) {
+    showToast('The passphrases do not match.', 'error');
+    return;
+  }
+  try {
+    await _vaultManager.enable(value);
+    if (pass) pass.value = '';
+    if (confirmPass) confirmPass.value = '';
+    updateVaultSettingsUI();
+    showToast('Device encryption enabled. Plaintext browser copies were removed after verification.', 'success');
+  } catch (err) {
+    showToast('Encryption was not enabled: ' + (err && err.message ? err.message : err), 'error');
+  }
+}
+
+async function changeVaultPassphrase(){
+  if (!_vaultManager || !_vaultManager.isUnlocked()) return;
+  const pass = document.getElementById('vault-change-passphrase');
+  const confirmPass = document.getElementById('vault-change-confirm');
+  const value = pass ? pass.value : '';
+  if (value !== (confirmPass ? confirmPass.value : '')) {
+    showToast('The new passphrases do not match.', 'error');
+    return;
+  }
+  try {
+    await _vaultManager.changePassphrase(value);
+    if (pass) pass.value = '';
+    if (confirmPass) confirmPass.value = '';
+    showToast('Encryption passphrase changed.', 'success');
+  } catch (err) {
+    showToast('Passphrase was not changed: ' + (err && err.message ? err.message : err), 'error');
+  }
+}
+
+async function disableVaultProtection(){
+  if (!_vaultManager || !_vaultManager.isUnlocked()) return;
+  if (!confirm('Turn off device encryption? Protected values will be written back to browser storage as plaintext.')) return;
+  try {
+    await _vaultManager.disable();
+    updateVaultSettingsUI();
+    showToast('Device encryption disabled. Browser data is now stored as plaintext.', 'success');
+  } catch (err) {
+    showToast('Encryption stayed on: ' + (err && err.message ? err.message : err), 'error');
+  }
+}
+
+async function lockVaultNow(){
+  if (!_vaultManager || !_vaultManager.isUnlocked()) return;
+  try {
+    await _vaultManager.flush();
+    _vaultManager.lock();
+    location.reload();
+  } catch (err) {
+    showToast('Could not lock because the latest encrypted save failed. Export a backup before closing this tab.', 'error');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    SETTINGS FORM
    ═══════════════════════════════════════════════════════════════════════ */
 function loadSettingsForm(){
@@ -2351,6 +2600,7 @@ function loadSettingsForm(){
   renderSalaryRulesEditor();
   // Recently deleted (trash)
   renderTrash();
+  updateVaultSettingsUI();
 }
 
 /* Live sum hint for the target allocation inputs. */
@@ -2646,7 +2896,7 @@ async function resetLocalConfirm(){
   let snapshotKey;
   try {
     snapshotKey = 'LK_DB_PRE_RESET_' + Date.now();
-    localStorage.setItem(snapshotKey, JSON.stringify(localPersistPayload()));
+    protectedStorage.setItem(snapshotKey, JSON.stringify(localPersistPayload()));
   } catch (snapshotErr) {
     console.error('[resetLocalConfirm] pre-reset snapshot failed', snapshotErr);
     localStorage.removeItem(LK_RESET_SYNC_BLOCK);
@@ -2654,7 +2904,7 @@ async function resetLocalConfirm(){
     saveData();
     return;
   }
-  localStorage.removeItem(LK_DB);
+  protectedStorage.removeItem(LK_DB);
   localStorage.removeItem(LK_SYNC_TS);
   DB = freshDB();
   _localBase = _cloneLocalValue(localPersistPayload());
@@ -2744,7 +2994,7 @@ function importBackupFromFile(input){
     let snapshotKey = null;
     try {
       snapshotKey = 'LK_DB_PRE_IMPORT_' + Date.now();
-      localStorage.setItem(snapshotKey, JSON.stringify(localPersistPayload()));
+      protectedStorage.setItem(snapshotKey, JSON.stringify(localPersistPayload()));
     } catch (snapErr) {
       console.error('[importBackupFromFile] pre-import snapshot failed', snapErr);
       if (!confirm('Could not save a safety snapshot of your current data (storage may be full). Import anyway?')) {
@@ -9162,6 +9412,10 @@ function installEventDelegation(){
     dismissConflict:     () => { const m = document.getElementById('conflict-modal'); if (m) m.remove(); setSyncStatus('failed', 'Conflict unresolved'); },
     setStrictConflicts:  (el) => setStrictConflicts(el.checked),
     setAutoRefreshEnabled: (el) => setAutoRefreshEnabled(el.checked),
+    enableVaultProtection: () => enableVaultProtection(),
+    changeVaultPassphrase: () => changeVaultPassphrase(),
+    disableVaultProtection: () => disableVaultProtection(),
+    lockVaultNow:           () => lockVaultNow(),
     // insurance riders (register expand/collapse + add)
     toggleRiderRow:      (el) => { const id = A(el)[0]; if (!kjrSafeId(id)) { showToast('Invalid entry id', 'error'); return; } toggleRiderRow(id); },
     openRiderForPolicy:  (el) => openRiderForPolicy(A(el)[0]),
@@ -9290,6 +9544,11 @@ async function boot(){
   renderNav();
   installEventDelegation();
   installAutoRefreshVisibility();
+  // Never interpret an encrypted profile as an empty first run. Boot stays
+  // behind the modal until the user supplies the passphrase. If the vault
+  // module failed to load, showVaultUnlockGate fails closed and leaves the
+  // encrypted bytes untouched instead of seeding a new blank database.
+  if (window.localStorage.getItem(LK_VAULT)) await showVaultUnlockGate();
   // ── 1. First paint from cached local data ─────────────────────────────────
   // Render immediately so the app is interactive fast. The heavy salary/snapshot
   // engines and the network pull are deferred below — neither blocks first paint.
@@ -9346,6 +9605,17 @@ async function boot(){
     maybeShowWizardOnBoot();
   }
 }
+
+window.addEventListener('beforeunload', event => {
+  if (!_vaultManager || !_vaultManager.hasPendingWrite()) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden' || !_vaultManager || !_vaultManager.isUnlocked()) return;
+  _vaultManager.flush().catch(() => {});
+});
 
 /* Run after first paint when the main thread is idle; falls back to a macrotask
    where requestIdleCallback is unavailable (e.g. older Safari). */
