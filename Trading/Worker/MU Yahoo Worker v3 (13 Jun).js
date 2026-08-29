@@ -53,6 +53,20 @@ async function checkRateLimit(env, key) {
     return true; // fail-open on KV error, don't block legitimate traffic on an infra hiccup
   }
 }
+async function safeSecretEqual(supplied, expected) {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return false;
+  const enc = new TextEncoder();
+  const [suppliedHash, expectedHash] = await Promise.all([
+    subtle.digest("SHA-256", enc.encode(String(supplied))),
+    subtle.digest("SHA-256", enc.encode(String(expected))),
+  ]);
+  const a = new Uint8Array(suppliedHash);
+  const b = new Uint8Array(expectedHash);
+  let mismatch = a.length ^ b.length;
+  for (let i = 0; i < a.length; i++) mismatch |= a[i] ^ b[i];
+  return mismatch === 0;
+}
 function jsonResp(data, status = 200, origin = null) {
   return new Response(JSON.stringify(data), {
     status,
@@ -61,6 +75,14 @@ function jsonResp(data, status = 200, origin = null) {
 }
 function err(status, description, origin = null) {
   return jsonResp({ chart: { result: null, error: { description } } }, status, origin);
+}
+async function requireAlertAuth(request, env, origin, ip, routeKey) {
+  if (!env.ALERTS_SECRET) return err(503, "ALERTS_SECRET not configured", origin);
+  if (!(await checkRateLimit(env, ip + ":" + routeKey))) return err(429, "rate limited", origin);
+  const supplied = request.headers.get("X-Alerts-Secret") || "";
+  let authorised = false;
+  try { authorised = await safeSecretEqual(supplied, env.ALERTS_SECRET); } catch (e) {}
+  return authorised ? null : err(401, "unauthorized", origin);
 }
 
 // ---- Crumb acquisition ----
@@ -253,11 +275,16 @@ function alertDesc(a) {
 }
 
 async function sendTelegram(token, chatId, text) {
-  await fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
+  const response = await fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
   });
+  let body = null;
+  try { body = JSON.parse(await response.text()); } catch (e) {}
+  if (!response.ok) throw new Error("Telegram delivery failed (HTTP " + response.status + ")");
+  if (!body || body.ok !== true) throw new Error("Telegram delivery was not accepted");
+  return true;
 }
 
 function isMarketWindow() {
@@ -329,6 +356,8 @@ export default {
 
     // GET /test-telegram
     if (request.method === "GET" && url.pathname === "/test-telegram") {
+      const authError = await requireAlertAuth(request, env, origin, ip, "telegram-test");
+      if (authError) return authError;
       if (!env.TELEGRAM_TOKEN) return jsonResp({ ok: false, error: "TELEGRAM_TOKEN secret not set" }, 503, origin);
       if (!env.MU_ALERTS)      return jsonResp({ ok: false, error: "KV not configured" }, 503, origin);
       const data = await env.MU_ALERTS.get("alerts:MU", { type: "json" });
@@ -336,17 +365,15 @@ export default {
       if (!chatId) return jsonResp({ ok: false, error: "No chatId stored, sync alerts from the dashboard first" }, 400, origin);
       try {
         await sendTelegram(env.TELEGRAM_TOKEN, chatId, "MU Dashboard\nTelegram connection test.");
-        return jsonResp({ ok: true, chatId }, 200, origin);
-      } catch (e) { return jsonResp({ ok: false, error: String(e) }, 502, origin); }
+        return jsonResp({ ok: true }, 200, origin);
+      } catch (e) { return jsonResp({ ok: false, error: "Telegram test failed" }, 502, origin); }
     }
 
     // POST /alerts, requires shared-secret auth (X-Alerts-Secret header) so only Julian's
     // own app instance can register/overwrite alert config and Telegram chatId.
     if (request.method === "POST" && url.pathname === "/alerts") {
-      if (!env.ALERTS_SECRET) return err(503, "ALERTS_SECRET not configured", origin);
-      const supplied = request.headers.get("X-Alerts-Secret") || "";
-      if (supplied !== env.ALERTS_SECRET) return err(401, "unauthorized", origin);
-      if (!(await checkRateLimit(env, ip + ":alerts-post"))) return err(429, "rate limited", origin);
+      const authError = await requireAlertAuth(request, env, origin, ip, "alerts-post");
+      if (authError) return authError;
 
       let body;
       try { body = await request.json(); } catch (e) { return err(400, "bad JSON", origin); }
@@ -372,10 +399,19 @@ export default {
 
     // GET /alerts?symbol=X
     if (request.method === "GET" && url.pathname === "/alerts") {
+      const authError = await requireAlertAuth(request, env, origin, ip, "alerts-get");
+      if (authError) return authError;
       if (!env.MU_ALERTS) return err(503, "KV binding MU_ALERTS not configured", origin);
       const sym = (url.searchParams.get("symbol") || "MU").toUpperCase();
+      if (!SYMBOL_RE.test(sym)) return err(400, "bad symbol", origin);
       const data = await env.MU_ALERTS.get("alerts:" + sym, { type: "json" });
-      return jsonResp(data || { alerts: [] }, 200, origin);
+      if (!data) return jsonResp({ alerts: [] }, 200, origin);
+      return jsonResp({
+        symbol: data.symbol,
+        alerts: Array.isArray(data.alerts) ? data.alerts : [],
+        updatedAt: data.updatedAt ?? null,
+        lastEvalAt: data.lastEvalAt ?? null,
+      }, 200, origin);
     }
 
     // GET /, Yahoo chart proxy
@@ -431,9 +467,11 @@ export default {
       if (!snap || snap.price == null) continue;
 
       let stateChanged = false;
-      const messages = [];
+      const nextAlerts = data.alerts.map(a => ({ ...a }));
+      const deliveries = [];
 
-      for (const a of data.alerts) {
+      for (let i = 0; i < nextAlerts.length; i++) {
+        const a = nextAlerts[i];
         if (!a.enabled) continue;
         const cond = evalCond(a, snap);
         if (cond === null) continue;
@@ -446,33 +484,44 @@ export default {
           if (cond && !prev) {
             const inCd = a.cooldownMs && a.lastFiredAt && (now - a.lastFiredAt < a.cooldownMs);
             if (!inCd) {
-              messages.push(alertDesc(a) + " @ $" + snap.price.toFixed(2));
-              a.lastFiredAt = now;
-              if (a.oneShot) a.enabled = false;
+              deliveries.push({ index: i, cond, message: alertDesc(a) + " @ $" + snap.price.toFixed(2) });
+              continue;
             }
-            stateChanged = true;
           }
           if (a.prevCond !== cond) { a.prevCond = cond; stateChanged = true; }
         } else {
           if (cond && a.armed) {
             const inCd = a.cooldownMs && a.lastFiredAt && (now - a.lastFiredAt < a.cooldownMs);
             if (!inCd) {
-              messages.push(alertDesc(a) + " @ $" + snap.price.toFixed(2));
-              a.lastFiredAt = now;
-              if (a.oneShot) a.enabled = false;
+              deliveries.push({ index: i, cond, message: alertDesc(a) + " @ $" + snap.price.toFixed(2) });
+            } else {
+              a.armed = false;
+              stateChanged = true;
             }
-            a.armed = false; stateChanged = true;
           } else if (!cond && !a.armed) { a.armed = true; stateChanged = true; }
         }
       }
 
-      if (messages.length) {
+      if (deliveries.length) {
         const text = "<b>" + data.symbol + " Alert</b>\n"
-          + messages.map(m => "• " + m).join("\n");
-        try { await sendTelegram(token, data.chatId, text); } catch (e) {}
+          + deliveries.map(d => "• " + d.message).join("\n");
+        try {
+          await sendTelegram(token, data.chatId, text);
+          for (const delivery of deliveries) {
+            const a = nextAlerts[delivery.index];
+            a.lastFiredAt = now;
+            if (a.oneShot) a.enabled = false;
+            if (CROSS_TYPES.has(a.type)) a.prevCond = delivery.cond;
+            else a.armed = false;
+          }
+          stateChanged = true;
+        } catch (e) {
+          console.error("scheduled: Telegram delivery failed for " + data.symbol);
+        }
       }
 
       if (stateChanged) {
+        data.alerts = nextAlerts;
         data.lastEvalAt = now;
         await env.MU_ALERTS.put(key.name, JSON.stringify(data));
       }

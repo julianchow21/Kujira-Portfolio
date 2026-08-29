@@ -182,10 +182,13 @@ th.sortable.desc::after{content:'\25BC'}
 @keyframes pop{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
 @media(max-width:640px){
+  .topbar{gap:6px;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right))}
   .main{padding:12px}
   .logo-name{display:none}
   .ver{display:none}
-  .tb-tab{padding:5px 9px}
+  .tb-tabs{min-width:0}
+  .tb-tab{padding:5px 7px}
+  .sync{min-width:0}
   .search{min-width:110px}
   .frow{grid-template-columns:1fr}
   .cmp{grid-template-columns:1.2fr 1fr 1fr 1fr;font-size:12px}
@@ -210,7 +213,7 @@ th.sortable.desc::after{content:'\25BC'}
   <div class="spacer"></div>
   <span class="sync" id="sync" aria-live="polite" role="status"></span>
   <span class="ver" id="ver"></span>
-  <button class="icon-btn" id="theme-btn" title="Toggle theme" onclick="toggleTheme()">◐</button>
+  <button class="icon-btn" id="theme-btn" title="Toggle theme" aria-label="Toggle colour theme" onclick="toggleTheme()">◐</button>
 </header>
 
 <main class="main">
@@ -233,7 +236,7 @@ th.sortable.desc::after{content:'\25BC'}
     </div>
     <div class="right">
       <button class="btn" onclick="openTagManager()">Tags</button>
-      <button class="icon-btn" title="Settings" onclick="openSettings()">⚙</button>
+      <button class="icon-btn" title="Settings" aria-label="Open settings" onclick="openSettings()">⚙</button>
       <button class="btn btn-primary" onclick="openTradeModal()">+ Log trade</button>
     </div>
   </div>
@@ -314,7 +317,7 @@ th.sortable.desc::after{content:'\25BC'}
 /* ============================================================================
    APP CONFIG
    ========================================================================== */
-const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.12 (16 Aug)' };
+const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.13 (29 Aug)' };
 const CCY = '$';
 const TABLES = ['trades'];
 const PAGE_SIZE = 25;
@@ -359,7 +362,9 @@ let _page = 1;
 let _sim = { excl:new Set(), only:new Set(), side:'all' };
 let _simMis = [], _simSet = [], _tagList = [];
 
-const VKEY = APP.storageKey + '_v', DIRTY_KEY = APP.storageKey + '_dirty', PDEL_KEY = APP.storageKey + '_pendingdel';
+const DIRTY_KEY = APP.storageKey + '_dirty', PDEL_KEY = APP.storageKey + '_pendingdel';
+const QUARANTINE_KEY = APP.storageKey + '_quarantine', CONFLICT_KEY = APP.storageKey + '_syncconflicts';
+const STORED_ID_MAX = 64, SB_PAGE_SIZE = 1000;
 const uid = KjrFmt.uid, escapeHtml = KjrFmt.esc;
 
 /* ============================================================================
@@ -369,9 +374,36 @@ function isLocalhostPreview(){
   try{ if (location.protocol==='file:') return true; const h=location.hostname||''; return h==='localhost'||h==='127.0.0.1'||h==='0.0.0.0'||h==='::1'||/\.local$/.test(h); }catch(e){ return false; }
 }
 const _dirty = {}; TABLES.forEach(t => _dirty[t] = new Set());
-function _loadDirty(){ try{ const o=JSON.parse(localStorage.getItem(DIRTY_KEY)||'{}'); TABLES.forEach(t=>_dirty[t]=new Set(o[t]||[])); }catch(e){} }
+const _rowRev = {}; TABLES.forEach(t => _rowRev[t] = new Map());
+function isValidStoredId(id){ return typeof id==='string' && id.length>=1 && id.length<=STORED_ID_MAX && /^[A-Za-z0-9_-]+$/.test(id); }
+function splitValidRows(rows){
+  const valid=[],rejected=[];
+  (Array.isArray(rows)?rows:[]).forEach(row=>{ if(row&&typeof row==='object'&&isValidStoredId(row.id)) valid.push(row); else rejected.push(row); });
+  return {valid,rejected};
+}
+function quarantineRows(source,table,rows){
+  if(!rows.length) return;
+  try{
+    const old=JSON.parse(localStorage.getItem(QUARANTINE_KEY)||'[]');
+    const entries=Array.isArray(old)?old:[];
+    entries.push({source,table,reason:'Invalid stored ID',rows});
+    localStorage.setItem(QUARANTINE_KEY,JSON.stringify(entries));
+  }catch(e){ console.error('Data validation: could not quarantine invalid '+table+' row(s).'); }
+}
+function assertStoredId(id){ if(!isValidStoredId(id)) throw new Error('Invalid stored trade ID'); return id; }
+function assertSyncTable(table){ if(!TABLES.includes(table)) throw new Error('Invalid sync table'); return table; }
+function _loadDirty(){
+  try{
+    const o=JSON.parse(localStorage.getItem(DIRTY_KEY)||'{}');
+    TABLES.forEach(t=>{ const ids=(Array.isArray(o[t])?o[t]:[]).filter(isValidStoredId); _dirty[t]=new Set(ids); ids.forEach(id=>_rowRev[t].set(id,0)); });
+  }catch(e){}
+}
 function _persistDirty(){ try{ const o={}; TABLES.forEach(t=>o[t]=[..._dirty[t]]); localStorage.setItem(DIRTY_KEY,JSON.stringify(o)); }catch(e){} }
-function markDirty(table,id){ if (_dirty[table]){ _dirty[table].add(id); _persistDirty(); } }
+function rowRevision(table,id){ return (_rowRev[table]&&_rowRev[table].get(id))||0; }
+function markDirty(table,id){
+  assertSyncTable(table); assertStoredId(id);
+  _dirty[table].add(id); _rowRev[table].set(id,rowRevision(table,id)+1); _persistDirty();
+}
 
 let _syncState='idle';
 function setSync(s,msg){
@@ -382,93 +414,138 @@ function setSync(s,msg){
   else if(s==='preview'){ el.textContent='● Preview'; el.style.color='var(--amber)'; }
   else el.textContent='';
 }
-async function sbBatchUpsert(table,items){
-  if(isLocalhostPreview()) return; if(!items.length) return;
+async function sbSyncRow(table,item,isDelete){
+  assertSyncTable(table); assertStoredId(item.id);
   const u=currentUser();
-  // updated_at is deliberately NOT sent: the server stamps now() (and the
-  // schema trigger in schema.sql advances it on every update). We echo the
-  // server's value back, so reconciliation compares server clocks, never the
-  // client's (data safety rule 3: a device with a fast clock must not suppress
-  // newer cloud rows).
-  const rows=items.map(it=>{ const {id,_updatedAt,...data}=it; const row={id,data}; if(u&&u.id) row.user_id=u.id; return row; });
-  const r=await fetch(SB_URL+'/rest/v1/'+table+'?on_conflict=id',{method:'POST',headers:{...SB_HDR,'Prefer':'resolution=merge-duplicates,return=representation'},body:JSON.stringify(rows)});
-  if(!r.ok) throw new Error('Upsert failed ('+r.status+'): '+await r.text());
-  try{
-    const echoed=await r.json();
-    if(Array.isArray(echoed)&&echoed.length){
-      let serverTs=0;
-      for(const er of echoed){
-        const local=DB[table]&&DB[table].find(x=>x.id===er.id);
-        if(local&&er.updated_at){ local._updatedAt=er.updated_at; const m=+new Date(er.updated_at); if(m>serverTs) serverTs=m; }
-      }
-      if(serverTs) bumpVersion(new Date(serverTs).toISOString());
-    }
-  }catch(e){ /* representation echo is best-effort */ }
+  if(!u||!u.id) throw new Error('Cloud sync requires an authenticated user');
+  const {id,_updatedAt,_deletedAt,...data}=item;
+  const r=await fetch(SB_URL+'/rest/v1/rpc/sync_trade',{method:'POST',headers:{...SB_HDR,'Prefer':'return=representation'},body:JSON.stringify({
+    p_id:id, p_data:isDelete?null:data, p_expected_updated_at:_updatedAt||null, p_delete:!!isDelete
+  })});
+  if(!r.ok) throw new Error('Sync failed ('+r.status+'): '+await r.text());
+  const payload=await r.json(), out=Array.isArray(payload)?payload[0]:payload;
+  if(!out||typeof out.applied!=='boolean') throw new Error('Sync returned an invalid response');
+  if(out.row_id&&!isValidStoredId(out.row_id)) throw new Error('Sync returned an invalid stored trade ID');
+  const serverRow=out.row_id?{...(out.row_data||{}),id:out.row_id,_updatedAt:out.server_updated_at||null,_deletedAt:out.server_deleted_at||null}:null;
+  if(!out.applied){ const e=new Error('A newer cloud version exists for trade '+id); e.code='STALE_WRITE'; e.serverRow=serverRow; throw e; }
+  if(!serverRow||!serverRow._updatedAt) throw new Error('Sync response omitted the server revision');
+  return serverRow;
+}
+async function sbBatchUpsert(table,items){
+  if(isLocalhostPreview()) return []; if(!items.length) return [];
+  const echoed=[];
+  for(const item of items) echoed.push(await sbSyncRow(table,item,false));
+  return echoed;
+}
+function sbPageUrl(table,cursor){
+  assertSyncTable(table);
+  let url=SB_URL+'/rest/v1/'+table+'?select=id,data,updated_at,deleted_at&order=updated_at.asc,id.asc&limit='+SB_PAGE_SIZE;
+  if(cursor) url+='&or=(updated_at.gt.'+encodeURIComponent(cursor.updatedAt)+',and(updated_at.eq.'+encodeURIComponent(cursor.updatedAt)+',id.gt.'+encodeURIComponent(cursor.id)+'))';
+  return url;
 }
 async function sbFetchAll(table){
-  const r=await fetch(SB_URL+'/rest/v1/'+table+'?select=id,data,updated_at&limit=10000&order=updated_at.desc',{headers:SB_HDR});
-  if(!r.ok) throw new Error(await r.text());
-  return (await r.json()).map(row=>({id:row.id,...row.data,_updatedAt:row.updated_at}));
+  const rows=[]; let cursor=null;
+  while(true){
+    const r=await fetch(sbPageUrl(table,cursor),{headers:SB_HDR});
+    if(!r.ok) throw new Error(await r.text());
+    const page=await r.json(); if(!Array.isArray(page)) throw new Error('Cloud read returned an invalid response');
+    const checked=splitValidRows(page); if(checked.rejected.length){ quarantineRows('cloud',table,checked.rejected); throw new Error('Cloud data contains an invalid stored trade ID'); }
+    checked.valid.forEach(row=>rows.push({...row.data,id:row.id,_updatedAt:row.updated_at,_deletedAt:row.deleted_at||null}));
+    if(page.length<SB_PAGE_SIZE) break;
+    const last=page[page.length-1]; cursor={updatedAt:last.updated_at,id:last.id};
+  }
+  return rows;
 }
-async function sbDelete(table,id){
-  if(isLocalhostPreview()||!sbConfigured()) return true;
+async function sbDelete(table,id,expectedUpdatedAt,data){
+  if(isLocalhostPreview()||!sbConfigured()||!currentUser().id) return true;
+  assertSyncTable(table); assertStoredId(id);
   // Write-ahead: queue the delete BEFORE the request, so a page close while it
   // is in flight (or before it starts) still reaches the cloud via
   // flushPendingDeletes on next boot. Removed from the queue only on success.
-  _queueDelete(table,id);
-  try{ const r=await fetch(SB_URL+'/rest/v1/'+table+'?id=eq.'+encodeURIComponent(id),{method:'DELETE',headers:SB_HDR}); if(!r.ok) throw new Error(await r.text()); _unqueueDelete(table,id); return true; }
-  catch(e){ setSync('error',e.message); return false; }
+  _queueDelete(table,id,expectedUpdatedAt,data);
+  try{ await sbSyncRow(table,{...(data||{}),id,_updatedAt:expectedUpdatedAt},true); _unqueueDelete(table,id); return true; }
+  catch(e){ if(e.code==='STALE_WRITE') _recordConflict(table,id,e.serverRow,e.message,'delete',data); setSync('error',e.message); return false; }
 }
-function _queueDelete(table,id){ try{ const l=JSON.parse(localStorage.getItem(PDEL_KEY)||'[]'); if(!l.some(x=>x.table===table&&x.id===id)){ l.push({table,id,ts:Date.now()}); localStorage.setItem(PDEL_KEY,JSON.stringify(l)); } }catch(e){} }
+function _queueDelete(table,id,expectedUpdatedAt,data){
+  assertSyncTable(table); assertStoredId(id);
+  try{
+    const parsed=JSON.parse(localStorage.getItem(PDEL_KEY)||'[]'), l=Array.isArray(parsed)?parsed:[];
+    const next={table,id,expectedUpdatedAt:expectedUpdatedAt||null,data:data||null};
+    const i=l.findIndex(x=>x&&x.table===table&&x.id===id); if(i>=0) l[i]=next; else l.push(next);
+    localStorage.setItem(PDEL_KEY,JSON.stringify(l));
+  }catch(e){}
+}
 function _unqueueDelete(table,id){ try{ const l=JSON.parse(localStorage.getItem(PDEL_KEY)||'[]'); const k=l.filter(x=>!(x.table===table&&x.id===id)); localStorage.setItem(PDEL_KEY,JSON.stringify(k)); }catch(e){} }
 async function flushPendingDeletes(){
-  if(isLocalhostPreview()||!sbConfigured()) return;
+  if(isLocalhostPreview()||!sbConfigured()||!currentUser().id) return;
   let l; try{ l=JSON.parse(localStorage.getItem(PDEL_KEY)||'[]'); }catch{ return; }
   if(!Array.isArray(l)||!l.length) return; const keep=[];
-  for(const it of l){ try{ const r=await fetch(SB_URL+'/rest/v1/'+it.table+'?id=eq.'+encodeURIComponent(it.id),{method:'DELETE',headers:SB_HDR}); if(!r.ok) throw 0; }catch(e){ if(Date.now()-(it.ts||0)<7*864e5) keep.push(it); } }
+  for(const it of l){
+    if(!it||!TABLES.includes(it.table)||!isValidStoredId(it.id)){ quarantineRows('pending-delete','trades',[it]); continue; }
+    try{ await sbSyncRow(it.table,{...(it.data||{}),id:it.id,_updatedAt:it.expectedUpdatedAt},true); }
+    catch(e){ if(e.code==='STALE_WRITE') _recordConflict(it.table,it.id,e.serverRow,e.message,'delete',it.data); keep.push(it); }
+  }
   try{ localStorage.setItem(PDEL_KEY,JSON.stringify(keep)); }catch{}
 }
 let _saveTimer=null;
-function bumpVersion(ts){ localStorage.setItem(VKEY+'_time', ts||new Date().toISOString()); }
 function saveData(){
-  try{ localStorage.setItem(APP.storageKey,JSON.stringify(DB)); bumpVersion(); }
+  try{ localStorage.setItem(APP.storageKey,JSON.stringify(DB)); }
   catch(e){ toast('Local storage is full. Changes will only reach the cloud. Avoid refreshing until synced.',true); }
   clearTimeout(_saveTimer); _saveTimer=setTimeout(_flushDirty,1000);
 }
-/* Data safety rule 2 (repo CLAUDE.md): an edit landing while the flush is in
-   flight must not lose its dirty flag. upsertTrade replaces the row object in
-   DB[t], so "still the same object we uploaded" is a reliable "nobody edited
-   it" test; if a newer edit happened mid-request the flag survives and the
-   next flush sends the newer state. */
-function _clearDirtyIfUnchanged(t,row){
-  const cur=DB[t]&&DB[t].find(x=>x.id===row.id);
-  if(cur===row) _dirty[t].delete(row.id);
+function _acceptServerRevision(t,id,uploadedRevision,serverRow){
+  const i=DB[t]&&DB[t].findIndex(x=>x.id===id); if(i<0) return false;
+  if(!serverRow||!serverRow._updatedAt) return false;
+  DB[t][i]={...DB[t][i],_updatedAt:serverRow._updatedAt};
+  try{ localStorage.setItem(APP.storageKey,JSON.stringify(DB)); }
+  catch(e){ toast('Could not save the server revision on this device. The trade will stay queued for safety.',true); return false; }
+  if(rowRevision(t,id)!==uploadedRevision) return false;
+  _dirty[t].delete(id); return true;
 }
 /* A row deleted (in another tab/device) while our upsert was in flight was
    re-created by that upsert. Re-issue the delete; sbDelete write-aheads the
    pending-delete queue, so it survives even a mid-request tab close. */
-async function _reapDeletedDuringFlush(t,rows){
-  for(const row of rows){
+async function _reapDeletedDuringFlush(t,rows,serverRows){
+  for(let i=0;i<rows.length;i++){
+    const row=rows[i], serverRow=serverRows[i];
     const still=DB[t]&&DB[t].some(x=>x.id===row.id);
-    if(!still) await sbDelete(t,row.id).catch(()=>{});
+    if(!still) await sbDelete(t,row.id,serverRow&&serverRow._updatedAt,serverRow).catch(()=>{});
   }
 }
-async function _flushDirty(){
-  if(isLocalhostPreview()||!sbConfigured()) return;
+function _recordConflict(table,id,serverRow,message,operation,localRow){
+  try{
+    const parsed=JSON.parse(localStorage.getItem(CONFLICT_KEY)||'[]'), l=Array.isArray(parsed)?parsed:[];
+    const op=operation||'upsert';
+    const entry={table,id,operation:op,local:localRow||DB[table].find(r=>r.id===id)||null,server:serverRow||null,message};
+    const i=l.findIndex(x=>x&&x.table===table&&x.id===id&&x.operation===op); if(i>=0) l[i]=entry; else l.push(entry);
+    localStorage.setItem(CONFLICT_KEY,JSON.stringify(l.slice(-100)));
+  }catch(e){}
+}
+let _flushPromise=null, _flushQueued=false;
+function _flushDirty(){
+  if(_flushPromise){ _flushQueued=true; return _flushPromise; }
+  const run=(async()=>{ do{ _flushQueued=false; await _flushDirtyOnce(); }while(_flushQueued); })();
+  _flushPromise=run.finally(()=>{ _flushPromise=null; });
+  return _flushPromise;
+}
+async function _flushDirtyOnce(){
+  if(isLocalhostPreview()||!sbConfigured()||!currentUser().id) return;
   const jobs=[];
-  for(const t of TABLES){ const ids=new Set(_dirty[t]); const rows=DB[t].filter(r=>ids.has(r.id)); if(rows.length) jobs.push({t,ids,rows}); }
+  for(const t of TABLES){
+    const ids=[..._dirty[t]], rows=[];
+    for(const id of ids){ const row=DB[t].find(r=>r.id===id); if(row) rows.push({row:JSON.parse(JSON.stringify(row)),revision:rowRevision(t,id)}); }
+    if(rows.length) jobs.push({t,rows});
+  }
   if(!jobs.length) return; setSync('saving'); let err=false, poisoned=[];
-  for(const {t,ids,rows} of jobs){
-    for(let i=0;i<rows.length;i+=200){
-      const chunk=rows.slice(i,i+200);
-      try{ await sbBatchUpsert(t,chunk); chunk.forEach(r=>_clearDirtyIfUnchanged(t,r)); await _reapDeletedDuringFlush(t,chunk); }
-      catch(e){
-        err=true; setSync('error',e.message);
-        // A single bad row must not wedge the whole chunk. Retry per-row so good rows still clear their dirty flag, and only the offending row stays dirty (diagnosable, not a silent full-chunk stall).
-        for(const row of chunk){
-          try{ await sbBatchUpsert(t,[row]); _clearDirtyIfUnchanged(t,row); await _reapDeletedDuringFlush(t,[row]); }
-          catch(e2){ poisoned.push({table:t,id:row.id,error:e2.message}); }
-        }
+  for(const {t,rows} of jobs){
+    for(const item of rows){
+      try{
+        const echoed=await sbBatchUpsert(t,[item.row]);
+        _acceptServerRevision(t,item.row.id,item.revision,echoed[0]);
+        await _reapDeletedDuringFlush(t,[item.row],echoed);
+      }catch(e){
+        err=true; setSync('error',e.message); poisoned.push({table:t,id:item.row.id,error:e.message});
+        if(e.code==='STALE_WRITE') _recordConflict(t,item.row.id,e.serverRow,e.message);
       }
     }
   }
@@ -478,25 +555,21 @@ async function _flushDirty(){
   flushPendingDeletes().catch(()=>{});
 }
 function mergeTable(cloudRows,localRows,dirtySet){
-  if(!dirtySet||dirtySet.size===0) return cloudRows;
-  const byId=new Map(cloudRows.map(r=>[r.id,r]));
-  for(const id of dirtySet){ const lr=localRows.find(r=>r.id===id); if(lr) byId.set(id,lr); }
+  if(!cloudRows.length) return localRows.slice();
+  const byId=new Map();
+  for(const row of cloudRows){ if(!row._deletedAt) byId.set(row.id,row); }
+  for(const id of (dirtySet||new Set())){ const lr=localRows.find(r=>r.id===id); if(lr) byId.set(id,lr); else byId.delete(id); }
   return [...byId.values()];
 }
 async function loadData(){
   let local=null; try{ local=JSON.parse(localStorage.getItem(APP.storageKey)||'null'); }catch(e){}
-  if(local) TABLES.forEach(t=>DB[t]=local[t]||[]);
+  if(local) TABLES.forEach(t=>{ const checked=splitValidRows(local[t]); DB[t]=checked.valid; quarantineRows('local',t,checked.rejected); });
   if(isLocalhostPreview()){ setSync('preview'); _cloudReachable=true; return; }
   if(!sbConfigured()){ setSync('idle'); _cloudReachable=true; return; }
+  if(!currentUser().id){ setSync('idle'); _cloudReachable=true; return; }
   let cloud={}; _cloudReachable=true;
   try{ const res=await Promise.all(TABLES.map(t=>sbFetchAll(t))); TABLES.forEach((t,i)=>cloud[t]=res[i]); }
   catch(e){ _cloudReachable=false; setSync('error',e.message); return; }
-  const hasCloud=TABLES.some(t=>(cloud[t]||[]).length); if(!hasCloud){ setSync('ok'); return; }
-  // TODO(Phase 2, needs a live Supabase backend to test against): this is table-level max-timestamp reconciliation, not per-row optimistic concurrency.
-  // A single stale local row can currently win or lose against the whole cloud table rather than being resolved row-by-row. Known limitation, revisit once Supabase is wired, do not redesign blind.
-  let cloudMs=0; TABLES.forEach(t=>(cloud[t]||[]).forEach(r=>{ const m=+new Date(r._updatedAt||0); if(m>cloudMs) cloudMs=m; }));
-  const localMs=+new Date(localStorage.getItem(VKEY+'_time')||0)||0;
-  if(local&&localMs>=cloudMs){ setSync('ok'); return; }
   TABLES.forEach(t=>{ DB[t]=mergeTable(cloud[t]||[],DB[t]||[],_dirty[t]); });
   // Rows the user deleted but whose cloud delete has not confirmed (queued in
   // PDEL_KEY) must not resurrect from the cloud merge, even when no local
@@ -506,7 +579,7 @@ async function loadData(){
     const del=new Set(pdel.map(d=>d.table+'|'+d.id));
     TABLES.forEach(t=>{ DB[t]=(DB[t]||[]).filter(r=>!del.has(t+'|'+r.id)); });
   }
-  try{ localStorage.setItem(APP.storageKey,JSON.stringify(DB)); bumpVersion(); }catch(e){}
+  try{ localStorage.setItem(APP.storageKey,JSON.stringify(DB)); }catch(e){}
   setSync('ok');
 }
 
@@ -532,8 +605,13 @@ function tradeTags(t,catKey){ return Array.isArray(t[catKey])?t[catKey]:[]; }
 function parseTags(s){ const seen=new Set(),out=[]; (s||'').split(',').forEach(x=>{ const v=x.trim().replace(/\s+/g,' '); if(v){ const k=v.toLowerCase(); if(!seen.has(k)){ seen.add(k); out.push(v); } } }); return out; }
 function allTags(catKey){ const m=new Map(); DB.trades.forEach(t=>tradeTags(t,catKey).forEach(tag=>{ const k=tag.toLowerCase(); const e=m.get(k)||{tag,count:0}; e.count++; m.set(k,e); })); return [...m.values()].sort((a,b)=>b.count-a.count||a.tag.localeCompare(b.tag)); }
 function renameTag(cat,oldT,newT){
-  newT=(newT||'').trim().replace(/\s+/g,' '); if(!newT) return; const lo=oldT.toLowerCase();
-  DB.trades.forEach(t=>{ const arr=tradeTags(t,cat); if(arr.some(x=>x.toLowerCase()===lo)){ const seen=new Set(),out=[]; arr.map(x=>x.toLowerCase()===lo?newT:x).forEach(x=>{ const k=x.toLowerCase(); if(!seen.has(k)){ seen.add(k); out.push(x); } }); t[cat]=out; markDirty('trades',t.id); } });
+  newT=(newT||'').trim().replace(/\s+/g,' '); if(!newT) return; const lo=oldT.toLowerCase(), changed=[];
+  DB.trades=DB.trades.map(t=>{
+    const arr=tradeTags(t,cat); if(!arr.some(x=>x.toLowerCase()===lo)) return t;
+    const seen=new Set(),out=[]; arr.map(x=>x.toLowerCase()===lo?newT:x).forEach(x=>{ const k=x.toLowerCase(); if(!seen.has(k)){ seen.add(k); out.push(x); } });
+    changed.push(t.id); return {...t,[cat]:out,updatedAt:new Date().toISOString()};
+  });
+  changed.forEach(id=>markDirty('trades',id));
   saveData();
 }
 const TAG_UNDO_KEY = APP.storageKey + '_tagundo';
@@ -543,7 +621,9 @@ function deleteTag(cat,tg){
   if(!affected.length) return;
   // Destructive bulk mutation (removes a tag from every trade with no built-in undo): snapshot the affected rows first so the action can be reversed.
   try{ localStorage.setItem(TAG_UNDO_KEY, JSON.stringify({ ts:Date.now(), cat, tag:tg, rows:JSON.parse(JSON.stringify(affected)) })); }catch(e){}
-  affected.forEach(t=>{ t[cat]=tradeTags(t,cat).filter(x=>x.toLowerCase()!==lo); markDirty('trades',t.id); });
+  const ids=new Set(affected.map(t=>t.id));
+  DB.trades=DB.trades.map(t=>ids.has(t.id)?{...t,[cat]:tradeTags(t,cat).filter(x=>x.toLowerCase()!==lo),updatedAt:new Date().toISOString()}:t);
+  ids.forEach(id=>markDirty('trades',id));
   saveData();
 }
 function undoDeleteTag(){
@@ -599,8 +679,12 @@ function computeStats(trades){
 /* ============================================================================
    CRUD
    ========================================================================== */
-function upsertTrade(tr){ const i=DB.trades.findIndex(t=>t.id===tr.id); if(i>=0) DB.trades[i]=tr; else DB.trades.push(tr); markDirty('trades',tr.id); saveData(); renderApp(); }
-function deleteTrade(id){ DB.trades=DB.trades.filter(t=>t.id!==id); _dirty.trades.delete(id); _persistDirty(); saveData(); renderApp(); sbDelete('trades',id).then(ok=>{ if(!ok) flushPendingDeletes().catch(()=>{}); }); }
+function upsertTrade(tr){ assertStoredId(tr&&tr.id); const i=DB.trades.findIndex(t=>t.id===tr.id); if(i>=0) DB.trades[i]=tr; else DB.trades.push(tr); markDirty('trades',tr.id); saveData(); renderApp(); }
+function deleteTrade(id){
+  assertStoredId(id); const row=DB.trades.find(t=>t.id===id); if(!row) return;
+  DB.trades=DB.trades.filter(t=>t.id!==id); _dirty.trades.delete(id); _persistDirty(); saveData(); renderApp();
+  sbDelete('trades',id,row._updatedAt,row).then(ok=>{ if(!ok) flushPendingDeletes().catch(()=>{}); });
+}
 
 /* ============================================================================
    FILTER / SORT / VIEW
@@ -689,7 +773,7 @@ function renderTable(rows){
   if(noRows){ document.getElementById('rows').innerHTML=''; return; }
   const pages=Math.max(1,Math.ceil(rows.length/PAGE_SIZE)); if(_page>pages)_page=pages; if(_page<1)_page=1;
   const start=(_page-1)*PAGE_SIZE, pageRows=rows.slice(start,start+PAGE_SIZE);
-  document.getElementById('rows').innerHTML=pageRows.map(t=>{ const d=deriveTrade(t); return '<tr onclick="openTradeModal(\''+t.id+'\')" tabindex="0" role="button" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openTradeModal(\''+t.id+'\')}" aria-label="Edit '+escapeHtml(t.symbol||'this')+' trade">'
+  document.getElementById('rows').innerHTML=pageRows.map(t=>{ const d=deriveTrade(t); return '<tr data-trade-id="'+escapeHtml(t.id)+'" tabindex="0" role="button" aria-label="Edit '+escapeHtml(t.symbol||'this')+' trade">'
     +'<td><strong>'+escapeHtml(t.symbol||'')+'</strong></td>'
     +'<td><span class="chip '+(t.side==='short'?'short':'long')+'">'+(t.side==='short'?'Short':'Long')+'</span></td>'
     +'<td>'+fmtDate(t.entryAt)+'</td>'
@@ -700,9 +784,17 @@ function renderTable(rows){
     +'<td class="num">'+(d.rMultiple==null?'\u2014':d.rMultiple.toFixed(2)+'R')+'</td>'
     +'<td><span class="chip '+d.status+'">'+(d.status==='open'?'Open':'Closed')+'</span></td>'
     +'<td class="tags-cell">'+rowTagsHtml(t)+'</td></tr>'; }).join('');
+  wireTradeRows();
   document.getElementById('pager').innerHTML= pages>1
     ? '<button class="btn" onclick="goPage('+(_page-1)+')" '+(_page<=1?'disabled':'')+'>Prev</button><span>Page '+_page+' of '+pages+'</span><button class="btn" onclick="goPage('+(_page+1)+')" '+(_page>=pages?'disabled':'')+'>Next</button>'
     : '<span>'+rows.length+' trade'+(rows.length===1?'':'s')+'</span>';
+}
+function wireTradeRows(){
+  document.querySelectorAll('#rows tr[data-trade-id]').forEach(row=>{
+    const id=row.getAttribute('data-trade-id'); if(!isValidStoredId(id)) return;
+    row.addEventListener('click',()=>openTradeModal(id));
+    row.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openTradeModal(id); } });
+  });
 }
 
 /* ============================================================================
@@ -765,17 +857,22 @@ function svgDualEquity(a,b){
 /* ============================================================================
    MODAL  (add / edit trade with validation + tags)
    ========================================================================== */
-function field(k,label,req,inputHtml){ return '<div class="field"><label>'+label+(req?' <span class="req">*</span>':'')+'</label>'+inputHtml+'<div class="err" id="e-'+k+'"></div></div>'; }
+function field(k,label,req,inputHtml){
+  const inputId='f-'+k, errorId='e-'+k;
+  const linked=inputHtml.replace(/<(input|select|textarea)\b/,'<$1 aria-describedby="'+errorId+'" aria-invalid="false"');
+  return '<div class="field"><label for="'+inputId+'">'+label+(req?' <span class="req" aria-hidden="true">*</span>':'')+'</label>'+linked+'<div class="err" id="'+errorId+'" aria-live="polite"></div></div>';
+}
 function frow(a,b){ return '<div class="frow">'+a+b+'</div>'; }
 function tagField(t,catKey,label){ const cur=t?tradeTags(t,catKey).join(', '):''; const opts=allTags(catKey).map(o=>'<option value="'+escapeHtml(o.tag)+'">').join(''); return field(catKey,label,false,'<input id="f-'+catKey+'" list="dl-'+catKey+'" value="'+escapeHtml(cur)+'" placeholder="comma separated"><datalist id="dl-'+catKey+'">'+opts+'</datalist>'); }
 function openTradeModal(id){
   // Phase 2 gate: while owner this no-ops; once plans are wired, free users
   // hitting the cap get an upgrade toast instead of an entry point that errors later.
   if(!requireEntitlement('unlimited_trades','Logging trades')) return;
+  if(id&&!isValidStoredId(id)){ toast('Could not open a trade with an invalid ID.',true); return; }
   const t=id?DB.trades.find(x=>x.id===id):null; const v=k=>(t&&t[k]!=null&&t[k]!=='')?String(t[k]):'';
   document.getElementById('modal-root').innerHTML=
     '<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog" aria-modal="true">'
-    +'<div class="modal-head"><h3>'+(t?'Edit trade':'Log trade')+'</h3><button class="icon-btn" onclick="closeModal()">✕</button></div>'
+    +'<div class="modal-head"><h3>'+(t?'Edit trade':'Log trade')+'</h3><button class="icon-btn" aria-label="Close trade form" onclick="closeModal()">✕</button></div>'
     +'<div class="modal-body">'
     + frow(field('symbol','Symbol',true,'<input id="f-symbol" type="text" maxlength="12" value="'+escapeHtml(v('symbol'))+'" placeholder="AAPL">'),
            field('side','Side',true,'<select id="f-side"><option value="long"'+(t&&t.side==='short'?'':' selected')+'>Long</option><option value="short"'+(t&&t.side==='short'?' selected':'')+'>Short</option></select>'))
@@ -793,9 +890,12 @@ function openTradeModal(id){
     + '<p class="muted">Leave exit blank for an open position. Both exit date and price are needed to close it.</p>'
     + (t && t.symbol ? tradeChartSectionHtml(t) : '')
     +'</div>'
-    +'<div class="modal-foot"><span>'+(t?'<button class="btn btn-danger" onclick="confirmDeleteTrade(\''+t.id+'\')">Delete</button>':'')+'</span><button class="btn btn-primary" onclick="saveTradeModal(\''+(t?t.id:'')+'\')">Save</button></div>'
+    +'<div class="modal-foot"><span>'+(t?'<button class="btn btn-danger" id="trade-delete-btn">Delete</button>':'')+'</span><button class="btn btn-primary" id="trade-save-btn">Save</button></div>'
     +'</div></div>';
   wireModal(t?'Edit trade':'Log trade');
+  const saveBtn=document.getElementById('trade-save-btn'); if(saveBtn) saveBtn.addEventListener('click',()=>saveTradeModal(t?t.id:''));
+  const deleteBtn=document.getElementById('trade-delete-btn'); if(deleteBtn&&t) deleteBtn.addEventListener('click',()=>confirmDeleteTrade(t.id));
+  if(t) wireChartLoadButton(t.id);
   const f=document.getElementById('f-symbol'); if(f) f.focus();
 }
 /* Modal a11y: accessible name + Escape-to-close + a Tab focus trap, wired on
@@ -819,7 +919,7 @@ function wireModal(label){
 function closeModal(){ const root=document.getElementById('modal-root'); if(_modalKeyTrap&&root){ root.removeEventListener('keydown',_modalKeyTrap); _modalKeyTrap=null; } if(root) root.innerHTML=''; }
 function saveTradeModal(id){
   const g=k=>document.getElementById('f-'+k);
-  const setErr=(k,m)=>{ const e=document.getElementById('e-'+k); if(e) e.textContent=m||''; const f=g(k); if(f) f.classList.toggle('invalid',!!m); return !m; };
+  const setErr=(k,m)=>{ const e=document.getElementById('e-'+k); if(e) e.textContent=m||''; const f=g(k); if(f){ f.classList.toggle('invalid',!!m); f.setAttribute('aria-invalid',m?'true':'false'); } return !m; };
   let ok=true;
   const symbol=g('symbol').value.trim().toUpperCase(); if(!setErr('symbol',symbol?'':'Required')) ok=false;
   const side=g('side').value;
@@ -832,6 +932,7 @@ function saveTradeModal(id){
   const stopRaw=g('stopPrice').value, stop=Number(stopRaw); if(!setErr('stopPrice',(stopRaw!==''&&!(stop>0))?'Must be greater than 0':'')) ok=false;
   const feesRaw=g('fees').value, fees=feesRaw===''?0:Number(feesRaw); if(!setErr('fees',(feesRaw!==''&&!(fees>=0))?'Cannot be negative':'')) ok=false;
   if(!ok) return;
+  if(id) assertStoredId(id);
   const prev=id?DB.trades.find(t=>t.id===id):null, now=new Date().toISOString();
   const trade={ id:id||uid(), symbol, side, quantity:qty, entryAt:new Date(entryV).toISOString(), entryPrice,
     exitAt:exitV?new Date(exitV).toISOString():'', exitPrice:(exitV&&xpRaw!=='')?exitPrice:'', stopPrice:stopRaw!==''?stop:'', fees,
@@ -840,9 +941,11 @@ function saveTradeModal(id){
   upsertTrade(trade); closeModal(); toast(id?'Trade updated':'Trade logged');
 }
 function confirmDeleteTrade(id){
+  if(!isValidStoredId(id)){ toast('Could not delete a trade with an invalid ID.',true); return; }
   const t=DB.trades.find(x=>x.id===id);
-  document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:380px" role="dialog" aria-modal="true"><div class="modal-head"><h3>Delete trade?</h3></div><div class="modal-body"><p style="color:var(--text2)">Delete the <strong>'+escapeHtml(t?t.symbol:'this')+'</strong> trade? This cannot be undone.</p></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-danger" onclick="deleteTrade(\''+id+'\');closeModal();toast(\'Trade deleted\')">Delete</button></div></div></div>';
+  document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:380px" role="dialog" aria-modal="true"><div class="modal-head"><h3>Delete trade?</h3></div><div class="modal-body"><p style="color:var(--text2)">Delete the <strong>'+escapeHtml(t?t.symbol:'this')+'</strong> trade? This cannot be undone.</p></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-danger" id="confirm-trade-delete-btn">Delete</button></div></div></div>';
   wireModal('Delete trade');
+  const deleteBtn=document.getElementById('confirm-trade-delete-btn'); if(deleteBtn) deleteBtn.addEventListener('click',()=>{ deleteTrade(id); closeModal(); toast('Trade deleted'); });
 }
 
 /* ============================================================================
@@ -913,7 +1016,7 @@ function nearestBarTime(bars,iso){
   return best;
 }
 function tradeChartSectionHtml(t){
-  return '<div class="field"><label>Price chart</label><div id="trade-chart-wrap"><button class="btn" onclick="loadTradeChart(\''+escapeHtml(t.id)+'\')">Load price chart</button></div></div>';
+  return '<div class="field"><div class="label">Price chart</div><div id="trade-chart-wrap"><button class="btn" id="trade-chart-load-btn">Load price chart</button></div></div>';
 }
 function chartErrorHtml(t,err){
   const kind=(err&&err.kind)==='symbol'?'symbol':'proxy';
@@ -924,9 +1027,14 @@ function chartErrorHtml(t,err){
   return '<div class="state error" style="padding:20px 10px">'
     +'<div class="big">⚠</div><h3>'+title+'</h3><p>'+detail+'</p>'
     +'<p class="muted">Check or change the proxy URL in Settings (⚙) if this keeps happening.</p>'
-    +'<button class="btn" onclick="loadTradeChart(\''+escapeHtml(t.id)+'\')">Retry</button></div>';
+    +'<button class="btn" id="trade-chart-load-btn">Retry</button></div>';
+}
+function wireChartLoadButton(id){
+  if(!isValidStoredId(id)) return;
+  const btn=document.getElementById('trade-chart-load-btn'); if(btn) btn.addEventListener('click',()=>loadTradeChart(id));
 }
 async function loadTradeChart(id){
+  if(!isValidStoredId(id)) return;
   if(!requireEntitlement('chart_markers','Chart markers')) return;
   const t=DB.trades.find(x=>x.id===id), wrap=document.getElementById('trade-chart-wrap');
   if(!t||!wrap) return;
@@ -942,7 +1050,7 @@ async function loadTradeChart(id){
     renderTradeChart(wrap,t,d,bars);
   }catch(err){
     if(_tradeChart){ try{ _tradeChart.remove(); }catch(e){} _tradeChart=null; }
-    wrap.innerHTML=chartErrorHtml(t,err);
+    wrap.innerHTML=chartErrorHtml(t,err); wireChartLoadButton(t.id);
   }
 }
 function renderTradeChart(wrap,t,d,bars){
@@ -979,11 +1087,11 @@ function renderTradeChart(wrap,t,d,bars){
 function openTagManager(){
   _tagList=[]; let i=0;
   const sections=TAG_CATS.map(c=>{ const tags=allTags(c.key);
-    const rows=tags.length? tags.map(o=>{ const idx=i++; _tagList[idx]={cat:c.key,tag:o.tag}; return '<div class="tag-row"><span class="tag '+c.cls+'">'+escapeHtml(o.tag)+'</span><span class="muted" title="trades">'+o.count+'</span><input id="ren-'+idx+'" value="'+escapeHtml(o.tag)+'" style="flex:1;min-width:70px"><button class="btn btn-sm" onclick="renameTagUI('+idx+')">Save</button><button class="btn btn-sm btn-danger" onclick="deleteTagUI('+idx+')">✕</button></div>'; }).join('') : '<p class="muted">None yet.</p>';
+    const rows=tags.length? tags.map(o=>{ const idx=i++; _tagList[idx]={cat:c.key,tag:o.tag}; return '<div class="tag-row"><span class="tag '+c.cls+'">'+escapeHtml(o.tag)+'</span><span class="muted" title="trades">'+o.count+'</span><input id="ren-'+idx+'" aria-label="Rename '+escapeHtml(o.tag)+' tag" value="'+escapeHtml(o.tag)+'" style="flex:1;min-width:70px"><button class="btn btn-sm" onclick="renameTagUI('+idx+')">Save</button><button class="btn btn-sm btn-danger" aria-label="Delete '+escapeHtml(o.tag)+' tag" onclick="deleteTagUI('+idx+')">✕</button></div>'; }).join('') : '<p class="muted">None yet.</p>';
     return '<div style="margin-bottom:14px"><div class="label" style="margin-bottom:6px">'+c.label+'</div>'+rows+'</div>'; }).join('');
   let undoSnap=null; try{ undoSnap=JSON.parse(localStorage.getItem(TAG_UNDO_KEY)||'null'); }catch(e){}
   const undoBtn = undoSnap ? '<button class="btn btn-sm" onclick="undoDeleteTag()">Undo delete "'+escapeHtml(undoSnap.tag)+'"</button>' : '<span></span>';
-  document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:480px" role="dialog" aria-modal="true"><div class="modal-head"><h3>Manage tags</h3><button class="icon-btn" onclick="closeModal()">✕</button></div><div class="modal-body">'+sections+'<p class="muted">Renaming updates every trade. Rename to an existing tag to merge them. Deleting can be undone once, right after it happens.</p></div><div class="modal-foot">'+undoBtn+'<button class="btn" onclick="closeModal()">Close</button></div></div></div>';
+  document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:480px" role="dialog" aria-modal="true"><div class="modal-head"><h3>Manage tags</h3><button class="icon-btn" aria-label="Close tag manager" onclick="closeModal()">✕</button></div><div class="modal-body">'+sections+'<p class="muted">Renaming updates every trade. Rename to an existing tag to merge them. Deleting can be undone once, right after it happens.</p></div><div class="modal-foot">'+undoBtn+'<button class="btn" onclick="closeModal()">Close</button></div></div></div>';
   wireModal('Manage tags');
 }
 function renameTagUI(i){ const e=_tagList[i]; if(!e) return; const nv=document.getElementById('ren-'+i).value; renameTag(e.cat,e.tag,nv); renderApp(); openTagManager(); toast('Tag updated'); }
@@ -1095,12 +1203,12 @@ async function runCoach(){
 function openSettings(){
   document.getElementById('modal-root').innerHTML=
     '<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog" aria-modal="true">'
-    +'<div class="modal-head"><h3>Settings</h3><button class="icon-btn" onclick="closeModal()">✕</button></div>'
+    +'<div class="modal-head"><h3>Settings</h3><button class="icon-btn" aria-label="Close settings" onclick="closeModal()">✕</button></div>'
     +'<div class="modal-body">'
     + field('akey','Anthropic API key (for the AI coach)',false,'<input id="f-akey" type="password" value="'+escapeHtml(getKey())+'" placeholder="sk-ant-...">')
     + '<div class="warn">Stored only in this browser. Fine for personal use. Before any multi-user launch this must move behind the Worker proxy so the key never reaches the client.</div>'
-    + '<div class="field"><label>Import trades from CSV</label><input id="f-csv" type="file" accept=".csv,text/csv"><div class="muted">Auto-maps columns named like symbol, side, qty, entry date, entry price, exit date, exit price, fees, stop. Adds to existing trades.</div><div class="err" id="e-csv"></div></div>'
-    + '<div class="field"><label>Chart data CORS proxy</label><input id="f-chartproxy" type="text" value="'+escapeHtml(localStorage.getItem(CHART_PROXY_KEY)||'')+'" placeholder="'+escapeHtml(CHART_PROXY_DEFAULT)+'"><div class="muted">{url} is replaced with the encoded Yahoo URL. The default is a public proxy and can be flaky. A personal Cloudflare Worker URL can go here later.</div></div>'
+    + '<div class="field"><label for="f-csv">Import trades from CSV</label><input id="f-csv" type="file" accept=".csv,text/csv" aria-describedby="csv-help e-csv" aria-invalid="false"><div class="muted" id="csv-help">Auto-maps columns named like symbol, side, qty, entry date, entry price, exit date, exit price, fees, stop. Adds to existing trades.</div><div class="err" id="e-csv" aria-live="polite"></div></div>'
+    + '<div class="field"><label for="f-chartproxy">Chart data CORS proxy</label><input id="f-chartproxy" type="text" aria-describedby="chartproxy-help" value="'+escapeHtml(localStorage.getItem(CHART_PROXY_KEY)||'')+'" placeholder="'+escapeHtml(CHART_PROXY_DEFAULT)+'"><div class="muted" id="chartproxy-help">{url} is replaced with the encoded Yahoo URL. The default is a public proxy and can be flaky. A personal Cloudflare Worker URL can go here later.</div></div>'
     +'</div>'
     +'<div class="modal-foot"><button class="btn" onclick="importCSV()">Import CSV</button><button class="btn btn-primary" onclick="saveSettings()">Save</button></div>'
     +'</div></div>';
@@ -1133,7 +1241,7 @@ function parseCSV(text){
   if(field!==''||row.length) pushR();
   return rows.filter(r=>r.some(x=>String(x).trim()!==''));
 }
-function upsertTradeSilent(tr){ DB.trades.push(tr); markDirty('trades',tr.id); }
+function upsertTradeSilent(tr){ assertStoredId(tr&&tr.id); DB.trades.push(tr); markDirty('trades',tr.id); }
 function importCSV(){
   const inp=document.getElementById('f-csv'), errEl=document.getElementById('e-csv');
   if(!requireEntitlement('csv_import','CSV import')) return;

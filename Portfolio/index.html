@@ -529,10 +529,8 @@ table.holdings th:first-child,table.holdings td:first-child,table.holdings th.tl
 table.holdings td{font-variant-numeric:tabular-nums}
 table.holdings td.cell-sym{font-weight:600}
 table.holdings td.muted{color:var(--text3)}
-/* Long free-text names (Cash account names, Real Estate names) clamp to 2
-   lines with an ellipsis instead of wrapping word-per-line into very tall
-   rows on mobile (F4). Full text is still on the row via title=, and
-   unclamped in the edit modal (a plain form input, not this display cell).
+/* Long free-text names clamp to 2 lines on desktop. Touch layouts show the
+   full wrapped name because title= is not an accessible disclosure there.
    -webkit-line-clamp on a <td> directly is unreliable (table-cell layout
    fights the -webkit-box display it needs), so the clamp lives on an inner
    span instead, the <td> just constrains the width. */
@@ -541,7 +539,12 @@ table.holdings td.name-clamp .name-clamp-inner{
   display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
   overflow:hidden;text-overflow:ellipsis;white-space:normal;word-break:break-word;line-height:1.35
 }
-@media (max-width:640px){table.holdings td.name-clamp{max-width:180px}}
+@media (max-width:640px){
+  table.holdings td.name-clamp{min-width:150px;max-width:180px}
+  table.holdings td.name-clamp .name-clamp-inner{
+    display:block;-webkit-line-clamp:unset;overflow:visible;text-overflow:clip
+  }
+}
 table.holdings .price-stale{color:var(--text3);font-style:italic}
 table.holdings th.sticky-col,table.holdings td.sticky-col{position:sticky;left:0;background:var(--surface-solid);border-right:1px solid var(--border);z-index:2}
 table.holdings th.sticky-col{z-index:3}
@@ -1388,8 +1391,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.60"></script>
-<script src="Worker/kjr-sortable.js?v=2.60"></script>
-<script src="Worker/app.js?v=2.60"></script>
+<script src="Worker/kjr-core.js?v=2.61"></script>
+<script src="Worker/kjr-sortable.js?v=2.61"></script>
+<script src="Worker/app.js?v=2.61"></script>
 </body>
 </html>

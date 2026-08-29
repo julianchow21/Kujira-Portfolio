@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.60';
-const APP_DISPLAY_VERSION = 'v2.60 (16 Aug)';
+const APP_VERSION = 'v2.61';
+const APP_DISPLAY_VERSION = 'v2.61 (29 Aug)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -24,6 +24,8 @@ const LK_SYNC_URL  = 'kjr-pf-sync-url-v1';
 const LK_SYNC_TS   = 'kjr-pf-sync-ts-v1';
 const LK_LAST_PULL = 'kjr-pf-last-pull-v1';
 const LK_LAST_PULL_SRC = 'kjr-pf-last-pull-src-v1';  // 'server' if from doGet._savedAt or doPost.savedAt, else 'client'
+const LK_RESET_SYNC_BLOCK = 'kjr-pf-reset-sync-block-v1'; // blocks automatic writes after a local-only reset until a pull or explicit push
+const LK_LOSSY_SYNC_BLOCK = 'kjr-pf-lossy-sync-block-v1'; // old backend acknowledged a write after stripping/truncating data
 const LK_THEME     = 'kjr-pf-theme-v1';
 const LK_PRIVACY   = 'kjr-pf-privacy-v1';   // blur all money figures (shoulder-surfing guard)
 const LK_PRICE_CACHE = 'kjr-pf-price-cache-v1'; // persisted separately so first paint uses last-known prices
@@ -1041,21 +1043,156 @@ function localPersistPayload(){
   return rest;
 }
 
+/* Three-way local merge. Each tab keeps the last LK_DB value it observed as
+   its base. Before a full-blob write, changes made in this tab are merged with
+   changes already written by another tab. Arrays of records merge by `id`,
+   including deletions. Plain objects merge by key. When both tabs change the
+   same value, the later operation wins and the losing value is stashed by
+   saveLocal(), so a conflict is recoverable rather than silently erased. */
+let _localBase = null;
+let _localConflictSeq = 0;
+function _cloneLocalValue(value){
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+function _sameLocalValue(a, b){
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch (_) { return false; }
+}
+function _localIdMap(arr){
+  if (!Array.isArray(arr)) return null;
+  const map = new Map();
+  for (const row of arr){
+    if (!row || typeof row !== 'object' || Array.isArray(row) || row.id == null || row.id === '') return null;
+    const id = String(row.id);
+    if (map.has(id)) return null;
+    map.set(id, row);
+  }
+  return map;
+}
+function _recordLocalConflict(conflicts, path, local, incoming, preferLocal){
+  conflicts.push({
+    path: path || '(root)',
+    winner: preferLocal ? 'later local save' : 'later storage event',
+    losingValue: _cloneLocalValue(preferLocal ? incoming : local)
+  });
+}
+function _mergeLocalValue(base, local, incoming, path, preferLocal, conflicts){
+  if (_sameLocalValue(local, incoming)) return _cloneLocalValue(local);
+  if (_sameLocalValue(local, base)) return _cloneLocalValue(incoming);
+  if (_sameLocalValue(incoming, base)) return _cloneLocalValue(local);
+
+  if (Array.isArray(local) && Array.isArray(incoming)){
+    const baseArr = Array.isArray(base) ? base : [];
+    const bm = _localIdMap(baseArr), lm = _localIdMap(local), im = _localIdMap(incoming);
+    // Record arrays merge by stable id. Primitive/config arrays are one value,
+    // because inventing element identity would turn reorders into corruption.
+    if (lm && im && bm){
+      const preferred = preferLocal ? local : incoming;
+      const secondary = preferLocal ? incoming : local;
+      const ids = [];
+      preferred.concat(secondary, baseArr).forEach(row => {
+        const id = String(row.id);
+        if (!ids.includes(id)) ids.push(id);
+      });
+      const out = [];
+      ids.forEach(id => {
+        const hasB = bm.has(id), hasL = lm.has(id), hasI = im.has(id);
+        const b = bm.get(id), l = lm.get(id), i = im.get(id);
+        const rowPath = (path || '(root)') + '[' + id + ']';
+        if (!hasL && !hasI) return;
+        if (!hasB){
+          if (hasL && hasI){
+            if (_sameLocalValue(l, i)) out.push(_cloneLocalValue(l));
+            else {
+              _recordLocalConflict(conflicts, rowPath, l, i, preferLocal);
+              out.push(_cloneLocalValue(preferLocal ? l : i));
+            }
+          } else out.push(_cloneLocalValue(hasL ? l : i));
+          return;
+        }
+        if (!hasL){
+          if (_sameLocalValue(i, b)) return; // local-only deletion
+          _recordLocalConflict(conflicts, rowPath, undefined, i, preferLocal);
+          if (!preferLocal) out.push(_cloneLocalValue(i));
+          return;
+        }
+        if (!hasI){
+          if (_sameLocalValue(l, b)) return; // incoming-only deletion
+          _recordLocalConflict(conflicts, rowPath, l, undefined, preferLocal);
+          if (preferLocal) out.push(_cloneLocalValue(l));
+          return;
+        }
+        out.push(_mergeLocalValue(b, l, i, rowPath, preferLocal, conflicts));
+      });
+      return out;
+    }
+    _recordLocalConflict(conflicts, path, local, incoming, preferLocal);
+    return _cloneLocalValue(preferLocal ? local : incoming);
+  }
+
+  const baseObj = base && typeof base === 'object' && !Array.isArray(base);
+  const localObj = local && typeof local === 'object' && !Array.isArray(local);
+  const incomingObj = incoming && typeof incoming === 'object' && !Array.isArray(incoming);
+  if (localObj && incomingObj && (baseObj || base == null)){
+    const b = baseObj ? base : {};
+    const out = {};
+    const keys = new Set(Object.keys(b).concat(Object.keys(local), Object.keys(incoming)));
+    keys.forEach(key => {
+      const merged = _mergeLocalValue(b[key], local[key], incoming[key], path ? path + '.' + key : key, preferLocal, conflicts);
+      if (merged !== undefined) out[key] = merged;
+    });
+    return out;
+  }
+
+  _recordLocalConflict(conflicts, path, local, incoming, preferLocal);
+  return _cloneLocalValue(preferLocal ? local : incoming);
+}
+function mergeConcurrentLocalState(base, local, incoming, preferLocal){
+  const conflicts = [];
+  const value = _mergeLocalValue(base || {}, local || {}, incoming || {}, '', !!preferLocal, conflicts);
+  return { value, conflicts };
+}
+function _readStoredLocalPayload(){
+  try {
+    const raw = localStorage.getItem(LK_DB);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+function _stashLocalConflicts(conflicts){
+  if (!conflicts || !conflicts.length) return null;
+  const key = 'LK_DB_CONFLICT_' + Date.now() + '_' + (++_localConflictSeq);
+  try {
+    localStorage.setItem(key, JSON.stringify({ createdAt: new Date().toISOString(), conflicts }));
+    showToast('Another tab changed the same entry. The later change won and the earlier value was stashed for recovery.', 'error');
+    return key;
+  } catch (err) {
+    console.error('[local merge] could not stash same-entry conflict', err);
+    showToast('Another tab changed the same entry. The later change won, but the recovery copy could not be stored.', 'error');
+    return null;
+  }
+}
+
 /* Resilient local save. If the quota is exceeded we shed disposable data in
    order (snapshot history) and retry, so a full disk can never silently drop
    your holdings, cash, CPF, or trades. */
-function saveLocal(){
+function _writeLocalPayload(payload, conflicts, opts){
+  opts = opts || {};
+  if (localStorage.getItem(LK_RESET_SYNC_BLOCK) && !opts.allowResetRestore) return false;
   const attempts = [
-    () => JSON.stringify(localPersistPayload()),
+    () => JSON.stringify(payload),
     () => { // thin snapshots to the most recent 180 days
-      const p = localPersistPayload();
+      const p = _cloneLocalValue(payload);
       if (Array.isArray(p.snapshots) && p.snapshots.length > 180) p.snapshots = p.snapshots.slice(-180);
       return JSON.stringify(p);
     }
   ];
   for (let i = 0; i < attempts.length; i++){
     try {
-      localStorage.setItem(LK_DB, attempts[i]());
+      const serialised = attempts[i]();
+      localStorage.setItem(LK_DB, serialised);
+      _localBase = JSON.parse(serialised);
+      _stashLocalConflicts(conflicts);
       if (i > 0) showToast('Saved. Trimmed old history to fit local storage.', 'success');
       // Persist price cache separately so the first paint on reload uses last-known prices
       try { localStorage.setItem(LK_PRICE_CACHE, JSON.stringify(DB._priceCache || {})); } catch (_) {}
@@ -1072,6 +1209,24 @@ function saveLocal(){
   return false;
 }
 
+function saveLocal(opts){
+  opts = opts || {};
+  // A reset is a local deletion broadcast. Until a valid cloud pull restores
+  // the primary blob, no stale tab may recreate LK_DB from its old in-memory
+  // copy. The pull path uses the narrow allowResetRestore bypass only after it
+  // has validated the remote schema and payload.
+  if (localStorage.getItem(LK_RESET_SYNC_BLOCK) && !opts.allowResetRestore) return false;
+  const priceCache = DB._priceCache;
+  const local = localPersistPayload();
+  const stored = _readStoredLocalPayload();
+  const merged = stored
+    ? mergeConcurrentLocalState(_localBase || stored, local, stored, true)
+    : { value: _cloneLocalValue(local), conflicts: [] };
+  DB = mergeDefaults(merged.value);
+  DB._priceCache = Object.assign({}, priceCache || {}, DB._priceCache || {});
+  return _writeLocalPayload(localPersistPayload(), merged.conflicts, { allowResetRestore: !!opts.allowResetRestore });
+}
+
 /* Returns true (loaded), false (nothing stored, genuinely empty), or the
    string 'corrupt' (something was stored but JSON.parse failed). Callers
    MUST branch on 'corrupt' separately from false: false is safe to treat as
@@ -1084,6 +1239,7 @@ function loadLocal(){
     if (!raw) return false;
     const obj = JSON.parse(raw);
     DB = mergeDefaults(obj);
+    _localBase = _cloneLocalValue(localPersistPayload());
     // Restore last-known prices so first paint shows market value, not cost basis
     try {
       const pc = localStorage.getItem(LK_PRICE_CACHE);
@@ -1269,6 +1425,14 @@ function saveData(){
   saveLocal();
   if (_syncTimer) clearTimeout(_syncTimer);
   if (!getSyncUrl()) { setSyncStatus('local'); return; }
+  if (localStorage.getItem(LK_RESET_SYNC_BLOCK)) {
+    setSyncStatus('failed', 'Cloud writes paused after local reset. Pull from cloud to restore, or use explicit Push to cloud.');
+    return;
+  }
+  if (localStorage.getItem(LK_LOSSY_SYNC_BLOCK)) {
+    setSyncStatus('failed', 'Cloud writes paused because the Apps Script backend must be redeployed.');
+    return;
+  }
   // Null the flag the moment the debounce actually fires, not just when a
   // newer saveData() cancels it. Without this, _syncTimer stays truthy
   // forever after the first save in a session (setTimeout doesn't self-clear
@@ -1317,6 +1481,27 @@ function syncPayload(){
 
 let _bloatWarned = false;
 let _activeSyncController = null;
+const _activeSyncCompletions = new Set();
+
+function _lossyAckReason(data){
+  if (!data || typeof data !== 'object') return '';
+  const stripped = Array.isArray(data.strippedKeys) ? data.strippedKeys.filter(Boolean) : [];
+  const paths = Array.isArray(data.truncatedPaths) ? data.truncatedPaths.filter(Boolean) : [];
+  if (!stripped.length && !paths.length && !data.truncated) return '';
+  const parts = [];
+  if (stripped.length) parts.push('stripped keys: ' + stripped.join(', '));
+  if (paths.length) parts.push('truncated values: ' + paths.join(', '));
+  else if (data.truncated) parts.push('truncated values');
+  return parts.join('; ');
+}
+function _rejectLossyAck(data){
+  const reason = _lossyAckReason(data);
+  if (!reason) return false;
+  localStorage.setItem(LK_LOSSY_SYNC_BLOCK, '1');
+  setSyncStatus('failed', 'Backend rejected: ' + reason + '. Redeploy Apps Script before syncing.');
+  showToast('The backend could not preserve all submitted data (' + reason + '). Local data is intact. Redeploy Apps Script, then use Push to cloud.', 'error');
+  return true;
+}
 
 /* Tracks whether the stored LK_LAST_PULL came from the server (data._savedAt
    on pull, or data.savedAt on push) or from the client's own updatedAt
@@ -1394,7 +1579,8 @@ function setStrictConflicts(on){
   showToast(on ? 'Strict conflict modal enabled' : 'Silent auto-recovery enabled', 'success');
 }
 
-async function pushToRemote(){
+async function pushToRemote(opts){
+  opts = opts || {};
   const url = getSyncUrl();
   if (!url) { setSyncStatus('local'); return false; }
   // Preview guard (AGENTS.md data-safety rule 1): never let a localhost/file:
@@ -1402,10 +1588,21 @@ async function pushToRemote(){
   // localStorage (e.g. pasted for debugging). Timers and dirty state stay
   // untouched here, only the network write is skipped.
   if (isLocalPreview()) { setSyncStatus('local', 'Preview, sync disabled'); return false; }
+  if (localStorage.getItem(LK_RESET_SYNC_BLOCK) && !opts.allowResetOverride) {
+    setSyncStatus('failed', 'Cloud writes paused after local reset. Pull from cloud to restore, or use explicit Push to cloud.');
+    return false;
+  }
+  if (localStorage.getItem(LK_LOSSY_SYNC_BLOCK) && !opts.retryLossyBackend) {
+    setSyncStatus('failed', 'Cloud writes paused because the Apps Script backend must be redeployed.');
+    return false;
+  }
 
   if (_activeSyncController) { try { _activeSyncController.abort(); } catch(_){} }
   const controller = new AbortController();
   _activeSyncController = controller;
+  let finishCompletion;
+  const completion = new Promise(resolve => { finishCompletion = resolve; });
+  _activeSyncCompletions.add(completion);
 
   setSyncStatus('syncing');
   try {
@@ -1438,6 +1635,7 @@ async function pushToRemote(){
       return false;
     }
     const data = parsed.data;
+    if (_rejectLossyAck(data)) return false;
     if (data.error) {
       // Old backend (pre-A2, no chunked storage) still hard-rejects any body
       // over its single-cell 49,500-char limit with this exact message. A
@@ -1506,11 +1704,13 @@ async function pushToRemote(){
           await new Promise(res => setTimeout(res, 500));
           r = await recover();
         }
-        if (r.ok && !r.data.error && !r.data.conflict) {
+        if (r.ok && !_rejectLossyAck(r.data) && !r.data.error && !r.data.conflict) {
           const stamp2 = r.data.savedAt || new Date().toISOString();
           localStorage.setItem(LK_SYNC_TS, stamp2);
           setLastPull(stamp2, 'server');
           setSyncStatus('synced');
+          localStorage.removeItem(LK_LOSSY_SYNC_BLOCK);
+          if (opts.allowResetOverride) localStorage.removeItem(LK_RESET_SYNC_BLOCK);
           if (!_resyncToastShown) {
             _resyncToastShown = true;
             showToast('Sync resynchronised', 'success');
@@ -1533,6 +1733,8 @@ async function pushToRemote(){
     localStorage.setItem(LK_SYNC_TS, stamp);
     setLastPull(stamp, 'server');  // push response gives us the real server stamp
     setSyncStatus('synced');
+    localStorage.removeItem(LK_LOSSY_SYNC_BLOCK);
+    if (opts.allowResetOverride) localStorage.removeItem(LK_RESET_SYNC_BLOCK);
     return true;
   } catch (err) {
     if (err.name === 'AbortError') return false; // superseded by a newer push
@@ -1545,12 +1747,19 @@ async function pushToRemote(){
     return false;
   } finally {
     if (_activeSyncController === controller) _activeSyncController = null;
+    _activeSyncCompletions.delete(completion);
+    finishCompletion();
   }
 }
 
 async function pullFromRemote(opts){
   const url = getSyncUrl();
   if (!url) { setSyncStatus('local'); return false; }
+  if (localStorage.getItem(LK_LOSSY_SYNC_BLOCK)) {
+    setSyncStatus('failed', 'Pull blocked because the last backend acknowledgement lost data. Redeploy Apps Script, then Push to cloud first.');
+    showToast('Pull blocked to protect your local data. Redeploy Apps Script, then use Push to cloud before pulling.', 'error');
+    return false;
+  }
   // #High-1 data safety: a pull racing a pending debounced save must not
   // clobber in-flight local edits. saveData() already wrote them to
   // localStorage, but the 800 ms _syncTimer debounce means they may not have
@@ -1610,7 +1819,8 @@ async function pullFromRemote(opts){
     const prevPriceCache = DB._priceCache;
     DB = mergeDefaults(data);
     DB._priceCache = Object.assign({}, prevPriceCache, DB._priceCache);
-    saveLocal();
+    const savedLocally = saveLocal({ allowResetRestore: true });
+    if (!savedLocally) throw new Error('Pulled cloud data but could not store it locally. Existing local recovery data was not overwritten.');
     // Prefer the server's C1 timestamp (data._savedAt) — that's what doPost
     // compares lastSeenRemoteAt against. Falling back to data.updatedAt
     // (the client's own timestamp) causes false-positive conflicts after
@@ -1625,6 +1835,7 @@ async function pullFromRemote(opts){
     }
     localStorage.setItem(LK_SYNC_TS, stamp);
     setLastPull(stamp, hasServerStamp ? 'server' : 'client');
+    localStorage.removeItem(LK_RESET_SYNC_BLOCK);
     setSyncStatus('synced');
     renderAll();
     return true;
@@ -1649,6 +1860,7 @@ window.addEventListener('beforeunload', () => {
   // Preview guard: same rule as pushToRemote, a localhost/file: tab must
   // never fire a real network write on close.
   if (isLocalPreview()) { setSyncStatus('local', 'Preview, sync disabled'); return; }
+  if (localStorage.getItem(LK_RESET_SYNC_BLOCK) || localStorage.getItem(LK_LOSSY_SYNC_BLOCK)) return;
   const payload = JSON.stringify(syncPayload());
   // fetch() only throws synchronously for a handful of pre-flight cases (bad
   // URL, CSP block); a network failure or server error rejects the returned
@@ -1665,15 +1877,93 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
-/* Cross-tab sync (#High-9): when another tab saves to LK_DB, pick up the
-   change and re-render. The storage event fires only in OTHER tabs (not the
-   one that wrote), so there is no self-loop. Skip during conflict resolution
-   to avoid a mid-flight clobber. */
-window.addEventListener('storage', (e) => {
-  if (e.key !== LK_DB || !e.newValue) return;
-  if (_conflictResolvingNow) return;
+function _reconcileIncomingLocalStorage(raw){
+  // If several events queued before this handler ran, merge against the value
+  // actually in storage now, not an older event payload that has already been
+  // superseded.
+  const incoming = _readStoredLocalPayload() || JSON.parse(raw);
+  const priceCache = DB._priceCache;
+  const merged = mergeConcurrentLocalState(_localBase || incoming, localPersistPayload(), incoming, false);
+  DB = mergeDefaults(merged.value);
+  DB._priceCache = Object.assign({}, priceCache || {}, DB._priceCache || {});
+  const reconciled = localPersistPayload();
+  let persisted = false;
+  if (!_sameLocalValue(reconciled, incoming)) {
+    // Persist immediately. Waiting for a later user edit leaves LK_DB holding
+    // the incoming one-tab blob, so closing this tab would still lose the
+    // distinct edit that the merge preserved only in memory.
+    persisted = _writeLocalPayload(reconciled, merged.conflicts);
+  } else {
+    _localBase = _cloneLocalValue(incoming);
+    _stashLocalConflicts(merged.conflicts);
+  }
+  return { persisted, conflicts: merged.conflicts.length };
+}
+
+async function _handleRemovedLocalStorage(){
+  // A remove event is a cross-tab reset, not an empty update. Stop every
+  // queued/active cloud write first and keep the persistent reset block.
+  const quiesced = _cancelSyncForReset();
+  let recoveryKey = null;
   try {
-    DB = mergeDefaults(JSON.parse(e.newValue));
+    recoveryKey = 'LK_DB_PRE_REMOTE_RESET_' + Date.now();
+    localStorage.setItem(recoveryKey, JSON.stringify(localPersistPayload()));
+  } catch (snapshotErr) {
+    console.error('[storage reset] support-recovery snapshot failed', snapshotErr);
+    try {
+      recoveryKey = 'LK_DB_PRE_REMOTE_RESET_SESSION_' + Date.now();
+      sessionStorage.setItem(recoveryKey, JSON.stringify(localPersistPayload()));
+    } catch (sessionErr) {
+      recoveryKey = null;
+      console.error('[storage reset] session recovery snapshot also failed', sessionErr);
+    }
+  }
+  await quiesced;
+  DB = freshDB();
+  _localBase = _cloneLocalValue(localPersistPayload());
+  const hasCloud = !!getSyncUrl();
+  if (!hasCloud) {
+    localStorage.removeItem(LK_RESET_SYNC_BLOCK);
+    saveLocal();
+  }
+  renderAll();
+  if (hasCloud) {
+    setSyncStatus('failed', 'Another tab reset local data. Cloud writes remain paused until a pull or explicit push.');
+    showToast(recoveryKey
+      ? 'Another tab reset local data. This tab followed the reset. A technical snapshot was retained for support recovery.'
+      : 'Another tab reset local data. This tab followed the reset, but its technical recovery snapshot could not be stored.',
+      recoveryKey ? 'success' : 'error');
+  } else {
+    setSyncStatus('local', 'Another tab reset local data. No cloud sync is configured.');
+    showToast(recoveryKey
+      ? 'Another tab reset local data. This local-only tab followed the reset. A technical snapshot was retained for support recovery.'
+      : 'Another tab reset local data. This local-only tab followed the reset, but its technical recovery snapshot could not be stored.',
+      recoveryKey ? 'success' : 'error');
+  }
+  return { recoveryKey };
+}
+
+/* Cross-tab sync (#High-9): the storage event fires only in OTHER tabs. A
+   merge writes back only when its canonical value differs from the incoming
+   blob. The originating tab then receives that reconciled value, finds it
+   identical and does not echo it, which prevents ping-pong loops. */
+window.addEventListener('storage', (e) => {
+  if (e.key !== LK_DB) return;
+  if (_conflictResolvingNow) return;
+  if (localStorage.getItem(LK_RESET_SYNC_BLOCK)) {
+    // A stale tab can race the reset event and write its old blob after the
+    // primary key was removed. Delete that resurrection immediately. The
+    // remove event then tells the stale writer to follow the reset too.
+    if (e.newValue) localStorage.removeItem(LK_DB);
+    _handleRemovedLocalStorage().catch(err => console.error('[storage reset] failed', err));
+    return;
+  }
+  if (!e.newValue) {
+    _handleRemovedLocalStorage().catch(err => console.error('[storage reset] failed', err));
+    return;
+  }
+  try {
+    _reconcileIncomingLocalStorage(e.newValue);
     renderAll();
   } catch (_) {}
 });
@@ -1767,6 +2057,7 @@ function showConflictModal(opts){
       return false;
     }
     const data = parsed.data;
+    if (_rejectLossyAck(data)) return false;
     if (data.error) throw new Error(data.error);
       const stamp = data.savedAt || new Date().toISOString();
       localStorage.setItem(LK_SYNC_TS, stamp);
@@ -1826,12 +2117,14 @@ async function manualPull(){
 
 async function manualPush(){
   if (!getSyncUrl()) { showToast('Set the Apps Script URL first', 'error'); return; }
-  await pushToRemote();
+  const afterReset = !!localStorage.getItem(LK_RESET_SYNC_BLOCK);
+  if (afterReset && !confirm('Local data was reset and automatic cloud writes are paused. Push the current local data and replace the cloud copy?')) return;
+  const ok = await pushToRemote({ allowResetOverride: afterReset, retryLossyBackend: true });
   // QA low-priority: guard the lookup, an absent pill (markup not yet
   // painted, or removed) used to throw here and silently swallow the
   // "Pushed to cloud" toast.
   const pill = document.getElementById('sync-pill');
-  if (pill && pill.classList.contains('s-synced')) showToast('Pushed to cloud', 'success');
+  if (ok && pill && pill.classList.contains('s-synced')) showToast('Pushed to cloud', 'success');
 }
 
 function saveSyncUrlFromForm(){
@@ -1934,7 +2227,7 @@ function renderSetupWizardStep(){
         <li>Click the function dropdown, pick <code>initOnce</code>, then <strong>▶ Run</strong>. Grant the permissions Google asks for, it needs to read/write your sheet and call Yahoo Finance / CoinGecko.</li>
       </ol>
       <div class="actions">
-        <a class="btn btn-primary" href="https://github.com/julianchow21/Kujira-Portfolio/blob/main/Portfolio/apps-script.gs" target="_blank" rel="noopener noreferrer">Open the backend code</a>
+        <a class="btn btn-primary" href="https://github.com/julianchow21/Kujira-Portfolio/blob/main/Portfolio/Worker/apps-script.gs" target="_blank" rel="noopener noreferrer">Open the backend code</a>
       </div>
     </div>`;
   } else if (_swStep === 3){
@@ -2330,16 +2623,54 @@ function renderTaxEstimate(){
   `;
 }
 
-function resetLocalConfirm(){
-  if (!confirm('Reset local data? This wipes the browser cache but keeps your cloud sheet intact. You can pull from cloud to restore.')) return;
+function _cancelSyncForReset(){
+  if (_syncTimer) { clearTimeout(_syncTimer); _syncTimer = null; }
+  // Persist the block before awaiting an active request. Any save triggered by
+  // another callback during the wait remains local and cannot queue a blank
+  // cloud write after the reset.
+  localStorage.setItem(LK_RESET_SYNC_BLOCK, '1');
+  if (_activeSyncController) {
+    try { _activeSyncController.abort(); } catch (_) {}
+  }
+  return Promise.allSettled(Array.from(_activeSyncCompletions));
+}
+
+async function resetLocalConfirm(){
+  const hasCloud = !!getSyncUrl();
+  const confirmation = hasCloud
+    ? 'Reset local data? This clears this browser only. Automatic cloud writes will pause until you pull from cloud or explicitly choose Push to cloud. A technical snapshot will be retained in browser storage for support recovery.'
+    : 'Reset local data? This clears this browser only. No cloud sync is configured. A technical snapshot will be retained in browser storage for support recovery.';
+  if (!confirm(confirmation)) return;
+  await _cancelSyncForReset();
+
+  let snapshotKey;
+  try {
+    snapshotKey = 'LK_DB_PRE_RESET_' + Date.now();
+    localStorage.setItem(snapshotKey, JSON.stringify(localPersistPayload()));
+  } catch (snapshotErr) {
+    console.error('[resetLocalConfirm] pre-reset snapshot failed', snapshotErr);
+    localStorage.removeItem(LK_RESET_SYNC_BLOCK);
+    showToast('Reset cancelled because a recoverable safety copy could not be stored.', 'error');
+    saveData();
+    return;
+  }
   localStorage.removeItem(LK_DB);
   localStorage.removeItem(LK_SYNC_TS);
-  localStorage.removeItem(LK_LAST_PULL);
-  localStorage.removeItem(LK_LAST_PULL_SRC);
   DB = freshDB();
+  _localBase = _cloneLocalValue(localPersistPayload());
+  if (!hasCloud) {
+    localStorage.removeItem(LK_RESET_SYNC_BLOCK);
+    saveLocal();
+  }
   loadSettingsForm();
   renderAll();
-  showToast('Local data reset. Pull from cloud to restore.', 'success');
+  if (hasCloud) {
+    setSyncStatus('failed', 'Cloud writes paused after local reset. Pull from cloud to restore, or use explicit Push to cloud.');
+    showToast('Local data reset. Pull from cloud to restore. A technical snapshot was retained for support recovery, and automatic cloud writes are paused.', 'success');
+  } else {
+    setSyncStatus('local', 'Local data reset. No cloud sync is configured.');
+    showToast('Local data reset. A technical snapshot was retained for support recovery.', 'success');
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -4907,12 +5238,12 @@ function renderStocks(){
 
   // Combined card-head right: filters + action buttons + freshness — shared by all table states.
   const cardHeadRight = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-    <select id="sf-market" class="fi fi-sm" data-change="stocksFilterMarket">
+    <select id="sf-market" class="fi fi-sm" data-change="stocksFilterMarket" aria-label="Filter stocks by market">
       <option value="">All markets</option>
       <option value="SGX"${_stocksFilter.market==='SGX'?' selected':''}>SGX</option>
       <option value="US"${_stocksFilter.market==='US'?' selected':''}>US</option>
     </select>
-    <select id="sf-sector" class="fi fi-sm" data-change="stocksFilterSector">
+    <select id="sf-sector" class="fi fi-sm" data-change="stocksFilterSector" aria-label="Filter stocks by sector">
       <option value="">All sectors</option>
       ${sectorOpts}
     </select>
@@ -5246,7 +5577,7 @@ function _pbEnsureUI(){
     <div class="card-head cb-builder-head">
       <h3><svg width="15" height="15" viewBox="0 0 15 15" fill="none" style="vertical-align:-2px;margin-right:5px"><rect x="1" y="8" width="3" height="6" rx="0.5" fill="currentColor"/><rect x="6" y="4" width="3" height="10" rx="0.5" fill="currentColor"/><rect x="11" y="1" width="3" height="13" rx="0.5" fill="currentColor"/></svg>Chart Builder</h3>
       <div class="cb-head-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <select class="fi fi-sm" style="width:auto" id="pb-source-select" data-change="pbSetSource">
+        <select class="fi fi-sm" style="width:auto" id="pb-source-select" data-change="pbSetSource" aria-label="Chart data source">
           <option value="holdings">Holdings</option>
           <option value="allocation">Allocation</option>
           <option value="cashflow">Cashflow</option>
@@ -5257,7 +5588,7 @@ function _pbEnsureUI(){
           <button class="cb-period-btn" id="pb-mode-crosssec" data-click="pbSetMode" data-a0="crosssec">By holding</button>
           <button class="cb-period-btn" id="pb-mode-timeseries" data-click="pbSetMode" data-a0="timeseries">Price history</button>
         </div>
-        <select class="fi fi-sm" style="width:auto" id="pb-chart-type" data-change="pbRenderChart">
+        <select class="fi fi-sm" style="width:auto" id="pb-chart-type" data-change="pbRenderChart" aria-label="Chart type">
           <option value="bar">Bar</option><option value="line">Line</option>
           <option value="doughnut">Doughnut</option><option value="scatter">Scatter</option>
         </select>
@@ -5329,11 +5660,11 @@ function _pbEnsureUI(){
           </div>
           <div style="display:flex;gap:10px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
             <span style="font-size:12px;color:var(--text3)">Top N:</span>
-            <select class="fi fi-sm" id="pb-topn" data-change="pbRenderChart" style="width:auto">
+            <select class="fi fi-sm" id="pb-topn" data-change="pbRenderChart" style="width:auto" aria-label="Number of chart results">
               <option value="all" selected>All</option><option value="5">5</option><option value="10">10</option><option value="20">20</option>
             </select>
             <span style="font-size:12px;color:var(--text3)">Sort:</span>
-            <select class="fi fi-sm" id="pb-sort" data-change="pbRenderChart" style="width:auto">
+            <select class="fi fi-sm" id="pb-sort" data-change="pbRenderChart" style="width:auto" aria-label="Chart sort order">
               <option value="desc">Highest first</option><option value="asc">Lowest first</option><option value="alpha">A → Z</option>
             </select>
             <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer"><input type="checkbox" id="pb-dual" data-change="pbRenderChart"> Dual axis</label>
@@ -8055,19 +8386,27 @@ function renderCashflow(){
    DASHBOARD — net worth, allocation, cashflow. All computed in SGD, then
    fmt() converts to the dashboard tab's display currency.
    ═══════════════════════════════════════════════════════════════════════ */
-function _stockMvSGD(){
-  let mv = 0;
+function _stockMvSGDInfo(){
+  let total = 0, estimatedCount = 0, estimatedAmount = 0;
   (DB.stocks || []).forEach(s => {
     const ccy = s.currency || (s.market === 'SGX' ? 'SGD' : 'USD');
     const derived = deriveStockPosition(s.id);
     const shares  = derived ? derived.shares  : (s.shares  || 0);
     const avgCost = derived ? derived.avgCost : (s.avgCost || 0);
     const px = DB._priceCache[yahooSymbol(s)];
-    if (px && px.price != null) mv += toSGD(px.price * shares, px.currency || ccy);
-    else mv += toSGD(shares * avgCost, ccy); // fall back to cost basis
+    if (px && px.price != null) total += toSGD(px.price * shares, px.currency || ccy);
+    else {
+      const estimate = toSGD(shares * avgCost, ccy);
+      total += estimate;
+      if (estimate !== 0) {
+        estimatedAmount += estimate;
+        estimatedCount++;
+      }
+    }
   });
-  return mv;
+  return { total, estimatedCount, estimatedAmount };
 }
+function _stockMvSGD(){ return _stockMvSGDInfo().total; }
 /* Use the DERIVED balance (opening + movements + linked trade flows), the same
    figure the Cash tab shows, so net worth / allocation / EF never drift from it.
    Accounts whose currency has no known SGD rate are EXCLUDED from the total
@@ -8088,15 +8427,23 @@ function _cpfSGD(){
   return e.OA + e.SA + e.MA + e.RA;
 }
 function _realestateSGD(){ return (DB.realestate || []).reduce((s,r) => s + (Number(r.value)||0), 0); }
-function _cryptoSGD(){
-  let mv = 0;
+function _cryptoSGDInfo(){
+  let total = 0, estimatedCount = 0, estimatedAmount = 0;
   (DB.crypto || []).forEach(c => {
     const px = DB._priceCache[coinIdFor(c.coingeckoId || c.symbol)];
-    if (px && px.sgd != null) mv += px.sgd * (Number(c.amount)||0);
-    else mv += toSGD((Number(c.amount)||0) * (Number(c.avgCost)||0), c.currency || 'USD');
+    if (px && px.sgd != null) total += px.sgd * (Number(c.amount)||0);
+    else {
+      const estimate = toSGD((Number(c.amount)||0) * (Number(c.avgCost)||0), c.currency || 'USD');
+      total += estimate;
+      if (estimate !== 0) {
+        estimatedAmount += estimate;
+        estimatedCount++;
+      }
+    }
   });
-  return mv;
+  return { total, estimatedCount, estimatedAmount };
 }
+function _cryptoSGD(){ return _cryptoSGDInfo().total; }
 
 function _cssVar(name){ return (getComputedStyle(document.documentElement).getPropertyValue(name) || '').trim() || '#888'; }
 
@@ -8334,13 +8681,15 @@ function renderDashboard(){
   if (!nwEl) return;
 
   const cashInfo = _cashSGDInfo();
+  const stockInfo = _stockMvSGDInfo();
+  const cryptoInfo = _cryptoSGDInfo();
   const classes = [
-    { key:'Stocks',      val:_stockMvSGD(),     color:assetClassColor('Stocks') },
+    { key:'Stocks',      val:stockInfo.total,   color:assetClassColor('Stocks') },
     { key:'Cash',        val:cashInfo.total,    color:assetClassColor('Cash')   },
     { key:'CPF',         val:_cpfSGD(),         color:assetClassColor('CPF')    },
     { key:'Real Estate', val:_realestateSGD(),  color:assetClassColor('Real Estate') }
   ];
-  const crypto = _cryptoSGD();
+  const crypto = cryptoInfo.total;
   if (crypto > 0) classes.push({ key:'Crypto', val:crypto, color:assetClassColor('Crypto') });
   const insVal = insuranceCashValueSGD();
   if (insVal > 0) classes.push({ key:'Insurance', val:insVal, color:assetClassColor('Insurance') });
@@ -8359,6 +8708,11 @@ function renderDashboard(){
     : '';
   const fxExclusionNote = cashInfo.excludedCount
     ? `<div class="dash-hero-label" style="margin-top:4px">Excludes ${cashInfo.excludedCount} cash account${cashInfo.excludedCount>1?'s':''} with missing FX, refresh FX in Settings</div>`
+    : '';
+  const estimateCount = stockInfo.estimatedCount + cryptoInfo.estimatedCount;
+  const estimateAmount = stockInfo.estimatedAmount + cryptoInfo.estimatedAmount;
+  const marketEstimateNote = estimateCount
+    ? `<div class="dash-hero-label" style="margin-top:4px">Includes cost-basis estimate for ${estimateCount} stock/crypto position${estimateCount>1?'s':''} without a live price (${fmt(estimateAmount,{dp:0})})</div>`
     : '';
 
   // Monthly change chip: latest snapshot vs the closest one >=28 days older,
@@ -8381,7 +8735,7 @@ function renderDashboard(){
   const subline = `CPF ${_dashShowCpf ? 'on' : 'off'} · <span id="dash-hero-sync">${kjrEscape(syncText)}</span>`;
 
   nwEl.innerHTML = `<div class="dash-hero">
-    <div><div class="dash-hero-label">${_dashShowCpf ? 'Net worth (with CPF)' : 'Net worth (ex-CPF)'}${changeChip}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div><div class="dash-hero-sub">${subline}</div>${fxExclusionNote}</div>
+    <div><div class="dash-hero-label">${_dashShowCpf ? 'Net worth (with CPF)' : 'Net worth (ex-CPF)'}${changeChip}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div><div class="dash-hero-sub">${subline}</div>${marketEstimateNote}${fxExclusionNote}</div>
     ${heroSecondary}
     ${spark}
     <button style="${spark ? '' : 'margin-left:auto;'}flex-shrink:0" class="btn btn-sm${_dashShowCpf ? ' btn-active' : ''}" data-click="toggleDashCpf" title="${_dashShowCpf ? 'Click to exclude CPF from net worth' : 'Click to include CPF in net worth'}">CPF ${_dashShowCpf ? 'on' : 'off'}</button>
@@ -8948,6 +9302,10 @@ async function boot(){
     // and continue running on the in-memory empty DB for this session only.
     showToast('Your local data was unreadable and has been quarantined, not deleted. Check Settings > Diagnostics or contact support to recover it.', 'error');
   } else if (!had) {
+    // A synced reset deliberately leaves LK_DB absent until cloud data is
+    // pulled back. Local-only users have no cloud write to protect, so clear
+    // the stale block and let them start again from an empty portfolio.
+    if (localStorage.getItem(LK_RESET_SYNC_BLOCK) && !getSyncUrl()) localStorage.removeItem(LK_RESET_SYNC_BLOCK);
     saveLocal(); // genuinely empty (first run): seed so localStorage has the canonical shape
   }
   migrateDeviceLocalChartState(); // D1: one-time pickup of the old localStorage chart/layout keys

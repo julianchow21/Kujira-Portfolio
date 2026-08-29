@@ -1,6 +1,6 @@
 # Portfolio monorepo
 
-Monorepo of 4 static SPAs hosted on GitHub Pages. No framework, no bundler, no build step. Open any `.html` directly or serve from repo root.
+Monorepo of 3 static SPAs hosted on GitHub Pages. No framework, no bundler, no build step. Open any `.html` directly or serve from repo root.
 
 > Master rules also apply from `~/Claude Projects/Claude/CLAUDE.md` (Julian's identity, formatting, workflow, skills, GitHub push, file naming, folder cleanliness, version badge, UI quality standard). That file loads separately and is not duplicated here. This file covers repo-specific architecture, commands, constraints, and gotchas no agent could infer from filenames alone.
 
@@ -135,4 +135,4 @@ These extend or override the master `CLAUDE.md` rules for this repo.
 ## Conventions
 
 - All apps use the Kujira design token system: `--bg/bg2/bg3/bg4`, `--text/text2/text3`, `--red/green/blue/amber`, `--accent`, `--radius`, `--glass*` (Portfolio, floating elements only since v2.39), `--surface-solid` (Portfolio dense tables)
-- Portfolio dark theme default (`--accent:#2dd4bf` teal); warm light opt-in (`--accent:#c15f3c` terracotta). Trading uses dark only with `--accent:#2962FF` and `--accent2:#1565C0` (TradingView blue convention), `--radius:6px/--radius-lg:8px`. Forex has dark and light themes both with `--accent:#2dd4bf` (dark) and `--accent:#0d9488` (light).
+- Portfolio dark theme default (`--accent:#2dd4bf` teal); warm light opt-in (`--bg:#F6F4EE`, `--accent:#0F6E56` deep teal). Trading uses dark only with `--accent:#2962FF` and `--accent2:#1565C0` (TradingView blue convention), `--radius:6px/--radius-lg:8px`. Forex has dark and light themes both with `--accent:#2dd4bf` (dark) and `--accent:#0d9488` (light).

@@ -464,5 +464,21 @@ test('esc - null/undefined become empty string, not "null"/"undefined"', () => {
   assert.strictEqual(sandbox.esc(undefined), '');
 });
 
+/* ====================== Proxy bootstrap / recovery accessibility ====================== */
+test('boot - URL parameters cannot select or persist a Worker origin', () => {
+  const bootSource = extractFunction(src, 'boot');
+  assert.ok(!bootSource.includes('URLSearchParams'), 'boot must not read a worker URL from the query string');
+  assert.ok(!bootSource.includes('cfg.proxyUrl'), 'boot must not set the proxy destination');
+  assert.ok(src.includes('id="proxyUrl"'), 'manual Settings proxy configuration must remain available');
+});
+test('error recovery - banner is a keyboard-semantic button with a visible focus rule', () => {
+  assert.match(src, /<button type="button" class="banner" id="errBanner"><\/button>/);
+  assert.match(src, /\.banner:focus-visible\s*\{/);
+  assert.ok(src.includes('$("#errBanner").addEventListener("click",openDrawer)'));
+  const showErrorSource = extractFunction(src, 'showError');
+  assert.ok(showErrorSource.includes('esc(msg)'), 'error text must remain escaped');
+  assert.ok(showErrorSource.includes('Open Settings'), 'control name must describe its recovery action');
+});
+
 console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
 if (failed > 0) process.exit(1);

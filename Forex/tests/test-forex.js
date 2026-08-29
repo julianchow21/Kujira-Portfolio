@@ -16,9 +16,11 @@ const vm = require('vm');
 const assert = require('assert');
 
 const INDEX_PATH = path.join(__dirname, '..', 'index.html');
+const SCHEMA_PATH = path.join(__dirname, '..', 'schema.sql');
 const CAL_PATH = path.join(__dirname, '..', 'lib', 'kjr-calendar.js');
 const FMT_PATH = path.join(__dirname, '..', 'lib', 'kjr-format.js');
 const indexSrc = fs.readFileSync(INDEX_PATH, 'utf8');
+const schemaSrc = fs.readFileSync(SCHEMA_PATH, 'utf8');
 const calSrc = fs.readFileSync(CAL_PATH, 'utf8');
 
 /* ====================== Extraction helpers (see Trading/tests/test-trading.js for full notes) ====================== */
@@ -42,7 +44,7 @@ function sliceFromMatch(source, start) {
   return source.slice(start, i);
 }
 function extractFunction(source, name, fromPath) {
-  const re = new RegExp('function\\s+' + name + '\\s*\\(');
+  const re = new RegExp('(?:async\\s+)?function\\s+' + name + '\\s*\\(');
   const m = re.exec(source);
   if (!m) throw new Error('extractFunction: "' + name + '" not found in ' + fromPath);
   return sliceFromMatch(source, m.index);
@@ -73,8 +75,9 @@ function toPlain(x) { return JSON.parse(JSON.stringify(x)); }
 /* ====================== Extract Forex/index.html functions + consts ====================== */
 
 const FN_NAMES = ['deriveTrade', 'computeStats', 'mergeTable', 'parseCSV', 'sortVal',
-  'tradeTags', 'parseTags', 'allTags', 'entitlement'];
-const CONST_NAMES = ['PLAN', 'ENTITLEMENTS'];
+  'tradeTags', 'parseTags', 'allTags', 'entitlement', 'isValidStoredId',
+  'splitValidRows', 'field'];
+const CONST_NAMES = ['PLAN', 'ENTITLEMENTS', 'STORED_ID_MAX'];
 
 // allTags() reads the module-level `DB.trades` array; stub the minimal shape it needs
 // (a plain data global, not app behaviour) so the function is callable in isolation.
@@ -87,6 +90,33 @@ for (const n of FN_NAMES) {
 for (const n of CONST_NAMES) {
   try { extractedCode += extractConst(indexSrc, n, INDEX_PATH) + '\n'; }
   catch (e) { missing.push(n + ' (const, index.html): ' + e.message); }
+}
+
+/* Sync contract sandbox. It supplies inert local dependencies and a mocked
+   fetch per test, so no network or live Supabase data can be touched. */
+const SYNC_FN_NAMES = ['isValidStoredId', 'splitValidRows', 'assertStoredId',
+  'assertSyncTable', 'sbSyncRow', 'sbPageUrl', 'sbFetchAll', 'rowRevision',
+  '_acceptServerRevision', '_flushDirty', '_queueDelete', '_unqueueDelete',
+  '_recordConflict', 'sbDelete', 'flushPendingDeletes'];
+let syncCode = [
+  "var TABLES=['trades'];",
+  'var STORED_ID_MAX=64, SB_PAGE_SIZE=1000;',
+  "var SB_URL='https://mock.supabase.test', SB_HDR={'Content-Type':'application/json'};",
+  'var DB={trades:[]}, _dirty={trades:new Set()}, _rowRev={trades:new Map()};',
+  "var APP={storageKey:'test_forex'}, persistedStore={};",
+  "var PDEL_KEY='test_pending_deletes', CONFLICT_KEY='test_sync_conflicts';",
+  "var localStorage={setItem:(k,v)=>{persistedStore[k]=v;},getItem:(k)=>persistedStore[k]||null};",
+  'function toast(){}',
+  'function isLocalhostPreview(){return false;} function sbConfigured(){return true;} function setSync(){}',
+  'var _flushPromise=null, _flushQueued=false, flushCalls=0, flushGate=null;',
+  'async function _flushDirtyOnce(){ flushCalls++; if(flushGate) await flushGate; }',
+  "function currentUser(){ return {id:'00000000-0000-0000-0000-000000000001'}; }",
+  'function quarantineRows(source,table,rows){ quarantined.push({source,table,rows}); }',
+  'var quarantined=[];',
+].join('\n') + '\n';
+for (const n of SYNC_FN_NAMES) {
+  try { syncCode += extractFunction(indexSrc, n, INDEX_PATH) + '\n'; }
+  catch (e) { missing.push(n + ' (sync function, index.html): ' + e.message); }
 }
 
 /* ====================== Extract kjr-calendar.js's internal Cal._computeCells ====================== */
@@ -111,6 +141,10 @@ if (missing.length) {
 const sandbox = {};
 const context = vm.createContext(sandbox);
 vm.runInContext(extractedCode, context, { filename: 'extracted-forex-index.js' });
+
+const syncSandbox = {};
+const syncContext = vm.createContext(syncSandbox);
+vm.runInContext(syncCode, syncContext, { filename: 'extracted-forex-sync.js' });
 
 const calSandbox = {};
 const calContext = vm.createContext(calSandbox);
@@ -321,6 +355,45 @@ test('mergeTable - empty cloud and local inputs return an empty array', () => {
   assert.deepStrictEqual(toPlain(sandbox.mergeTable([], [], new Set())), []);
   assert.deepStrictEqual(toPlain(sandbox.mergeTable([], [], new Set(['x']))), []);
 });
+test('mergeTable - an empty cloud never erases existing local rows', () => {
+  const local = [{ id: 'local_1', v: 'kept' }];
+  assert.deepStrictEqual(toPlain(sandbox.mergeTable([], local, new Set())), local);
+});
+test('mergeTable - cloud tombstones remove clean local rows', () => {
+  const cloud = [{ id: 'trade_1', _deletedAt: '2026-08-29T00:00:00Z' }];
+  const local = [{ id: 'trade_1', v: 'old local' }];
+  assert.deepStrictEqual(toPlain(sandbox.mergeTable(cloud, local, new Set())), []);
+});
+test('mergeTable - a fast client clock does not outrank a server version', () => {
+  const cloud = [{ id: 'trade_1', v: 'server wins', _updatedAt: '2026-01-01T00:00:00Z' }];
+  const local = [{ id: 'trade_1', v: 'fast client', updatedAt: '2099-01-01T00:00:00Z' }];
+  assert.strictEqual(sandbox.mergeTable(cloud, local, new Set())[0].v, 'server wins');
+});
+
+/* ====================== stored IDs + form accessibility ====================== */
+test('isValidStoredId - accepts generated and UUID-style IDs within the cap', () => {
+  assert.strictEqual(sandbox.isValidStoredId('abc123'), true);
+  assert.strictEqual(sandbox.isValidStoredId('550e8400-e29b-41d4-a716-446655440000'), true);
+  assert.strictEqual(sandbox.isValidStoredId('trade_01'), true);
+});
+test('isValidStoredId - rejects quote/script payloads, whitespace and overlong IDs', () => {
+  assert.strictEqual(sandbox.isValidStoredId("x');alert(1)//"), false);
+  assert.strictEqual(sandbox.isValidStoredId('<script>alert(1)</script>'), false);
+  assert.strictEqual(sandbox.isValidStoredId('trade 01'), false);
+  assert.strictEqual(sandbox.isValidStoredId('a'.repeat(65)), false);
+});
+test('splitValidRows - quarantinable rows are separated from valid stored rows', () => {
+  const out = sandbox.splitValidRows([{ id: 'ok_1' }, { id: "bad'id" }, null]);
+  assert.deepStrictEqual(toPlain(out.valid), [{ id: 'ok_1' }]);
+  assert.deepStrictEqual(toPlain(out.rejected), [{ id: "bad'id" }, null]);
+});
+test('field - programme-links label, input and validation error', () => {
+  const html = sandbox.field('symbol', 'Symbol', true, '<input id="f-symbol" type="text">');
+  assert.match(html, /<label for="f-symbol">/);
+  assert.match(html, /aria-describedby="e-symbol"/);
+  assert.match(html, /aria-invalid="false"/);
+  assert.match(html, /id="e-symbol" aria-live="polite"/);
+});
 
 /* ====================== parseCSV ====================== */
 test('parseCSV - quoted field with an embedded comma', () => {
@@ -528,5 +601,182 @@ test('_computeCells - lead + trail padding always totals a multiple of 7, across
   }
 });
 
-console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
-if (failed > 0) process.exit(1);
+/* ====================== static safety contracts ====================== */
+test('stored trade IDs never enter inline JavaScript handlers', () => {
+  assert.doesNotMatch(indexSrc, /onclick="openTradeModal\([^"\n]*\.id/);
+  assert.doesNotMatch(indexSrc, /onclick="confirmDeleteTrade\([^"\n]*\.id/);
+  assert.doesNotMatch(indexSrc, /onclick="deleteTrade\([^"\n]*\+id/);
+  assert.match(indexSrc, /<tr data-trade-id=/);
+  assert.match(indexSrc, /addEventListener\('click',\(\)=>openTradeModal\(id\)\)/);
+});
+test('trade validation updates both visual and programme state', () => {
+  assert.match(indexSrc, /f\.setAttribute\('aria-invalid',m\?'true':'false'\)/);
+  assert.match(indexSrc, /aria-label="Close trade form"/);
+  assert.match(indexSrc, /aria-label="Toggle colour theme"/);
+  assert.match(indexSrc, /aria-label="Open settings"/);
+});
+test('375px mobile rules shrink the topbar without removing app links or theme', () => {
+  assert.match(indexSrc, /@media\(max-width:640px\)\{[\s\S]*?\.topbar\{gap:6px;/);
+  for (const label of ['Trading', 'Forex', 'Portfolio']) assert.match(indexSrc, new RegExp('class="tb-tab[^>]*>\\s*' + label));
+  assert.match(indexSrc, /id="theme-btn"/);
+});
+test('schema defines authenticated, RLS-invoker CAS and durable tombstones', () => {
+  assert.match(schemaSrc, /deleted_at\s+timestamptz/);
+  assert.match(schemaSrc, /create or replace function public\.sync_trade/);
+  assert.match(schemaSrc, /security invoker/);
+  assert.match(schemaSrc, /for update;/);
+  assert.match(schemaSrc, /auth\.uid\(\)/);
+  assert.match(schemaSrc, /revoke all on function public\.sync_trade[^\n]+from anon/);
+  assert.match(schemaSrc, /grant execute on function public\.sync_trade[^\n]+to authenticated/);
+  assert.strictEqual((schemaSrc.match(/drop policy if exists/g) || []).length, 4);
+});
+test('dashboard emits exactly one Profit factor stat card', () => {
+  const source = extractFunction(indexSrc, 'renderDashboard', INDEX_PATH);
+  assert.strictEqual((source.match(/statCard\('Profit factor'/g) || []).length, 1);
+});
+
+async function testAsync(name, fn) {
+  try { await fn(); console.log(`✅ PASS: ${name}`); passed++; }
+  catch (e) { console.error(`❌ FAIL: ${name}`); console.error(e); failed++; }
+}
+
+async function runSyncContractTests() {
+  await testAsync('sbSyncRow - stale server version is rejected and returned for recovery', async () => {
+    syncSandbox.fetch = async () => ({ ok: true, json: async () => [{
+      applied: false, row_id: 'trade_1', row_data: { symbol: 'EURUSD' },
+      server_updated_at: '2026-08-29T01:00:00Z', server_deleted_at: null,
+    }] });
+    await assert.rejects(
+      () => syncSandbox.sbSyncRow('trades', { id: 'trade_1', symbol: 'GBPUSD', _updatedAt: '2026-08-29T00:00:00Z' }, false),
+      (err) => err.code === 'STALE_WRITE' && err.serverRow.symbol === 'EURUSD'
+    );
+  });
+
+  await testAsync('sbSyncRow - delete uses the same CAS RPC and sends a tombstone intent', async () => {
+    let request;
+    syncSandbox.fetch = async (url, options) => {
+      request = { url, options };
+      return { ok: true, json: async () => [{
+        applied: true, row_id: 'trade_2', row_data: { symbol: 'USDJPY' },
+        server_updated_at: '2026-08-29T02:00:00Z', server_deleted_at: '2026-08-29T02:00:00Z',
+      }] };
+    };
+    const out = await syncSandbox.sbSyncRow('trades', { id: 'trade_2', symbol: 'USDJPY', _updatedAt: '2026-08-29T01:00:00Z' }, true);
+    const body = JSON.parse(request.options.body);
+    assert.ok(request.url.endsWith('/rest/v1/rpc/sync_trade'));
+    assert.strictEqual(body.p_expected_updated_at, '2026-08-29T01:00:00Z');
+    assert.strictEqual(body.p_delete, true);
+    assert.strictEqual(body.p_data, null);
+    assert.strictEqual(out._deletedAt, '2026-08-29T02:00:00Z');
+  });
+
+  await testAsync('sbDelete - stale immediate delete is queued and audited once with both row versions', async () => {
+    syncSandbox.persistedStore = {};
+    syncSandbox.fetch = async () => ({ ok: true, json: async () => [{
+      applied: false, row_id: 'trade_delete_1', row_data: { symbol: 'SERVER' },
+      server_updated_at: '2026-08-29T03:00:00Z', server_deleted_at: null,
+    }] });
+    const local = { id: 'trade_delete_1', symbol: 'LOCAL', _updatedAt: '2026-08-29T02:00:00Z' };
+    assert.strictEqual(await syncSandbox.sbDelete('trades', local.id, local._updatedAt, local), false);
+    assert.strictEqual(await syncSandbox.sbDelete('trades', local.id, local._updatedAt, local), false);
+    const queued = JSON.parse(syncSandbox.persistedStore.test_pending_deletes);
+    const conflicts = JSON.parse(syncSandbox.persistedStore.test_sync_conflicts);
+    assert.strictEqual(queued.length, 1);
+    assert.strictEqual(conflicts.length, 1);
+    assert.strictEqual(conflicts[0].operation, 'delete');
+    assert.strictEqual(conflicts[0].local.symbol, 'LOCAL');
+    assert.strictEqual(conflicts[0].server.symbol, 'SERVER');
+  });
+
+  await testAsync('flushPendingDeletes - stale queued delete remains durable and does not duplicate its audit', async () => {
+    syncSandbox.persistedStore = {
+      test_pending_deletes: JSON.stringify([{
+        table: 'trades', id: 'trade_delete_2', expectedUpdatedAt: '2026-08-29T02:00:00Z',
+        data: { id: 'trade_delete_2', symbol: 'QUEUED LOCAL', _updatedAt: '2026-08-29T02:00:00Z' },
+      }]),
+    };
+    syncSandbox.fetch = async () => ({ ok: true, json: async () => [{
+      applied: false, row_id: 'trade_delete_2', row_data: { symbol: 'QUEUED SERVER' },
+      server_updated_at: '2026-08-29T04:00:00Z', server_deleted_at: null,
+    }] });
+    await syncSandbox.flushPendingDeletes();
+    await syncSandbox.flushPendingDeletes();
+    const queued = JSON.parse(syncSandbox.persistedStore.test_pending_deletes);
+    const conflicts = JSON.parse(syncSandbox.persistedStore.test_sync_conflicts);
+    assert.strictEqual(queued.length, 1);
+    assert.strictEqual(conflicts.length, 1);
+    assert.strictEqual(conflicts[0].operation, 'delete');
+    assert.strictEqual(conflicts[0].local.symbol, 'QUEUED LOCAL');
+    assert.strictEqual(conflicts[0].server.symbol, 'QUEUED SERVER');
+  });
+
+  await testAsync('sbFetchAll - keyset pagination reads beyond 1,000 rows completely', async () => {
+    const first = Array.from({ length: 1000 }, (_, i) => ({
+      id: 'id' + String(i).padStart(4, '0'), data: { n: i }, updated_at: '2026-08-29T00:00:00Z', deleted_at: null,
+    }));
+    const second = [{ id: 'id1000', data: { n: 1000 }, updated_at: '2026-08-29T00:00:01Z', deleted_at: null }];
+    const urls = [];
+    syncSandbox.fetch = async (url) => { urls.push(url); return { ok: true, json: async () => (urls.length === 1 ? first : second) }; };
+    const out = await syncSandbox.sbFetchAll('trades');
+    assert.strictEqual(out.length, 1001);
+    assert.strictEqual(urls.length, 2);
+    assert.match(urls[1], /updated_at\.gt\./);
+    assert.match(urls[1], /id\.gt\.id0999/);
+  });
+
+  await testAsync('sbFetchAll - malicious cloud IDs fail closed and are quarantined', async () => {
+    syncSandbox.quarantined.length = 0;
+    syncSandbox.fetch = async () => ({ ok: true, json: async () => [{
+      id: "x');alert(1)//", data: {}, updated_at: '2026-08-29T00:00:00Z', deleted_at: null,
+    }] });
+    await assert.rejects(() => syncSandbox.sbFetchAll('trades'), /invalid stored trade ID/i);
+    assert.strictEqual(syncSandbox.quarantined.length, 1);
+  });
+
+  await testAsync('dirty revision - edit during an in-flight upload stays dirty', async () => {
+    syncSandbox.persistedStore = {};
+    syncSandbox.DB.trades = [{ id: 'trade_3', symbol: 'newer edit', _updatedAt: 'old-server-time' }];
+    syncSandbox._dirty.trades = new Set(['trade_3']);
+    syncSandbox._rowRev.trades = new Map([['trade_3', 2]]);
+    const cleared = syncSandbox._acceptServerRevision('trades', 'trade_3', 1, { _updatedAt: 'new-server-time' });
+    assert.strictEqual(cleared, false);
+    assert.strictEqual(syncSandbox._dirty.trades.has('trade_3'), true);
+    assert.strictEqual(syncSandbox.DB.trades[0].symbol, 'newer edit');
+    assert.strictEqual(syncSandbox.DB.trades[0]._updatedAt, 'new-server-time');
+    const persisted = JSON.parse(syncSandbox.persistedStore.test_forex);
+    assert.strictEqual(persisted.trades[0].symbol, 'newer edit');
+    assert.strictEqual(persisted.trades[0]._updatedAt, 'new-server-time');
+  });
+
+  await testAsync('accepted server revision - persists before the dirty flag clears', async () => {
+    syncSandbox.persistedStore = {};
+    syncSandbox.DB.trades = [{ id: 'trade_4', symbol: 'stable edit', _updatedAt: 'old-server-time' }];
+    syncSandbox._dirty.trades = new Set(['trade_4']);
+    syncSandbox._rowRev.trades = new Map([['trade_4', 1]]);
+    const cleared = syncSandbox._acceptServerRevision('trades', 'trade_4', 1, { _updatedAt: 'accepted-server-time' });
+    assert.strictEqual(cleared, true);
+    assert.strictEqual(syncSandbox._dirty.trades.has('trade_4'), false);
+    assert.strictEqual(JSON.parse(syncSandbox.persistedStore.test_forex).trades[0]._updatedAt, 'accepted-server-time');
+  });
+
+  await testAsync('flush coordinator - overlapping calls coalesce and never run concurrently', async () => {
+    syncSandbox._flushPromise = null; syncSandbox._flushQueued = false; syncSandbox.flushCalls = 0;
+    let release;
+    syncSandbox.flushGate = new Promise(resolve => { release = resolve; });
+    const first = syncSandbox._flushDirty();
+    const second = syncSandbox._flushDirty();
+    assert.strictEqual(first, second);
+    assert.strictEqual(syncSandbox.flushCalls, 1);
+    release();
+    await Promise.all([first, second]);
+    assert.strictEqual(syncSandbox.flushCalls, 2);
+    assert.strictEqual(syncSandbox._flushPromise, null);
+    syncSandbox.flushGate = null;
+  });
+}
+
+(async () => {
+  await runSyncContractTests();
+  console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
+  if (failed > 0) process.exit(1);
+})().catch((e) => { console.error(e); process.exit(1); });

@@ -24,7 +24,7 @@ The app's first-launch wizard walks you through these steps interactively. The v
 
 1. In your new sheet: **Extensions → Apps Script**.
 2. Delete whatever code is already in `Code.gs`.
-3. Open [`Portfolio/apps-script.gs`](./Portfolio/apps-script.gs) from this repo. Copy everything.
+3. Open [`Portfolio/Worker/apps-script.gs`](./Portfolio/Worker/apps-script.gs) from this repo. Copy everything.
 4. Paste into `Code.gs`. Click **Save** (or Cmd/Ctrl+S).
 5. From the function dropdown at the top, pick **`initOnce`** and click **▶ Run**.
 6. Google will ask you to grant permissions. Click **Review permissions**, pick your Google account, click **Advanced** → **Go to (your project name)** if there's a "Google hasn't verified this app" warning (this is normal — it's *your own code*), then **Allow**.
@@ -52,7 +52,7 @@ That's it. Add a stock, refresh prices, watch it sync to your sheet.
 
 ## Updating the backend
 
-If we ship a new version of `Portfolio/apps-script.gs`, you'll need to re-paste it:
+If we ship a new version of `Portfolio/Worker/apps-script.gs`, you'll need to re-paste it:
 
 1. Open your Apps Script project (from the same Google Sheet → Extensions → Apps Script).
 2. Select all in `Code.gs`, delete, paste the new file, save.
@@ -85,7 +85,7 @@ To report a security issue, please open a private security advisory on the GitHu
 - Test the URL directly: paste it into a new browser tab. You should see `{"schema":"kujira-portfolio",...}`.
 
 **Price test returns HTTP 401 from Yahoo.**
-- Yahoo locked down their old quote endpoint. Make sure you have the **latest** backend `.txt` — it uses the v8 chart endpoint that doesn't require auth.
+- Yahoo locked down their old quote endpoint. Make sure you have the latest `Portfolio/Worker/apps-script.gs`, it uses the v8 chart endpoint that does not require auth.
 
 **"Schema mismatch" error.**
 - The sheet you connected was already used by another Kujira app. Use a fresh sheet, or clear cell A1.

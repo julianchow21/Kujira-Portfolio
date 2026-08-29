@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
+const { webcrypto } = require('crypto');
 
 const SRC_PATH = path.join(__dirname, '..', 'Worker', 'MU Yahoo Worker v3 (13 Jun).js');
 const TRADING_HTML_PATH = path.join(__dirname, '..', 'index.html');
@@ -117,6 +118,28 @@ const frontendSandbox = {};
 const frontendContext = vm.createContext(frontendSandbox);
 vm.runInContext(frontendCode, frontendContext, { filename: 'extracted-trading-evalcond.js' });
 
+/* ====================== Full Worker harness for route / scheduled tests ====================== */
+
+const fullWorkerCode = src
+  .replace('import { NYSE_HOLIDAYS, NYSE_HALF_DAYS } from "./nyse-holidays.js";', NYSE_SRC)
+  .replace('export default {', 'var worker = {');
+const FIXED_NOW = Date.UTC(2026, 6, 15, 16, 0, 0); // Wed 15 Jul 2026, 12:00 ET
+const RealDate = Date;
+class FixedDate extends RealDate {
+  constructor(...args) { super(...(args.length ? args : [FIXED_NOW])); }
+  static now() { return FIXED_NOW; }
+}
+const fullSandbox = {
+  URL, Request, Response, Headers, TextEncoder, Uint8Array,
+  crypto: webcrypto,
+  Date: FixedDate,
+  console: { error() {}, log() {} },
+  fetch: async () => { throw new Error('unexpected external fetch'); },
+};
+const fullContext = vm.createContext(fullSandbox);
+vm.runInContext(fullWorkerCode, fullContext, { filename: 'full-worker.js' });
+const worker = fullSandbox.worker;
+
 /* ====================== Cross-check INTERVALS/RANGES against what the frontend actually requests ====================== */
 // Pulled straight from Trading/index.html's TIMEFRAMES / DAILY_PARAMS / RS_SYMBOL fetch,
 // see Trading/CLAUDE.md "Timeframes". Kept as a literal list here (not re-extracted) since
@@ -131,6 +154,8 @@ function test(name, fn) {
   try { fn(); console.log(`✅ PASS: ${name}`); passed++; }
   catch (e) { console.error(`❌ FAIL: ${name}`); console.error(e); failed++; }
 }
+const asyncTests = [];
+function testAsync(name, fn) { asyncTests.push({ name, fn }); }
 
 console.log('--- Testing Trading Worker (extracted) ---');
 
@@ -297,5 +322,162 @@ test('isMarketWindow - false on a weekend regardless of time of day', () => {
   sandbox.__clearNow__();
 });
 
-console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
-if (failed > 0) process.exit(1);
+/* ====================== Alert route auth / rate limits ====================== */
+
+function makeKv(initial = {}) {
+  const store = new Map(Object.entries(initial).map(([key, value]) => [
+    key,
+    typeof value === 'string' ? value : JSON.stringify(value),
+  ]));
+  return {
+    store,
+    async get(key, options) {
+      const value = store.get(key);
+      if (value == null) return null;
+      return options?.type === 'json' ? JSON.parse(value) : value;
+    },
+    async put(key, value) { store.set(key, String(value)); },
+    async delete(key) { store.delete(key); },
+    async list({ prefix }) {
+      return { keys: [...store.keys()].filter(key => key.startsWith(prefix)).map(name => ({ name })) };
+    },
+  };
+}
+function alertRequest(pathname, secret, init = {}) {
+  return new Request('https://worker.test' + pathname, {
+    ...init,
+    headers: {
+      Origin: 'https://julianchow21.github.io',
+      'CF-Connecting-IP': '203.0.113.10',
+      'X-Alerts-Secret': secret,
+      ...(init.headers || {}),
+    },
+  });
+}
+function makeAlertState(alerts) {
+  return { symbol: 'MU', chatId: '123456789', alerts, updatedAt: 123 };
+}
+function triggeredAlert() {
+  return {
+    id: 'one', type: 'price_above', value: 50, oneShot: true,
+    cooldownMs: 0, enabled: true, armed: true, prevCond: null, lastFiredAt: null,
+  };
+}
+
+testAsync('alert routes - GET, POST and Telegram test all reject a wrong secret with 401', async () => {
+  const env = {
+    ALERTS_SECRET: 'correct secret', TELEGRAM_TOKEN: 'telegram token',
+    MU_ALERTS: makeKv({ 'alerts:MU': makeAlertState([]) }),
+  };
+  const requests = [
+    alertRequest('/alerts?symbol=MU', 'wrong secret'),
+    alertRequest('/alerts', 'wrong secret', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: 'MU', chatId: '1', alerts: [] }),
+    }),
+    alertRequest('/test-telegram', 'wrong secret'),
+  ];
+  for (const request of requests) {
+    const response = await worker.fetch(request, env);
+    assert.strictEqual(response.status, 401);
+    assert.strictEqual(response.headers.get('Access-Control-Allow-Origin'), 'https://julianchow21.github.io');
+  }
+});
+
+testAsync('alert GET and Telegram test - each route returns 429 when its rate bucket is exhausted', async () => {
+  const kv = makeKv({
+    'alerts:MU': makeAlertState([]),
+    'rl:203.0.113.10:alerts-get': '30',
+    'rl:203.0.113.10:telegram-test': '30',
+  });
+  const env = { ALERTS_SECRET: 'correct secret', TELEGRAM_TOKEN: 'telegram token', MU_ALERTS: kv };
+  const alertsResponse = await worker.fetch(alertRequest('/alerts?symbol=MU', 'correct secret'), env);
+  const telegramResponse = await worker.fetch(alertRequest('/test-telegram', 'correct secret'), env);
+  assert.strictEqual(alertsResponse.status, 429);
+  assert.strictEqual(telegramResponse.status, 429);
+});
+
+testAsync('alert GET - authenticated response omits the stored Telegram chatId', async () => {
+  const kv = makeKv({ 'alerts:MU': makeAlertState([triggeredAlert()]) });
+  const env = { ALERTS_SECRET: 'correct secret', MU_ALERTS: kv };
+  const response = await worker.fetch(alertRequest('/alerts?symbol=MU', 'correct secret'), env);
+  const body = await response.json();
+  assert.strictEqual(response.status, 200);
+  assert.strictEqual(body.symbol, 'MU');
+  assert.strictEqual(body.alerts.length, 1);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(body, 'chatId'), false);
+});
+
+testAsync('Telegram test - success requires an accepted response body and does not return chatId', async () => {
+  const kv = makeKv({ 'alerts:MU': makeAlertState([]) });
+  const env = { ALERTS_SECRET: 'correct secret', TELEGRAM_TOKEN: 'telegram token', MU_ALERTS: kv };
+  fullSandbox.fetch = async url => {
+    assert.ok(String(url).startsWith('https://api.telegram.org/bot'));
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+  };
+  const response = await worker.fetch(alertRequest('/test-telegram', 'correct secret'), env);
+  const body = await response.json();
+  assert.strictEqual(response.status, 200);
+  assert.deepStrictEqual(body, { ok: true });
+});
+
+testAsync('Telegram test - HTTP 200 with a rejected response body fails closed', async () => {
+  const kv = makeKv({ 'alerts:MU': makeAlertState([]) });
+  const env = { ALERTS_SECRET: 'correct secret', TELEGRAM_TOKEN: 'telegram token', MU_ALERTS: kv };
+  fullSandbox.fetch = async () => new Response(JSON.stringify({ ok: false }), { status: 200 });
+  const response = await worker.fetch(alertRequest('/test-telegram', 'correct secret'), env);
+  assert.strictEqual(response.status, 502);
+});
+
+/* ====================== Scheduled Telegram delivery state ====================== */
+
+function yahooResponse() {
+  return new Response(JSON.stringify({ chart: { result: [mkFixtureResult(30)] } }), { status: 200 });
+}
+
+testAsync('scheduled alerts - network failure leaves a one-shot armed for retry while saving safe re-arm state', async () => {
+  const retryAlert = triggeredAlert();
+  const safeRearm = {
+    id: 'two', type: 'price_below', value: 50, oneShot: false,
+    cooldownMs: 0, enabled: true, armed: false, prevCond: null, lastFiredAt: null,
+  };
+  const kv = makeKv({ 'alerts:MU': makeAlertState([retryAlert, safeRearm]) });
+  const env = { TELEGRAM_TOKEN: 'telegram token', MU_ALERTS: kv };
+  fullSandbox.fetch = async url => {
+    if (String(url).startsWith('https://query1.finance.yahoo.com/')) return yahooResponse();
+    throw new Error('simulated Telegram network failure');
+  };
+  await worker.scheduled({}, env, {});
+  const stored = JSON.parse(kv.store.get('alerts:MU'));
+  assert.strictEqual(stored.alerts[0].enabled, true, 'one-shot must remain enabled');
+  assert.strictEqual(stored.alerts[0].armed, true, 'failed delivery must retry on the next cron');
+  assert.strictEqual(stored.alerts[0].lastFiredAt, null, 'failed delivery must not consume cooldown state');
+  assert.strictEqual(stored.alerts[1].armed, true, 'unrelated safe re-arm state should still persist');
+});
+
+testAsync('scheduled alerts - accepted delivery commits one-shot, armed and last-fired state', async () => {
+  const kv = makeKv({ 'alerts:MU': makeAlertState([triggeredAlert()]) });
+  const env = { TELEGRAM_TOKEN: 'telegram token', MU_ALERTS: kv };
+  let telegramCalls = 0;
+  fullSandbox.fetch = async url => {
+    if (String(url).startsWith('https://query1.finance.yahoo.com/')) return yahooResponse();
+    telegramCalls++;
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+  };
+  await worker.scheduled({}, env, {});
+  const stored = JSON.parse(kv.store.get('alerts:MU'));
+  assert.strictEqual(telegramCalls, 1);
+  assert.strictEqual(stored.alerts[0].enabled, false);
+  assert.strictEqual(stored.alerts[0].armed, false);
+  assert.strictEqual(stored.alerts[0].lastFiredAt, FIXED_NOW);
+});
+
+async function finish() {
+  for (const { name, fn } of asyncTests) {
+    try { await fn(); console.log(`✅ PASS: ${name}`); passed++; }
+    catch (e) { console.error(`❌ FAIL: ${name}`); console.error(e); failed++; }
+  }
+  console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
+  if (failed > 0) process.exitCode = 1;
+}
+finish().catch(e => { console.error(e); process.exitCode = 1; });

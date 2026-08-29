@@ -3,7 +3,7 @@
 How to QA this app after any change, and the mistakes that must never come back.
 Re-run the whole thing whenever a new feature touches money, display, or storage.
 
-Supersedes `QA SOP v1 (4 Jun)`. Last updated: 03/07/2026 (app v2.38).
+Supersedes `QA SOP v1 (4 Jun)`. Last updated: 29/08/2026 (app v2.60).
 
 ---
 
@@ -13,9 +13,10 @@ Supersedes `QA SOP v1 (4 Jun)`. Last updated: 03/07/2026 (app v2.38).
    the repo root on port 3807. The app lives at `http://localhost:3807/Portfolio/`, not the
    repo root (the root 404s by design, that is expected).
 2. **Run the automated checks first** (cheap, catches regressions before you open a browser):
-   - `npm test` from `Portfolio/`, runs `tests/test-core.js` (money/date/CPF/tax/seed-guard
-     unit tests) then `tests/check-release.js` (cache-bust discipline, see below). Both must
-     be green before any manual pass.
+   - `npm test` from `Portfolio/`, runs `tests/test-core.js` (pure core logic),
+     `tests/test-app.js` (extracted pure helpers from `Worker/app.js`), then
+     `tests/check-release.js` (cache-bust discipline, see below). All three must be green
+     before any manual pass.
    - Static scan for dead buttons: `grep -oE "^function [a-zA-Z0-9_]+" index.html | sort | uniq -d`
      (expect blank, no duplicate top-level defs).
    - Every inline `onclick`/`oninput`/`onchange` handler resolves to a defined function

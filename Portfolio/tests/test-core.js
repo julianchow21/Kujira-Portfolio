@@ -287,6 +287,37 @@ function runTests() {
     assert.strictEqual(core.getPayday(2026, 3), '2026-03-31');
   });
 
+  test('SG_HOLIDAYS - 2027 exactly matches the complete MOM calendar', () => {
+    const holidays2027 = Array.from(core.SG_HOLIDAYS)
+      .filter(date => date.startsWith('2027-'))
+      .sort();
+    assert.deepStrictEqual(holidays2027, [
+      '2027-01-01',
+      '2027-02-06',
+      '2027-02-07',
+      '2027-02-08',
+      '2027-03-10',
+      '2027-03-26',
+      '2027-05-01',
+      '2027-05-17',
+      '2027-05-20',
+      '2027-08-09',
+      '2027-10-28',
+      '2027-12-25'
+    ]);
+  });
+
+  test('SG_HOLIDAYS - includes the Sunday CNY day and its observed Monday', () => {
+    assert.strictEqual(core.SG_HOLIDAYS.has('2027-02-07'), true);
+    assert.strictEqual(core.SG_HOLIDAYS.has('2027-02-08'), true);
+  });
+
+  test('SG_HOLIDAYS - complete 2027 calendar needs no incomplete warning', () => {
+    const holidays2027 = Array.from(core.SG_HOLIDAYS)
+      .filter(date => date.startsWith('2027-'));
+    assert.strictEqual(holidays2027.length, 12);
+  });
+
   // 10. Testing computeSgIncomeTax (D5: moved from app.js, IRAS worked examples)
   test('computeSgIncomeTax - IRAS worked examples at known chargeable-income points', () => {
     assert.strictEqual(core.computeSgIncomeTax(40000), 550);
@@ -843,19 +874,6 @@ function runTests() {
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
-
-  // Non-fatal constants-freshness reminder (does not affect pass/fail or exit code):
-  // SG_HOLIDAYS only lists fixed-date holidays for 2027 today. Warn once next year's
-  // table looks thin so the December constants review (see kjr-core.js header comment
-  // on SG_HOLIDAYS) doesn't get missed.
-  (function checkHolidayFreshness(){
-    const nextYear = new Date().getFullYear() + 1;
-    let count = 0;
-    core.SG_HOLIDAYS.forEach(d => { if (d.startsWith(String(nextYear))) count++; });
-    if (count < 8){
-      console.warn(`\n⚠️  SG_HOLIDAYS has only ${count} entries for ${nextYear} (expect ~11 once the full gazette lands). Constants review due, see kjr-core.js SG_HOLIDAYS comment.`);
-    }
-  })();
 
   if (failed > 0) process.exit(1);
 }

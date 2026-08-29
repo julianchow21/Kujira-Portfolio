@@ -230,8 +230,9 @@ input[type=number]{width:96px}
 .testout.err{display:block;color:var(--red);background:var(--red-soft);border:1px solid var(--red-border)}
 
 /* Banner / toast */
-.banner{background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);border-radius:var(--radius);padding:9px 12px;font-size:12px;margin-top:14px;display:none;cursor:pointer}
+.banner{width:100%;background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);border-radius:var(--radius);padding:9px 12px;font:inherit;font-size:12px;text-align:left;margin-top:14px;display:none;cursor:pointer}
 .banner:hover{border-color:var(--amber)}
+.banner:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-color:var(--accent)}
 .banner.show{display:block}
 .toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:300;display:flex;flex-direction:column;gap:8px;align-items:center;width:max-content;max-width:92vw}
 .toast{background:var(--bg4);border:1px solid var(--amber-border);color:var(--text);border-radius:var(--radius);padding:10px 14px;font-size:13px;box-shadow:0 6px 22px rgba(0,0,0,.5);animation:tin .2s ease}
@@ -327,7 +328,7 @@ body.has-alertbar{padding-bottom:56px}
       <a class="tb-tab" href="../Portfolio/" title="Kujira Portfolio">Portfolio</a>
     </nav>
     <div class="tb-right">
-      <span class="tb-ver">v3.12 (16 Aug)</span>
+      <span class="tb-ver">v3.13 (29 Aug)</span>
       <button class="iconbtn" id="refreshBtn" title="Refresh now" aria-label="Refresh now">&#x21bb;</button>
       <button class="iconbtn" id="gearBtn" title="Settings" aria-label="Settings">&#9881;</button>
     </div>
@@ -337,7 +338,7 @@ body.has-alertbar{padding-bottom:56px}
 <div class="wrap" role="main">
   <h1 class="sr-only">MU Day Trading</h1>
 
-  <div class="banner" id="errBanner"></div>
+  <button type="button" class="banner" id="errBanner"></button>
 
   <!-- Hero -->
   <div class="card">
@@ -578,7 +579,7 @@ body.has-alertbar{padding-bottom:56px}
   <span class="warn">For information only, not financial advice.</span>
   Live <span id="footSym">MU</span> data via Yahoo Finance, may be delayed and is not tick-accurate. Confirm against your broker before trading.
   <span id="footState"></span>
-  <span style="margin-left:8px;color:var(--text3)">v3.12 (16 Aug)</span>
+  <span style="margin-left:8px;color:var(--text3)">v3.13 (29 Aug)</span>
 
 </div>
 
@@ -1887,8 +1888,8 @@ function showError(msg){
   const b=$("#errBanner");
   if(msg){
     const tip = (cfg.proxyMode==="public" || cfg.proxyMode==="direct")
-      ? "Public proxies are unreliable and often down. Tap here to open Settings and connect a Cloudflare Worker or your Apps Script URL for live data."
-      : "Tap here to open Settings and check the data proxy.";
+      ? "Public proxies are unreliable and often down. Open Settings to connect a Cloudflare Worker or your Apps Script URL for live data."
+      : "Open Settings to check the data proxy.";
     b.innerHTML="<b>Could not load live data</b> ("+esc(msg)+"). "+tip;
     b.classList.add("show");
   } else b.classList.remove("show");
@@ -2371,22 +2372,8 @@ function openSymPop(anchor, meta){
 
 /* ====================== Boot ====================== */
 function boot(){
-  // One-tap remote setup: ?worker=<https URL> wires the Cloudflare Worker proxy
-  // and saves it, so a phone opened via a shared link never falls back to the
-  // flaky public proxies. Silently ignored if missing or not https.
-  (function bootstrapWorkerParam(){
-    const qs = new URLSearchParams(location.search);
-    const raw = qs.get("worker");
-    if(raw==null) return;
-    const url = raw.trim();
-    if(!/^https:\/\//i.test(url)) return;
-    cfg.proxyMode = "worker";
-    cfg.proxyUrl = url;
-    saveCfg();
-    qs.delete("worker");
-    history.replaceState(null, "", location.pathname + (qs.toString() ? "?" + qs.toString() : "") + location.hash);
-    toast("Worker proxy connected");
-  })();
+  // Worker origins are accepted only through the visible Settings flow. URL
+  // parameters must never select or persist a destination for alert secrets.
   // one-time migration: seed hidden-by-default level lines for existing users
   if(!cfg.lvDefaultsV31){
     cfg.levelLines=cfg.levelLines||{};

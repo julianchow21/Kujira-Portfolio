@@ -45,9 +45,9 @@ function seedDecision(remoteData, opts, expectedSchema){
 const CONSTANTS_VERIFIED_FOR = 2026;
 
 /* ─── SG public holidays ────────────────────────────────────────────────
-   2026 follows the MOM gazette. 2027 covers fixed-date holidays only.
-   Observed-Monday dates (when a holiday falls on a Sunday) are the entries
-   that matter for payday. Top up each December for the coming year. */
+   2026 and 2027 follow the MOM gazette. Observed-Monday dates (when a
+   holiday falls on a Sunday) are included because they matter for payday.
+   Review and add the next year's dates when MOM publishes them. */
 const SG_HOLIDAYS = new Set([
   // 2026
   '2026-01-01', // New Year's Day
@@ -61,11 +61,18 @@ const SG_HOLIDAYS = new Set([
   '2026-08-10', // National Day (observed, falls Sun 9 Aug)
   '2026-11-09', // Deepavali (observed, falls Sun 8 Nov)
   '2026-12-25', // Christmas Day
-  // 2027 — fixed-date only, verify and complete in Dec 2026
+  // 2027
   '2027-01-01', // New Year's Day
+  '2027-02-06', // Chinese New Year
+  '2027-02-07', // Chinese New Year
+  '2027-02-08', // Chinese New Year (observed, second day falls Sun 7 Feb)
+  '2027-03-10', // Hari Raya Puasa
   '2027-03-26', // Good Friday
   '2027-05-01', // Labour Day
+  '2027-05-17', // Hari Raya Haji
+  '2027-05-20', // Vesak Day
   '2027-08-09', // National Day
+  '2027-10-28', // Deepavali
   '2027-12-25'  // Christmas Day
 ]);
 

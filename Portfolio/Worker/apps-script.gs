@@ -180,6 +180,7 @@ const ALLOWED_KEYS = {
   cpfBalances:1, cpfHistory:1,
   income:1, expenses:1,
   snapshots:1, categories:1, settings:1,
+  insurance:1, insuranceRiders:1,
   changelog:1, trash:1, _meta:1
 };
 
@@ -205,14 +206,16 @@ function sanitisePayload_(data) {
     if (ALLOWED_KEYS[k]) clean[k] = data[k];
     else strippedKeys.push(k);
   });
-  // Hard caps on arrays, protect against accidental runaway
-  ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','changelog','trash'].forEach(t => {
+  const truncatedPaths = [];
+  // Hard caps on arrays, protect against accidental runaway. Record every
+  // capped table so doPost can fail closed rather than persist a partial copy.
+  ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','insurance','insuranceRiders','changelog','trash'].forEach(t => {
     if (Array.isArray(clean[t]) && clean[t].length > MAX_ARRAY_LEN) {
       clean[t] = clean[t].slice(0, MAX_ARRAY_LEN);
+      truncatedPaths.push(t);
     }
   });
   // Truncate any string field >5KB (defensive, the frontend already caps)
-  const truncatedPaths = [];
   truncateStringsDeep_(clean, MAX_STRING_LEN, '', truncatedPaths);
   return { clean, strippedKeys, truncatedPaths };
 }
@@ -286,6 +289,20 @@ function doPost(e) {
       clean = sanitised.clean;
       strippedKeys = sanitised.strippedKeys;
       truncatedPaths = sanitised.truncatedPaths;
+
+      // Never persist a payload that failed to round-trip exactly. Older
+      // deployments returned success after dropping unknown tables or
+      // truncating values, which let a later pull erase the local originals.
+      // The client also checks these fields for compatibility with an older
+      // backend, but the current backend rejects before writePayloadRaw_.
+      if (strippedKeys.length || truncatedPaths.length) {
+        return json_({
+          error: 'Payload rejected because it would lose data',
+          strippedKeys: strippedKeys,
+          truncated: truncatedPaths.length > 0,
+          truncatedPaths: truncatedPaths
+        });
+      }
 
       stamp = new Date().toISOString();
       writePayloadRaw_(sh, JSON.stringify(clean));

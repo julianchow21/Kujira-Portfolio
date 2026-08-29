@@ -1,6 +1,6 @@
 # Kujira Forex — Build Spec
 
-v0.1 draft, 15 Jun 2026. Status: for review, no code written yet.
+v0.1 draft, 15 Jun 2026. Status updated 29/08/2026: the Phase 1 single-user feature set is implemented as a local-first app. Multi-user authentication, Supabase sync and billing are Phase 2 targets and remain disabled.
 
 A personal trading journal and analytics app, modelled on TraderSync but trimmed to what one trader actually uses and what fits the Kujira single-file stack. You log each trade, tag it, and the app tells you what is working and what is losing money. It is retrospective. It does not replace the live Trading dashboard, it complements it.
 
@@ -16,75 +16,73 @@ In scope:
 - An AI coach that reads the computed stats and gives plain-English feedback (Claude API).
 - CSV import.
 
-Out of scope (deliberately):
+Out of Phase 1 (deliberately):
 - 900+ broker auto-sync. Needs broker OAuth per vendor. Too much surface for a personal app.
 - Tick-by-tick market replay. Needs a paid tick feed.
-- Multi-user accounts beyond the single-owner Supabase row-level model already in use.
+- Multi-user accounts, billing and any paid launch. The seams exist in source, but no authenticated or paid runtime is live.
 
 ## 2. Architecture
 
-- Sibling app in the existing repo: `Kujira/Portfolio/Forex/index.html`. Single-file SPA, no framework, no bundler, matching Trading and Portfolio.
-- Scaffold via the `newproject` skill from the hardened web-app-starter template.
-- Reuse the shared Kujira core (`kjr-core.js`) the Portfolio app already uses for Supabase auth and dirty-flag sync. Do not fork a second sync path.
-- Charts via TradingView Lightweight Charts v5.2.0, the same version and global the Trading app loads.
-- Dark theme only. Port the existing design tokens (`--bg*`, `--green`, `--red`, `--accent` #2dd4bf, `--blue`, `--amber`, `--radius`).
-- Topbar segmented control becomes three-way: Trading | Forex | Portfolio. Update the same control in the Trading and Portfolio files so the set is consistent.
-- Price data for chart markers reuses the Trading app's Worker proxy (`/chart`), not the public proxies.
+- Sibling app in the existing repo at `Kujira/Portfolio/Forex/index.html`. It is a single-file SPA with no framework or bundler.
+- Shared format and calendar engines are vendored in `lib/kjr-format.js` and `lib/kjr-calendar.js`. Forex owns its row-level local and dormant cloud-sync path in `index.html`, it does not import Portfolio's `kjr-core.js`.
+- Phase 1 is localStorage-first. Supabase configuration is empty and `currentUser()` returns `{id:null}`, so cloud reads and writes do not run.
+- `schema.sql` and row-level sync functions are Phase 2 preparation. They are not evidence that authentication, RLS cutover or cloud reconciliation is live.
+- Charts load TradingView Lightweight Charts v5.2.0 lazily when requested.
+- Dark and light themes are both implemented with a persisted toggle.
+- The topbar is the live three-way control, Trading | Forex | Portfolio.
+- Chart candles currently use a configurable CORS proxy whose default is `corsproxy.io`. They do not use the Trading Worker `/chart` route.
 
 ## 3. Data model
 
-One `trades` table in Supabase, mirrored to localStorage, synced with the existing dirty-flag and `mergeTable` logic. RLS on the table keyed to the owner, same pattern as Portfolio.
+The Phase 1 source of truth is the `kjr_journal_v1` localStorage object, with one `trades` array. Dirty IDs and pending deletes are stored under separate local keys. The dormant Phase 2 Supabase schema wraps each trade as `id`, `data`, `updated_at`, `deleted_at` and `user_id`. No Phase 1 row has an authenticated `user_id`.
 
 Trade record fields:
 
 | Field | Type | Notes |
-|---|---|---|
-| id | uuid | client-generated |
-| symbol | text | upper-cased |
-| asset_type | enum | stock, option, future, forex, crypto |
-| side | enum | long, short |
-| status | enum | open, closed (derived from exit presence) |
-| entry_at | timestamptz | stored in UTC, shown in SGT |
-| exit_at | timestamptz | null while open |
-| entry_price | numeric | |
-| exit_price | numeric | null while open |
-| quantity | numeric | shares or contracts |
-| fees | numeric | commissions + fees |
-| stop_price | numeric | planned stop, used for R-multiple |
-| target_price | numeric | optional |
-| setup_tags | text[] | |
-| mistake_tags | text[] | |
-| emotion_tags | text[] | |
-| market_tags | text[] | trend, range, news, etc. |
-| plan_note | text | written before/at entry |
-| review_note | text | written after close |
-| screenshots | text[] | optional, see section 4 phase 3 |
-| created_at / updated_at | timestamptz | |
-| dirty | bool (local only) | sync flag |
+|:---|:---:|:---|
+| `id` | text | Client-generated, validated to 1 to 64 letters, numbers, underscores or hyphens |
+| `symbol` | text | Upper-cased |
+| `side` | enum | `long` or `short` |
+| `entryAt` | ISO timestamp | Stored in UTC |
+| `exitAt` | ISO timestamp or empty | Empty while open |
+| `entryPrice` | number | Positive |
+| `exitPrice` | number or empty | Required with `exitAt` to close a trade |
+| `quantity` | number | Positive shares or contracts |
+| `fees` | number | Non-negative commissions and fees |
+| `stopPrice` | number or empty | Planned stop, used for R-multiple |
+| `setupTags`, `mistakeTags`, `emotionTags`, `marketTags` | text arrays | Stored inline on the trade |
+| `notes` | text | Combined setup, context and review notes |
+| `contractMultiplier` | number | Defaults to 1 |
+| `createdAt`, `updatedAt` | ISO timestamps | Client record timestamps |
+| `_updatedAt`, `_deletedAt` | ISO timestamps or empty | Dormant Phase 2 server revision and tombstone metadata |
 
 Derived values are never stored as columns. One `deriveTrade()` function computes gross P&L, net P&L, R-multiple, holding time, and return percent on read. This follows the standing rule that a derived value has a single source of truth and every view calls the same function.
 
-Tags are stored inline as arrays on the trade. A small `tagCatalogue` in localStorage holds the master list per category plus a colour, so the manager can rename or recolour without touching every trade. Renames map old to new across trades in one pass.
+Tags are stored inline as arrays on the trade. The manager derives its catalogue from those arrays. Rename, merge and delete operations update every affected trade, mark each row dirty and retain one local undo snapshot for tag deletion.
 
 ## 4. Feature phases
 
-Phase 1, MVP (the slice to build first):
-- Add/edit/delete trade modal with validation.
-- Trades table: sortable, filterable, paginated.
-- Stats dashboard: the core metric cards plus the equity curve.
-- Tags: setup, mistake, emotion, market. Multi-tag per trade. Tag manager.
-- What-if simulator.
+Current Phase 1, single-user local delivery:
+- Add, edit and delete trade modal with validation
+- Sortable, filterable and paginated journal
+- Stats dashboard, equity curve, reports and cumulative drawdown
+- Setup, mistake, emotion and market tags, including the tag manager
+- What-if simulator
+- On-demand entry and exit chart markers
+- CSV import
+- AI coach using a browser-stored Anthropic key for personal use only
+- Persisted dark and light themes
 
-Phase 2:
-- Entry/exit markers on the symbol's candlestick chart for a selected trade.
-- Breakdowns: day-of-week, hour-of-day, by-symbol, by-tag, monthly calendar heatmap of P&L.
-- Cumulative drawdown view.
+Phase 2 platform cutover, dormant:
+- Supabase Auth and a real `currentUser()` identity
+- User JWT requests, `user_id` backfill and RLS enablement
+- Server-backed row-level compare-and-swap sync and paginated reconciliation
+- Profiles, enforced entitlements, billing and a server-side AI proxy
 
-Phase 3:
-- CSV import with a column-mapping step (broker formats vary, so map once and remember the layout).
-- AI coach: send the computed stat block and tag breakdowns (not raw trades) to Claude, return plain-English strengths, leaks, and one suggested focus.
-- Screenshot attachments (decision needed, see open questions).
-- Pre-trade plan and rule-compliance colouring against your own rules.
+Additional product work:
+- Screenshot attachments
+- Pre-trade plan and rule-compliance colouring
+- Broker auto-sync or paid market replay only if their external dependencies are accepted
 
 ## 5. Metrics catalogue
 
@@ -103,13 +101,13 @@ Computed over the current filter set, closed trades only unless noted.
 - Return per share/contract: net P&L / total quantity.
 - Trade count, win/loss/breakeven counts, open-position count.
 
-Open trades show unrealised P&L using the last price from the Worker proxy, kept separate from realised stats so they do not pollute the win rate.
+Open trades are counted separately and do not affect realised win-rate statistics. Current source does not fetch a live price for unrealised P&L. The candle proxy is used only for the on-demand chart.
 
 ## 6. The what-if simulator
 
 The cheapest high-value feature. It is a predicate over the trade set fed back into the same stats engine.
 
-- Controls: exclude trades carrying mistake tag X (multi-select), include only setup Y, restrict to chosen days or hours.
+- Controls: exclude selected mistake tags, include only selected setup tags, and restrict by long or short side.
 - On change, recompute the full metric set and the equity curve on the filtered subset.
 - Render baseline versus simulated side by side, with the delta on each metric and both equity curves overlaid.
 - Read-only. It never edits the underlying trades.
@@ -119,11 +117,11 @@ Example payoff: tag your impulse entries as `fomo`, exclude them, and see the eq
 ## 7. UI layout
 
 - Dashboard: metric cards row, equity curve, recent trades, a "biggest leak" callout from the worst mistake tag by total loss.
-- Trades: table with filter bar (symbol, date range, tags, side, status), sort, pagination, row click opens the trade.
-- Trade detail/modal: all fields, tags, notes, and in phase 2 the chart with entry/exit markers.
+- Trades: table with symbol search, status filter, sortable columns, pagination and row click to edit.
+- Trade detail/modal: all current fields, tags, notes and an on-demand chart with entry/exit markers.
 - Simulator: the panel from section 6.
-- Reports: the breakdowns from phase 2.
-- Tag manager: list per category, rename, recolour, merge.
+- Reports: day, hour, symbol, tag, monthly P&L and drawdown breakdowns.
+- Tag manager: list per category, rename, merge, delete and one-step undo for deletion.
 
 ## 8. Data safety (standing bar, non-negotiable)
 
@@ -132,7 +130,7 @@ This app stores user data, so the full bar applies, unlike the read-only Trading
 - Input validation: required fields, exit after entry, positive quantity, numeric prices, sane fees.
 - No silent data loss. The dirty flag is only cleared after a confirmed write. Honour the preview guard: bail at the top of the flush on localhost or file://, never clear dirty under the guard. (This is the exact loss class logged in lessons.)
 - Conflict handling on sync: echo the server's own timestamp for optimistic concurrency, never compare two clocks. Reuse `mergeTable`.
-- RLS on the `trades` table keyed to the owner.
+- Phase 2 only: RLS on `trades` keyed to the authenticated user. Phase 1 is fully local and must not be described as RLS-protected.
 - Pagination on the trades list from day one.
 - Designed empty states (no trades yet) and error states (sync failed, proxy down).
 - Backups: snapshot before any destructive bulk action (tag merge, CSV import overwrite), before the action runs, not after.
@@ -146,9 +144,9 @@ This app stores user data, so the full bar applies, unlike the read-only Trading
 5. Stats engine + dashboard cards + equity curve.
 6. Tags + tag manager.
 7. Simulator.
-8. Supabase sync via `kjr-core.js`, RLS, preview guard, conflict handling.
+8. Keep the dormant row-level Supabase client and `schema.sql` aligned, without enabling cloud sync in Phase 1.
 9. QA pass (the `qa` skill), then ship (the `ship` skill).
-10. Phase 2 and 3 as separate efforts.
+10. Activate authentication, RLS, cloud sync and billing only through the Phase 2 cutover checklist in `CLAUDE.md`.
 
 ## 10. Open questions for Julian
 
@@ -186,9 +184,9 @@ Not a time estimate, bounded by external dependencies:
 
 ## 12. Monetisation and multi-tenant pivot (added 15 Jun)
 
-Direction changed: this is now a commercial multi-tenant SaaS, not a personal app. That raises it to the full enterprise bar (real per-user identity, RLS on every table, concurrency-safe writes, pagination).
+The Phase 2 target is a commercial multi-tenant SaaS. The current Phase 1 app remains a single-user local build. A sellable release therefore requires real per-user identity, RLS on every table, concurrency-safe writes, pagination and server-enforced billing before it can be called multi-tenant.
 
-Architecture additions on top of the journal core:
+Phase 2 architecture targets, not active runtime claims:
 - Supabase Auth (email plus OAuth) for real identity. Every table keyed to `auth.uid()` with RLS. No single-owner shortcut.
 - A `profiles` row per user holding plan/entitlement and the Stripe (or MoR) customer id.
 - Billing: Checkout plus a customer/billing portal, plus a Cloudflare Worker webhook that updates the plan on subscription events. Plan status is the single source of truth for entitlements.
@@ -221,7 +219,7 @@ Confirmed 15 Jun:
 2. Payment processor: Stripe.
 3. Paywall split: free logging plus basic stats, capped (target 50 trades). Paid unlocks unlimited trades plus the simulator, advanced analytics, AI coach, chart markers, and CSV import.
 
-Once these land, the build plan goes into `~/Claude Projects/Claude/tasks/todo.md` for approval, then I scaffold from the hardened starter.
+These decisions are represented by dormant seams in the current source. They do not make authentication, billing or paid entitlements live.
 
 ## 14. Build approach and product framing (added 15 Jun)
 
@@ -235,10 +233,10 @@ Product framing (this doubles as the PRD, no separate doc):
 - Non-goals (v1): accounts, billing, landing page, broker auto-sync, tick replay.
 
 Scale-ready seams (built from M0, no-op until Phase 2):
-- `user_id` on every table (schema ships RLS option C). Swapping the anon key for a user JWT is a one-line change.
-- one `entitlement(feature)` gate, returns true for everything now, reads `profiles.plan` later. Every paid-only feature calls it from day one.
-- `currentUser()` abstraction, local owner now, Supabase Auth user later. No owner assumption scattered through the code.
-- `profiles` table stubbed (plan, stripe_customer_id) so adding Stripe later only writes to it.
+- `schema.sql` includes `user_id`, RLS policies and a row-level compare-and-swap RPC. Phase 1 stays local, so no authenticated `user_id` exists yet. Any old cloud rows must be backfilled before RLS is enabled.
+- `entitlement(feature)` returns true for the owner today. Phase 2 must read the authenticated user's plan and enforce paid limits on the server as well as in the client.
+- `currentUser()` returns the local owner with `id:null` today. Phase 2 must return the Supabase Auth user and send that user's JWT in `SB_HDR`.
+- `profiles` is stubbed with `plan` and `stripe_customer_id`. No current flow populates the Stripe customer ID, so billing is not ready to take money.
 
 v1 release criteria (single-user "stable"):
 - all trade CRUD validated (exit after entry, positive quantity, numeric prices)
