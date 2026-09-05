@@ -549,9 +549,16 @@ table.holdings td.name-clamp .name-clamp-inner{
 table.holdings .price-stale{color:var(--text3);font-style:italic}
 table.holdings th.sticky-col,table.holdings td.sticky-col{position:sticky;left:0;background:var(--surface-solid);border-right:1px solid var(--border);z-index:2}
 table.holdings th.sticky-col{z-index:3}
+/* The header cell owns aria-sort. Its real button owns the pointer and
+   keyboard interaction, rather than making a non-button <th> focusable. */
 table.holdings th.sortable{cursor:pointer;user-select:none;position:relative;padding-right:20px}
-table.holdings th.sortable:hover,table.holdings th.sortable:focus-visible{color:var(--text)}
 table.holdings th.sortable .sort-glyph{position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--accent)}
+table.holdings th.sortable.sortable-button{padding:0;cursor:default}
+table.holdings th.sortable.sortable-button .sort-button{appearance:none;border:0;width:100%;min-height:38px;padding:10px 12px;display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;background:transparent;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;text-align:inherit;white-space:nowrap;cursor:pointer}
+table.holdings th.sortable.sortable-button.tl .sort-button,table.holdings th.sortable.sortable-button:first-child .sort-button{justify-content:flex-start}
+table.holdings th.sortable.sortable-button .sort-button:hover{color:var(--text)}
+table.holdings th.sortable.sortable-button .sort-button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;color:var(--text)}
+table.holdings th.sortable.sortable-button .sort-glyph{position:static;transform:none;font-size:12px;line-height:1}
 .btn-xs{padding:2px 7px;font-size:12px;line-height:1.2}
 a.btn,a.btn:hover{text-decoration:none}
 @media (pointer:coarse){ .col-mgr-move .btn-xs{min-width:36px;min-height:36px;justify-content:center} }
@@ -686,21 +693,31 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
    top-right controls (CPF toggle, chart pin/refresh/delete). */
 .kjr-drag-handle{
   position:absolute;top:50%;left:-40px;transform:translateY(-50%);
-  width:28px;height:40px;
+  box-sizing:border-box;width:28px;height:40px;padding:0;
   display:flex;align-items:center;justify-content:center;
-  background:var(--accent,#a78bfa);border:1px solid var(--border);border-radius:var(--radius);
-  cursor:grab;font-size:15px;color:var(--on-accent,#fff);z-index:40;
-  touch-action:none;user-select:none;box-shadow:0 3px 10px rgba(0,0,0,.4);
+  background:var(--accent);border:1px solid var(--border);border-radius:var(--radius);
+  cursor:grab;font:inherit;font-size:15px;color:var(--on-accent);z-index:40;
+  touch-action:none;user-select:none;box-shadow:var(--shadow-card);
 }
 .kjr-drag-handle:hover{filter:brightness(1.1)}
 .kjr-drag-handle:active{cursor:grabbing}
+.kjr-drag-handle:focus-visible,.kjr-arrange-move:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+/* The move buttons are a keyboard and click alternative to pointer dragging.
+   The existing direct-handle form stays supported while the dashboard renders
+   into the controls wrapper in arrange mode. */
+.kjr-arrange-controls{position:absolute;top:50%;left:-40px;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;z-index:40}
+.kjr-arrange-controls .kjr-drag-handle{position:static;transform:none;width:28px;height:28px;z-index:auto}
+.kjr-arrange-moves{display:flex;flex-direction:column;gap:2px}
+.kjr-arrange-move{box-sizing:border-box;width:28px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font:inherit;line-height:1;cursor:pointer}
+.kjr-arrange-move:hover:not(:disabled){background:var(--bg4);color:var(--accent)}
+.kjr-arrange-move:disabled{cursor:not-allowed;opacity:.45}
 /* While arranging, give room on the left for the grip and freeze each card's
    own buttons so a stray tap can never re-render the dashboard mid-drag. */
 .dash-arranging #dash-stack{padding-left:48px}
-.dash-arranging #dash-stack > [data-wid]{position:relative;outline:1px dashed var(--border);border-radius:12px}
+.dash-arranging #dash-stack > [data-wid]{position:relative;overflow:visible;outline:1px dashed var(--border);border-radius:12px}
 .dash-arranging #dash-stack > [data-wid] .btn{pointer-events:none;opacity:.4}
 .kjr-sortable-dragging{box-shadow:0 14px 40px rgba(0,0,0,.5);border-radius:12px;transform:scale(1.01)}
-.kjr-sortable-placeholder{background:color-mix(in srgb,var(--accent,#a78bfa) 12%,transparent);border:2px dashed var(--accent,#a78bfa);border-radius:12px}
+.kjr-sortable-placeholder{background:color-mix(in srgb,var(--accent) 12%,transparent);border:2px dashed var(--accent);border-radius:12px}
 </style>
 </head>
 <body>
@@ -759,8 +776,10 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
   <!-- DASHBOARD -->
   <section class="page" id="page-dashboard">
-    <div class="page-head"><div><h2 class="page-title">Dashboard</h2></div><div style="display:flex;align-items:center;gap:10px"><button id="dash-arrange-btn" class="btn btn-sm btn-ghost" data-click="toggleArrange" style="display:none">Arrange</button><div id="dash-integrity-pill"></div></div></div>
+    <div class="page-head"><div><h2 class="page-title">Dashboard</h2></div><div style="display:flex;align-items:center;gap:10px"><button id="dash-arrange-btn" class="btn btn-sm btn-ghost" data-click="toggleArrange" aria-pressed="false" aria-describedby="dash-arrange-instructions" style="display:none">Arrange</button><div id="dash-integrity-pill"></div></div></div>
     <div id="dash-integrity"></div>
+    <p id="dash-arrange-instructions" class="sr-only">Arrange mode provides a drag handle and Move up or Move down buttons for each dashboard card.</p>
+    <div id="dash-arrange-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
     <div id="dash-stack">
       <div id="dash-networth" data-wid="networth"></div>
       <div id="dash-assets"   data-wid="assets"></div>
@@ -1340,7 +1359,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- MOBILE "MORE" SHEET: the tabs and cross-app links that don't fit the
      5-button bottom bar. Slides up from the bottom, reuses the .overlay
      pattern so Escape/backdrop-click behave like every other modal. -->
-<div class="overlay more-sheet-overlay" id="more-sheet" data-click="overlayBackdropClose" role="dialog" aria-modal="true" aria-labelledby="more-sheet-title">
+<div class="overlay more-sheet-overlay" id="more-sheet" data-click="overlayBackdropClose" role="dialog" aria-modal="true" aria-labelledby="more-sheet-title" tabindex="-1">
   <div class="modal more-sheet">
     <div class="modal-head">
       <h3 id="more-sheet-title">More</h3>
@@ -1356,7 +1375,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Insurance CSV import (manual SGFinDex mapper), dynamically populated by openInsuranceImport()/insuranceImportShowMapper()/insuranceImportShowPreview() -->
 <div class="overlay" id="ins-import-overlay" data-click="overlayBackdropClose" role="dialog" aria-modal="true" aria-label="Insurance import"></div>
 
-<div class="overlay" id="entity-modal" role="dialog" aria-modal="true" aria-labelledby="em-title">
+<div class="overlay" id="entity-modal" role="dialog" aria-modal="true" aria-labelledby="em-title" tabindex="-1">
   <div class="modal">
     <div class="modal-head">
       <h3 id="em-title">Add</h3>
@@ -1402,7 +1421,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 </div>
 
 <!-- SETUP WIZARD, 4-step onboarding for first-time users -->
-<div class="overlay" id="setup-wizard" role="dialog" aria-modal="true" aria-labelledby="setup-wizard-title">
+<div class="overlay" id="setup-wizard" role="dialog" aria-modal="true" aria-labelledby="setup-wizard-title" tabindex="-1">
   <div class="modal" style="max-width:620px">
     <div class="modal-head">
       <h3 id="setup-wizard-title">Welcome, let's get you set up</h3>
@@ -1460,9 +1479,9 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.62"></script>
-<script src="Worker/kjr-sortable.js?v=2.62"></script>
-<script src="Worker/kjr-vault.js?v=2.62"></script>
-<script src="Worker/app.js?v=2.62"></script>
+<script src="Worker/kjr-core.js?v=2.63"></script>
+<script src="Worker/kjr-sortable.js?v=2.63"></script>
+<script src="Worker/kjr-vault.js?v=2.63"></script>
+<script src="Worker/app.js?v=2.63"></script>
 </body>
 </html>

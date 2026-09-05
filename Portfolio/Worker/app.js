@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.62';
-const APP_DISPLAY_VERSION = 'v2.62 (30 Aug)';
+const APP_VERSION = 'v2.63';
+const APP_DISPLAY_VERSION = 'v2.63 (05 Sep)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -26,6 +26,8 @@ const LK_LAST_PULL = 'kjr-pf-last-pull-v1';
 const LK_LAST_PULL_SRC = 'kjr-pf-last-pull-src-v1';  // 'server' if from doGet._savedAt or doPost.savedAt, else 'client'
 const LK_RESET_SYNC_BLOCK = 'kjr-pf-reset-sync-block-v1'; // blocks automatic writes after a local-only reset until a pull or explicit push
 const LK_LOSSY_SYNC_BLOCK = 'kjr-pf-lossy-sync-block-v1'; // old backend acknowledged a write after stripping/truncating data
+const LK_UNSAVED   = 'kjr-pf-unsaved-v1'; // durable warning that the latest in-memory financial change did not reach protected storage
+const LK_CLOUD_DIRTY = 'kjr-pf-cloud-dirty-v1'; // locally durable financial changes that have not reached the configured cloud
 const LK_THEME     = 'kjr-pf-theme-v1';
 const LK_PRIVACY   = 'kjr-pf-privacy-v1';   // blur all money figures (shoulder-surfing guard)
 const LK_PRICE_CACHE = 'kjr-pf-price-cache-v1'; // persisted separately so first paint uses last-known prices
@@ -44,6 +46,8 @@ const _vaultManager = window.KjrVault ? window.KjrVault.createManager({
   sensitivePrefixes: ['LK_DB_'],
   onError: err => {
     console.error('[vault] encrypted save failed', err);
+    _markLocalUnsaved();
+    setSyncStatus('failed', 'Encrypted local save failed. Keep this tab open and export a backup.');
     if (document.readyState !== 'loading') {
       showToast('Encrypted local save failed. Keep this tab open and export a backup before retrying.', 'error');
     }
@@ -529,28 +533,28 @@ const STOCK_COLUMNS = [
     } },
   { key:'shares', label:()=>'Shares', cls:'num', defVis:true,
     render:r => r.derived
-      ? `${r.shares}<span class="hint" title="Derived from ${r.derived.txnCount} trade${r.derived.txnCount===1?'':'s'}"> ◆</span>`
-      : `${r.shares}` },
+      ? `${kjrEscape(r.shares)}<span class="hint" title="Derived from ${kjrEscape(r.derived.txnCount)} trade${r.derived.txnCount===1?'':'s'}"> ◆</span>`
+      : `${kjrEscape(r.shares)}` },
   { key:'avgCost', label:()=>'Avg cost', cls:'num', defVis:true,
-    render:r => fmt(toSGD(r.avgCost, r.ccy)) },
+    render:r => fmtSgdOrNative(r.avgCost, r.ccy) },
   { key:'price', label:()=>'Price', cls:'num', defVis:true,
     render:r => r.priceSgd!=null
-      ? `${fmt(r.priceSgd)}${r.stale?' <span class="hint">(stale)</span>':''}${r.extLine}`
+      ? `${fmtSgdOrNative(r.px.price, r.priceCcy || r.ccy)}${r.stale?' <span class="hint">(stale)</span>':''}${r.extLine}`
       : '<span class="price-stale">—</span>' },
   { key:'dayChange', label:dc=>`Day P&L (${dc})`, cls:'num', defVis:false,
-    render:r => r.changeSgd!=null ? `<span class="${r.changeSgd>=0?'pos':'neg'}">${fmt(r.changeSgd,{signed:true})}</span>` : '—' },
+    render:r => r.changeSgd!=null ? `<span class="${r.changeSgd>=0?'pos':'neg'}">${fmtSgdOrNative(r.px.change, r.priceCcy || r.ccy,{signed:true})}</span>` : '—' },
   { key:'dayChangePct', label:()=>'Day %', cls:'num', defVis:false,
     render:r => (r.px&&r.px.changePct!=null) ? `<span class="${r.px.changePct>=0?'pos':'neg'}">${fmtPct(r.px.changePct)}</span>` : '—' },
   { key:'prevClose', label:()=>'Prev close', cls:'num', defVis:false,
-    render:r => r.prevCloseSgd!=null ? fmt(r.prevCloseSgd) : '—' },
+    render:r => r.prevCloseSgd!=null ? fmtSgdOrNative(r.px.previousClose, r.priceCcy || r.ccy) : '—' },
   { key:'dayRange', label:()=>'Day range', cls:'num', defVis:false, backend:true,
     // priceCcy is only set when px.price != null; fall back to the quote's own
     // currency, then the stock's, so ranges never render unconverted.
     render:r => (r.px&&r.px.dayLow!=null&&r.px.dayHigh!=null)
-      ? `${fmt(toSGD(r.px.dayLow,r.priceCcy||r.px.currency||r.ccy))}–${fmt(toSGD(r.px.dayHigh,r.priceCcy||r.px.currency||r.ccy))}` : '—' },
+      ? `${fmtSgdOrNative(r.px.dayLow,r.priceCcy||r.px.currency||r.ccy)}–${fmtSgdOrNative(r.px.dayHigh,r.priceCcy||r.px.currency||r.ccy)}` : '—' },
   { key:'week52', label:()=>'52w range', cls:'num', defVis:false, backend:true,
     render:r => (r.px&&r.px.week52Low!=null&&r.px.week52High!=null)
-      ? `${fmt(toSGD(r.px.week52Low,r.priceCcy||r.px.currency||r.ccy))}–${fmt(toSGD(r.px.week52High,r.priceCcy||r.px.currency||r.ccy))}` : '—' },
+      ? `${fmtSgdOrNative(r.px.week52Low,r.priceCcy||r.px.currency||r.ccy)}–${fmtSgdOrNative(r.px.week52High,r.priceCcy||r.px.currency||r.ccy)}` : '—' },
   { key:'pos52w', label:()=>'52w pos', cls:'num', defVis:false, backend:true,
     // Where the price sits in the 52w band: 0% = at the low, 100% = at the high.
     render:r => {
@@ -572,19 +576,19 @@ const STOCK_COLUMNS = [
   { key:'volume', label:()=>'Volume', cls:'num', defVis:false, backend:true,
     render:r => (r.px&&r.px.volume!=null) ? Number(r.px.volume).toLocaleString('en-SG') : '—' },
   { key:'mv', label:dc=>`Market value (${dc})`, cls:'num', defVis:true,
-    render:r => r.mv!=null ? fmt(r.mv, {dp:0}) : '—' },
+    render:r => r.mv!=null ? fmtSgdOrNative(r.mv, 'SGD', {dp:0}) : '—' },
   { key:'cost', label:dc=>`Cost basis (${dc})`, cls:'num', defVis:false,
-    render:r => fmt(r.cost, {dp:0}) },
+    render:r => r.cost != null ? fmtSgdOrNative(r.cost, 'SGD', {dp:0}) : '<span class="price-stale">— FX missing</span>' },
   { key:'pl', label:dc=>`P&L (${dc})`, cls:'num', defVis:true,
-    render:r => r.pl!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${_plArrow(r.pl)}${fmt(r.pl, {dp:0,signed:true})}</span>` : '—' },
+    render:r => r.pl!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${_plArrow(r.pl)}${fmtSgdOrNative(r.pl, 'SGD', {dp:0,signed:true})}</span>` : '—' },
   { key:'plPct', label:()=>'P&L %', cls:'num', defVis:true,
     render:r => r.plPct!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${fmtPct(r.plPct)}</span>` : '—' },
   { key:'realised', label:dc=>`Realised P&L (${dc})`, cls:'num', defVis:false,
-    render:r => r.realisedSgd!=null ? `<span class="${r.realisedSgd>=0?'pos':'neg'}">${_plArrow(r.realisedSgd)}${fmt(r.realisedSgd, {dp:0,signed:true})}</span>` : '—' },
+    render:r => r.realisedSgd!=null ? `<span class="${r.realisedSgd>=0?'pos':'neg'}">${_plArrow(r.realisedSgd)}${fmtSgdOrNative(r.realisedSgd, 'SGD', {dp:0,signed:true})}</span>` : '—' },
   { key:'weight', label:()=>'Weight %', cls:'num', defVis:false,
     render:r => r.weight!=null ? r.weight.toFixed(1)+'%' : '—' },
   { key:'divIncome', label:dc=>`Dividend/yr (${dc})`, cls:'num', defVis:false,
-    render:r => r.divAnnualSgd!=null ? fmt(r.divAnnualSgd, {dp:0}) : '—' },
+    render:r => r.divAnnualSgd!=null ? fmtSgdOrNative(r.divAnnualSgd, 'SGD', {dp:0}) : '—' },
   { key:'divYoc', label:()=>'Yield on cost', cls:'num', defVis:false,
     render:r => r.divYoc!=null ? r.divYoc.toFixed(2)+'%' : '—' },
   { key:'divYield', label:()=>'Div yield', cls:'num', defVis:false,
@@ -602,7 +606,12 @@ const STOCK_COLUMNS = [
   { key:'payout', label:()=>'Payout', cls:'num', defVis:false, backend:true,
     render:r => { const f=r.px&&r.px.fund; return (f&&f.payoutRatio!=null) ? (f.payoutRatio*100).toFixed(0)+'%' : '—'; } },
   { key:'mktCap', label:()=>'Mkt cap', cls:'num', defVis:false, backend:true,
-    render:r => { const f=r.px&&r.px.fund; return (f&&f.marketCap!=null) ? fmtCompact(toSGD(f.marketCap, f.currency||r.px.currency||r.ccy)) : '—'; } },
+    render:r => {
+      const f = r.px && r.px.fund;
+      if (!f || f.marketCap == null) return '—';
+      const ccy = f.currency || r.px.currency || r.ccy;
+      return fmtCompactSgdOrNative(f.marketCap, ccy);
+    } },
   { key:'updated', label:()=>'Updated', cls:'num muted', defVis:true,
     render:r => (r.px&&r.px.fetchedAt) ? relTime(r.px.fetchedAt) : '—' }
 ];
@@ -636,29 +645,29 @@ const BOARD_COLUMNS = [
     } },
   { key:'price', label:()=>'Price', cls:'num', defVis:true,
     render:r => (r.px && r.px.price!=null)
-      ? fmt(toSGD(r.px.price, r.ccy)) + (isStale(r.px.fetchedAt,24)?' <span class="hint">(stale)</span>':'')
+      ? fmtSgdOrNative(r.px.price, r.ccy) + (isStale(r.px.fetchedAt,24)?' <span class="hint">(stale)</span>':'')
       : '<span class="price-stale">—</span>' },
   { key:'change', label:()=>'Change', cls:'num', defVis:true,
     render:r => (r.px && r.px.change!=null)
-      ? `<span class="${r.px.change>=0?'pos':'neg'}">${fmt(toSGD(r.px.change, r.ccy),{signed:true})}</span>` : '—' },
+      ? `<span class="${r.px.change>=0?'pos':'neg'}">${fmtSgdOrNative(r.px.change, r.ccy,{signed:true})}</span>` : '—' },
   { key:'changePct', label:()=>'Change %', cls:'num', defVis:true,
     render:r => (r.px && r.px.changePct!=null)
       ? `<span class="${r.px.changePct>=0?'pos':'neg'}">${fmtPct(r.px.changePct)}</span>` : '—' },
   { key:'prevClose', label:()=>'Prev close', cls:'num', defVis:false,
-    render:r => (r.px && r.px.previousClose!=null) ? fmt(toSGD(r.px.previousClose, r.ccy)) : '—' },
+    render:r => (r.px && r.px.previousClose!=null) ? fmtSgdOrNative(r.px.previousClose, r.ccy) : '—' },
   { key:'dayRange', label:()=>'Day range', cls:'num', defVis:true, backend:true,
     render:r => (r.px && r.px.dayLow!=null && r.px.dayHigh!=null)
-      ? `${fmt(toSGD(r.px.dayLow, r.ccy))}–${fmt(toSGD(r.px.dayHigh, r.ccy))}` : '—' },
+      ? `${fmtSgdOrNative(r.px.dayLow, r.ccy)}–${fmtSgdOrNative(r.px.dayHigh, r.ccy)}` : '—' },
   { key:'week52', label:()=>'52w range', cls:'num', defVis:true, backend:true,
     render:r => (r.px && r.px.week52Low!=null && r.px.week52High!=null)
-      ? `${fmt(toSGD(r.px.week52Low, r.ccy))}–${fmt(toSGD(r.px.week52High, r.ccy))}` : '—' },
+      ? `${fmtSgdOrNative(r.px.week52Low, r.ccy)}–${fmtSgdOrNative(r.px.week52High, r.ccy)}` : '—' },
   { key:'pos52w', label:()=>'52w pos', cls:'num', defVis:false, backend:true,
     render:r => { const v = r.px ? rangePosition(r.px.price, r.px.week52Low, r.px.week52High) : null;
       return v!=null ? `<span title="0% = 52w low, 100% = 52w high">${(v*100).toFixed(0)}%</span>` : '—'; } },
   { key:'volume', label:()=>'Volume', cls:'num', defVis:true, backend:true,
     render:r => (r.px && r.px.volume!=null) ? Number(r.px.volume).toLocaleString('en-SG') : '—' },
   { key:'mktCap', label:()=>'Mkt cap', cls:'num', defVis:true, backend:true,
-    render:r => { const f=r.px&&r.px.fund; return (f&&f.marketCap!=null) ? fmtCompact(toSGD(f.marketCap, f.currency||r.px.currency||r.ccy)) : '—'; } },
+    render:r => { const f=r.px&&r.px.fund; return (f&&f.marketCap!=null) ? fmtCompactSgdOrNative(f.marketCap, f.currency||r.px.currency||r.ccy) : '—'; } },
   { key:'peTtm', label:()=>'P/E', cls:'num', defVis:false, backend:true,
     render:r => { const f=r.px&&r.px.fund; return (f&&f.trailingPE!=null) ? f.trailingPE.toFixed(1) : '—'; } },
   { key:'peFwd', label:()=>'Fwd P/E', cls:'num', defVis:false, backend:true,
@@ -675,7 +684,7 @@ const BOARD_COLUMNS = [
     render:r => {
       if (r.w.targetPrice == null) return '—';
       const atTarget = (r.px && r.px.price!=null && r.px.price <= Number(r.w.targetPrice));
-      return fmt(toSGD(Number(r.w.targetPrice), r.ccy)) + (atTarget ? ' <span class="wl-hit">✓ At target</span>' : '');
+      return fmtSgdOrNative(Number(r.w.targetPrice), r.ccy) + (atTarget ? ' <span class="wl-hit">✓ At target</span>' : '');
     } },
   { key:'notes', label:()=>'Notes', cls:'tl', defVis:true,
     render:r => r.w.notes ? `<span class="wl-note" title="${kjrEscape(r.w.notes)}">${kjrEscape(r.w.notes)}</span>` : '' },
@@ -733,13 +742,13 @@ const STOCK_SORT_VALS = {
   symbol:       r => r.s.symbol || '',
   market:       r => r.s.market || '',
   shares:       r => r.shares,
-  avgCost:      r => toSGD(r.avgCost, r.ccy),
+  avgCost:      r => sgdOrNull(r.avgCost, r.ccy),
   price:        r => r.priceSgd,
   dayChange:    r => r.changeSgd,
   dayChangePct: r => (r.px && r.px.changePct != null) ? r.px.changePct : null,
   prevClose:    r => r.prevCloseSgd,
-  dayRange:     r => (r.px && r.px.dayHigh != null) ? toSGD(r.px.dayHigh, r.priceCcy || r.px.currency || r.ccy) : null,
-  week52:       r => (r.px && r.px.week52High != null) ? toSGD(r.px.week52High, r.priceCcy || r.px.currency || r.ccy) : null,
+  dayRange:     r => (r.px && r.px.dayHigh != null) ? sgdOrNull(r.px.dayHigh, r.priceCcy || r.px.currency || r.ccy) : null,
+  week52:       r => (r.px && r.px.week52High != null) ? sgdOrNull(r.px.week52High, r.priceCcy || r.px.currency || r.ccy) : null,
   volume:       r => (r.px && r.px.volume != null) ? r.px.volume : null,
   mv:           r => r.mv,
   cost:         r => r.cost,
@@ -762,7 +771,7 @@ const STOCK_SORT_VALS = {
   beta:         r => (r.px && r.px.fund && r.px.fund.beta        != null) ? r.px.fund.beta        : null,
   payout:       r => (r.px && r.px.fund && r.px.fund.payoutRatio != null) ? r.px.fund.payoutRatio : null,
   mktCap:       r => (r.px && r.px.fund && r.px.fund.marketCap   != null)
-                       ? toSGD(r.px.fund.marketCap, r.px.fund.currency || r.px.currency || r.ccy) : null,
+                       ? sgdOrNull(r.px.fund.marketCap, r.px.fund.currency || r.px.currency || r.ccy) : null,
   updated:      r => (r.px && r.px.fetchedAt) || null
 };
 /* Header click cycle: asc → desc → clear. Unknown keys are ignored. */
@@ -1054,14 +1063,58 @@ function showToast(msg, kind, action){
 /* ═══════════════════════════════════════════════════════════════════════
    PERSISTENCE — local storage immediate, cloud debounced
    ═══════════════════════════════════════════════════════════════════════ */
-/* Build the object we persist locally. The price cache is a transient,
-   re-fetchable mirror of Yahoo/CoinGecko quotes — there is no reason to spend
-   the (~5MB) localStorage budget on it, and pre/post-market quotes can bloat it
-   enough to blow the quota and block saving your actual financial data. So we
-   never write it to disk; it lives in memory only and repopulates on refresh. */
+/* Build the canonical financial payload. Quotes are excluded here because
+   they are transient and can exhaust the main storage budget, but a capped
+   last-known copy is persisted separately under LK_PRICE_CACHE. `_backup` is
+   an export envelope marker, never canonical portfolio data. */
+let _localUnsavedInMemory = false;
+let _cloudDirtyInMemory = false;
+function _markLocalUnsaved(){
+  _localUnsavedInMemory = true;
+  try { localStorage.setItem(LK_UNSAVED, '1'); } catch (_) {}
+}
+function _clearLocalUnsaved(revision){
+  if (revision != null && revision !== _localSaveRevision) return false;
+  try {
+    localStorage.removeItem(LK_UNSAVED);
+    _localUnsavedInMemory = false;
+    return true;
+  } catch (_) {
+    _localUnsavedInMemory = true;
+    return false;
+  }
+}
+function _hasLocalUnsaved(){
+  if (_localUnsavedInMemory) return true;
+  try { return localStorage.getItem(LK_UNSAVED) === '1'; } catch (_) { return true; }
+}
+function _markCloudDirty(){
+  _cloudDirtyInMemory = true;
+  try { localStorage.setItem(LK_CLOUD_DIRTY, '1'); } catch (_) {}
+}
+function _clearCloudDirty(revision){
+  if (revision != null && revision !== _localSaveRevision) return false;
+  try {
+    localStorage.removeItem(LK_CLOUD_DIRTY);
+    _cloudDirtyInMemory = false;
+    return true;
+  } catch (_) {
+    _cloudDirtyInMemory = true;
+    return false;
+  }
+}
+function _hasCloudDirty(){
+  if (_cloudDirtyInMemory) return true;
+  try { return localStorage.getItem(LK_CLOUD_DIRTY) === '1'; } catch (_) { return true; }
+}
+function _stripBackupMetadata(value){
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const { _backup, ...canonical } = value;
+  return canonical;
+}
 function localPersistPayload(){
   const { _priceCache, ...rest } = DB;
-  return rest;
+  return _stripBackupMetadata(rest);
 }
 
 /* Three-way local merge. Each tab keeps the last LK_DB value it observed as
@@ -1223,7 +1276,9 @@ function _writeLocalPayload(payload, conflicts, opts){
         continue; // try a leaner payload
       }
       console.error('localStorage write failed', e);
-      showToast('Local save failed: ' + (e && e.message ? e.message : e) + '. Your data is still in memory, set up cloud sync in Settings to protect it.', 'error');
+      _markLocalUnsaved();
+      setSyncStatus('failed', 'Local save failed. Keep this tab open and export a backup.');
+      showToast('Local save failed: ' + (e && e.message ? e.message : e) + '. Keep this tab open and export a backup before retrying.', 'error');
       return false;
     }
   }
@@ -1354,6 +1409,18 @@ const _DATE_FIELDS_BY_TABLE = {
 };
 let _sanitiseInvalidDateCount = 0;   // recovered-date counter, reset per mergeDefaults() run
 
+function _copySafeOwnObject(source){
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+  const out = {};
+  const descriptors = Object.getOwnPropertyDescriptors(source);
+  Object.keys(descriptors).forEach(key => {
+    const descriptor = descriptors[key];
+    if (key === '__proto__' || key === 'prototype' || key === 'constructor') return;
+    if (Object.prototype.hasOwnProperty.call(descriptor, 'value')) out[key] = descriptor.value;
+  });
+  return out;
+}
+
 function _sanitiseList(arr, table){
   if (!Array.isArray(arr)) return [];
   const dateFields = _DATE_FIELDS_BY_TABLE[table];
@@ -1369,8 +1436,9 @@ function _sanitiseList(arr, table){
   const schema = ENTITY_SCHEMAS[table];
   const numericFields = schema ? schema.fields.filter(f => f.type === 'number').map(f => f.key) : null;
   return arr.map(item => {
-    if (!item || typeof item !== 'object') return null;
-    const safe = Object.assign({}, item);
+    const safe = _copySafeOwnObject(item);
+    if (!safe) return null;
+    if (table === 'trash') safe.data = _copySafeOwnObject(safe.data) || {};
     if (!kjrSafeId(safe.id)) safe.id = uid(table);
     if (dateFields){
       dateFields.forEach(k => {
@@ -1391,7 +1459,8 @@ function _sanitiseList(arr, table){
 
 function mergeDefaults(loaded){
   const base = freshDB();
-  const safe = (loaded && typeof loaded === 'object') ? _runMigrations(loaded) : {};
+  const canonical = (loaded && typeof loaded === 'object') ? _stripBackupMetadata(loaded) : {};
+  const safe = _runMigrations(canonical);
   const out  = Object.assign({}, base, safe);
   out.settings   = Object.assign({}, base.settings, safe.settings || {});
   out.settings.cpfRates    = Object.assign({}, base.settings.cpfRates,    (safe.settings && safe.settings.cpfRates) || {});
@@ -1442,17 +1511,20 @@ function mergeDefaults(loaded){
 /* Single entry point for "I changed something, persist + sync".
    Mirrors Kujira's saveData() debounce pattern. */
 let _syncTimer = null;
-function saveData(){
-  saveLocal();
+let _activeLocalSave = null;
+let _localSaveRevision = 0;
+function _scheduleCloudAfterLocalSave(revision){
+  if (revision != null && revision !== _localSaveRevision) return false;
   if (_syncTimer) clearTimeout(_syncTimer);
-  if (!getSyncUrl()) { setSyncStatus('local'); return; }
+  if (!getSyncUrl()) { setSyncStatus('local'); return true; }
+  _markCloudDirty();
   if (localStorage.getItem(LK_RESET_SYNC_BLOCK)) {
     setSyncStatus('failed', 'Cloud writes paused after local reset. Pull from cloud to restore, or use explicit Push to cloud.');
-    return;
+    return true;
   }
   if (localStorage.getItem(LK_LOSSY_SYNC_BLOCK)) {
     setSyncStatus('failed', 'Cloud writes paused because the Apps Script backend must be redeployed.');
-    return;
+    return true;
   }
   // Null the flag the moment the debounce actually fires, not just when a
   // newer saveData() cancels it. Without this, _syncTimer stays truthy
@@ -1462,6 +1534,65 @@ function saveData(){
   // a save is genuinely in flight.
   _syncTimer = setTimeout(() => { _syncTimer = null; pushToRemote(); }, SYNC_DEBOUNCE_MS);
   setSyncStatus('syncing'); // visual feedback before debounce fires
+  return true;
+}
+function saveData(){
+  const revision = ++_localSaveRevision;
+  _markLocalUnsaved();
+  if (_syncTimer) { clearTimeout(_syncTimer); _syncTimer = null; }
+  const savedLocally = saveLocal();
+  if (!savedLocally) {
+    setSyncStatus('failed', 'Local save failed. Keep this tab open and export a backup.');
+    return false;
+  }
+  if (_vaultManager && _vaultManager.isEnabled()) {
+    const pending = _vaultManager.flush()
+      .then(() => {
+        if (!_clearLocalUnsaved(revision)) return false;
+        return _scheduleCloudAfterLocalSave(revision);
+      })
+      .catch(err => {
+        console.error('[saveData] encrypted local save failed', err);
+        _markLocalUnsaved();
+        setSyncStatus('failed', 'Encrypted local save failed. Keep this tab open and export a backup.');
+        return false;
+      });
+    _activeLocalSave = pending;
+    pending.finally(() => { if (_activeLocalSave === pending) _activeLocalSave = null; });
+    return pending;
+  }
+  _clearLocalUnsaved(revision);
+  return _scheduleCloudAfterLocalSave(revision);
+}
+
+/* Direct local writes outside saveData() still need to join the vault's
+   ordered encryption queue. The revision check prevents an older flush from
+   clearing the warning for a newer edit. */
+async function _awaitVaultFlushForRevision(revision){
+  if (!_vaultManager || !_vaultManager.isEnabled()) return true;
+  let pending;
+  pending = (async () => {
+    try {
+      await _vaultManager.flush();
+      return revision == null || revision === _localSaveRevision;
+    } catch (err) {
+      console.error('[vault] tracked encrypted write failed', err);
+      _markLocalUnsaved();
+      return false;
+    }
+  })();
+  _activeLocalSave = pending;
+  try { return await pending; }
+  finally { if (_activeLocalSave === pending) _activeLocalSave = null; }
+}
+
+async function _persistLocalOnly(opts){
+  opts = opts || {};
+  const revision = opts.revision == null ? _localSaveRevision : opts.revision;
+  _markLocalUnsaved();
+  if (!saveLocal(opts.saveOptions || {})) return false;
+  if (!(await _awaitVaultFlushForRevision(revision))) return false;
+  return _clearLocalUnsaved(revision);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -1489,8 +1620,7 @@ function setSyncUrl(u){
    large (quotes + fundamentals per symbol), and syncing it eats the 49.5KB
    sheet-cell payload cap for no reason. */
 function syncPayload(){
-  const { _priceCache, ...rest } = DB;
-  return Object.assign({}, rest, {
+  return Object.assign({}, localPersistPayload(), {
     schema: SCHEMA,
     version: 1,
     schemaVersion: SCHEMA_VERSION,
@@ -1503,6 +1633,7 @@ function syncPayload(){
 let _bloatWarned = false;
 let _activeSyncController = null;
 const _activeSyncCompletions = new Set();
+let _activeSyncLatest = null;
 
 function _lossyAckReason(data){
   if (!data || typeof data !== 'object') return '';
@@ -1624,6 +1755,9 @@ async function pushToRemote(opts){
   let finishCompletion;
   const completion = new Promise(resolve => { finishCompletion = resolve; });
   _activeSyncCompletions.add(completion);
+  _activeSyncLatest = completion;
+  let completedOk = false;
+  const pushRevision = _localSaveRevision;
 
   setSyncStatus('syncing');
   try {
@@ -1729,13 +1863,16 @@ async function pushToRemote(opts){
           const stamp2 = r.data.savedAt || new Date().toISOString();
           localStorage.setItem(LK_SYNC_TS, stamp2);
           setLastPull(stamp2, 'server');
-          setSyncStatus('synced');
+          const pushedLatest = pushRevision === _localSaveRevision;
+          if (pushedLatest) _clearCloudDirty(pushRevision);
+          setSyncStatus(pushedLatest ? 'synced' : 'syncing', pushedLatest ? '' : 'Newer local changes are waiting to sync');
           localStorage.removeItem(LK_LOSSY_SYNC_BLOCK);
           if (opts.allowResetOverride) localStorage.removeItem(LK_RESET_SYNC_BLOCK);
           if (!_resyncToastShown) {
             _resyncToastShown = true;
             showToast('Sync resynchronised', 'success');
           }
+          completedOk = true;
           return true;
         }
         console.warn('[sync] auto-recovery exhausted retries', r);
@@ -1753,9 +1890,12 @@ async function pushToRemote(opts){
     const stamp = data.savedAt || new Date().toISOString();
     localStorage.setItem(LK_SYNC_TS, stamp);
     setLastPull(stamp, 'server');  // push response gives us the real server stamp
-    setSyncStatus('synced');
+    const pushedLatest = pushRevision === _localSaveRevision;
+    if (pushedLatest) _clearCloudDirty(pushRevision);
+    setSyncStatus(pushedLatest ? 'synced' : 'syncing', pushedLatest ? '' : 'Newer local changes are waiting to sync');
     localStorage.removeItem(LK_LOSSY_SYNC_BLOCK);
     if (opts.allowResetOverride) localStorage.removeItem(LK_RESET_SYNC_BLOCK);
+    completedOk = true;
     return true;
   } catch (err) {
     if (err.name === 'AbortError') return false; // superseded by a newer push
@@ -1769,11 +1909,43 @@ async function pushToRemote(opts){
   } finally {
     if (_activeSyncController === controller) _activeSyncController = null;
     _activeSyncCompletions.delete(completion);
-    finishCompletion();
+    if (_activeSyncLatest === completion) _activeSyncLatest = null;
+    finishCompletion(completedOk);
   }
 }
 
+async function _quiesceSavesBeforePull(opts){
+  opts = opts || {};
+  if (_activeLocalSave) {
+    const localSaved = await _activeLocalSave;
+    if (!localSaved) return false;
+  }
+  if (_hasLocalUnsaved()) return false;
+  if (_syncTimer) {
+    clearTimeout(_syncTimer);
+    _syncTimer = null;
+    if (!(await pushToRemote())) return false;
+  }
+  const active = _activeSyncLatest;
+  if (active) {
+    const activeOk = await active;
+    if (!activeOk && !opts.discardLocalChanges) return false;
+  } else if (_activeSyncCompletions.size) {
+    const results = await Promise.all(Array.from(_activeSyncCompletions));
+    if (!results.every(Boolean) && !opts.discardLocalChanges) return false;
+  }
+  if (!opts.discardLocalChanges && _hasCloudDirty() && !(await pushToRemote())) return false;
+  return true;
+}
+
+function _cancelPullForUnsavedChanges(){
+  setSyncStatus('failed', 'Could not save pending edits before pulling, try again');
+  showToast('You have unsaved local changes that could not be synced yet. Pull cancelled so they are not overwritten, try again shortly.', 'error');
+  return false;
+}
+
 async function pullFromRemote(opts){
+  opts = opts || {};
   const url = getSyncUrl();
   if (!url) { setSyncStatus('local'); return false; }
   if (localStorage.getItem(LK_LOSSY_SYNC_BLOCK)) {
@@ -1781,33 +1953,12 @@ async function pullFromRemote(opts){
     showToast('Pull blocked to protect your local data. Redeploy Apps Script, then use Push to cloud before pulling.', 'error');
     return false;
   }
-  // #High-1 data safety: a pull racing a pending debounced save must not
-  // clobber in-flight local edits. saveData() already wrote them to
-  // localStorage, but the 800 ms _syncTimer debounce means they may not have
-  // reached the remote sheet yet. Left unchecked, DB = mergeDefaults(data)
-  // below overwrites the in-memory DB (then, via saveLocal(), the persisted
-  // copy too) with the stale remote state, discarding the unsaved edit with
-  // no warning at all.
-  // Fix: flush the pending save first, same "cancel the timer, act now"
-  // pattern the conflict modal's cf-pull/cf-force handlers already use
-  // (below, in showConflictModal). Only continue into the destructive pull
-  // once the edit is confirmed safely on the remote. If the flush itself
-  // fails, or it surfaces a genuine conflict (showConflictModal already
-  // opens its own modal in that case), bail out of this pull instead of
-  // risking the edit, the conflict modal or the next save cycle resolves it
-  // instead.
-  if (_syncTimer) {
-    clearTimeout(_syncTimer);
-    _syncTimer = null;
-    const flushed = await pushToRemote();
-    if (!flushed) {
-      if (!document.getElementById('conflict-modal')) {
-        setSyncStatus('failed', 'Could not save pending edits before pulling, try again');
-        showToast('You have unsaved local changes that could not be synced yet. Pull cancelled so they are not overwritten, try again shortly.', 'error');
-      }
-      return false;
-    }
-  }
+  // A pull is destructive to the in-memory working copy. Wait for native or
+  // encrypted local persistence, then for the latest queued/active cloud push.
+  // Failed writes cancel the pull in both conflict modes. A revision captured
+  // before GET also detects an edit that completed during the read.
+  if (!(await _quiesceSavesBeforePull(opts))) return _cancelPullForUnsavedChanges();
+  const localRevisionAtRead = _localSaveRevision;
   setSyncStatus('syncing');
   try {
     const resp = await fetch(url, {
@@ -1816,6 +1967,11 @@ async function pullFromRemote(opts){
     });
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
+    if (_localSaveRevision !== localRevisionAtRead || _activeLocalSave || _syncTimer || _activeSyncLatest) {
+      if (opts._retriedAfterLocalEdit) return _cancelPullForUnsavedChanges();
+      if (!(await _quiesceSavesBeforePull(opts))) return _cancelPullForUnsavedChanges();
+      return pullFromRemote(Object.assign({}, opts, { _retriedAfterLocalEdit:true }));
+    }
     if (data.schema !== SCHEMA){
       // Schema mismatch. seedDecision() (kjr-core.js) decides if seeding is
       // safe. Fail SAFE: if the helper didn't load, never auto-overwrite.
@@ -1840,8 +1996,19 @@ async function pullFromRemote(opts){
     const prevPriceCache = DB._priceCache;
     DB = mergeDefaults(data);
     DB._priceCache = Object.assign({}, prevPriceCache, DB._priceCache);
-    const savedLocally = saveLocal({ allowResetRestore: true });
-    if (!savedLocally) throw new Error('Pulled cloud data but could not store it locally. Existing local recovery data was not overwritten.');
+    const savedLocally = await _persistLocalOnly({
+      revision: localRevisionAtRead,
+      saveOptions: { allowResetRestore: true }
+    });
+    if (!savedLocally) {
+      if (_localSaveRevision !== localRevisionAtRead) {
+        if (opts._retriedAfterLocalEdit) return _cancelPullForUnsavedChanges();
+        if (!(await _quiesceSavesBeforePull(opts))) return _cancelPullForUnsavedChanges();
+        return pullFromRemote(Object.assign({}, opts, { _retriedAfterLocalEdit:true }));
+      }
+      throw new Error('Pulled cloud data but could not confirm local persistence. The cloud copy remains intact.');
+    }
+    if (opts.discardLocalChanges) _clearCloudDirty();
     // Prefer the server's C1 timestamp (data._savedAt) — that's what doPost
     // compares lastSeenRemoteAt against. Falling back to data.updatedAt
     // (the client's own timestamp) causes false-positive conflicts after
@@ -1898,27 +2065,43 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
-function _reconcileIncomingLocalStorage(raw){
+async function _reconcileIncomingLocalStorage(raw){
   // If several events queued before this handler ran, merge against the value
   // actually in storage now, not an older event payload that has already been
   // superseded.
   const incoming = _readStoredLocalPayload() || JSON.parse(raw);
+  const before = localPersistPayload();
+  const hadPendingCloudWrite = !!(_syncTimer || _activeSyncLatest || _activeSyncCompletions.size);
   const priceCache = DB._priceCache;
   const merged = mergeConcurrentLocalState(_localBase || incoming, localPersistPayload(), incoming, false);
   DB = mergeDefaults(merged.value);
   DB._priceCache = Object.assign({}, priceCache || {}, DB._priceCache || {});
   const reconciled = localPersistPayload();
+  const changed = !_sameLocalValue(before, reconciled);
+  const revision = changed ? ++_localSaveRevision : _localSaveRevision;
+  if (changed && getSyncUrl()) _markCloudDirty();
   let persisted = false;
   if (!_sameLocalValue(reconciled, incoming)) {
     // Persist immediately. Waiting for a later user edit leaves LK_DB holding
     // the incoming one-tab blob, so closing this tab would still lose the
     // distinct edit that the merge preserved only in memory.
+    _markLocalUnsaved();
     persisted = _writeLocalPayload(reconciled, merged.conflicts);
+    if (!persisted) return { persisted:false, conflicts:merged.conflicts.length, changed };
+    const vaultSaved = await _awaitVaultFlushForRevision(revision);
+    if (!vaultSaved || !_clearLocalUnsaved(revision)) {
+      if (revision === _localSaveRevision) {
+        setSyncStatus('failed', 'Encrypted cross-tab merge could not be stored. Keep this tab open and export a backup.');
+        showToast('A change from another tab is in memory but could not be stored safely. Keep this tab open and export a backup.', 'error');
+      }
+      return { persisted:false, conflicts:merged.conflicts.length, changed };
+    }
   } else {
     _localBase = _cloneLocalValue(incoming);
     _stashLocalConflicts(merged.conflicts);
   }
-  return { persisted, conflicts: merged.conflicts.length };
+  if (changed && hadPendingCloudWrite && getSyncUrl()) _scheduleCloudAfterLocalSave(revision);
+  return { persisted, conflicts: merged.conflicts.length, changed };
 }
 
 async function _handleRemovedLocalStorage(){
@@ -1942,10 +2125,12 @@ async function _handleRemovedLocalStorage(){
   await quiesced;
   DB = freshDB();
   _localBase = _cloneLocalValue(localPersistPayload());
+  const resetRevision = ++_localSaveRevision;
   const hasCloud = !!getSyncUrl();
+  let localResetSaved = true;
   if (!hasCloud) {
     localStorage.removeItem(LK_RESET_SYNC_BLOCK);
-    saveLocal();
+    localResetSaved = await _persistLocalOnly({ revision:resetRevision });
   }
   renderAll();
   if (hasCloud) {
@@ -1955,13 +2140,18 @@ async function _handleRemovedLocalStorage(){
       : 'Another tab reset local data. This tab followed the reset, but its technical recovery snapshot could not be stored.',
       recoveryKey ? 'success' : 'error');
   } else {
+    if (!localResetSaved) {
+      setSyncStatus('failed', 'Another tab reset local data, but this browser could not store the empty state.');
+      showToast('The reset is visible in memory but could not be stored in this browser. Keep this tab open until storage is available.', 'error');
+      return { recoveryKey, persisted:false };
+    }
     setSyncStatus('local', 'Another tab reset local data. No cloud sync is configured.');
     showToast(recoveryKey
       ? 'Another tab reset local data. This local-only tab followed the reset. A technical snapshot was retained for support recovery.'
       : 'Another tab reset local data. This local-only tab followed the reset, but its technical recovery snapshot could not be stored.',
       recoveryKey ? 'success' : 'error');
   }
-  return { recoveryKey };
+  return { recoveryKey, persisted:true };
 }
 
 /* Cross-tab sync (#High-9): the storage event fires only in OTHER tabs. A
@@ -1984,9 +2174,7 @@ window.addEventListener('storage', (e) => {
       if (localStorage.getItem(LK_RESET_SYNC_BLOCK) || !raw) {
         return _handleRemovedLocalStorage();
       }
-      _reconcileIncomingLocalStorage(raw);
-      renderAll();
-      return null;
+      return _reconcileIncomingLocalStorage(raw).then(() => { renderAll(); return null; });
     }).catch(err => {
       console.error('[vault] cross-tab update failed', err);
       showToast(err && err.code === 'reunlock-required'
@@ -2011,10 +2199,12 @@ window.addEventListener('storage', (e) => {
     _handleRemovedLocalStorage().catch(err => console.error('[storage reset] failed', err));
     return;
   }
-  try {
-    _reconcileIncomingLocalStorage(e.newValue);
-    renderAll();
-  } catch (_) {}
+  _reconcileIncomingLocalStorage(e.newValue)
+    .then(() => renderAll())
+    .catch(err => {
+      console.error('[storage] cross-tab merge failed', err);
+      setSyncStatus('failed', 'Could not safely apply a change from another tab.');
+    });
 });
 
 /* ── Event-driven router (#Med-8) ────────────────────────────────────────────
@@ -2081,10 +2271,11 @@ function showConflictModal(opts){
     // right after the pull, conflict again, and reopen this modal in a loop.
     if (_syncTimer) { clearTimeout(_syncTimer); _syncTimer = null; }
     if (_activeSyncController) { try { _activeSyncController.abort(); } catch(_){} _activeSyncController = null; }
-    await pullFromRemote();
+    await pullFromRemote({ discardLocalChanges:true });
   };
   document.getElementById('cf-force').onclick = async () => {
     wrap.remove();
+    const forceRevision = _localSaveRevision;
     // Cancel any pending or in-flight push so force-push has the cloud to
     // itself. Otherwise a debounced push from the auto-refresh tick could
     // land right after, with the OLD stamp, and re-trigger the conflict.
@@ -2111,7 +2302,9 @@ function showConflictModal(opts){
       const stamp = data.savedAt || new Date().toISOString();
       localStorage.setItem(LK_SYNC_TS, stamp);
       setLastPull(stamp, 'server');
-      setSyncStatus('synced');
+      const pushedLatest = forceRevision === _localSaveRevision;
+      if (pushedLatest) _clearCloudDirty(forceRevision);
+      setSyncStatus(pushedLatest ? 'synced' : 'syncing', pushedLatest ? '' : 'Newer local changes are waiting to sync');
       showToast('Cloud overwritten with local version', 'success');
     } catch (err) {
       setSyncStatus('failed', err.message);
@@ -2148,7 +2341,9 @@ function setSyncStatus(state, detail){
 }
 
 function updateSyncStatusPill(){
-  if (!getSyncUrl()) setSyncStatus('local');
+  if (_hasLocalUnsaved()) setSyncStatus('failed', 'Unsaved changes remain in this tab. Export a backup before closing it.');
+  else if (_hasCloudDirty()) setSyncStatus('failed', 'Local changes have not reached the cloud. Use Push to cloud before pulling.');
+  else if (!getSyncUrl()) setSyncStatus('local');
   else if (localStorage.getItem(LK_SYNC_TS)) setSyncStatus('synced');
   else setSyncStatus('local', 'URL saved, run a pull or push to sync');
 }
@@ -2200,12 +2395,19 @@ let _swStep = 1;
 
 function openSetupWizard(){
   _swStep = 1;
-  document.getElementById('setup-wizard').classList.add('open');
+  const overlay = document.getElementById('setup-wizard');
+  if (!overlay) return;
+  overlay.classList.add('open');
   renderSetupWizardStep();
+  openModalFocus(overlay, closeSetupWizard);
 }
 
 function closeSetupWizard(){
-  document.getElementById('setup-wizard').classList.remove('open');
+  const overlay = document.getElementById('setup-wizard');
+  if (overlay){
+    overlay.classList.remove('open');
+    closeModalFocus(overlay);
+  }
   localStorage.setItem(LK_WIZARD_DISMISSED, '1');
 }
 
@@ -2299,8 +2501,9 @@ function renderSetupWizardStep(){
     body.innerHTML = `<div class="sw-step">
       <h4>Step 4: Paste the URL here</h4>
       <p>Paste the URL you copied from the deploy dialog. We'll save it locally and pull your data.</p>
-      <input type="url" id="sw-url-input" class="fi" placeholder="https://script.google.com/macros/s/.../exec" spellcheck="false" autocomplete="off">
-      <p style="margin-top:14px;font-size:12px;color:var(--text3)">The URL is stored only in this browser. We never transmit it anywhere except to your own Apps Script.</p>
+      <label class="lbl" for="sw-url-input">Apps Script URL</label>
+      <input type="url" id="sw-url-input" class="fi" placeholder="https://script.google.com/macros/s/.../exec" spellcheck="false" autocomplete="off" aria-describedby="sw-url-help">
+      <p id="sw-url-help" style="margin-top:14px;font-size:12px;color:var(--text3)">The URL is stored only in this browser. We never transmit it anywhere except to your own Apps Script.</p>
     </div>`;
     setTimeout(() => document.getElementById('sw-url-input')?.focus(), 100);
   }
@@ -2614,7 +2817,7 @@ function updateTargetSumHint(){
   el.style.color = sum === 100 ? 'var(--green)' : 'var(--amber)';
 }
 
-function saveSettingsFromForm(){
+async function saveSettingsFromForm(){
   const numOrNull = (id) => {
     const v = document.getElementById(id).value;
     if (v === '' || v == null) return null;
@@ -2674,10 +2877,10 @@ function saveSettingsFromForm(){
   const taxReliefs      = numOrNull('cfg-tax-reliefs');
   s.tax.totalReliefs    = taxReliefs != null ? taxReliefs : 1000;
   s.tax.manualAnnualTax = numOrNull('cfg-tax-manual');
-  saveData();
   runSalaryEngine({ rerender: true, notify: true }); // backfill/refresh auto entries
+  const saved = await Promise.resolve(saveData());
   renderAll(); // base-currency change reconverts every tab + syncs the toggle
-  showToast('Settings saved', 'success');
+  if (saved) showToast('Settings saved', 'success');
   renderDiagnostics();
 }
 
@@ -2726,11 +2929,11 @@ function removeSalaryRule(idx){
   DB.settings.salaryRules = _readSalaryRulesFromEditor().filter((_, i) => i !== idx);
   renderSalaryRulesEditor();
 }
-function saveSalaryRulesFromForm(){
+async function saveSalaryRulesFromForm(){
   DB.settings.salaryRules = _readSalaryRulesFromEditor().filter(r => r.name || r.pct);
-  saveData();
+  const saved = await Promise.resolve(saveData());
   renderSalaryRulesEditor();
-  showToast('Salary rules saved', 'success');
+  if (saved) showToast('Salary rules saved', 'success');
 }
 function updateRulesSumHint(){
   const el = document.getElementById('cfg-rules-sum');
@@ -2893,24 +3096,49 @@ async function resetLocalConfirm(){
   if (!confirm(confirmation)) return;
   await _cancelSyncForReset();
 
+  const preResetPayload = localPersistPayload();
+  const preResetPriceCache = DB._priceCache;
   let snapshotKey;
   try {
     snapshotKey = 'LK_DB_PRE_RESET_' + Date.now();
-    protectedStorage.setItem(snapshotKey, JSON.stringify(localPersistPayload()));
+    protectedStorage.setItem(snapshotKey, JSON.stringify(preResetPayload));
   } catch (snapshotErr) {
     console.error('[resetLocalConfirm] pre-reset snapshot failed', snapshotErr);
     localStorage.removeItem(LK_RESET_SYNC_BLOCK);
     showToast('Reset cancelled because a recoverable safety copy could not be stored.', 'error');
     saveData();
-    return;
+    return false;
   }
-  protectedStorage.removeItem(LK_DB);
+  try { protectedStorage.removeItem(LK_DB); }
+  catch (removeErr) {
+    console.error('[resetLocalConfirm] local removal failed', removeErr);
+    localStorage.removeItem(LK_RESET_SYNC_BLOCK);
+    showToast('Reset cancelled because local storage could not be updated.', 'error');
+    return false;
+  }
   localStorage.removeItem(LK_SYNC_TS);
   DB = freshDB();
   _localBase = _cloneLocalValue(localPersistPayload());
+  const resetRevision = ++_localSaveRevision;
+  let resetSaved;
   if (!hasCloud) {
     localStorage.removeItem(LK_RESET_SYNC_BLOCK);
-    saveLocal();
+    resetSaved = await _persistLocalOnly({ revision:resetRevision });
+  } else {
+    _markLocalUnsaved();
+    resetSaved = await _awaitVaultFlushForRevision(resetRevision);
+    if (resetSaved) resetSaved = _clearLocalUnsaved(resetRevision);
+  }
+  if (!resetSaved) {
+    localStorage.removeItem(LK_RESET_SYNC_BLOCK);
+    DB = mergeDefaults(preResetPayload);
+    DB._priceCache = preResetPriceCache || {};
+    _localBase = _cloneLocalValue(localPersistPayload());
+    loadSettingsForm();
+    renderAll();
+    setSyncStatus('failed', 'Local reset could not be stored. The previous data remains in memory.');
+    showToast('Reset was not completed because local persistence failed. Your previous data remains in memory.', 'error');
+    return false;
   }
   loadSettingsForm();
   renderAll();
@@ -2921,6 +3149,7 @@ async function resetLocalConfirm(){
     setSyncStatus('local', 'Local data reset. No cloud sync is configured.');
     showToast('Local data reset. A technical snapshot was retained for support recovery.', 'success');
   }
+  return true;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -2930,11 +3159,15 @@ async function resetLocalConfirm(){
    mergeDefaults (same validation as a cloud pull) so a malformed or hostile
    file cannot corrupt the app. Import always confirms before overwriting.
    ═══════════════════════════════════════════════════════════════════════ */
+function backupExportPayload(){
+  return Object.assign({}, localPersistPayload(), {
+    _backup: { app: 'kujira-portfolio', appVersion: APP_VERSION, exportedAt: new Date().toISOString() }
+  });
+}
+
 function exportBackup(){
   try {
-    const payload = Object.assign({}, localPersistPayload(), {
-      _backup: { app: 'kujira-portfolio', appVersion: APP_VERSION, exportedAt: new Date().toISOString() }
-    });
+    const payload = backupExportPayload();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2958,7 +3191,7 @@ function importBackupFromFile(input){
   if (!file) return;
   const reader = new FileReader();
   reader.onerror = () => { showToast('Could not read that file', 'error'); input.value = ''; };
-  reader.onload = () => {
+  reader.onload = async () => {
     let parsed;
     try {
       parsed = JSON.parse(reader.result);
@@ -2972,8 +3205,9 @@ function importBackupFromFile(input){
       input.value = '';
       return;
     }
-    // Soft check: a real backup has at least one known table or our marker.
-    const known = ['stocks','cash','cpfHistory','income','expenses','settings','_backup'];
+    // Soft check: a real backup has canonical portfolio data. The `_backup`
+    // marker alone is not data and must never make an empty object importable.
+    const known = ['stocks','cash','cpfHistory','income','expenses','settings'];
     if (!known.some(k => k in parsed)){
       showToast('That file does not look like a portfolio backup', 'error');
       input.value = '';
@@ -2995,6 +3229,7 @@ function importBackupFromFile(input){
     try {
       snapshotKey = 'LK_DB_PRE_IMPORT_' + Date.now();
       protectedStorage.setItem(snapshotKey, JSON.stringify(localPersistPayload()));
+      if (_vaultManager && _vaultManager.isEnabled()) await _vaultManager.flush();
     } catch (snapErr) {
       console.error('[importBackupFromFile] pre-import snapshot failed', snapErr);
       if (!confirm('Could not save a safety snapshot of your current data (storage may be full). Import anyway?')) {
@@ -3004,11 +3239,18 @@ function importBackupFromFile(input){
       snapshotKey = null;
     }
     try {
-      DB = mergeDefaults(parsed);   // same validation path as a cloud pull
-      saveLocal();
+      DB = mergeDefaults(_stripBackupMetadata(parsed));   // same validation path as a cloud pull
+      const saved = await Promise.resolve(saveData());
       loadSettingsForm();
       runSalaryEngine({});
       renderAll();
+      if (!saved) {
+        const failedMeta = document.getElementById('backup-meta');
+        if (failedMeta) failedMeta.textContent = 'Import not saved, export before closing';
+        showToast('Backup loaded in memory but could not be saved. Keep this tab open and export a backup before retrying.', 'error');
+        input.value = '';
+        return;
+      }
       navigate('dashboard');
       const meta = document.getElementById('backup-meta');
       if (meta) meta.textContent = 'Imported ' + _isoDate(new Date());
@@ -3328,6 +3570,7 @@ function openMoreSheet(){
   if (!ov) return;
   renderMoreSheet();
   ov.classList.add('open');
+  openModalFocus(ov);
   // The sheet starts translated off-screen (CSS default) and slides in via
   // .sheet-in, added a frame after .open so display:none -> flex doesn't eat
   // the transition (no transition fires across a display change in the same frame).
@@ -3339,7 +3582,11 @@ function openMoreSheet(){
 
 function closeMoreSheet(){
   const ov = document.getElementById('more-sheet');
-  if (ov){ ov.classList.remove('open'); ov.classList.remove('sheet-in'); }
+  if (ov){
+    ov.classList.remove('open');
+    ov.classList.remove('sheet-in');
+    closeModalFocus(ov);
+  }
   // Opening the sheet gave "More" the active state as tap feedback. If the
   // user dismissed without navigating, hand the highlight back to the tab
   // that actually owns the page. (showPage also calls this before its own
@@ -3569,6 +3816,56 @@ function sgdOrNull(amount, currency){
   return r == null ? null : n * r;
 }
 
+/* Convert an amount to the active display currency without accepting either
+   missing FX leg. A native amount already in the chosen display currency is
+   safe to show without an SGD bridge, but every other route must first be
+   strictly convertible to SGD and then from SGD to the display currency. */
+function _displayMoneyOrNull(amount, currency){
+  const native = Number(amount);
+  if (!isFinite(native)) return null;
+  const from = String(currency || 'SGD').toUpperCase();
+  const to = String(displayCcy() || 'SGD').toUpperCase();
+  if (from === to) return { value:native, currency:to };
+  const sgd = sgdOrNull(native, from);
+  const displayRate = getFx('SGD', to);
+  if (sgd == null || displayRate == null) return null;
+  return { value:sgd * displayRate, currency:to };
+}
+
+function _nativeMoneyText(amount, currency, opts){
+  const native = Number(amount);
+  if (!isFinite(native)) return '—';
+  const ccy = String(currency || 'SGD').toUpperCase();
+  const dp = opts && opts.dp != null ? opts.dp : 2;
+  const sign = opts && opts.signed && native > 0 ? '+' : '';
+  return `${kjrEscape(ccy)} ${sign}${native.toLocaleString('en-SG', {minimumFractionDigits:dp, maximumFractionDigits:dp})}`;
+}
+
+/* A table cell marked with the app display currency must never show a raw
+   foreign amount under that label. Preserve an unconvertible native amount
+   with its own currency and a missing-FX marker instead. */
+function fmtSgdOrNative(amount, currency, opts){
+  const converted = _displayMoneyOrNull(amount, currency);
+  if (converted) return fmt(converted.value, Object.assign({}, opts || {}, { currency:converted.currency }));
+  return `<span class="price-stale">${_nativeMoneyText(amount, currency, opts)} · FX missing</span>`;
+}
+
+function _compactMoneyText(amount, currency){
+  const value = Number(amount);
+  if (!isFinite(value) || value <= 0) return '—';
+  const ccy = kjrEscape(String(currency || 'SGD').toUpperCase());
+  if (value >= 1e12) return ccy + ' ' + (value / 1e12).toFixed(2) + 'T';
+  if (value >= 1e9) return ccy + ' ' + (value / 1e9).toFixed(2) + 'B';
+  if (value >= 1e6) return ccy + ' ' + (value / 1e6).toFixed(1) + 'M';
+  return ccy + ' ' + Math.round(value).toLocaleString('en-SG');
+}
+
+function fmtCompactSgdOrNative(amount, currency){
+  const converted = _displayMoneyOrNull(amount, currency);
+  if (converted) return _compactMoneyText(converted.value, converted.currency);
+  return `<span class="price-stale">${_compactMoneyText(amount, currency)} · FX missing</span>`;
+}
+
 /* ─── Per-tab display currency ─────────────────────────────────────────
    Julian's ruling (F2, 10/07/2026): everything is SGD except anything
    stock-related. Stocks and Watchlist+ (board) default to USD and keep the
@@ -3691,9 +3988,16 @@ async function refreshFx(opts){
       // Cloud push only when a rate actually moved. lastUpdated alone is
       // freshness metadata, and syncing it turned every background FX tick
       // into a sheet write, feeding the multi-client conflict loop.
-      if (changed) saveData(); else saveLocal();
+      const persisted = changed
+        ? await Promise.resolve(saveData())
+        : await _persistLocalOnly({ revision:_localSaveRevision });
       renderAll();
+      if (!persisted) {
+        setSyncStatus('failed', 'FX rates changed in memory but could not be stored.');
+        return false;
+      }
       if (!opts.silent) showToast('FX refreshed: ' + ok + '/' + pairs.length + ' pair' + (pairs.length===1?'':'s'), 'success');
+      return true;
     } catch (err) {
       if (!opts.silent) showToast('FX refresh failed: ' + err.message, 'error');
       else console.warn('[fx]', err.message);
@@ -3743,21 +4047,21 @@ function pushUndo(){
   if (_undoStack.length > UNDO_MAX) _undoStack.shift();
   _redoStack = [];
 }
-function undoAction(){
+async function undoAction(){
   if (!_undoStack.length){ showToast('Nothing to undo'); return; }
   _redoStack.push(_undoSnapshot());
   const prevPriceCache = DB._priceCache;
   DB = JSON.parse(_undoStack.pop());
   DB._priceCache = prevPriceCache || {}; // carry the live cache forward, same as pullFromRemote
-  saveData(); renderAll(); showToast('Undone', 'success');
+  const saved = await Promise.resolve(saveData()); renderAll(); if (saved) showToast('Undone', 'success');
 }
-function redoAction(){
+async function redoAction(){
   if (!_redoStack.length){ showToast('Nothing to redo'); return; }
   _undoStack.push(_undoSnapshot());
   const prevPriceCache = DB._priceCache;
   DB = JSON.parse(_redoStack.pop());
   DB._priceCache = prevPriceCache || {}; // carry the live cache forward, same as pullFromRemote
-  saveData(); renderAll(); showToast('Redone', 'success');
+  const saved = await Promise.resolve(saveData()); renderAll(); if (saved) showToast('Redone', 'success');
 }
 
 function autoRefreshEnabled(){
@@ -4008,8 +4312,7 @@ function sendToTrash(table, id){
   if (!DB.trash) DB.trash = [];
   DB.trash.push({ id: uid('tr'), table, ts: new Date().toISOString(), data: item });
   if (DB.trash.length > TRASH_MAX) DB.trash = DB.trash.slice(-TRASH_MAX);
-  saveData();
-  return true;
+  return saveData();
 }
 
 /* Human label for a trashed entry, by table. Used by the Recently deleted UI. */
@@ -4066,59 +4369,150 @@ function renderTrash(){
 
 /* Put a trashed entry back into its table. Restores its contribution to all
    derived totals (balances, P&L). Regenerates the id only if it would collide. */
-function restoreFromTrash(trashId){
+async function restoreFromTrash(trashId){
   const trash = DB.trash || [];
   const idx = trash.findIndex(e => e.id === trashId);
-  if (idx < 0) return;
+  if (idx < 0) return false;
   const entry = trash[idx];
-  if (!ENTITY_SCHEMAS[entry.table] && !_LIST_TABLES.includes(entry.table)){
-    showToast('Cannot restore this entry', 'error'); return;
+  if (!ENTITY_SCHEMAS[entry.table]){
+    showToast('Cannot restore this entry because its type is not supported', 'error'); return false;
   }
-  pushUndo();
-  const item = Object.assign({}, entry.data);
-  if (!kjrSafeId(item.id)) item.id = uid(entry.table);
+  const normalised = normaliseEntityRow(entry.table, entry.data);
+  if (!normalised.ok) {
+    showToast('Cannot restore this entry: ' + normalised.error + '. It remains in Recently deleted.', 'error');
+    return false;
+  }
+  const item = normalised.item;
   if (!DB[entry.table]) DB[entry.table] = [];
   if (DB[entry.table].some(x => x.id === item.id)) item.id = uid(entry.table);
   item.updatedAt = new Date().toISOString();
+  pushUndo();
   DB[entry.table].push(item);
   trash.splice(idx, 1);
-  saveData();
+  const saved = await Promise.resolve(saveData());
   renderAll();
   renderTrash();
+  if (!saved) return false;
   showToast('Restored', 'success');
+  return true;
 }
 
 /* Permanently remove one trashed entry. */
-function purgeTrashItem(trashId){
+async function purgeTrashItem(trashId){
   const trash = DB.trash || [];
   const idx = trash.findIndex(e => e.id === trashId);
   if (idx < 0) return;
   if (!confirm('Permanently delete this entry? This cannot be undone.')) return;
   pushUndo();
   trash.splice(idx, 1);
-  saveData();
+  const saved = await Promise.resolve(saveData());
   renderTrash();
-  showToast('Deleted permanently', 'success');
+  if (saved) showToast('Deleted permanently', 'success');
 }
 
 /* Empty the whole Recently deleted list. */
-function emptyTrash(){
+async function emptyTrash(){
   const n = (DB.trash || []).length;
   if (!n) return;
   if (!confirm('Permanently delete all ' + n + ' item' + (n > 1 ? 's' : '') + ' in Recently deleted? This cannot be undone.')) return;
   pushUndo();
   DB.trash = [];
-  saveData();
+  const saved = await Promise.resolve(saveData());
   renderTrash();
-  showToast('Recently deleted emptied', 'success');
+  if (saved) showToast('Recently deleted emptied', 'success');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
    ENTITY MODAL — shared CRUD form for the four holdings tables
    ═══════════════════════════════════════════════════════════════════════ */
 let _modalState  = null; // { table, item, isNew }
-let _modalOpener = null; // element focused before modal opened (restored on close)
-let _modalKeyTrap = null; // keydown handler reference so we can remove it cleanly
+let _entitySaveInFlight = false;
+let _entityDeleteInFlight = false;
+
+// Each overlay keeps its own opener and key handler. This deliberately does
+// not introduce a modal stack: an inner modal restores focus to the control
+// that opened it, while its outer overlay remains responsible for its own
+// lifecycle.
+const _modalFocusStates = new WeakMap();
+
+function _modalFocusable(overlay){
+  if (!overlay) return [];
+  const selector = [
+    'a[href]', 'area[href]', 'button', 'input:not([type="hidden"])',
+    'select', 'textarea', '[contenteditable="true"]', '[tabindex]:not([tabindex="-1"])'
+  ].join(',');
+  return Array.from(overlay.querySelectorAll(selector)).filter(el => {
+    if (el.matches(':disabled') || el.hidden || el.closest('[aria-hidden="true"]')) return false;
+    if (!el.getClientRects().length) return false;
+    const style = getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  });
+}
+
+function _modalFocusVisible(el){
+  if (!el || !el.isConnected || !el.getClientRects().length) return false;
+  const style = getComputedStyle(el);
+  return style.display !== 'none' && style.visibility !== 'hidden';
+}
+
+function _modalFocusElement(el){
+  if (!el || typeof el.focus !== 'function') return;
+  try { el.focus({ preventScroll:true }); }
+  catch (_) { try { el.focus(); } catch (_) {} }
+}
+
+function openModalFocus(overlay, closeOnEscape){
+  if (!overlay) return;
+  const previous = _modalFocusStates.get(overlay);
+  if (previous && previous.trap) overlay.removeEventListener('keydown', previous.trap);
+  const state = {
+    opener: previous && previous.opener ? previous.opener : document.activeElement,
+    trap: null
+  };
+  state.trap = function(e){
+    if (e.key === 'Escape' && typeof closeOnEscape === 'function'){
+      e.preventDefault();
+      e.stopPropagation();
+      closeOnEscape();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const focusable = _modalFocusable(overlay);
+    if (!focusable.length){
+      e.preventDefault();
+      _modalFocusElement(overlay);
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey){
+      if (active === first || !overlay.contains(active)){
+        e.preventDefault();
+        _modalFocusElement(last);
+      }
+    } else if (active === last || !overlay.contains(active)){
+      e.preventDefault();
+      _modalFocusElement(first);
+    }
+  };
+  _modalFocusStates.set(overlay, state);
+  overlay.addEventListener('keydown', state.trap);
+  requestAnimationFrame(() => {
+    if (_modalFocusStates.get(overlay) !== state || !overlay.classList.contains('open')) return;
+    const first = _modalFocusable(overlay)[0];
+    _modalFocusElement(first || overlay);
+  });
+}
+
+function closeModalFocus(overlay){
+  if (!overlay) return;
+  const state = _modalFocusStates.get(overlay);
+  if (!state) return;
+  overlay.removeEventListener('keydown', state.trap);
+  _modalFocusStates.delete(overlay);
+  if (_modalFocusVisible(state.opener)) _modalFocusElement(state.opener);
+}
 
 /* GICS 11 sectors + two app-level labels. Values feed sectorClass() in
    kjr-core.js, which buckets them cyclical / defensive / sensitive for the
@@ -4268,7 +4662,7 @@ const ENTITY_SCHEMAS = {
         hint:'Source account. Leave as n/a unless this is a transfer.' },
       { key:'date',   label:'Date', type:'date', required:true },
       { key:'amount', label:'Amount', type:'number', required:true, step:'0.01', min:'0', placeholder:'1000.00', hint:'Amount leaving the source, in its currency.' },
-      { key:'amountIn', label:'Amount received (cross-currency transfers)', type:'number', step:'0.01', placeholder:'auto',
+      { key:'amountIn', label:'Amount received (cross-currency transfers)', type:'number', step:'0.01', min:'0', placeholder:'auto',
         hint:'Only for transfers where the two accounts use different currencies. Leave blank if same currency.' },
       { key:'notes',  label:'Notes', type:'textarea' }
     ],
@@ -4383,6 +4777,68 @@ const ENTITY_SCHEMAS = {
   }
 };
 
+/* Normalise one externally sourced entity through the same field contract as
+   the edit modal. Used by trash restore so nested backup/cloud data cannot
+   bypass numeric, date, select, text and ticker validation. */
+function normaliseEntityRow(table, source){
+  const schema = ENTITY_SCHEMAS[table];
+  if (!schema || !source || typeof source !== 'object' || Array.isArray(source)) {
+    return { ok:false, error:'malformed row data' };
+  }
+  const item = _copySafeOwnObject(source);
+  if (!item) return { ok:false, error:'malformed row data' };
+  for (const f of schema.fields){
+    const raw = item[f.key];
+    if (f.type === 'number') {
+      if (raw === '' || raw == null) item[f.key] = null;
+      else {
+        if (typeof raw !== 'number' && typeof raw !== 'string') return { ok:false, error:f.label + ' is invalid' };
+        const n = Number(raw);
+        const min = f.min != null ? Number(f.min) : null;
+        const max = f.max != null ? Number(f.max) : null;
+        if (!isFinite(n) || (min != null && n < min) || (max != null && n > max)) {
+          return { ok:false, error:f.label + ' is invalid' };
+        }
+        item[f.key] = n;
+      }
+    } else if (f.type === 'select') {
+      if (raw !== '' && raw != null && typeof raw !== 'string' && typeof raw !== 'number') {
+        return { ok:false, error:f.label + ' is invalid' };
+      }
+      let options;
+      try { options = f.optionsFn ? (f.optionsFn() || []) : (f.options || []); }
+      catch (_) { return { ok:false, error:f.label + ' could not be validated' }; }
+      const allowed = options.map(o => String(Array.isArray(o) ? o[0] : o));
+      if (raw === '' || raw == null) item[f.key] = f.default || '';
+      else if (allowed.includes(String(raw))) item[f.key] = String(raw);
+      else return { ok:false, error:f.label + ' is invalid' };
+    } else if (f.type === 'date') {
+      if (raw === '' || raw == null) item[f.key] = '';
+      else if (typeof raw === 'string' && kjrValidDate(raw)) item[f.key] = raw;
+      else return { ok:false, error:f.label + ' is invalid' };
+    } else if (f.type === 'textarea') {
+      if (raw != null && typeof raw !== 'string' && typeof raw !== 'number') return { ok:false, error:f.label + ' is invalid' };
+      item[f.key] = kjrSafeString(raw == null ? '' : String(raw).trim(), 5000);
+    } else {
+      if (raw != null && typeof raw !== 'string' && typeof raw !== 'number') return { ok:false, error:f.label + ' is invalid' };
+      item[f.key] = kjrSafeString(raw == null ? '' : String(raw).trim(), 120);
+    }
+  }
+  if (schema.afterRead) schema.afterRead(item);
+  for (const f of schema.fields){
+    if (!f.required) continue;
+    const value = item[f.key];
+    if (value == null || value === '' || (f.type === 'number' && !isFinite(value))) {
+      return { ok:false, error:'required field ' + f.label + ' is missing' };
+    }
+  }
+  if ((table === 'stocks' || table === 'watchlist' || table === 'crypto') && !_isValidTicker(item.symbol)) {
+    return { ok:false, error:'Symbol is invalid' };
+  }
+  if (!kjrSafeId(item.id)) item.id = uid(table);
+  return { ok:true, item };
+}
+
 /* defaultsOverride: optional extra defaults merged on top of schema.defaults
    for a NEW entity only (never touches an edit of an existing row). Used by
    the "＋ Add rider" action under an expanded policy to preselect that policy
@@ -4490,23 +4946,10 @@ function openEntityModal(table, existingId, defaultsOverride){
   }
 
   document.getElementById('em-delete').style.display = existing ? '' : 'none';
-  _modalOpener = document.activeElement;
   const _overlay = document.getElementById('entity-modal');
-  if (_modalKeyTrap) _overlay.removeEventListener('keydown', _modalKeyTrap);
-  _modalKeyTrap = function(e){
-    if (e.key === 'Escape'){ e.preventDefault(); closeEntityModal(); return; }
-    if (e.key !== 'Tab') return;
-    const focusable = Array.from(_overlay.querySelectorAll(
-      'input:not([disabled]),select:not([disabled]),textarea:not([disabled]),button:not([disabled])'
-    )).filter(el => el.offsetParent !== null);
-    if (!focusable.length) return;
-    const first = focusable[0], last = focusable[focusable.length - 1];
-    if (e.shiftKey){ if (document.activeElement === first){ e.preventDefault(); last.focus(); } }
-    else           { if (document.activeElement === last) { e.preventDefault(); first.focus(); } }
-  };
-  _overlay.addEventListener('keydown', _modalKeyTrap);
+  if (!_overlay) return;
   _overlay.classList.add('open');
-  setTimeout(() => { const first = body.querySelector('input,select,textarea'); if (first) first.focus(); }, 50);
+  openModalFocus(_overlay, closeEntityModal);
 }
 
 function renderField(f, value){
@@ -4548,15 +4991,16 @@ function renderField(f, value){
 
 function closeEntityModal(){
   const overlay = document.getElementById('entity-modal');
-  if (_modalKeyTrap){ overlay.removeEventListener('keydown', _modalKeyTrap); _modalKeyTrap = null; }
-  overlay.classList.remove('open');
+  if (overlay){
+    overlay.classList.remove('open');
+    closeModalFocus(overlay);
+  }
   _modalState = null;
-  if (_modalOpener && typeof _modalOpener.focus === 'function'){ try { _modalOpener.focus(); } catch (_){} }
-  _modalOpener = null;
 }
 
-function entityModalSave(){
-  if (!_modalState) return;
+async function entityModalSave(){
+  if (!_modalState || _entitySaveInFlight) return false;
+  const modalToken = _modalState;
   const { table, item, isNew } = _modalState;
   const schema = ENTITY_SCHEMAS[table];
 
@@ -4668,21 +5112,19 @@ function entityModalSave(){
     const toCcy   = toAcct ? (toAcct.currency || 'SGD') : 'SGD';
     const hasIn = item.amountIn != null && isFinite(item.amountIn);
     if (fromCcy !== toCcy && !hasIn){
-      if (!confirm(fromCcy + ' → ' + toCcy + ' transfer with no received amount. Both sides will use ' + fmt(toSGD(Number(item.amount)||0, fromCcy)) + ', which is wrong across currencies.\n\nEnter "Amount received" for an exact figure, or save anyway?')) return;
+      showToast('Enter Amount received for this ' + fromCcy + ' → ' + toCcy + ' transfer before saving.', 'error');
+      return;
     }
   }
 
-  // Trade funded from a cash account in a different currency: flag, since we
-  // do not auto-convert the cash leg. Same-currency keeps the math exact.
+  // A linked trade has no separate cash-leg amount field. Until one exists,
+  // only a same-currency funding account can be represented without inventing
+  // an exchange rate or corrupting the cash ledger.
   if (table === 'stockTxns' && item.cashAccountId){
-    const stock = DB.stocks.find(s => s.id === item.stockId);
-    const acct  = (DB.cash || []).find(c => c.id === item.cashAccountId);
-    if (stock && acct){
-      const stockCcy = stock.currency || (stock.market === 'SGX' ? 'SGD' : 'USD');
-      const acctCcy  = acct.currency || 'SGD';
-      if (stockCcy !== acctCcy){
-        if (!confirm('This trade is in ' + stockCcy + ' but ' + (acct.name || 'the cash account') + ' holds ' + acctCcy + '. The cash leg will not be currency-converted, so the balance may be off.\n\nLink anyway?')) return;
-      }
+    const mismatch = linkedTradeCurrencyMismatch(item);
+    if (mismatch){
+      showToast('This trade is in ' + mismatch.stockCcy + ' but ' + mismatch.accountName + ' holds ' + mismatch.accountCcy + '. Choose a same-currency cash account or leave the trade unlinked.', 'error');
+      return;
     }
   }
 
@@ -4720,8 +5162,16 @@ function entityModalSave(){
       (DB[table] = DB[table] || []).push(item);
     }
   }
-  saveData();
-  closeEntityModal();
+  _entitySaveInFlight = true;
+  let saved = false;
+  try { saved = await Promise.resolve(saveData()); }
+  finally { _entitySaveInFlight = false; }
+  if (!saved) {
+    if (_modalState === modalToken) _modalState = { table, item, isNew:false };
+    renderAll();
+    return false;
+  }
+  if (_modalState === modalToken) closeEntityModal();
   renderAll();
   showToast(rowWasGone ? 'This entry was deleted elsewhere, your edit was restored as a new entry' : (isNew ? 'Added' : 'Saved'), rowWasGone ? 'error' : 'success');
 
@@ -4733,10 +5183,12 @@ function entityModalSave(){
   if ((table === 'stocks' || table === 'watchlist') && !priceFor(table, item)){
     refreshStockPrices({ silent: true });
   }
+  return true;
 }
 
-function entityModalDelete(){
-  if (!_modalState || _modalState.isNew) return;
+async function entityModalDelete(){
+  if (!_modalState || _modalState.isNew || _entityDeleteInFlight) return false;
+  const modalToken = _modalState;
   const { table, item } = _modalState;
 
   // Referential-integrity guard: warn if deleting this would orphan movements
@@ -4762,12 +5214,16 @@ function entityModalDelete(){
   // restoring the policy from trash makes them reappear with no extra step.
 
   const prompt = refWarning + 'Move this entry to trash? You can restore it from Settings → Recently deleted.';
-  if (!confirm(prompt)) return;
+  if (!confirm(prompt)) return false;
   pushUndo();
-  sendToTrash(table, item.id);
-  closeEntityModal();
+  _entityDeleteInFlight = true;
+  let saved = false;
+  try { saved = await Promise.resolve(sendToTrash(table, item.id)); }
+  finally { _entityDeleteInFlight = false; }
+  if (_modalState === modalToken) closeEntityModal();
   renderAll();
-  showToast('Moved to trash', 'success');
+  if (saved) showToast('Moved to trash', 'success');
+  return saved;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -4842,7 +5298,7 @@ function exportHoldingsCSV(){
     r.s.market,
     r.s.sector || '',
     r.shares,
-    r.avgCost != null ? toSGD(r.avgCost, r.ccy) : '',
+    r.avgCost != null ? sgdOrNull(r.avgCost, r.ccy) : '',
     r.cost != null ? r.cost : '',
     r.priceSgd != null ? r.priceSgd : '',
     r.mv != null ? r.mv : '',
@@ -4874,9 +5330,9 @@ function exportLedgerCSV(){
       symbolOf(t.stockId),
       t.side,
       qty,
-      toSGD(px, ccy),
-      fees ? toSGD(fees, ccy) : '',
-      toSGD(value, ccy),
+      sgdOrNull(px, ccy),
+      fees ? sgdOrNull(fees, ccy) : '',
+      sgdOrNull(value, ccy),
       t.notes || ''
     ];
   });
@@ -4982,7 +5438,10 @@ function ibkrShowPreview(matched, skippedCount){
   overlay.classList.add('open');
 }
 
-function ibkrConfirmImport(){
+let _ibkrImportInFlight = false;
+async function ibkrConfirmImport(){
+  if (_ibkrImportInFlight) return false;
+  _ibkrImportInFlight = true;
   const overlay = document.getElementById('ibkr-preview-overlay');
   let matched;
   try { matched = JSON.parse(overlay.dataset.matched || '[]'); } catch(_){ matched = []; }
@@ -5044,9 +5503,12 @@ function ibkrConfirmImport(){
     }
   });
 
-  saveData();
+  let saved = false;
+  try { saved = await Promise.resolve(saveData()); }
+  finally { _ibkrImportInFlight = false; }
   renderAll();
-  showToast(`Imported ${addedTrades} trade${addedTrades !== 1 ? 's' : ''}${addedStocks ? ' + ' + addedStocks + ' new stock' + (addedStocks !== 1 ? 's' : '') : ''}${rejected ? ', ' + rejected + ' rejected (invalid shares/price)' : ''}`);
+  if (saved) showToast(`Imported ${addedTrades} trade${addedTrades !== 1 ? 's' : ''}${addedStocks ? ' + ' + addedStocks + ' new stock' + (addedStocks !== 1 ? 's' : '') : ''}${rejected ? ', ' + rejected + ' rejected (invalid shares/price)' : ''}`);
+  return saved;
 }
 
 /* ─── Insurance CSV import (manual SGFinDex mapper) ─────────────────────
@@ -5264,13 +5726,15 @@ function insuranceImportShowPreview(){
   overlay.classList.add('open');
 }
 let _insImportReady = null;
+let _insuranceImportInFlight = false;
 
 /* Commits the whole batch as ONE undo step: pushUndo() once before the loop,
    one saveData()/renderAll() after, so Ctrl+Z reverses the entire import in
    a single action rather than row-by-row. */
-function insuranceImportConfirm(){
+async function insuranceImportConfirm(){
   const ready = _insImportReady || [];
-  if (!ready.length) return;
+  if (!ready.length || _insuranceImportInFlight) return false;
+  _insuranceImportInFlight = true;
   pushUndo();
   const now = new Date().toISOString();
   ready.forEach(p => {
@@ -5280,11 +5744,22 @@ function insuranceImportConfirm(){
     (DB.insurance = DB.insurance || []).push(item);
   });
   const skipped = (_insImportRows || []).length - ready.length;
-  saveData();
-  closeInsuranceImport();
+  let saved = false;
+  try { saved = await Promise.resolve(saveData()); }
+  finally { _insuranceImportInFlight = false; }
+  if (!saved) {
+    if (_insImportReady === ready) {
+      closeInsuranceImport();
+      _insImportReady = null;
+    }
+    renderAll();
+    return false;
+  }
+  if (_insImportReady === ready) closeInsuranceImport();
   renderAll();
   showToast(`Imported ${ready.length} polic${ready.length === 1 ? 'y' : 'ies'}${skipped ? ' (' + skipped + ' skipped)' : ''}`, 'success');
-  _insImportReady = null;
+  if (_insImportReady === ready) _insImportReady = null;
+  return true;
 }
 
 /* Compute the per-holding rows that BOTH the Holdings table and the Custom
@@ -5302,39 +5777,66 @@ function buildStockChartRows(){
     const derived = deriveStockPosition(s.id);
     const shares  = derived ? derived.shares  : (s.shares  || 0);
     const avgCost = derived ? derived.avgCost : (s.avgCost || 0);
+    let fxMissing = false;
     let realisedSgd = null;
-    if (derived){ realisedSgd = roundMoney(toSGD(derived.realisedPL, ccy)); }
-    const cost  = roundMoney(toSGD(shares * avgCost, ccy));
+    if (derived){
+      const realised = sgdOrNull(derived.realisedPL, ccy);
+      if (realised == null){ fxMissing = Number(derived.realisedPL) !== 0; }
+      else realisedSgd = roundMoney(realised);
+    }
+    const costNative = shares * avgCost;
+    const costSgd = sgdOrNull(costNative, ccy);
+    const cost = costSgd == null ? (Number(costNative) === 0 ? 0 : null) : roundMoney(costSgd);
+    if (costSgd == null && Number(costNative) !== 0) fxMissing = true;
     let priceSgd = null, mv = null, pl = null, plPct = null, stale = true, priceCcy = null;
     let changeSgd = null, prevCloseSgd = null;
     if (px && px.price != null){
       const pxCcy = px.currency || ccy;
-      priceSgd = toSGD(px.price, pxCcy);
-      mv  = roundMoney(priceSgd * shares);
-      pl  = roundMoney(mv - cost);
-      plPct = safeRatio(pl, cost);
-      stale = isStale(px.fetchedAt, 24);
       priceCcy = pxCcy;
-      if (px.change != null) changeSgd = roundMoney(toSGD(px.change, pxCcy) * shares);
-      if (px.previousClose != null) prevCloseSgd = toSGD(px.previousClose, pxCcy);
+      priceSgd = sgdOrNull(px.price, pxCcy);
+      if (priceSgd == null){
+        fxMissing = Number(px.price) !== 0 || fxMissing;
+      } else {
+        mv  = roundMoney(priceSgd * shares);
+        if (cost != null){
+          pl  = roundMoney(mv - cost);
+          plPct = safeRatio(pl, cost);
+        }
+      }
+      stale = isStale(px.fetchedAt, 24);
+      if (px.change != null){
+        const change = sgdOrNull(px.change, pxCcy);
+        if (change == null) fxMissing = Number(px.change) !== 0 || fxMissing;
+        else changeSgd = roundMoney(change * shares);
+      }
+      if (px.previousClose != null){
+        const previous = sgdOrNull(px.previousClose, pxCcy);
+        if (previous == null) fxMissing = Number(px.previousClose) !== 0 || fxMissing;
+        else prevCloseSgd = previous;
+      }
     }
     const dps = Number(s.divPerShare) || 0;
     let divAnnualSgd = null, divYoc = null, divYieldCur = null;
     if (dps > 0 && shares){
-      divAnnualSgd = roundMoney(toSGD(shares * dps, ccy));
-      divYoc = safeRatio(divAnnualSgd, cost);
-      if (mv != null) divYieldCur = safeRatio(divAnnualSgd, mv);
+      const dividend = sgdOrNull(shares * dps, ccy);
+      if (dividend == null){
+        fxMissing = true;
+      } else {
+        divAnnualSgd = roundMoney(dividend);
+        if (cost != null) divYoc = safeRatio(divAnnualSgd, cost);
+        if (mv != null) divYieldCur = safeRatio(divAnnualSgd, mv);
+      }
     }
     let extLine = '';
     if (px && px.extendedKind && px.extendedPrice != null){
       const extCls = (px.extendedChange || 0) >= 0 ? 'pos' : 'neg';
       const elabel = px.extendedKind === 'pre' ? 'Pre' : 'Post';
       const pctTxt = px.extendedChangePct != null ? ' ' + fmtPct(px.extendedChangePct) : '';
-      extLine = `<div class="px-ext"><span class="px-ext-tag">${elabel}</span> ${fmt(toSGD(px.extendedPrice, priceCcy))}<span class="${extCls}">${pctTxt}</span></div>`;
+      extLine = `<div class="px-ext"><span class="px-ext-tag">${elabel}</span> ${fmtSgdOrNative(px.extendedPrice, priceCcy)}<span class="${extCls}">${pctTxt}</span></div>`;
     }
     if (mv != null) totMv += mv;
     return { s, ysym, px, ccy, cost, mv, pl, plPct, stale, priceCcy, priceSgd, shares, avgCost, derived,
-             realisedSgd, changeSgd, prevCloseSgd, divAnnualSgd, divYoc, divYieldCur, extLine, weight:null };
+             realisedSgd, changeSgd, prevCloseSgd, divAnnualSgd, divYoc, divYieldCur, extLine, fxMissing, weight:null };
   });
   totMv = roundMoney(totMv);
   rows.forEach(r => { if (r.mv != null && totMv > 0) r.weight = safeRatio(r.mv, totMv); });
@@ -5369,14 +5871,15 @@ function renderStocks(){
   // are then derived from those rows in a single pass.
   const rows = buildStockChartRows();
   let totCost = 0, totMv = 0, totRealised = 0, totDivAnnual = 0,
-      anyPriceMissing = false, anyFxMissing = false, anyPriced = false, anyDerived = false, anyDiv = false;
+      anyPriceMissing = false, anyFxMissing = false, anyPriced = false, anyDerived = false, anyDiv = false, anyCostMissing = false;
   rows.forEach(r => {
-    totCost += r.cost;
+    if (r.cost == null) anyCostMissing = true;
+    else totCost += r.cost;
     if (r.mv != null){ totMv += r.mv; anyPriced = true; } else { anyPriceMissing = true; }
     if (r.realisedSgd != null) totRealised += r.realisedSgd;
     if (r.derived) anyDerived = true;
     if (r.divAnnualSgd != null){ totDivAnnual += r.divAnnualSgd; anyDiv = true; }
-    if (fxMissingFor(r.ccy) || (r.priceCcy && fxMissingFor(r.priceCcy))) anyFxMissing = true;
+    if (r.fxMissing) anyFxMissing = true;
   });
   totCost = roundMoney(totCost); totMv = roundMoney(totMv);
   totRealised = roundMoney(totRealised); totDivAnnual = roundMoney(totDivAnnual);
@@ -5394,10 +5897,11 @@ function renderStocks(){
   if (_stocksFilter.sector) filteredRows = filteredRows.filter(r => r.s.sector === _stocksFilter.sector);
 
   // Filtered totals — used by the tfoot row so the footer always matches the visible set.
-  let fTotCost=0, fTotMv=0, fTotRealised=0, fTotDiv=0, fAnyMv=false;
+  let fTotCost=0, fTotMv=0, fTotRealised=0, fTotDiv=0, fAnyMv=false, fAnyCostMissing=false, fAnyPriceMissing=false;
   filteredRows.forEach(r => {
-    fTotCost += r.cost;
-    if (r.mv != null){ fTotMv += r.mv; fAnyMv = true; }
+    if (r.cost == null) fAnyCostMissing = true;
+    else fTotCost += r.cost;
+    if (r.mv != null){ fTotMv += r.mv; fAnyMv = true; } else fAnyPriceMissing = true;
     if (r.realisedSgd != null) fTotRealised += r.realisedSgd;
     if (r.divAnnualSgd != null) fTotDiv += r.divAnnualSgd;
   });
@@ -5406,7 +5910,7 @@ function renderStocks(){
   const fTotPl    = roundMoney(fTotMv - fTotCost);
   const fTotPlPct = safeRatio(fTotPl, fTotCost);
 
-  const showPl = anyPriced && !anyPriceMissing;
+  const showPl = anyPriced && !anyPriceMissing && !anyCostMissing;
   const totPl = roundMoney(totMv - totCost);
   const totPlPct = safeRatio(totPl, totCost);
   const mvSub = anyFxMissing ? 'FX missing, set rate in Settings'
@@ -5416,24 +5920,24 @@ function renderStocks(){
 
   const summaryItems = [
     { label:'Holdings',     value: String(list.length), accent:'accent' },
-    { label:'Total cost',   value: fmt(totCost, {dp:0}), sub: anyFxMissing ? 'approximate (FX missing)' : '' },
-    { label:'Market value', value: anyPriced ? fmt(totMv, {dp:0}) : '—', accent:'accent', sub: mvSub },
-    { label:'Unrealised P&L', value: showPl ? fmt(totPl, {dp:0}) : '—',
-      sub: showPl && totPlPct != null ? fmtPct(totPlPct) : (anyPriceMissing ? 'refresh prices to compute' : ''),
+    { label:'Total cost',   value: anyCostMissing ? '—' : fmtSgdOrNative(totCost, 'SGD', {dp:0}), sub: anyCostMissing ? 'FX missing, set rate in Settings' : '' },
+    { label:'Market value', value: anyPriced ? fmtSgdOrNative(totMv, 'SGD', {dp:0}) : '—', accent:'accent', sub: mvSub },
+    { label:'Unrealised P&L', value: showPl ? fmtSgdOrNative(totPl, 'SGD', {dp:0}) : '—',
+      sub: showPl && totPlPct != null ? fmtPct(totPlPct) : (anyCostMissing ? 'set FX to compute' : (anyPriceMissing ? 'refresh prices to compute' : '')),
       accent: showPl ? (totPl >= 0 ? 'pos' : 'neg') : '' }
   ];
   const anySell = (DB.stockTxns || []).some(t => t.side === 'sell');
   if (anyDerived && anySell){
-    summaryItems.push({ label:'Realised P&L', value: fmt(totRealised, {dp:0}), sub:'from closed trades',
+    summaryItems.push({ label:'Realised P&L', value: fmtSgdOrNative(totRealised, 'SGD', {dp:0}), sub:'from closed trades',
       accent: totRealised >= 0 ? 'pos' : 'neg' });
   }
   if (anyDiv){
     const totDivYoc = safeRatio(totDivAnnual, totCost);
-    summaryItems.push({ label:'Dividend income', value: fmt(totDivAnnual, {dp:0}),
-      sub: fmt(roundMoney(totDivAnnual/12)) + ' / mo' + (totDivYoc != null ? ' · ' + totDivYoc.toFixed(2) + '% on cost' : ''),
+    summaryItems.push({ label:'Dividend income', value: fmtSgdOrNative(totDivAnnual, 'SGD', {dp:0}),
+      sub: fmtSgdOrNative(roundMoney(totDivAnnual/12), 'SGD') + ' / mo' + (totDivYoc != null ? ' · ' + totDivYoc.toFixed(2) + '% on cost' : ''),
       accent:'accent' });
   }
-  const allocHtml = renderSectorAllocation(rows, anyPriceMissing);
+  const allocHtml = renderSectorAllocation(rows, anyPriceMissing || anyFxMissing || anyCostMissing);
   sumEl.innerHTML = allocHtml
     ? `<div class="sum-row">${renderSummary(summaryItems)}${allocHtml}</div>`
     : renderSummary(summaryItems);
@@ -5472,9 +5976,10 @@ function renderStocks(){
   // Sortable header cell: reserved glyph space so the layout never shifts.
   const thSort = (key, lbl, extraCls) => {
     const active = sortPref.key === key && sortPref.dir;
-    const glyph  = active ? `<span class="sort-glyph">${sortPref.dir === 'asc' ? '▲' : '▼'}</span>` : '';
-    const aria   = active ? ` aria-sort="${sortPref.dir === 'asc' ? 'ascending' : 'descending'}"` : '';
-    return `<th class="sortable${extraCls || ''}" data-sort-key="${key}" tabindex="0"${aria}>${lbl}${glyph}</th>`;
+    const glyph = active ? `<span class="sort-glyph" aria-hidden="true">${sortPref.dir === 'asc' ? '▲' : '▼'}</span>` : '';
+    const ariaSort = active ? (sortPref.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+    const label = kjrEscape(String(lbl).replace(/<[^>]*>/g, '').trim());
+    return `<th class="sortable sortable-button${extraCls || ''}" data-sort-key="${key}" aria-sort="${ariaSort}"><button type="button" class="sort-button" aria-label="Sort by ${label}">${lbl}${glyph}</button></th>`;
   };
   const headCells = cols.map(c => {
     const lbl = typeof c.label === 'function' ? c.label(dc) : c.label;
@@ -5516,12 +6021,12 @@ function renderStocks(){
     // Tfoot totals aligned to the visible column set.
     const totCells = cols.map(c => {
       switch(c.key){
-        case 'mv':       return `<td class="num">${fAnyMv?fmt(fTotMv,{dp:0}):'—'}</td>`;
-        case 'cost':     return `<td class="num">${fmt(fTotCost,{dp:0})}</td>`;
-        case 'pl':       return `<td class="num">${fAnyMv?`<span class="${fTotPl>=0?'pos':'neg'}">${_plArrow(fTotPl)}${fmt(fTotPl,{dp:0,signed:true})}</span>`:'—'}</td>`;
-        case 'plPct':    return `<td class="num">${fAnyMv&&fTotPlPct!=null?`<span class="${fTotPl>=0?'pos':'neg'}">${fmtPct(fTotPlPct)}</span>`:'—'}</td>`;
-        case 'realised': return `<td class="num">${fTotRealised?`<span class="${fTotRealised>=0?'pos':'neg'}">${_plArrow(fTotRealised)}${fmt(fTotRealised,{dp:0,signed:true})}</span>`:'—'}</td>`;
-        case 'divIncome':return `<td class="num">${fTotDiv?fmt(fTotDiv,{dp:0}):'—'}</td>`;
+        case 'mv':       return `<td class="num">${fAnyMv?fmtSgdOrNative(fTotMv,'SGD',{dp:0}):'—'}</td>`;
+        case 'cost':     return `<td class="num">${fAnyCostMissing ? '—' : fmtSgdOrNative(fTotCost,'SGD',{dp:0})}</td>`;
+        case 'pl':       return `<td class="num">${fAnyMv&&!fAnyPriceMissing&&!fAnyCostMissing?`<span class="${fTotPl>=0?'pos':'neg'}">${_plArrow(fTotPl)}${fmtSgdOrNative(fTotPl,'SGD',{dp:0,signed:true})}</span>`:'—'}</td>`;
+        case 'plPct':    return `<td class="num">${fAnyMv&&!fAnyPriceMissing&&!fAnyCostMissing&&fTotPlPct!=null?`<span class="${fTotPl>=0?'pos':'neg'}">${fmtPct(fTotPlPct)}</span>`:'—'}</td>`;
+        case 'realised': return `<td class="num">${fTotRealised?`<span class="${fTotRealised>=0?'pos':'neg'}">${_plArrow(fTotRealised)}${fmtSgdOrNative(fTotRealised,'SGD',{dp:0,signed:true})}</span>`:'—'}</td>`;
+        case 'divIncome':return `<td class="num">${fTotDiv?fmtSgdOrNative(fTotDiv,'SGD',{dp:0}):'—'}</td>`;
         default:         return `<td></td>`;
       }
     }).join('');
@@ -5641,17 +6146,17 @@ const PB_HOLDINGS_FIELDS = {
   // null here rather than coerce to 0, otherwise it silently counts as a real
   // 0% in the average and drags it down. kjrChartAggregate now excludes a
   // null get() result from both the sum and the n denominator.
-  pnlPct:     { label:'P&L %',           type:'meas', agg:'avg', unit:'pct',   get: r => r.plPct == null ? null : r.plPct * 100 },
+  pnlPct:     { label:'P&L %',           type:'meas', agg:'avg', unit:'pct',   get: r => r.plPct == null ? null : r.plPct },
   shares:     { label:'Shares',          type:'meas', agg:'sum', unit:'count', get: r => r.shares ?? 0 },
   divIncome:  { label:'Annual Dividend', type:'meas', agg:'sum', unit:'money', get: r => r.divAnnualSgd ?? 0 },
-  divYield:   { label:'Dividend Yield',  type:'meas', agg:'avg', unit:'pct',   get: r => r.divYieldCur == null ? null : r.divYieldCur * 100 },
-  weightPct:  { label:'Portfolio Weight',type:'meas', agg:'sum', unit:'pct',   get: r => (r.weight ?? 0) * 100 },
+  divYield:   { label:'Dividend Yield',  type:'meas', agg:'avg', unit:'pct',   get: r => r.divYieldCur == null ? null : r.divYieldCur },
+  weightPct:  { label:'Portfolio Weight',type:'meas', agg:'sum', unit:'pct',   get: r => r.weight ?? 0 },
   posCount:   { label:'Position Count',  type:'meas', agg:'sum', unit:'count', get: () => 1 },
 };
 const PB_ALLOC_FIELDS = {
   assetClass: { label:'Asset Class', type:'dim',  get: r => r.cls },
   value:      { label:'Value',       type:'meas', agg:'sum', unit:'money', get: r => r.val },
-  weightPct:  { label:'Weight',      type:'meas', agg:'sum', unit:'pct',   get: r => r.weight * 100 },
+  weightPct:  { label:'Weight',      type:'meas', agg:'sum', unit:'pct',   get: r => r.weight == null ? null : r.weight * 100 },
 };
 const PB_CASHFLOW_FIELDS = {
   month:   { label:'Month',    type:'dim',  get: r => r.month },
@@ -5660,14 +6165,28 @@ const PB_CASHFLOW_FIELDS = {
   net:     { label:'Net',      type:'meas', agg:'sum', unit:'money', get: r => r.net },
 };
 
-function _pbAllocRows(){
-  const c = _netWorthClassesSGD();
-  const net = c.stocks + c.cash + c.cpf + c.realestate + c.crypto;
+function _allocationData(classes, includeCpf){
+  const c = classes || {};
   const defs = [
-    ['Stocks',c.stocks],['Cash',c.cash],['CPF',c.cpf],['Real Estate',c.realestate],['Crypto',c.crypto]
+    ['Stocks','stocks'], ['Cash','cash'], ['CPF','cpf'], ['Real Estate','realestate'], ['Crypto','crypto'], ['Insurance','insurance']
   ];
-  const rows = defs.filter(([,v]) => v > 0).map(([cls,v]) => ({ cls, val:v, weight:net>0?v/net:0 }));
-  return _dashShowCpf ? rows : rows.filter(r => r.cls !== 'CPF');
+  const items = defs
+    .filter(([, key]) => includeCpf || key !== 'cpf')
+    .map(([cls, key]) => ({ cls, val:Number(c[key]) || 0 }))
+    .filter(row => row.val !== 0);
+  const total = items.reduce((sum, row) => sum + row.val, 0);
+  const canAllocate = isFinite(total) && total > 0;
+  return {
+    items,
+    rows: items.map(row => ({ cls:row.cls, val:row.val, weight:canAllocate ? row.val / total : null })),
+    total,
+    hasValues: items.length > 0,
+    hasNegative: items.some(row => row.val < 0),
+    canAllocate
+  };
+}
+function _pbAllocRows(){
+  return _allocationData(_netWorthClassesSGD(), _dashShowCpf).rows;
 }
 function _pbCashflowRows(){
   const ms = _recentMonths(12);
@@ -5853,7 +6372,7 @@ function _pbEnsureUI(){
       <div class="cb-palette-col" style="border-right:1px solid var(--border);padding:14px;display:flex;flex-direction:column;gap:8px">
         <div id="pb-palette-pane" style="display:flex;flex-direction:column;gap:8px">
           <div style="${rl}">Available Fields</div>
-          <input id="pb-palette-search" class="fi fi-sm" placeholder="Search fields..." data-input="pbFilterPalette">
+          <input id="pb-palette-search" class="fi fi-sm" placeholder="Search fields..." data-input="pbFilterPalette" aria-label="Search available fields">
           <div id="pb-palette" style="display:flex;flex-direction:column;gap:5px"></div>
         </div>
         <div id="pb-ts-pane" style="display:none;flex-direction:column;gap:6px">
@@ -5905,7 +6424,7 @@ function _pbEnsureUI(){
             </div>
             <div>
               <div style="${rl};margin-bottom:5px">Filter</div>
-              <input id="pb-kw" class="cb-drop-zone" style="font-size:12px;width:100%;min-height:42px;padding:11px 12px" placeholder="symbol / sector…" data-input="pbRenderChart">
+              <input id="pb-kw" class="cb-drop-zone" style="font-size:12px;width:100%;min-height:42px;padding:11px 12px" placeholder="symbol / sector…" data-input="pbRenderChart" aria-label="Filter holdings by symbol or sector">
             </div>
           </div>
           <div style="display:flex;gap:10px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
@@ -6185,14 +6704,26 @@ function _pbDrawCrossSectional(host, cfg, showEmpty, showChart){
     const sub = src.kind === 'holdings' ? 'Pick a dimension and a measure, or switch to Price history.' : 'Select a dimension and a measure.';
     showEmpty('Build a chart', sub); return false;
   }
-  const rows = src.kind === 'holdings' ? _pbFilteredRows(cfg.kwFilter) : (src.rows ? src.rows() : []);
+  const allocationInfo = src.key === 'allocation' ? _netWorthValueInfo() : null;
+  if (allocationInfo && allocationInfo.incomplete){
+    showEmpty('Allocation incomplete', 'Set FX rates for ' + allocationInfo.missingFxCount + ' asset' + (allocationInfo.missingFxCount === 1 ? '' : 's') + ' before charting a partial allocation.');
+    return false;
+  }
+  const allocation = allocationInfo ? _allocationData(allocationInfo.classes, _dashShowCpf) : null;
+  const rows = src.kind === 'holdings' ? _pbFilteredRows(cfg.kwFilter) : (allocation ? allocation.rows : (src.rows ? src.rows() : []));
   if (!rows.length){
-    const msg = src.key === 'allocation'
+    const msg = src.key === 'allocation' && allocation && allocation.hasValues
+      ? ['Allocation unavailable', 'Net allocation is zero or negative. Use a signed value chart after correcting the balance.']
+      : src.key === 'allocation'
       ? ['No assets yet',        'Add stocks, cash, or CPF to see your allocation.']
       : src.key === 'cashflow'
       ? ['No transactions yet',  'Add income or expenses to see your cashflow.']
       : ['No matching holdings', 'Clear the filter to see your positions.'];
     showEmpty(...msg); return false;
+  }
+  if (allocation && cfg.yFields.includes('weightPct') && !allocation.canAllocate){
+    showEmpty('Allocation percentage unavailable', 'Net allocation is zero or negative, so a percentage denominator would be misleading. Choose Value to chart signed balances.');
+    return false;
   }
   const entries = kjrChartAggregate(rows, cfg.xFields, cfg.yFields, flds, cfg.sort, cfg.topN);
   if (!entries.length){ showEmpty('Nothing to plot', 'No groups for this configuration.'); return false; }
@@ -6206,10 +6737,18 @@ function _pbDrawCrossSectional(host, cfg, showEmpty, showChart){
   // reads the same underlying figures (see F3, both draw from the same DB).
   const isClassAlloc = src.key === 'allocation' && cfg.xFields.length === 1 && cfg.xFields[0] === 'assetClass';
   const roundColorFor = i => isClassAlloc ? _cssVar(assetClassColor(entries[i][0])) : PB_PALETTE[i % PB_PALETTE.length];
+  const valueSets = cfg.yFields.map(yKey => {
+    const f = flds[yKey];
+    return entries.map(([,v]) => +(_pbVal(v[yKey]||0, f)).toFixed(2));
+  });
+  if (isRound && valueSets.some(values => values.some(value => value < 0))){
+    showEmpty('Doughnut unavailable', 'Doughnut charts cannot faithfully show negative values. Choose Bar or Line to keep signed values accurate.');
+    return false;
+  }
   const datasets = cfg.yFields.map((yKey, yi) => {
     const f = flds[yKey];
     const color = PB_FIELD_COLOR_OVERRIDE[src.key + ':' + yKey] || PB_PALETTE[yi % PB_PALETTE.length];
-    const values = entries.map(([,v]) => +(_pbVal(v[yKey]||0, f)).toFixed(2));
+    const values = valueSets[yi];
     const ds = {
       label: f.label, data: values,
       backgroundColor: isRound ? entries.map((_,i) => roundColorFor(i)) : color + '55',
@@ -6282,6 +6821,7 @@ async function _pbDrawTimeSeries(host, cfg, showEmpty, showChart){
 
   const curSym = _pbCurSym();
   const dropped = [];
+  const missingCurrencies = new Set();
   // Build a per-symbol date→value map, then plot every series against one
   // shared, sorted date axis. SGX and US trade on different days, so aligning
   // by date (not array index) is the only way the lines line up. Missing days
@@ -6300,10 +6840,20 @@ async function _pbDrawTimeSeries(host, cfg, showEmpty, showChart){
       // doesn't land on the wrong day's bucket for non-UTC users.
       const d = _isoDateSG(new Date(t));
       const base = cfg.tsValue === 'positionValue' ? (p.c * (r.shares||0)) : p.c;
-      map[d] = +toDisplay(base, pxCcy).toFixed(2);
+      const converted = _displayMoneyOrNull(base, pxCcy);
+      if (!converted){
+        if (isFinite(Number(base))) missingCurrencies.add(String(pxCcy || 'SGD').toUpperCase());
+        return;
+      }
+      map[d] = +converted.value.toFixed(2);
     });
     if (Object.keys(map).length) series.push({ r, i, map }); else dropped.push(r.s.symbol);
   });
+  if (missingCurrencies.size){
+    const currencies = [...missingCurrencies].map(kjrEscape).join(', ');
+    showEmpty('FX rate missing', 'Set FX rates for ' + currencies + ' before charting in ' + kjrEscape(displayCcy()) + '.');
+    return false;
+  }
   if (!series.length){ showEmpty('History unavailable', 'No price history returned for the selected symbols.'); return false; }
 
   const labels = [...new Set(series.flatMap(s => Object.keys(s.map)))].sort();
@@ -6314,12 +6864,20 @@ async function _pbDrawTimeSeries(host, cfg, showEmpty, showChart){
                     borderColor:color, backgroundColor:'transparent', borderWidth:2, pointRadius:0, tension:0.15 });
     if (cfg.tsAvgCost && r.avgCost){
       const ac = cfg.tsValue === 'positionValue' ? r.avgCost * (r.shares||0) : r.avgCost;
-      const acVal = +toDisplay(ac, r.ccy).toFixed(2);
+      const converted = _displayMoneyOrNull(ac, r.ccy);
+      if (!converted){ missingCurrencies.add(String(r.ccy || 'SGD').toUpperCase()); return; }
+      const acVal = +converted.value.toFixed(2);
       // Avg-cost reference line only spans the dates where this symbol has data.
       datasets.push({ label:r.s.symbol + ' avg cost', data: labels.map(d => d in map ? acVal : null), spanGaps:true,
                       borderColor:color, borderDash:[6,4], borderWidth:1, pointRadius:0, _avgCost:true });
     }
   });
+
+  if (missingCurrencies.size){
+    const currencies = [...missingCurrencies].map(kjrEscape).join(', ');
+    showEmpty('FX rate missing', 'Set FX rates for ' + currencies + ' before charting in ' + kjrEscape(displayCcy()) + '.');
+    return false;
+  }
 
   showChart();
   const axisColor = _cssVar('--text3'), gridColor = _cssVar('--border');
@@ -6465,9 +7023,14 @@ function pbLoadSaved(){
   });
   return result.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
 }
-function pbPersistSaved(charts){ DB.settings.savedCharts = Array.isArray(charts) ? charts : []; saveData(); }
+function pbPersistSaved(charts){
+  DB.settings.savedCharts = Array.isArray(charts) ? charts : [];
+  return saveData();
+}
 
-function pbSaveChart(){
+let _pbSaveInFlight = false;
+async function pbSaveChart(){
+  if (_pbSaveInFlight) return false;
   const cfg = _pbLiveConfig();
   const src = pbSource(cfg);
   const ready = src.kind === 'series'
@@ -6489,9 +7052,13 @@ function pbSaveChart(){
   if (title === null) return;
   const charts = pbLoadSaved();
   charts.push(Object.assign({ id:'sc_' + Date.now(), title: title || 'Chart', pinned:false, order:999 }, cfg));
-  pbPersistSaved(charts);
+  _pbSaveInFlight = true;
+  let saved = false;
+  try { saved = await Promise.resolve(pbPersistSaved(charts)); }
+  finally { _pbSaveInFlight = false; }
   pbRenderAllSaved();
-  showToast('Chart added to dashboard', 'success');
+  if (saved) showToast('Chart added to dashboard', 'success');
+  return saved;
 }
 
 function pbRenderAllSaved(){
@@ -6550,36 +7117,58 @@ function pbRefreshSaved(id){
                  emptyEl: wrap.querySelector('#pb-sc-empty-'+id), summaryEl: wrap.querySelector('#pb-sc-summary-'+id) };
   _pbDrawInto(host, cfg).then(()=>showToast('Chart refreshed'));
 }
-function pbTogglePin(id){
+async function pbTogglePin(id){
   const charts = pbLoadSaved();
   const cfg = charts.find(c => c.id === id);
-  if (!cfg) return;
+  if (!cfg) return false;
   cfg.pinned = !cfg.pinned;
-  pbPersistSaved(charts);
+  const saved = await Promise.resolve(pbPersistSaved(charts));
   pbRenderAllSaved();
-  showToast(cfg.pinned ? 'Chart pinned — protected from delete' : 'Chart unpinned');
+  if (saved) showToast(cfg.pinned ? 'Chart pinned — protected from delete' : 'Chart unpinned');
+  return saved;
 }
 function pbDeleteSaved(id){
   const charts = pbLoadSaved();
   const cfg = charts.find(c => c.id === id);
   if (!cfg) return;
   if (cfg.pinned){ showToast('Pinned — unpin first to delete'); return; }
-  _pbConfirm('Delete "' + kjrEscape(cfg.title) + '"?', () => {
-    pbPersistSaved(charts.filter(c => c.id !== id));
+  _pbConfirm('Delete "' + kjrEscape(cfg.title) + '"?', async () => {
+    const currentCharts = pbLoadSaved();
+    const currentCfg = currentCharts.find(c => c.id === id);
+    if (!currentCfg) return false;
+    if (currentCfg.pinned){ showToast('Pinned — unpin first to delete'); pbRenderAllSaved(); return false; }
+    const saved = await Promise.resolve(pbPersistSaved(currentCharts.filter(c => c.id !== id)));
+    if (!saved) {
+      pbRenderAllSaved();
+      return false;
+    }
     const inst = _pbCharts['pb-sc-canvas-'+id]; if (inst){ try{ inst.destroy(); }catch(e){} delete _pbCharts['pb-sc-canvas-'+id]; }
     pbRenderAllSaved();
     // Soft-delete: keep the config in memory for 8s and offer an Undo on the
     // toast (matches the toast's own 8s lifetime).
-    _pbUndoChart = cfg; clearTimeout(_pbUndoTimer);
+    _pbUndoChart = currentCfg; clearTimeout(_pbUndoTimer);
     _pbUndoTimer = setTimeout(() => { _pbUndoChart = null; }, 8000);
     showToast('Chart deleted', '', { label:'Undo', fn: pbUndoDelete });
+    return true;
   });
 }
-let _pbUndoChart = null, _pbUndoTimer = null;
-function pbUndoDelete(){
-  if (!_pbUndoChart) { showToast('Nothing to undo'); return; }
-  const charts = pbLoadSaved(); charts.push(_pbUndoChart); pbPersistSaved(charts);
-  _pbUndoChart = null; pbRenderAllSaved(); showToast('Chart restored', 'success');
+let _pbUndoChart = null, _pbUndoTimer = null, _pbUndoInFlight = false;
+async function pbUndoDelete(){
+  if (!_pbUndoChart || _pbUndoInFlight) { if (!_pbUndoChart) showToast('Nothing to undo'); return false; }
+  const undoTarget = _pbUndoChart;
+  const charts = pbLoadSaved();
+  if (!charts.some(c => c.id === undoTarget.id)) charts.push(undoTarget);
+  _pbUndoInFlight = true;
+  let saved = false;
+  try { saved = await Promise.resolve(pbPersistSaved(charts)); }
+  finally { _pbUndoInFlight = false; }
+  pbRenderAllSaved();
+  if (saved && _pbUndoChart === undoTarget) {
+    clearTimeout(_pbUndoTimer); _pbUndoTimer = null;
+    _pbUndoChart = null;
+    showToast('Chart restored', 'success');
+  }
+  return saved;
 }
 function _pbConfirm(msg, onYes){
   document.getElementById('pb-confirm-ov')?.remove();
@@ -6820,17 +7409,18 @@ function renderWatchlist(){
     return { w, px, ccy };
   });
 
-  // Sort accessors — price/target convert to SGD for consistent ordering across currencies.
+  // Strict SGD sort values keep unknown-FX rows unavailable instead of treating
+  // their native amount as SGD. Nulls sort after comparable values.
   const WL_SORT_VALS = {
     symbol: r => r.w.symbol || '',
     market: r => r.w.market || '',
     sector: r => r.w.sector || '',
-    price:  r => (r.px && r.px.price != null) ? toSGD(r.px.price, r.ccy) : null,
+    price:  r => (r.px && r.px.price != null) ? sgdOrNull(r.px.price, r.ccy) : null,
     dayPct: r => (r.px && r.px.changePct != null) ? r.px.changePct : null,
     pos52w: r => r.px ? rangePosition(r.px.price, r.px.week52Low, r.px.week52High) : null,
     peTtm:  r => (r.px && r.px.fund && r.px.fund.trailingPE  != null) ? r.px.fund.trailingPE  : null,
     pb:     r => (r.px && r.px.fund && r.px.fund.priceToBook != null) ? r.px.fund.priceToBook : null,
-    target: r => r.w.targetPrice != null ? toSGD(Number(r.w.targetPrice), r.ccy) : null
+    target: r => r.w.targetPrice != null ? sgdOrNull(Number(r.w.targetPrice), r.ccy) : null
   };
 
   const wlSort = DB.settings.watchlistSort || {};
@@ -6854,9 +7444,10 @@ function renderWatchlist(){
   // Sortable header for watchlist — uses data-wl-sort-key to avoid routing to setStockSort.
   const wlTh = (key, lbl, extraCls) => {
     const active = wlSort.key === key && wlSort.dir;
-    const glyph  = active ? `<span class="sort-glyph">${wlSort.dir === 'asc' ? '▲' : '▼'}</span>` : '';
-    const aria   = active ? ` aria-sort="${wlSort.dir === 'asc' ? 'ascending' : 'descending'}"` : '';
-    return `<th class="sortable${extraCls||''}" data-wl-sort-key="${key}" tabindex="0"${aria}>${lbl}${glyph}</th>`;
+    const glyph = active ? `<span class="sort-glyph" aria-hidden="true">${wlSort.dir === 'asc' ? '▲' : '▼'}</span>` : '';
+    const ariaSort = active ? (wlSort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+    const label = kjrEscape(String(lbl).replace(/<[^>]*>/g, '').trim());
+    return `<th class="sortable sortable-button${extraCls||''}" data-wl-sort-key="${key}" aria-sort="${ariaSort}"><button type="button" class="sort-button" aria-label="Sort by ${label}">${lbl}${glyph}</button></th>`;
   };
 
   el.innerHTML = head + `
@@ -6869,7 +7460,7 @@ function renderWatchlist(){
       ${wlRows.map(({ w, px, ccy }) => {
         const f   = px && px.fund;
         const priceCell = (px && px.price != null)
-          ? fmt(toSGD(px.price, ccy)) + (isStale(px.fetchedAt, 24) ? ' <span class="hint">(stale)</span>' : '')
+          ? fmtSgdOrNative(px.price, ccy) + (isStale(px.fetchedAt, 24) ? ' <span class="hint">(stale)</span>' : '')
           : '<span class="price-stale">—</span>';
         const dayCell = (px && px.changePct != null)
           ? `<span class="${px.changePct >= 0 ? 'pos' : 'neg'}">${fmtPct(px.changePct)}</span>` : '—';
@@ -6881,7 +7472,7 @@ function renderWatchlist(){
         // against the native quote price needs no FX at all.
         const atTarget = (w.targetPrice != null && px && px.price != null && px.price <= Number(w.targetPrice));
         const targetCell = w.targetPrice != null
-          ? fmt(toSGD(Number(w.targetPrice), ccy)) + (atTarget ? ' <span class="wl-hit">✓ At target</span>' : '')
+          ? fmtSgdOrNative(Number(w.targetPrice), ccy) + (atTarget ? ' <span class="wl-hit">✓ At target</span>' : '')
           : '—';
         const ax = encodeURIComponent(yahooSymbol(w));
         return `<tr>
@@ -6928,28 +7519,29 @@ function renderBoard(){
     return { w, px, ccy };
   });
 
-  // Sort accessors — money values compare in SGD for consistent ordering.
+  // Strict SGD sort values keep unknown-FX rows unavailable instead of treating
+  // their native amount as SGD. Nulls sort after comparable values.
   const BOARD_SORT_VALS = {
     symbol:     r => r.w.symbol || '',
     companyName:r => (r.px && r.px.shortName) || '',
     market:     r => r.w.market || '',
     sector:     r => r.w.sector || '',
-    price:      r => (r.px && r.px.price != null) ? toSGD(r.px.price, r.ccy) : null,
-    change:     r => (r.px && r.px.change != null) ? toSGD(r.px.change, r.ccy) : null,
+    price:      r => (r.px && r.px.price != null) ? sgdOrNull(r.px.price, r.ccy) : null,
+    change:     r => (r.px && r.px.change != null) ? sgdOrNull(r.px.change, r.ccy) : null,
     changePct:  r => (r.px && r.px.changePct != null) ? r.px.changePct : null,
-    prevClose:  r => (r.px && r.px.previousClose != null) ? toSGD(r.px.previousClose, r.ccy) : null,
-    dayRange:   r => (r.px && r.px.dayHigh != null) ? toSGD(r.px.dayHigh, r.ccy) : null,
-    week52:     r => (r.px && r.px.week52High != null) ? toSGD(r.px.week52High, r.ccy) : null,
+    prevClose:  r => (r.px && r.px.previousClose != null) ? sgdOrNull(r.px.previousClose, r.ccy) : null,
+    dayRange:   r => (r.px && r.px.dayHigh != null) ? sgdOrNull(r.px.dayHigh, r.ccy) : null,
+    week52:     r => (r.px && r.px.week52High != null) ? sgdOrNull(r.px.week52High, r.ccy) : null,
     pos52w:     r => r.px ? rangePosition(r.px.price, r.px.week52Low, r.px.week52High) : null,
     volume:     r => (r.px && r.px.volume != null) ? r.px.volume : null,
-    mktCap:     r => (r.px && r.px.fund && r.px.fund.marketCap  != null) ? toSGD(r.px.fund.marketCap, r.px.fund.currency || r.px.currency || r.ccy) : null,
+    mktCap:     r => (r.px && r.px.fund && r.px.fund.marketCap  != null) ? sgdOrNull(r.px.fund.marketCap, r.px.fund.currency || r.px.currency || r.ccy) : null,
     peTtm:      r => (r.px && r.px.fund && r.px.fund.trailingPE != null) ? r.px.fund.trailingPE : null,
     peFwd:      r => (r.px && r.px.fund && r.px.fund.forwardPE  != null) ? r.px.fund.forwardPE : null,
     pb:         r => (r.px && r.px.fund && r.px.fund.priceToBook!= null) ? r.px.fund.priceToBook : null,
     beta:       r => (r.px && r.px.fund && r.px.fund.beta       != null) ? r.px.fund.beta : null,
     payout:     r => (r.px && r.px.fund && r.px.fund.payoutRatio!= null) ? r.px.fund.payoutRatio : null,
     exchange:   r => (r.px && r.px.exchange) || '',
-    target:     r => r.w.targetPrice != null ? toSGD(Number(r.w.targetPrice), r.ccy) : null,
+    target:     r => r.w.targetPrice != null ? sgdOrNull(Number(r.w.targetPrice), r.ccy) : null,
     updated:    r => (r.px && r.px.fetchedAt) || null
   };
 
@@ -6974,9 +7566,10 @@ function renderBoard(){
   // Sortable header — data-board-sort-key keeps it off the holdings/watchlist routers.
   const th = (key, lbl, extraCls) => {
     const active = sort.key === key && sort.dir;
-    const glyph  = active ? `<span class="sort-glyph">${sort.dir === 'asc' ? '▲' : '▼'}</span>` : '';
-    const aria   = active ? ` aria-sort="${sort.dir === 'asc' ? 'ascending' : 'descending'}"` : '';
-    return `<th class="sortable${extraCls || ''}" data-board-sort-key="${key}" tabindex="0"${aria}>${lbl}${glyph}</th>`;
+    const glyph = active ? `<span class="sort-glyph" aria-hidden="true">${sort.dir === 'asc' ? '▲' : '▼'}</span>` : '';
+    const ariaSort = active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+    const label = kjrEscape(String(lbl).replace(/<[^>]*>/g, '').trim());
+    return `<th class="sortable sortable-button${extraCls || ''}" data-board-sort-key="${key}" aria-sort="${ariaSort}"><button type="button" class="sort-button" aria-label="Sort by ${label}">${lbl}${glyph}</button></th>`;
   };
   const headCells = cols.map(c => {
     const lbl = typeof c.label === 'function' ? c.label() : c.label;
@@ -7281,41 +7874,45 @@ function renderCrypto(){
     return;
   }
 
-  let totCost = 0, totMv = 0, anyPriceMissing = false, anyFxMissing = false, anyPriced = false;
+  let totCost = 0, totMv = 0, anyPriceMissing = false, anyCostMissing = false, anyPriced = false;
   const rows = list.map(c => {
     const cid = coinIdFor(c.coingeckoId || c.symbol);
     const px  = DB._priceCache[cid] || null;
     const ccy = c.currency || 'USD';
-    if (fxMissingFor(ccy)) anyFxMissing = true;
-    const cost = roundMoney(toSGD((c.amount||0) * (c.avgCost||0), ccy));
+    const nativeCost = (Number(c.amount) || 0) * (Number(c.avgCost) || 0);
+    const costSgd = sgdOrNull(nativeCost, ccy);
+    const cost = costSgd == null ? (nativeCost === 0 ? 0 : null) : roundMoney(costSgd);
+    if (cost == null) anyCostMissing = true;
     let mv = null, pl = null, plPct = null, stale = true, priceSgd = null;
     if (px && px.sgd != null){
       anyPriced = true;
       priceSgd = px.sgd; // CoinGecko prices come in SGD
       mv = roundMoney(priceSgd * (c.amount || 0));
-      pl = roundMoney(mv - cost);
-      plPct = safeRatio(pl, cost);
+      if (cost != null){
+        pl = roundMoney(mv - cost);
+        plPct = safeRatio(pl, cost);
+      }
       stale = isStale(px.fetchedAt, 24);
     } else { anyPriceMissing = true; }
-    totCost += cost;
+    if (cost != null) totCost += cost;
     if (mv != null) totMv += mv;
     return { c, cid, px, ccy, cost, mv, pl, plPct, stale, priceSgd };
   });
 
-  const showPl = anyPriced && !anyPriceMissing;
+  const showPl = anyPriced && !anyPriceMissing && !anyCostMissing;
   const totPl = roundMoney(totMv - totCost);
   const totPlPct = safeRatio(totPl, totCost);
-  const mvSub = anyFxMissing ? 'FX missing for cost basis'
+  const mvSub = anyCostMissing ? 'FX missing for cost basis'
               : anyPriceMissing && anyPriced ? 'some prices missing, refresh'
               : anyPriceMissing ? 'click Refresh prices to populate'
               : '';
 
   sumEl.innerHTML = renderSummary([
     { label:'Coins',        value: String(list.length), accent:'accent' },
-    { label:'Total cost',   value: fmt(totCost, {dp:0}), sub: anyFxMissing ? 'approximate (FX missing)' : '' },
+    { label:'Total cost',   value: anyCostMissing ? '—' : fmt(totCost, {dp:0}), sub: anyCostMissing ? 'FX missing, set rate in Settings' : '' },
     { label:'Market value', value: anyPriced ? fmt(totMv, {dp:0}) : '—', accent:'accent', sub: mvSub },
     { label:'P&L',          value: showPl ? fmt(totPl, {dp:0}) : '—',
-      sub: showPl && totPlPct != null ? fmtPct(totPlPct) : (anyPriceMissing ? 'refresh prices to compute' : ''),
+      sub: showPl && totPlPct != null ? fmtPct(totPlPct) : (anyCostMissing ? 'set FX to compute' : (anyPriceMissing ? 'refresh prices to compute' : '')),
       accent: showPl ? (totPl >= 0 ? 'pos' : 'neg') : '' }
   ]);
 
@@ -7336,7 +7933,7 @@ function renderCrypto(){
           <td class="tl cell-sym"><span class="tag crypto">${kjrEscape(r.c.symbol)}</span></td>
           <td class="tl muted">${kjrEscape(r.cid || '—')}</td>
           <td class="num">${r.c.amount || 0}</td>
-          <td class="num">${r.c.avgCost ? fmt(toSGD(r.c.avgCost, r.ccy)) : '—'}</td>
+          <td class="num">${r.c.avgCost ? fmtSgdOrNative(r.c.avgCost, r.ccy) : '—'}</td>
           <td class="num">${priceTxt}</td>
           <td class="num ${chg}">${px && px.change24h != null ? fmtPct(px.change24h) : '—'}</td>
           <td class="num">${r.mv != null ? fmt(r.mv, {dp:0}) : '—'}</td>
@@ -7394,10 +7991,11 @@ function renderRealestate(){
     return;
   }
 
-  const total = list.reduce((s,x) => s + Number(x.value || 0), 0);
+  const valueInfo = _realestateSGDInfo();
   sumEl.innerHTML = renderSummary([
     { label:'Properties',  value: String(list.length), accent:'accent' },
-    { label:'Total value', value: fmt(total, {dp:0}), accent:'accent' }
+    { label:'Total value', value: fmt(valueInfo.total, {dp:0}), accent:'accent',
+      sub:valueInfo.excludedCount ? valueInfo.excludedCount + ' propert' + (valueInfo.excludedCount === 1 ? 'y' : 'ies') + ' excluded, FX missing' : '' }
   ]);
 
   bodyEl.innerHTML = `
@@ -7406,7 +8004,7 @@ function renderRealestate(){
     </tr></thead><tbody>
       ${list.map(r => `<tr>
         <td class="tl cell-sym name-clamp" title="${kjrEscape(r.name)}"><span class="name-clamp-inner">${kjrEscape(r.name)}</span></td>
-        <td class="num">${fmt(r.value, {dp:0})}</td>
+        <td class="num">${fmtSgdOrNative(r.value, r.currency || 'SGD', {dp:0})}</td>
         <td class="num muted">${r.updatedAt ? fmtDateSG(r.updatedAt) : '—'}</td>
         <td class="tl muted">${kjrEscape(r.notes || '')}</td>
         <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="realestate" data-edit-id="${kjrEscape(r.id)}">Edit</button></td>
@@ -7425,7 +8023,18 @@ function renderRealestate(){
 const PREMIUM_PER_YEAR = { Monthly:12, Quarterly:4, 'Semi-annual':2, Annual:1, Single:0 };
 function annualPremium(p){ return (Number(p.premium)||0)*(PREMIUM_PER_YEAR[p.premiumFreq]??1); }
 function cashPremiumPerYear(p){ return ['Cash','Card'].includes(p.premiumMode)?annualPremium(p):0; }
-function insuranceCashValueSGD(){ return (DB.insurance||[]).filter(p=>p.status==='Active').reduce((s,p)=>s+toSGD(Number(p.cashValue)||0,p.currency||'SGD'),0); }
+function insuranceCashValueSGDInfo(){
+  let total = 0, excludedCount = 0;
+  (DB.insurance || []).filter(p => p.status === 'Active').forEach(p => {
+    const nativeValue = Number(p.cashValue) || 0;
+    const value = sgdOrNull(nativeValue, p.currency || 'SGD');
+    if (value == null){
+      if (nativeValue !== 0) excludedCount++;
+    } else total += value;
+  });
+  return { total:roundMoney(total), excludedCount };
+}
+function insuranceCashValueSGD(){ return insuranceCashValueSGDInfo().total; }
 
 /* Coverage adequacy targets, editable in Settings, code-level defaults so a
    brand-new / never-migrated DB needs no schema bump. */
@@ -7560,20 +8169,24 @@ function exportInsuranceCSV(){
   const list = DB.insurance || [];
   if (!list.length){ showToast('No policies to export'); return; }
   const headers = ['Insurer','Plan','Policy No','Type','Insured','Status','Death Cover (SGD)','CI Cover (SGD)','Annual Premium (SGD)','Premium Mode','Next Premium Due','Cash Value (SGD)'];
-  const rows = list.map(p => [
-    p.insurer || '',
-    p.plan || '',
-    p.policyNo || '',
-    p.type || '',
-    p.insured || '',
-    p.status || '',
-    p.coverDeath != null ? p.coverDeath : '',
-    p.coverCI != null ? p.coverCI : '',
-    annualPremium(p) || '',
-    p.premiumMode || '',
-    p.premiumDue || '',
-    p.cashValue != null ? p.cashValue : ''
-  ]);
+  const rows = list.map(p => {
+    const ccy = p.currency || 'SGD';
+    const premium = annualPremium(p);
+    return [
+      p.insurer || '',
+      p.plan || '',
+      p.policyNo || '',
+      p.type || '',
+      p.insured || '',
+      p.status || '',
+      p.coverDeath != null ? sgdOrNull(p.coverDeath, ccy) : '',
+      p.coverCI != null ? sgdOrNull(p.coverCI, ccy) : '',
+      premium ? sgdOrNull(premium, ccy) : '',
+      p.premiumMode || '',
+      p.premiumDue || '',
+      p.cashValue != null ? sgdOrNull(p.cashValue, ccy) : ''
+    ];
+  });
   downloadCSV('kujira-insurance-' + _isoDateSG(new Date()) + '.csv', headers, rows);
 }
 
@@ -7614,11 +8227,13 @@ function renderInsurance(){
   const cashYr = active.reduce((s,p) => s + cashPremiumPerYear(p), 0);
   const nonCashYr = active.reduce((s,p) => s + (annualPremium(p) - cashPremiumPerYear(p)), 0);
   const cover = k => active.reduce((s,p) => s + (Number(p[k])||0), 0);
+  const cashValueInfo = insuranceCashValueSGDInfo();
   const summary = renderSummary([
     { label:'Annual premium (cash)', value: fmt(cashYr, {dp:0}), accent:'accent' },
     { label:'From MediSave / CPF',   value: fmt(nonCashYr, {dp:0}) },
     { label:'Death cover',           value: fmt(cover('coverDeath'), {dp:0}) },
-    { label:'Cash value (net worth)', value: fmt(insuranceCashValueSGD(), {dp:0}), accent:'accent' }
+    { label:'Cash value (net worth)', value: fmt(cashValueInfo.total, {dp:0}), accent:'accent',
+      sub:cashValueInfo.excludedCount ? cashValueInfo.excludedCount + ' active polic' + (cashValueInfo.excludedCount === 1 ? 'y' : 'ies') + ' excluded, FX missing' : '' }
   ]);
   // Sort accessors, mirrors WL_SORT_VALS. Null/empty always sorts last.
   const INS_SORT_VALS = {
@@ -7654,9 +8269,10 @@ function renderInsurance(){
   // Sortable header, data-ins-sort-key keeps it off the holdings/watchlist routers.
   const insTh = (key, lbl, extraCls) => {
     const active = insSort.key === key && insSort.dir;
-    const glyph  = active ? `<span class="sort-glyph">${insSort.dir === 'asc' ? '▲' : '▼'}</span>` : '';
-    const aria   = active ? ` aria-sort="${insSort.dir === 'asc' ? 'ascending' : 'descending'}"` : '';
-    return `<th class="sortable${extraCls||''}" data-ins-sort-key="${key}" tabindex="0"${aria}>${lbl}${glyph}</th>`;
+    const glyph = active ? `<span class="sort-glyph" aria-hidden="true">${insSort.dir === 'asc' ? '▲' : '▼'}</span>` : '';
+    const ariaSort = active ? (insSort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+    const label = kjrEscape(String(lbl).replace(/<[^>]*>/g, '').trim());
+    return `<th class="sortable sortable-button${extraCls||''}" data-ins-sort-key="${key}" aria-sort="${ariaSort}"><button type="button" class="sort-button" aria-label="Sort by ${label}">${lbl}${glyph}</button></th>`;
   };
 
   // Riders are grouped by policyId once per render, not per row, so a policy
@@ -7678,7 +8294,7 @@ function renderInsurance(){
       <td class="num">${p.coverDeath?fmt(Number(p.coverDeath),{dp:0}):'—'}</td>
       <td class="num">${p.premium?fmt(annualPremium(p),{dp:0})+'/yr':'—'}</td>
       <td class="num">${p.premiumDue?fmtDateSG(p.premiumDue):'—'}</td>
-      <td class="num">${p.cashValue?fmt(Number(p.cashValue),{dp:0}):'—'}</td>
+      <td class="num">${p.cashValue?fmtSgdOrNative(p.cashValue, p.currency || 'SGD', {dp:0}):'—'}</td>
       <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="insurance" data-edit-id="${kjrEscape(p.id)}">Edit</button></td>
     </tr>`;
     if (!expanded || !riders.length) return mainRow;
@@ -7903,6 +8519,12 @@ function renderCoverageAdequacy(){
    ═══════════════════════════════════════════════════════════════════════ */
 const PROJECTION_MONTHS = 480; // 40 years, plenty of runway past any realistic retirementAge
 
+function _clearProjectionChart(){
+  const old = _pbCharts['proj-canvas'];
+  if (old){ try{ old.destroy(); }catch(e){} }
+  delete _pbCharts['proj-canvas'];
+}
+
 function renderProjections(){
   setRenderCcy('projections');
   const el = document.getElementById('projections-root');
@@ -7910,7 +8532,8 @@ function renderProjections(){
 
   const s = DB.settings || {};
   const birthYear = s.birthYear;
-  const liquidNow = _stockMvSGD() + _cashSGDInfo().total + _cryptoSGD();
+  const liquidInfo = _liquidAssetValueInfo();
+  const liquidNow = liquidInfo.total;
   const cpfNow = cpfEffectiveBalances();
   const fireNumber = fireNumberSGD();
   const expInfo = annualExpensesSGD();
@@ -7922,10 +8545,17 @@ function renderProjections(){
   const retirementAge = Number(s.retirementAge) || 65;
 
   if (!birthYear){
+    _clearProjectionChart();
     el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🎂</div><div class="empty-title">Set your birth year to see projections</div><div class="empty-sub">Age drives the CPF contribution/interest schedule and the retirement verdict. Add it in Settings.</div></div></div></div>`;
     return;
   }
+  if (liquidInfo.incomplete){
+    _clearProjectionChart();
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">💱</div><div class="empty-title">Projection unavailable</div><div class="empty-sub">Set FX rates for ${liquidInfo.missingFxCount} liquid asset${liquidInfo.missingFxCount === 1 ? '' : 's'} in Settings. The projected starting balance would otherwise be incomplete.</div></div></div></div>`;
+    return;
+  }
   if (fireNumber == null){
+    _clearProjectionChart();
     el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🎯</div><div class="empty-title">No FIRE number yet</div><div class="empty-sub">Log expenses on the P&amp;L tab (trailing 12 months is annualised x your FIRE multiple), or set a manual FIRE target in Settings.</div></div></div></div>`;
     return;
   }
@@ -8049,6 +8679,28 @@ function cashMovementDelta(t){
   if (t.type === 'adjustment') return amt;                 // signed as entered
   if (t.type === 'withdrawal' || t.type === 'fee') return -Math.abs(amt);
   return Math.abs(amt);                                    // deposit/dividend/interest
+}
+
+function linkedTradeCurrencyMismatch(t){
+  if (!t || !t.cashAccountId) return null;
+  const stock = (DB.stocks || []).find(s => s.id === t.stockId);
+  const account = (DB.cash || []).find(c => c.id === t.cashAccountId);
+  if (!stock || !account) return null;
+  const stockCcy = stock.currency || (stock.market === 'SGX' ? 'SGD' : 'USD');
+  const accountCcy = account.currency || 'SGD';
+  if (stockCcy === accountCcy) return null;
+  return { stockCcy, accountCcy, accountName:account.name || 'the cash account' };
+}
+
+function crossCurrencyTransferMissingAmount(t){
+  if (!t || t.type !== 'transfer') return false;
+  const from = (DB.cash || []).find(c => c.id === t.fromAccountId);
+  const to = (DB.cash || []).find(c => c.id === t.cashAccountId);
+  if (!from || !to) return false;
+  const fromCcy = from.currency || 'SGD';
+  const toCcy = to.currency || 'SGD';
+  const hasAmountIn = t.amountIn !== '' && t.amountIn != null && isFinite(Number(t.amountIn)) && Number(t.amountIn) >= 0;
+  return fromCcy !== toCcy && !hasAmountIn;
 }
 
 /* Net cash effect of a linked stock trade on its funding account, in the
@@ -8322,7 +8974,7 @@ function _cpfMonthEnds(){
   return out;
 }
 
-function saveCpfBalancesFromForm(){
+async function saveCpfBalancesFromForm(){
   const numOrNull = (id) => {
     const v = document.getElementById(id).value;
     if (v === '' || v == null) return null;
@@ -8338,10 +8990,10 @@ function saveCpfBalancesFromForm(){
   DB.cpfBalances.updatedAt  = new Date().toISOString();
   DB.cpfBalances.anchorDate = _isoDateSG(new Date()); // QA low-priority: same SG-local convention as the accrual engines that read this anchor
   runSalaryEngine();
-  saveData();
+  const saved = await Promise.resolve(saveData());
   renderAll();
   loadSettingsForm();
-  showToast('Starting balances saved. CPF now grows on its own from salary + interest.', 'success');
+  if (saved) showToast('Starting balances saved. CPF now grows on its own from salary + interest.', 'success');
 }
 
 function loadCpfBalancesForm(){
@@ -8637,24 +9289,32 @@ function renderCashflow(){
    fmt() converts to the dashboard tab's display currency.
    ═══════════════════════════════════════════════════════════════════════ */
 function _stockMvSGDInfo(){
-  let total = 0, estimatedCount = 0, estimatedAmount = 0;
+  let total = 0, estimatedCount = 0, estimatedAmount = 0, excludedCount = 0;
   (DB.stocks || []).forEach(s => {
     const ccy = s.currency || (s.market === 'SGX' ? 'SGD' : 'USD');
     const derived = deriveStockPosition(s.id);
     const shares  = derived ? derived.shares  : (s.shares  || 0);
     const avgCost = derived ? derived.avgCost : (s.avgCost || 0);
     const px = DB._priceCache[yahooSymbol(s)];
-    if (px && px.price != null) total += toSGD(px.price * shares, px.currency || ccy);
-    else {
-      const estimate = toSGD(shares * avgCost, ccy);
-      total += estimate;
-      if (estimate !== 0) {
-        estimatedAmount += estimate;
-        estimatedCount++;
+    if (px && px.price != null){
+      const value = sgdOrNull(Number(px.price) * Number(shares), px.currency || ccy);
+      if (value == null){
+        if (Number(px.price) * Number(shares) !== 0) excludedCount++;
+      } else total += value;
+    } else {
+      const estimate = sgdOrNull(Number(shares) * Number(avgCost), ccy);
+      if (estimate == null){
+        if (Number(shares) * Number(avgCost) !== 0) excludedCount++;
+      } else {
+        total += estimate;
+        if (estimate !== 0){
+          estimatedAmount += estimate;
+          estimatedCount++;
+        }
       }
     }
   });
-  return { total, estimatedCount, estimatedAmount };
+  return { total:roundMoney(total), estimatedCount, estimatedAmount:roundMoney(estimatedAmount), excludedCount };
 }
 function _stockMvSGD(){ return _stockMvSGDInfo().total; }
 /* Use the DERIVED balance (opening + movements + linked trade flows), the same
@@ -8665,33 +9325,54 @@ function _stockMvSGD(){ return _stockMvSGDInfo().total; }
 function _cashSGDInfo(){
   let total = 0, excludedCount = 0;
   (DB.cash || []).forEach(c => {
-    const sgd = sgdOrNull(deriveCashBalance(c), c.currency || 'SGD');
-    if (sgd == null) excludedCount++;
+    const balance = deriveCashBalance(c);
+    const sgd = sgdOrNull(balance, c.currency || 'SGD');
+    if (sgd == null){
+      if (Number(balance) !== 0) excludedCount++;
+    }
     else total += sgd;
   });
-  return { total, excludedCount };
+  return { total:roundMoney(total), excludedCount };
 }
 function _cashSGD(){ return _cashSGDInfo().total; }
 function _cpfSGD(){
   const e = cpfEffectiveBalances();
   return e.OA + e.SA + e.MA + e.RA;
 }
-function _realestateSGD(){ return (DB.realestate || []).reduce((s,r) => s + (Number(r.value)||0), 0); }
+function _realestateSGDInfo(){
+  let total = 0, excludedCount = 0;
+  (DB.realestate || []).forEach(r => {
+    const nativeValue = Number(r.value) || 0;
+    const value = sgdOrNull(nativeValue, r.currency || 'SGD');
+    if (value == null){
+      if (nativeValue !== 0) excludedCount++;
+    } else total += value;
+  });
+  return { total:roundMoney(total), excludedCount };
+}
+function _realestateSGD(){ return _realestateSGDInfo().total; }
 function _cryptoSGDInfo(){
-  let total = 0, estimatedCount = 0, estimatedAmount = 0;
+  let total = 0, estimatedCount = 0, estimatedAmount = 0, excludedCount = 0;
   (DB.crypto || []).forEach(c => {
     const px = DB._priceCache[coinIdFor(c.coingeckoId || c.symbol)];
-    if (px && px.sgd != null) total += px.sgd * (Number(c.amount)||0);
-    else {
-      const estimate = toSGD((Number(c.amount)||0) * (Number(c.avgCost)||0), c.currency || 'USD');
-      total += estimate;
-      if (estimate !== 0) {
-        estimatedAmount += estimate;
-        estimatedCount++;
+    if (px && px.sgd != null){
+      const value = Number(px.sgd) * (Number(c.amount) || 0);
+      total += isFinite(value) ? value : 0;
+    } else {
+      const nativeCost = (Number(c.amount) || 0) * (Number(c.avgCost) || 0);
+      const estimate = sgdOrNull(nativeCost, c.currency || 'USD');
+      if (estimate == null){
+        if (nativeCost !== 0) excludedCount++;
+      } else {
+        total += estimate;
+        if (estimate !== 0){
+          estimatedAmount += estimate;
+          estimatedCount++;
+        }
       }
     }
   });
-  return { total, estimatedCount, estimatedAmount };
+  return { total:roundMoney(total), estimatedCount, estimatedAmount:roundMoney(estimatedAmount), excludedCount };
 }
 function _cryptoSGD(){ return _cryptoSGDInfo().total; }
 
@@ -8709,6 +9390,14 @@ function runReconciliation(){
   const unlinked = (DB.stockTxns || []).filter(t => !t.cashAccountId);
   if (unlinked.length) issues.push({ level:'warn',
     msg: unlinked.length + ' stock trade' + (unlinked.length > 1 ? 's are' : ' is') + ' not funded from a cash account, so the matching cash movement is not tracked.' });
+
+  const currencyMismatchedTrades = (DB.stockTxns || []).filter(t => linkedTradeCurrencyMismatch(t));
+  if (currencyMismatchedTrades.length) issues.push({ level:'error',
+    msg: currencyMismatchedTrades.length + ' linked stock trade' + (currencyMismatchedTrades.length > 1 ? 's use' : ' uses') + ' a cash account in a different currency. The legacy cash leg is not converted, so correct or unlink the trade.' });
+
+  const incompleteFxTransfers = (DB.cashTxns || []).filter(t => crossCurrencyTransferMissingAmount(t));
+  if (incompleteFxTransfers.length) issues.push({ level:'error',
+    msg: incompleteFxTransfers.length + ' cross-currency transfer' + (incompleteFxTransfers.length > 1 ? 's are' : ' is') + ' missing Amount received, so the destination balance is not reliable.' });
 
   let orphanCash = 0;
   (DB.cashTxns || []).forEach(t => {
@@ -8744,7 +9433,7 @@ function runReconciliation(){
 
 /* Move every trade referencing a missing stock or cash account to trash.
    Wired to the "Remove orphaned" button in the integrity bar. */
-function cleanOrphanedTrades(){
+async function cleanOrphanedTrades(){
   const cashIds  = new Set((DB.cash   || []).map(c => c.id));
   const stockIds = new Set((DB.stocks || []).map(s => s.id));
   const orphans  = (DB.stockTxns || [])
@@ -8753,9 +9442,10 @@ function cleanOrphanedTrades(){
   if (!orphans.length) return;
   const n = orphans.length;
   if (!confirm('Move ' + n + ' orphaned trade' + (n > 1 ? 's' : '') + ' to trash? You can restore from Settings → Recently deleted.')) return;
-  orphans.forEach(id => sendToTrash('stockTxns', id));
+  let saved = true;
+  for (const id of orphans) saved = !!(await Promise.resolve(sendToTrash('stockTxns', id))) && saved;
   renderAll();
-  showToast('Moved ' + n + ' orphaned trade' + (n > 1 ? 's' : '') + ' to trash', 'success');
+  if (saved) showToast('Moved ' + n + ' orphaned trade' + (n > 1 ? 's' : '') + ' to trash', 'success');
 }
 
 /* Last n 'YYYY-MM' months ending with the current month. */
@@ -8773,25 +9463,44 @@ function _recentMonths(n){
    One row per day in DB.snapshots: { date:'YYYY-MM-DD', net, byClass:{...} }.
    takeSnapshot upserts today's row; autoSnapshot fires once per day on boot.
    Stored in SGD (the canonical base), converted at display time like all money. */
-function _netWorthClassesSGD(){
-  return {
-    stocks:     _stockMvSGD(),
-    cash:       _cashSGD(),
-    cpf:        _cpfSGD(),
-    realestate: _realestateSGD(),
-    crypto:     _cryptoSGD(),
-    insurance:  insuranceCashValueSGD()
+function _netWorthValueInfo(){
+  const stockInfo = _stockMvSGDInfo();
+  const cashInfo = _cashSGDInfo();
+  const cryptoInfo = _cryptoSGDInfo();
+  const realestateInfo = _realestateSGDInfo();
+  const insuranceInfo = insuranceCashValueSGDInfo();
+  const classes = {
+    stocks:stockInfo.total,
+    cash:cashInfo.total,
+    cpf:_cpfSGD(),
+    realestate:realestateInfo.total,
+    crypto:cryptoInfo.total,
+    insurance:insuranceInfo.total
   };
+  const total = roundMoney(classes.stocks + classes.cash + classes.cpf + classes.realestate + classes.crypto + classes.insurance);
+  const missingFxCount = stockInfo.excludedCount + cashInfo.excludedCount + cryptoInfo.excludedCount + realestateInfo.excludedCount + insuranceInfo.excludedCount;
+  return { classes, total, missingFxCount, incomplete:missingFxCount > 0, stockInfo, cashInfo, cryptoInfo, realestateInfo, insuranceInfo };
 }
-function currentNetWorthSGD(){
-  const c = _netWorthClassesSGD();
-  return c.stocks + c.cash + c.cpf + c.realestate + c.crypto + (c.insurance||0);
+function _liquidAssetValueInfo(){
+  const stockInfo = _stockMvSGDInfo();
+  const cashInfo = _cashSGDInfo();
+  const cryptoInfo = _cryptoSGDInfo();
+  const total = roundMoney(stockInfo.total + cashInfo.total + cryptoInfo.total);
+  const missingFxCount = stockInfo.excludedCount + cashInfo.excludedCount + cryptoInfo.excludedCount;
+  return { total, missingFxCount, incomplete:missingFxCount > 0, stockInfo, cashInfo, cryptoInfo };
 }
+function _netWorthClassesSGD(){ return _netWorthValueInfo().classes; }
+function currentNetWorthSGD(){ return _netWorthValueInfo().total; }
 function takeSnapshot(opts){
   opts = opts || {};
+  const valuation = opts.valuation || _netWorthValueInfo();
+  if (valuation.incomplete){
+    if (opts.notify) showToast('Snapshot skipped because ' + valuation.missingFxCount + ' asset' + (valuation.missingFxCount === 1 ? ' is' : 's are') + ' missing an FX rate', 'error');
+    return null;
+  }
   if (!Array.isArray(DB.snapshots)) DB.snapshots = [];
-  const byClass = _netWorthClassesSGD();
-  const net = byClass.stocks + byClass.cash + byClass.cpf + byClass.realestate + byClass.crypto + (byClass.insurance||0);
+  const byClass = valuation.classes;
+  const net = valuation.total;
   const today = _isoDateSG(new Date());
   const existing = DB.snapshots.find(s => s.date === today);
   if (existing){
@@ -8807,7 +9516,8 @@ function takeSnapshot(opts){
 /* Auto-snapshot at most once per calendar day, and only when there's
    something to record (net worth > 0). Called on boot. */
 function autoSnapshot(){
-  if (currentNetWorthSGD() <= 0) return;
+  const valuation = _netWorthValueInfo();
+  if (valuation.incomplete || valuation.total <= 0) return;
   const today = _isoDateSG(new Date());
   const has = (DB.snapshots || []).some(s => s.date === today);
   if (has) return;
@@ -8816,12 +9526,84 @@ function autoSnapshot(){
   // (payday/CPF/cash event) and runs before this mutation, so relying on it
   // silently dropped the snapshot on an ordinary day (chart had ~1 point per
   // payday). takeSnapshot() now saves, including a debounced cloud push.
-  takeSnapshot();
+  takeSnapshot({ valuation });
 }
 
 /* ── Dashboard arrange mode ─────────────────────────────────────────────── */
 let _dashArrange  = false;
 let _dashSortable = null;
+let _dashArrangeStatusToken = 0;
+
+const DASH_WIDGET_NAMES = {
+  networth:'Net worth',
+  assets:'Asset allocation',
+  ef:'Emergency fund',
+  targets:'Target allocation',
+  movers:'Top movers',
+  cpf:'CPF breakdown'
+};
+
+function _dashArrangeItems(stack){
+  if (!stack) return [];
+  return Array.from(stack.querySelectorAll(':scope > [data-wid]')).filter(el => {
+    return el.textContent.trim() || el.querySelector(':scope > :not(.kjr-arrange-controls)');
+  });
+}
+
+function _dashWidgetBaseName(el){
+  const id = el && el.getAttribute('data-wid');
+  if (id && DASH_WIDGET_NAMES[id]) return DASH_WIDGET_NAMES[id];
+  const heading = el && el.querySelector('h2,h3,h4');
+  return (heading && heading.textContent.trim()) || 'Dashboard card';
+}
+
+function _dashWidgetName(el, items){
+  const base = _dashWidgetBaseName(el);
+  const sameName = items.filter(item => _dashWidgetBaseName(item) === base);
+  return sameName.length > 1 ? base + ' ' + (sameName.indexOf(el) + 1) : base;
+}
+
+function _announceDashArrange(message){
+  const status = document.getElementById('dash-arrange-status');
+  if (!status) return;
+  const token = ++_dashArrangeStatusToken;
+  status.textContent = '';
+  requestAnimationFrame(() => {
+    if (token === _dashArrangeStatusToken) status.textContent = message;
+  });
+}
+
+function _focusDashMoveControl(id, preferredDirection){
+  const stack = document.getElementById('dash-stack');
+  if (!stack) return;
+  const card = Array.from(stack.querySelectorAll(':scope > [data-wid]')).find(el => el.getAttribute('data-wid') === id);
+  if (!card) return;
+  const preferred = card.querySelector('[data-dash-move="' + preferredDirection + '"]:not(:disabled)');
+  const alternate = card.querySelector('[data-dash-move]:not(:disabled)');
+  _modalFocusElement(preferred || alternate);
+}
+
+function moveDashWidget(id, direction){
+  if (!_dashArrange || !id || (direction !== -1 && direction !== 1)) return false;
+  const stack = document.getElementById('dash-stack');
+  const items = _dashArrangeItems(stack);
+  const index = items.findIndex(el => el.getAttribute('data-wid') === id);
+  const targetIndex = index + direction;
+  if (index < 0 || targetIndex < 0 || targetIndex >= items.length) return false;
+  const card = items[index];
+  const target = items[targetIndex];
+  if (direction < 0) stack.insertBefore(card, target);
+  else stack.insertBefore(card, target.nextElementSibling);
+  const ids = Array.from(stack.querySelectorAll(':scope > [data-wid]')).map(el => el.getAttribute('data-wid'));
+  saveDashLayout(ids);
+  _dashDecorate();
+  const movedItems = _dashArrangeItems(stack);
+  const movedIndex = movedItems.findIndex(el => el.getAttribute('data-wid') === id);
+  const name = _dashWidgetName(card, movedItems);
+  _announceDashArrange('Moved ' + name + ' ' + (direction < 0 ? 'up' : 'down') + '. Position ' + (movedIndex + 1) + ' of ' + movedItems.length + '.');
+  requestAnimationFrame(() => _focusDashMoveControl(id, direction < 0 ? 'up' : 'down'));
+  return true;
+}
 
 function _applyDashLayout(){
   const stack = document.getElementById('dash-stack');
@@ -8841,7 +9623,11 @@ function _applyDashLayout(){
       handleSelector: '.kjr-drag-handle',
       idAttr:         'data-wid',
       enabled:        _dashArrange,
-      onReorder: function(ids){ saveDashLayout(ids); }
+      onReorder: function(ids){
+        saveDashLayout(ids);
+        _dashDecorate();
+        _announceDashArrange('Dashboard order saved.');
+      }
     });
   }
 }
@@ -8849,16 +9635,42 @@ function _applyDashLayout(){
 function _dashDecorate(){
   const stack = document.getElementById('dash-stack');
   if (!stack) return;
-  // Remove existing handles so re-decoration is idempotent.
-  stack.querySelectorAll('.kjr-drag-handle').forEach(h => h.remove());
+  // Remove controls first so an already-decorated card is measured by its
+  // actual content and every render recreates one clean control group.
+  stack.querySelectorAll('.kjr-arrange-controls, .kjr-drag-handle').forEach(control => control.remove());
   if (!_dashArrange) return;
-  stack.querySelectorAll(':scope > [data-wid]').forEach(function(el){
-    if (!el.innerHTML.trim()) return; // skip empty blocks (CPF off, etc.)
-    const h = document.createElement('div');
-    h.className = 'kjr-drag-handle';
-    h.title = 'Drag to reorder';
-    h.innerHTML = '&#9776;'; // ☰ grip (positioning comes from the .dash-arranging CSS rule)
-    el.appendChild(h);
+  const items = _dashArrangeItems(stack);
+  items.forEach(function(el, index){
+    const id = el.getAttribute('data-wid');
+    const name = _dashWidgetName(el, items);
+    const controls = document.createElement('div');
+    controls.className = 'kjr-arrange-controls';
+
+    const handle = document.createElement('div');
+    handle.className = 'kjr-drag-handle';
+    handle.title = 'Drag ' + name + ' to reorder';
+    handle.setAttribute('aria-hidden', 'true');
+    handle.textContent = '☰';
+    controls.appendChild(handle);
+
+    const moves = document.createElement('div');
+    moves.className = 'kjr-arrange-moves';
+    [[-1, 'up', '↑'], [1, 'down', '↓']].forEach(([direction, placement, glyph]) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'kjr-arrange-move';
+      button.setAttribute('data-click', 'moveDashWidget');
+      button.setAttribute('data-a0', id);
+      button.setAttribute('data-a1', String(direction));
+      button.setAttribute('data-dash-move', placement);
+      button.setAttribute('aria-label', 'Move ' + name + ' ' + placement);
+      button.title = 'Move ' + name + ' ' + placement;
+      button.disabled = direction < 0 ? index === 0 : index === items.length - 1;
+      button.textContent = glyph;
+      moves.appendChild(button);
+    });
+    controls.appendChild(moves);
+    el.appendChild(controls);
   });
 }
 
@@ -8867,8 +9679,12 @@ function toggleArrange(){
   document.body.classList.toggle('dash-arranging', _dashArrange);
   if (_dashSortable){ _dashArrange ? _dashSortable.enable() : _dashSortable.disable(); }
   const btn = document.getElementById('dash-arrange-btn');
-  if (btn) btn.textContent = _dashArrange ? 'Done' : 'Arrange';
+  if (btn){
+    btn.textContent = _dashArrange ? 'Done' : 'Arrange';
+    btn.setAttribute('aria-pressed', String(_dashArrange));
+  }
   _dashDecorate();
+  _announceDashArrange(_dashArrange ? 'Arrange mode on. Use Move up or Move down to reorder dashboard cards.' : 'Arrange mode off.');
 }
 
 /* ─── Hero monthly-change chip + sparkline ──────────────────────────────
@@ -8930,34 +9746,35 @@ function renderDashboard(){
   const nwEl = document.getElementById('dash-networth');
   if (!nwEl) return;
 
-  const cashInfo = _cashSGDInfo();
-  const stockInfo = _stockMvSGDInfo();
-  const cryptoInfo = _cryptoSGDInfo();
+  const valuation = _netWorthValueInfo();
+  const { cashInfo, stockInfo, cryptoInfo } = valuation;
   const classes = [
-    { key:'Stocks',      val:stockInfo.total,   color:assetClassColor('Stocks') },
-    { key:'Cash',        val:cashInfo.total,    color:assetClassColor('Cash')   },
-    { key:'CPF',         val:_cpfSGD(),         color:assetClassColor('CPF')    },
-    { key:'Real Estate', val:_realestateSGD(),  color:assetClassColor('Real Estate') }
+    { key:'Stocks',      val:valuation.classes.stocks,     color:assetClassColor('Stocks') },
+    { key:'Cash',        val:valuation.classes.cash,       color:assetClassColor('Cash') },
+    { key:'CPF',         val:valuation.classes.cpf,        color:assetClassColor('CPF') },
+    { key:'Real Estate', val:valuation.classes.realestate, color:assetClassColor('Real Estate') },
+    { key:'Crypto',      val:valuation.classes.crypto,     color:assetClassColor('Crypto') },
+    { key:'Insurance',   val:valuation.classes.insurance,  color:assetClassColor('Insurance') }
   ];
-  const crypto = cryptoInfo.total;
-  if (crypto > 0) classes.push({ key:'Crypto', val:crypto, color:assetClassColor('Crypto') });
-  const insVal = insuranceCashValueSGD();
-  if (insVal > 0) classes.push({ key:'Insurance', val:insVal, color:assetClassColor('Insurance') });
-  const netFull   = roundMoney(classes.reduce((s,c) => s + c.val, 0));
-  const cpfVal    = _cpfSGD();
+  const netFull   = valuation.total;
+  const cpfVal    = valuation.classes.cpf;
   const netExCpf  = roundMoney(netFull - cpfVal);
 
   // displayClasses + displayNet respect the CPF toggle
-  const displayClasses = _dashShowCpf ? classes : classes.filter(c => c.key !== 'CPF');
-  const displayNet     = _dashShowCpf ? netFull : netExCpf;
+  const allocation = _allocationData(valuation.classes, _dashShowCpf);
+  const displayClasses = allocation.items.map(c => ({ key:c.cls, val:c.val, color:assetClassColor(c.cls) }));
+  const displayNet = allocation.total;
 
   // Net worth hero — secondary (ex-CPF) only shown when CPF is on
+  const headline = valuation.incomplete
+    ? `Known net worth (${_dashShowCpf ? 'with CPF' : 'ex-CPF'}, incomplete)`
+    : (_dashShowCpf ? 'Net worth (with CPF)' : 'Net worth (ex-CPF)');
   const heroSecondary = _dashShowCpf
     ? `<div style="width:1px;height:48px;background:var(--border);align-self:center;flex-shrink:0"></div>
-    <div><div class="dash-hero-label">Ex-CPF</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${fmt(netExCpf, {dp:0})}</div></div>`
+    <div><div class="dash-hero-label">${valuation.incomplete ? 'Known ex-CPF subtotal' : 'Ex-CPF'}</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${fmt(netExCpf, {dp:0})}</div></div>`
     : '';
-  const fxExclusionNote = cashInfo.excludedCount
-    ? `<div class="dash-hero-label" style="margin-top:4px">Excludes ${cashInfo.excludedCount} cash account${cashInfo.excludedCount>1?'s':''} with missing FX, refresh FX in Settings</div>`
+  const fxExclusionNote = valuation.incomplete
+    ? `<div class="dash-hero-label" style="margin-top:4px">Known subtotal excludes ${valuation.missingFxCount} asset${valuation.missingFxCount === 1 ? '' : 's'} with missing FX, refresh FX in Settings</div>`
     : '';
   const estimateCount = stockInfo.estimatedCount + cryptoInfo.estimatedCount;
   const estimateAmount = stockInfo.estimatedAmount + cryptoInfo.estimatedAmount;
@@ -8970,11 +9787,11 @@ function renderDashboard(){
   // (not an empty pill) when fewer than 2 qualifying snapshots exist.
   const snaps = DB.snapshots || [];
   const netOf = s => _dashShowCpf ? s.net : (s.net - ((s.byClass && s.byClass.cpf) || 0));
-  const change = _heroMonthlyChange(snaps, netOf);
+  const change = valuation.incomplete ? null : _heroMonthlyChange(snaps, netOf);
   const changeChip = change
     ? `<span class="dash-hero-chip ${change.pct >= 0 ? 'pos' : 'neg'}">${change.pct >= 0 ? '▲' : '▼'} ${change.pct >= 0 ? '+' : ''}${change.pct.toFixed(1)}% this month</span>`
     : '';
-  const spark = _heroSparkline(snaps, netOf);
+  const spark = valuation.incomplete ? '' : _heroSparkline(snaps, netOf);
 
   // Subline: current CPF-toggle wording plus the sync status (kept in step by
   // setSyncStatus, which also writes #dash-hero-sync directly on every sync
@@ -8985,7 +9802,7 @@ function renderDashboard(){
   const subline = `CPF ${_dashShowCpf ? 'on' : 'off'} · <span id="dash-hero-sync">${kjrEscape(syncText)}</span>`;
 
   nwEl.innerHTML = `<div class="dash-hero">
-    <div><div class="dash-hero-label">${_dashShowCpf ? 'Net worth (with CPF)' : 'Net worth (ex-CPF)'}${changeChip}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div><div class="dash-hero-sub">${subline}</div>${marketEstimateNote}${fxExclusionNote}</div>
+    <div><div class="dash-hero-label">${headline}${changeChip}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div><div class="dash-hero-sub">${subline}</div>${marketEstimateNote}${fxExclusionNote}</div>
     ${heroSecondary}
     ${spark}
     <button style="${spark ? '' : 'margin-left:auto;'}flex-shrink:0" class="btn btn-sm${_dashShowCpf ? ' btn-active' : ''}" data-click="toggleDashCpf" title="${_dashShowCpf ? 'Click to exclude CPF from net worth' : 'Click to include CPF in net worth'}">CPF ${_dashShowCpf ? 'on' : 'off'}</button>
@@ -9027,28 +9844,42 @@ function renderDashboard(){
   };
   const assetsEl = document.getElementById('dash-assets');
   if (assetsEl){
-    if (netFull <= 0){
+    if (!displayClasses.length && !valuation.incomplete){
       assetsEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">📊</div><div class="empty-title">No holdings yet</div><div class="empty-sub">Add stocks, cash, CPF, or property and your net worth and allocation appear here.</div></div></div></div>`;
     } else {
-      const segs = displayClasses.filter(c => c.val > 0);
-      const pctOf = c => displayNet > 0 ? (c.val / displayNet * 100) : 0;
-      const classCards = segs.map(c => {
+      const canShowAllocation = !valuation.incomplete && allocation.canAllocate && !allocation.hasNegative;
+      const pctOf = c => canShowAllocation ? (c.val / displayNet * 100) : null;
+      const classCards = displayClasses.map(c => {
         const p = pctOf(c);
+        const label = p != null ? kjrEscape(c.key) + ' · ' + p.toFixed(0) + '%'
+          : kjrEscape(c.key) + ' · ' + (c.val < 0 ? 'signed balance' : (valuation.incomplete ? 'known value' : 'value'));
         return `<div class="dash-class-card">
           <div class="dash-class-icon" style="background:var(${c.color}-soft,var(${c.color}));color:var(${c.color})">${CLASS_ICON[c.key] || ''}</div>
           <div class="dash-class-value metric-value">${fmt(c.val,{dp:0})}</div>
-          <div class="dash-class-label">${kjrEscape(c.key)} · ${p.toFixed(0)}%</div>
+          <div class="dash-class-label">${label}</div>
         </div>`;
       }).join('');
-      const bar = segs.map(c => {
-        const p = pctOf(c);
-        return `<div class="alloc-seg" style="flex:${c.val};background:var(${c.color})" title="${kjrEscape(c.key)} · ${fmt(c.val,{dp:0})} (${p.toFixed(0)}%)"></div>`;
-      }).join('');
-      const legend = segs.map(c => {
-        const p = pctOf(c);
-        return `<div class="alloc-legend-item"><span class="alloc-legend-dot" style="background:var(${c.color})"></span>${kjrEscape(c.key)} <span class="alloc-legend-amt">${fmt(c.val,{dp:0})}</span> <span class="alloc-legend-pct">${p.toFixed(0)}%</span></div>`;
-      }).join('');
-      assetsEl.innerHTML = `<div class="dash-class-grid" style="margin-top:16px">${classCards}</div><div class="card"><div class="card-body"><div class="alloc-bar">${bar}</div><div class="alloc-legend">${legend}</div></div></div>`;
+      let allocationHtml = '';
+      if (!canShowAllocation){
+        const title = valuation.incomplete ? 'Allocation incomplete' : 'Allocation unavailable';
+        const sub = valuation.incomplete
+          ? `Known values exclude ${valuation.missingFxCount} asset${valuation.missingFxCount === 1 ? '' : 's'} with missing FX. Set rates in Settings before calculating percentages.`
+          : (!allocation.canAllocate
+            ? 'Net allocation is zero or negative. Signed balances are shown above.'
+            : 'A class balance is negative. Signed balances are shown above, and the proportion bar is hidden.');
+        allocationHtml = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">📊</div><div class="empty-title">${title}</div><div class="empty-sub">${sub}</div></div></div></div>`;
+      } else {
+        const bar = displayClasses.map(c => {
+          const p = pctOf(c);
+          return `<div class="alloc-seg" style="flex:${c.val};background:var(${c.color})" title="${kjrEscape(c.key)} · ${fmt(c.val,{dp:0})} (${p.toFixed(0)}%)"></div>`;
+        }).join('');
+        const legend = displayClasses.map(c => {
+          const p = pctOf(c);
+          return `<div class="alloc-legend-item"><span class="alloc-legend-dot" style="background:var(${c.color})"></span>${kjrEscape(c.key)} <span class="alloc-legend-amt">${fmt(c.val,{dp:0})}</span> <span class="alloc-legend-pct">${p.toFixed(0)}%</span></div>`;
+        }).join('');
+        allocationHtml = `<div class="card"><div class="card-body"><div class="alloc-bar">${bar}</div><div class="alloc-legend">${legend}</div></div></div>`;
+      }
+      assetsEl.innerHTML = `${classCards ? `<div class="dash-class-grid" style="margin-top:16px">${classCards}</div>` : ''}${allocationHtml}`;
     }
   }
 
@@ -9073,7 +9904,18 @@ function renderDashboard(){
   // Emergency fund progress
   renderEmergencyFund();
   // Target allocation: always use full picture (planning tool; CPF is a real asset class)
-  renderTargetAllocation(classes, netFull);
+  const targetSettings = DB.settings.targets || {};
+  const targetSum = (Number(targetSettings.stocks)||0) + (Number(targetSettings.cash)||0) + (Number(targetSettings.cpf)||0) + (Number(targetSettings.realestate)||0) + (Number(targetSettings.crypto)||0);
+  const fullAllocation = _allocationData(valuation.classes, true);
+  if (targetSum > 0 && (valuation.incomplete || !fullAllocation.canAllocate || fullAllocation.hasNegative)){
+    const targetEl = document.getElementById('dash-targets');
+    if (targetEl){
+      const sub = valuation.incomplete
+        ? `Set FX rates for ${valuation.missingFxCount} asset${valuation.missingFxCount === 1 ? '' : 's'} before comparing against targets.`
+        : 'Net allocation is zero, negative, or contains a negative class balance. Signed values remain visible above.';
+      targetEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">🎯</div><div class="empty-title">Target allocation unavailable</div><div class="empty-sub">${sub}</div></div></div></div>`;
+    }
+  } else renderTargetAllocation(classes, netFull);
   // Top movers (today's gainers/losers)
   renderTopMovers();
 
@@ -9097,13 +9939,18 @@ function renderEmergencyFund(){
   if (!el) return;
   const target = Number(DB.settings.efTarget) || 0;
   if (target <= 0){ el.innerHTML = ''; return; }
-  const cash = _cashSGD();
-  const pct = target > 0 ? Math.min(100, cash / target * 100) : 0;
+  const cashInfo = _cashSGDInfo();
+  if (cashInfo.excludedCount){
+    el.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head"><h3>Emergency fund</h3></div><div class="card-body"><div class="empty"><div class="empty-icon">💱</div><div class="empty-title">Emergency fund progress unavailable</div><div class="empty-sub">Set FX rates for ${cashInfo.excludedCount} cash account${cashInfo.excludedCount === 1 ? '' : 's'} before comparing the balance with this target.</div></div></div></div>`;
+    return;
+  }
+  const cash = cashInfo.total;
+  const pct = target > 0 ? Math.max(0, Math.min(100, cash / target * 100)) : 0;
   const done = cash >= target;
   const barColor = done ? 'var(--green)' : (pct >= 50 ? 'var(--amber)' : 'var(--red)');
   el.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head">
       <h3>Emergency fund</h3>
-      <span class="hint">${done ? 'fully funded' : fmt(target - cash, {dp:0}) + ' to go'}</span>
+      <span class="hint">${cash < 0 ? 'negative balance, reconcile cash' : (done ? 'fully funded' : fmt(target - cash, {dp:0}) + ' to go')}</span>
     </div><div class="card-body">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
         <span style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(cash, {dp:0})}</span>
@@ -9278,23 +10125,45 @@ function _refreshTblScrollHints(){
 /* ═══════════════════════════════════════════════════════════════════════
    BOOT
    ═══════════════════════════════════════════════════════════════════════ */
-/* Delegated click handler for Edit buttons.
-   We no longer inline data-click="openEntity" data-a0="table" data-a1="${id}" because that
+/* Delegated click handler for table actions and Edit buttons.
+  We no longer inline data-click="openEntity" data-a0="table" data-a1="${id}" because that
    interpolates user-supplied data into a JS context — even with ids validated
    on save, defence-in-depth says don't put untrusted data into JS strings.
    Instead, the buttons carry data-edit-table + data-edit-id. The handler
    re-validates the id with kjrSafeId before dispatching.
    This listener attaches once at boot and survives every re-render. */
+function _restoreSortableFocus(attribute, key){
+  requestAnimationFrame(() => {
+    const header = Array.from(document.querySelectorAll('th[' + attribute + ']'))
+      .find(el => el.getAttribute(attribute) === key);
+    const button = header && header.querySelector('button.sort-button');
+    _modalFocusElement(button);
+  });
+}
+
+function _activateSortButton(button){
+  const restoreFocus = document.activeElement === button;
+  const routes = [
+    ['data-board-sort-key', setBoardSort],
+    ['data-wl-sort-key', setWatchlistSort],
+    ['data-ins-sort-key', setInsuranceSort],
+    ['data-sort-key', setStockSort]
+  ];
+  for (const [attribute, sort] of routes){
+    const header = button.closest('th[' + attribute + ']');
+    if (!header) continue;
+    const key = header.getAttribute(attribute);
+    sort(key);
+    if (restoreFocus) _restoreSortableFocus(attribute, key);
+    return true;
+  }
+  return false;
+}
+
 function installEventDelegation(){
   document.addEventListener('click', (e) => {
-    const bTh = e.target.closest('th[data-board-sort-key]');
-    if (bTh){ setBoardSort(bTh.getAttribute('data-board-sort-key')); return; }
-    const wlTh = e.target.closest('th[data-wl-sort-key]');
-    if (wlTh){ setWatchlistSort(wlTh.getAttribute('data-wl-sort-key')); return; }
-    const insTh = e.target.closest('th[data-ins-sort-key]');
-    if (insTh){ setInsuranceSort(insTh.getAttribute('data-ins-sort-key')); return; }
-    const th = e.target.closest('th[data-sort-key]');
-    if (th){ setStockSort(th.getAttribute('data-sort-key')); return; }
+    const sortButton = e.target.closest('button.sort-button');
+    if (sortButton && _activateSortButton(sortButton)) return;
     const btn = e.target.closest('[data-edit-table][data-edit-id]');
     if (!btn) return;
     const table = btn.getAttribute('data-edit-table');
@@ -9359,21 +10228,6 @@ function installEventDelegation(){
       if (e.key === 'y' || (e.key === 'z' && e.shiftKey)){ e.preventDefault(); redoAction(); return; }
     }
   });
-  // Keyboard sort: sortable headers are tabbable, Enter/Space toggles.
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    const bTh = e.target && e.target.closest ? e.target.closest('th[data-board-sort-key]') : null;
-    if (bTh){ e.preventDefault(); setBoardSort(bTh.getAttribute('data-board-sort-key')); return; }
-    const wlTh = e.target && e.target.closest ? e.target.closest('th[data-wl-sort-key]') : null;
-    if (wlTh){ e.preventDefault(); setWatchlistSort(wlTh.getAttribute('data-wl-sort-key')); return; }
-    const insTh = e.target && e.target.closest ? e.target.closest('th[data-ins-sort-key]') : null;
-    if (insTh){ e.preventDefault(); setInsuranceSort(insTh.getAttribute('data-ins-sort-key')); return; }
-    const th = e.target && e.target.closest ? e.target.closest('th[data-sort-key]') : null;
-    if (!th) return;
-    e.preventDefault();
-    setStockSort(th.getAttribute('data-sort-key'));
-  });
-
   // ── Delegated action dispatch (CSP: no inline handlers) ────────────────────
   // Every former inline on* handler now carries data-click / data-change /
   // data-input (plus data-a0..a2 for arguments). One set of document-level
@@ -9441,6 +10295,7 @@ function installEventDelegation(){
     // dashboard
     toggleDashCpf:       () => { _dashShowCpf = !_dashShowCpf; renderDashboard(); },
     toggleArrange:       () => toggleArrange(),
+    moveDashWidget:     (el) => { const [id, direction] = A(el); moveDashWidget(id, Number(direction)); },
     // columns manager
     openStockColumns:    () => openStockColumns(),
     closeStockColumns:   () => closeStockColumns(),
@@ -9506,7 +10361,11 @@ function installEventDelegation(){
     pbRefreshSaved:      (el) => pbRefreshSaved(A(el)[0]),
     pbDeleteSaved:       (el) => pbDeleteSaved(A(el)[0]),
     // misc
-    overlayBackdropClose: (el, ev) => { if (ev.target === el) el.classList.remove('open'); },
+    overlayBackdropClose: (el, ev) => {
+      if (ev.target !== el) return;
+      if (el.id === 'more-sheet') closeMoreSheet();
+      else el.classList.remove('open');
+    },
     callFixFn:           (el) => { const fn = window[A(el)[0]]; if (typeof fn === 'function') fn(); },
   };
   function runAction(attr, el, ev){
@@ -9607,7 +10466,7 @@ async function boot(){
 }
 
 window.addEventListener('beforeunload', event => {
-  if (!_vaultManager || !_vaultManager.hasPendingWrite()) return;
+  if (!_hasLocalUnsaved() && (!_vaultManager || !_vaultManager.hasPendingWrite())) return;
   event.preventDefault();
   event.returnValue = '';
 });

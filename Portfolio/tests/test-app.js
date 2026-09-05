@@ -80,16 +80,28 @@ function extractConstLine(name){
 
 const FUNCTION_TARGETS = [
   'kjrSafeId', 'kjrSafeString', '_isValidTicker',
-  'isBrokerageAcct', 'cashMovementDelta', 'cashTradeFlow', 'transferInAmount',
+  'isBrokerageAcct', 'cashMovementDelta', 'linkedTradeCurrencyMismatch',
+  'crossCurrencyTransferMissingAmount', 'cashTradeFlow', 'transferInAmount', 'deriveCashBalance',
   'annualPremium', 'cashPremiumPerYear', '_insurancePremiumSchedule',
-  'estimateAnnualTax', 'toSGD', 'sgdOrNull', 'getFx', '_ageOnYear',
+  'estimateAnnualTax', 'toSGD', 'sgdOrNull', 'getFx', '_displayMoneyOrNull', '_ageOnYear',
   '_stockMvSGDInfo', '_cryptoSGDInfo', '_lossyAckReason', '_rejectLossyAck',
+  '_markLocalUnsaved', '_clearLocalUnsaved', '_hasLocalUnsaved',
+  '_markCloudDirty', '_clearCloudDirty', '_hasCloudDirty',
+  '_stripBackupMetadata', 'localPersistPayload', 'syncPayload', 'backupExportPayload',
   '_cloneLocalValue', '_sameLocalValue', '_localIdMap', '_recordLocalConflict',
   '_mergeLocalValue', 'mergeConcurrentLocalState', '_writeLocalPayload',
   '_reconcileIncomingLocalStorage', '_handleRemovedLocalStorage',
-  'saveData', '_cancelSyncForReset', 'resetLocalConfirm'
+  '_scheduleCloudAfterLocalSave', 'saveData', '_awaitVaultFlushForRevision',
+  '_persistLocalOnly', 'safeJson', 'pushToRemote',
+  '_quiesceSavesBeforePull',
+  '_cancelPullForUnsavedChanges', 'setLastPull', 'pullFromRemote',
+  '_copySafeOwnObject', '_sanitiseList', 'normaliseEntityRow', 'entityModalSave', 'entityModalDelete',
+  'restoreFromTrash', 'runReconciliation',
+  '_cancelSyncForReset', 'resetLocalConfirm', '_fxPairsInUse', 'refreshFx',
+  '_pbDrawInto', '_pbDrawTimeSeries',
+  'pbPersistSaved', 'pbSaveChart', 'pbTogglePin', 'pbDeleteSaved', 'pbUndoDelete'
 ];
-const CONST_TARGETS = ['SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'LK_DB', 'LK_SYNC_TS', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_PRICE_CACHE'];
+const CONST_TARGETS = ['APP_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'PB_PALETTE', 'PB_PERIOD_LABELS'];
 
 const extractedFns = {};
 const missingFns = [];
@@ -151,13 +163,34 @@ function freshSandbox(dbOverrides){
     CPF_OW_CEILING_2026: core.CPF_OW_CEILING_2026,
     computeSgIncomeTax: core.computeSgIncomeTax,
     _round2: core._round2,
+    roundMoney: core.roundMoney,
     deriveStockPosition: () => null,
     yahooSymbol: s => s.symbol,
     coinIdFor: id => id,
     _syncTimer: null,
     _activeSyncController: null,
     _activeSyncCompletions: new Set(),
+    _activeSyncLatest: null,
+    _activeLocalSave: null,
+    _localSaveRevision: 0,
+    _localUnsavedInMemory: false,
+    _cloudDirtyInMemory: false,
     _localBase: null,
+    _vaultManager: null,
+    _bloatWarned: false,
+    _conflictResolvingNow: false,
+    _resyncToastShown: false,
+    _entitySaveInFlight: false,
+    _entityDeleteInFlight: false,
+    _modalState: null,
+    _fxInFlight: null,
+    _pbSaveInFlight: false,
+    _pbUndoChart: null,
+    _pbUndoTimer: null,
+    _pbUndoInFlight: false,
+    _pbCharts: {},
+    _DATE_FIELDS_BY_TABLE: {},
+    _sanitiseInvalidDateCount: 0,
     localStorage: fakeStorage,
     protectedStorage: fakeStorage,
     sessionStorage: {
@@ -171,19 +204,52 @@ function freshSandbox(dbOverrides){
     mergeDefaults: value => JSON.parse(JSON.stringify(value)),
     _stashLocalConflicts: () => null,
     renderAll: () => {},
+    renderTrash: () => {},
+    pushUndo: () => {},
     loadSettingsForm: () => {},
     freshDB: () => ({ stocks:[], crypto:[], cash:[], settings:{}, _priceCache:{} }),
     getSyncUrl: () => 'https://example.invalid/sync',
+    isLocalPreview: () => false,
     confirm: () => true,
     setSyncStatus: () => {},
     showToast: () => {},
+    uid: table => table + '_safe_id',
+    kjrValidDate: core.kjrValidDate,
+    kjrSafeNumber: core.kjrSafeNumber,
+    OVERSOLD_EPSILON: core.OVERSOLD_EPSILON,
+    fmt: n => String(n),
+    ENTITY_SCHEMAS: {},
+    document: { getElementById: () => null },
+    location: { protocol:'https:', hostname:'portfolio.example' },
+    AbortController,
+    AbortSignal,
+    fetch: () => Promise.reject(new Error('fetch not stubbed')),
+    seedDecision: () => 'refuse',
     pushToRemote: () => Promise.resolve(true),
+    closeEntityModal: () => {},
+    priceFor: () => ({ price:1 }),
+    refreshStockPrices: () => {},
+    prompt: () => 'Chart',
+    pbSource: () => ({ kind:'holdings' }),
+    pbFields: () => ({ symbol:{label:'Symbol'}, marketValue:{label:'Market Value'} }),
+    _pbLiveConfig: () => ({ source:'holdings', mode:'crosssec', xFields:['symbol'], yFields:['marketValue'], tsSymbols:[] }),
+    pbLoadSaved: () => JSON.parse(JSON.stringify(sandbox.DB.settings.savedCharts || [])),
+    pbRenderAllSaved: () => {},
+    _pbConfirm: (_message, onYes) => { sandbox._pbConfirmPromise = Promise.resolve(onYes()); },
+    _pbStockRows: () => [],
+    _pbCurSym: () => 'S$',
+    _isoDateSG: date => new Date(date).toISOString().slice(0, 10),
+    displayCcy: () => 'SGD',
+    fetchStockHistory: async () => ({}),
+    _pbMountChart: () => {},
+    _pbDrawInternalSeries: () => false,
+    _pbDrawCrossSectional: () => false,
+    _cssVar: () => '#888',
+    _privacyMaskLabel: value => value,
+    kjrFmtAxis: value => String(value),
+    kjrEscape: value => String(value),
     setTimeout,
     clearTimeout
-  };
-  sandbox.localPersistPayload = () => {
-    const { _priceCache, ...rest } = sandbox.DB;
-    return rest;
   };
   sandbox._readStoredLocalPayload = () => {
     const raw = sandbox.localStorage.getItem('kjr-pf-db-v1');
@@ -363,6 +429,56 @@ async function runTests(){
     assert.strictEqual(sb.transferInAmount({ amount: -100 }), 100);
     assert.strictEqual(sb.transferInAmount({ amount: 100, amountIn: '' }), 100);
     assert.strictEqual(sb.transferInAmount({ amount: 100, amountIn: null }), 100);
+  });
+
+  test('cash ledger - mismatched linked trade stays legacy-unconverted but reconciliation flags it', () => {
+    const sb = freshSandbox({
+      stocks:[{id:'s1',symbol:'USDCO',market:'US',currency:'USD',shares:0,avgCost:0}],
+      cash:[{id:'c1',name:'SGD cash',account:'Brokerage',amount:1000,currency:'SGD'}],
+      stockTxns:[{id:'t1',stockId:'s1',cashAccountId:'c1',side:'buy',shares:1,price:100,fees:0,date:'2026-01-01'}],
+      cashTxns:[]
+    });
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(sb.linkedTradeCurrencyMismatch(sb.DB.stockTxns[0]))), {
+      stockCcy:'USD', accountCcy:'SGD', accountName:'SGD cash'
+    });
+    assert.strictEqual(sb.deriveCashBalance(sb.DB.cash[0]), 900);
+    const rec = sb.runReconciliation();
+    assert.strictEqual(rec.ok, false);
+    assert.strictEqual(Array.from(rec.issues).some(x => /different currency/.test(x.msg)), true);
+  });
+
+  test('cash ledger - same-currency linked trade remains exact and clean', () => {
+    const sb = freshSandbox({
+      stocks:[{id:'s1',symbol:'SGDCO',market:'SGX',currency:'SGD',shares:0,avgCost:0}],
+      cash:[{id:'c1',name:'SGD cash',account:'Brokerage',amount:1000,currency:'SGD'}],
+      stockTxns:[{id:'t1',stockId:'s1',cashAccountId:'c1',side:'buy',shares:1,price:100,fees:5,date:'2026-01-01'}],
+      cashTxns:[]
+    });
+    assert.strictEqual(sb.linkedTradeCurrencyMismatch(sb.DB.stockTxns[0]), null);
+    assert.strictEqual(sb.deriveCashBalance(sb.DB.cash[0]), 895);
+    assert.strictEqual(sb.runReconciliation().ok, true);
+  });
+
+  test('cash ledger - cross-currency transfer needs amountIn, same-currency transfer does not', () => {
+    const base = {
+      cash:[{id:'sgd',currency:'SGD'},{id:'usd',currency:'USD'}], stocks:[], stockTxns:[], cashTxns:[]
+    };
+    const sb = freshSandbox(base);
+    assert.strictEqual(sb.crossCurrencyTransferMissingAmount({type:'transfer',fromAccountId:'sgd',cashAccountId:'usd',amount:100}), true);
+    assert.strictEqual(sb.crossCurrencyTransferMissingAmount({type:'transfer',fromAccountId:'sgd',cashAccountId:'usd',amount:100,amountIn:75}), false);
+    assert.strictEqual(sb.crossCurrencyTransferMissingAmount({type:'transfer',fromAccountId:'sgd',cashAccountId:'sgd',amount:100}), false);
+    sb.DB.cashTxns = [{id:'x1',type:'transfer',fromAccountId:'sgd',cashAccountId:'usd',amount:100}];
+    const rec = sb.runReconciliation();
+    assert.strictEqual(rec.ok, false);
+    assert.strictEqual(Array.from(rec.issues).some(x => /missing Amount received/.test(x.msg)), true);
+  });
+
+  test('entity save - new mismatched cash legs are blocked and persistence success is awaited before acknowledgement', () => {
+    const src = extractFunction('entityModalSave');
+    assert.ok(src.indexOf('linkedTradeCurrencyMismatch(item)') < src.indexOf('pushUndo()'));
+    assert.strictEqual(src.includes('Link anyway?'), false);
+    assert.ok(src.indexOf('await Promise.resolve(saveData())') < src.indexOf('closeEntityModal()'));
+    assert.ok(src.indexOf('if (!saved)') < src.indexOf("showToast(rowWasGone"));
   });
 
   /* ═══ annualPremium, cashPremiumPerYear (~6642) ═══ */
@@ -582,9 +698,9 @@ async function runTests(){
       _priceCache: { bitcoin:{ sgd:20000 } }
     });
     const info = sb._cryptoSGDInfo();
-    assert.strictEqual(info.total, 40000 + 3 * 1000 * 1.35);
+    assert.strictEqual(info.total, core.roundMoney(40000 + 3 * 1000 * 1.35));
     assert.strictEqual(info.estimatedCount, 1);
-    assert.strictEqual(info.estimatedAmount, 3 * 1000 * 1.35);
+    assert.strictEqual(info.estimatedAmount, core.roundMoney(3 * 1000 * 1.35));
   });
 
   test('_cryptoSGDInfo - zero-balance rows do not inflate the estimate count', () => {
@@ -618,7 +734,9 @@ async function runTests(){
     assert.strictEqual(states[0].state, 'failed');
     assert.match(states[0].detail, /insurance/);
     const pushSrc = extractFunction('pushToRemote');
-    assert.ok(pushSrc.indexOf('if (_rejectLossyAck(data)) return false;') < pushSrc.indexOf("setSyncStatus('synced')"));
+    const rejectAt = pushSrc.indexOf('if (_rejectLossyAck(data)) return false;');
+    const acceptedStampAt = pushSrc.indexOf('const stamp = data.savedAt', rejectAt);
+    assert.ok(rejectAt >= 0 && acceptedStampAt > rejectAt);
   });
 
   test('apps-script sanitiser round-trips Insurance tables and reports array caps', () => {
@@ -656,6 +774,527 @@ async function runTests(){
     const rejectAt = doPost.indexOf('if (strippedKeys.length || truncatedPaths.length)');
     const writeAt = doPost.indexOf('writePayloadRaw_(sh');
     assert.ok(rejectAt >= 0 && writeAt > rejectAt, 'lossy rejection must precede writePayloadRaw_');
+  });
+
+  /* ═══ Canonical backup envelope and durable local persistence ═══ */
+
+  test('backup export-import-sync - envelope is exported but never becomes canonical data', () => {
+    const sb = freshSandbox({
+      stocks:[{id:'s1',symbol:'SAFE'}], settings:{salary:{},tax:{},fxOverrides:{},fxRates:{}},
+      _priceCache:{SAFE:{price:10}}, futureFinancialField:{kept:true}
+    });
+    const exported = sb.backupExportPayload();
+    assert.strictEqual(exported._backup.app, 'kujira-portfolio');
+    assert.strictEqual('_priceCache' in exported, false);
+    sb.DB = exported;
+    const canonical = sb.localPersistPayload();
+    const synced = sb.syncPayload();
+    assert.strictEqual('_backup' in canonical, false);
+    assert.strictEqual('_backup' in synced, false);
+    assert.strictEqual('_priceCache' in synced, false);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(synced.futureFinancialField)), {kept:true});
+  });
+
+  test('saveData - native storage failure stays visibly unsaved and queues no cloud write', () => {
+    const sb = freshSandbox();
+    const states = [];
+    let timerCalls = 0;
+    sb.saveLocal = () => false;
+    sb.setSyncStatus = (state, detail) => states.push({state, detail});
+    sb.setTimeout = () => { timerCalls++; return 1; };
+    assert.strictEqual(sb.saveData(), false);
+    assert.strictEqual(sb._hasLocalUnsaved(), true);
+    assert.strictEqual(sb.localStorage.getItem('kjr-pf-unsaved-v1'), '1');
+    assert.strictEqual(timerCalls, 0);
+    assert.strictEqual(states.at(-1).state, 'failed');
+  });
+
+  test('saveData - in-memory warning survives when even the marker storage is unavailable', () => {
+    const sb = freshSandbox();
+    sb.localStorage.setItem = () => { throw new Error('storage disabled'); };
+    sb.localStorage.getItem = () => { throw new Error('storage disabled'); };
+    sb.saveLocal = () => false;
+    assert.strictEqual(sb.saveData(), false);
+    assert.strictEqual(sb._hasLocalUnsaved(), true);
+  });
+
+  test('saveData - a failed newer save cancels the older cloud debounce', () => {
+    const sb = freshSandbox();
+    let nextTimer = 0, cancelled = null;
+    sb.setTimeout = () => ++nextTimer;
+    sb.clearTimeout = id => { cancelled = id; };
+    assert.strictEqual(sb.saveData(), true);
+    assert.strictEqual(sb._syncTimer, 1);
+    sb.saveLocal = () => false;
+    assert.strictEqual(sb.saveData(), false);
+    assert.strictEqual(cancelled, 1);
+    assert.strictEqual(sb._syncTimer, null);
+    assert.strictEqual(sb._hasLocalUnsaved(), true);
+  });
+
+  await testAsync('saveData - stale vault completion cannot clear or sync a newer edit', async () => {
+    const sb = freshSandbox();
+    sb.getSyncUrl = () => '';
+    const resolvers = [];
+    sb._vaultManager = {
+      isEnabled: () => true,
+      flush: () => new Promise(resolve => resolvers.push(resolve))
+    };
+    const first = sb.saveData();
+    const second = sb.saveData();
+    resolvers[0](true);
+    assert.strictEqual(await first, false);
+    assert.strictEqual(sb._hasLocalUnsaved(), true);
+    resolvers[1](true);
+    assert.strictEqual(await second, true);
+    assert.strictEqual(sb._hasLocalUnsaved(), false);
+  });
+
+  /* ═══ Pull serialisation against delayed and failed pushes ═══ */
+
+  await testAsync('pushToRemote - preview guard preserves cloud-dirty state and makes no request', async () => {
+    const sb = freshSandbox();
+    sb._markCloudDirty();
+    sb.isLocalPreview = () => true;
+    let requests = 0;
+    sb.fetch = async () => { requests++; throw new Error('must not fetch'); };
+    assert.strictEqual(await sb.pushToRemote(), false);
+    assert.strictEqual(requests, 0);
+    assert.strictEqual(sb._hasCloudDirty(), true);
+  });
+
+  await testAsync('pullFromRemote - a completed failed POST is retried before pull in both conflict modes', async () => {
+    for (const strict of ['0','1']) {
+      const sb = freshSandbox({stocks:[{id:'local',symbol:'LOCAL'}]});
+      sb.localStorage.setItem('kjr-pf-strict-conflicts-v1', strict);
+      sb._localSaveRevision = 1;
+      sb._markCloudDirty();
+      let posts = 0, gets = 0;
+      let remote = {schema:'kujira-portfolio',stocks:[{id:'remote-old',symbol:'OLD'}]};
+      sb.fetch = async (_url, request) => {
+        if (request && request.method === 'POST') {
+          posts++;
+          if (posts === 1) return {status:503,text:async () => JSON.stringify({error:'offline'})};
+          remote = JSON.parse(request.body);
+          return {status:200,text:async () => JSON.stringify({savedAt:'server-2'})};
+        }
+        gets++;
+        return {json:async () => Object.assign({}, remote, {_savedAt:'server-2'})};
+      };
+      assert.strictEqual(await sb.pushToRemote(), false);
+      assert.strictEqual(sb._hasCloudDirty(), true);
+      assert.strictEqual(await sb.pullFromRemote(), true);
+      assert.strictEqual(posts, 2);
+      assert.strictEqual(gets, 1);
+      assert.strictEqual(sb._hasCloudDirty(), false);
+      assert.strictEqual(sb.DB.stocks[0].id, 'local');
+    }
+  });
+
+  await testAsync('pullFromRemote - explicit conflict discard may replace a cloud-dirty local copy', async () => {
+    const sb = freshSandbox({stocks:[{id:'local',symbol:'LOCAL'}]});
+    sb._markCloudDirty();
+    let posts = 0, gets = 0;
+    sb.fetch = async (_url, request) => {
+      if (request && request.method === 'POST') { posts++; throw new Error('must not post'); }
+      gets++;
+      return {json:async () => ({schema:'kujira-portfolio',_savedAt:'server-3',stocks:[{id:'remote',symbol:'REMOTE'}]})};
+    };
+    assert.strictEqual(await sb.pullFromRemote({discardLocalChanges:true}), true);
+    assert.strictEqual(posts, 0);
+    assert.strictEqual(gets, 1);
+    assert.strictEqual(sb._hasCloudDirty(), false);
+    assert.strictEqual(sb.DB.stocks[0].id, 'remote');
+  });
+
+  await testAsync('pullFromRemote - waits for active push, then applies server-stamped data', async () => {
+    const sb = freshSandbox({stocks:[{id:'local',symbol:'LOCAL'}], _priceCache:{LOCAL:{price:1}}});
+    let finishPush;
+    const active = new Promise(resolve => { finishPush = resolve; });
+    sb._activeSyncCompletions.add(active);
+    let gets = 0;
+    sb.fetch = async () => {
+      gets++;
+      return { json:async () => ({schema:'kujira-portfolio',_savedAt:'server-2',stocks:[{id:'remote',symbol:'REMOTE'}],_priceCache:{}}) };
+    };
+    const pulling = sb.pullFromRemote();
+    await Promise.resolve();
+    assert.strictEqual(gets, 0);
+    finishPush(true);
+    assert.strictEqual(await pulling, true);
+    assert.strictEqual(gets, 1);
+    assert.strictEqual(sb.DB.stocks[0].id, 'remote');
+    assert.strictEqual(sb.localStorage.getItem('kjr-pf-last-pull-v1'), 'server-2');
+    assert.strictEqual(sb.localStorage.getItem('kjr-pf-last-pull-src-v1'), 'server');
+  });
+
+  await testAsync('pullFromRemote - failed active push preserves local data in both conflict modes', async () => {
+    for (const strict of ['0','1']) {
+      const sb = freshSandbox({stocks:[{id:'local',symbol:'LOCAL'}]});
+      sb.localStorage.setItem('kjr-pf-strict-conflicts-v1', strict);
+      sb._activeSyncCompletions.add(Promise.resolve(false));
+      let gets = 0;
+      sb.fetch = async () => { gets++; throw new Error('must not fetch'); };
+      assert.strictEqual(await sb.pullFromRemote(), false);
+      assert.strictEqual(gets, 0);
+      assert.strictEqual(sb.DB.stocks[0].id, 'local');
+    }
+  });
+
+  await testAsync('pullFromRemote - edit arriving during GET is pushed and cloud is re-read once', async () => {
+    const sb = freshSandbox({stocks:[{id:'local',symbol:'LOCAL'}]});
+    let finishFirstGet;
+    let gets = 0, pushes = 0;
+    sb.pushToRemote = async () => { pushes++; return true; };
+    sb.fetch = async () => {
+      gets++;
+      if (gets === 1) return { json:() => new Promise(resolve => { finishFirstGet = resolve; }) };
+      return { json:async () => ({schema:'kujira-portfolio',_savedAt:'server-new',stocks:[{id:'new',symbol:'NEW'}]}) };
+    };
+    const pulling = sb.pullFromRemote();
+    while (!finishFirstGet) await Promise.resolve();
+    sb._localSaveRevision++;
+    sb._syncTimer = 9;
+    finishFirstGet({schema:'kujira-portfolio',_savedAt:'server-old',stocks:[{id:'old',symbol:'OLD'}]});
+    assert.strictEqual(await pulling, true);
+    assert.strictEqual(pushes, 1);
+    assert.strictEqual(gets, 2);
+    assert.strictEqual(sb.DB.stocks[0].id, 'new');
+    assert.strictEqual(sb.localStorage.getItem('kjr-pf-last-pull-v1'), 'server-new');
+  });
+
+  await testAsync('pullFromRemote - vault persistence is awaited and rejection cannot report synced', async () => {
+    for (const reject of [false, true]) {
+      const sb = freshSandbox({stocks:[{id:'local'}],_priceCache:{}});
+      let finishFlush, settled = false;
+      sb._vaultManager = {
+        isEnabled: () => true,
+        flush: () => new Promise((resolve, rejectFlush) => { finishFlush = reject ? () => rejectFlush(new Error('vault failed')) : resolve; })
+      };
+      const states = [];
+      sb.setSyncStatus = state => states.push(state);
+      sb.fetch = async () => ({json:async()=>({schema:'kujira-portfolio',_savedAt:'server-vault',stocks:[{id:'remote'}]})});
+      const pulling = sb.pullFromRemote().then(result => { settled = true; return result; });
+      while (!finishFlush) await Promise.resolve();
+      assert.strictEqual(settled, false);
+      assert.strictEqual(states.includes('synced'), false);
+      finishFlush(true);
+      assert.strictEqual(await pulling, !reject);
+      assert.strictEqual(states.includes('synced'), !reject);
+      assert.strictEqual(sb._hasLocalUnsaved(), reject);
+    }
+  });
+
+  await testAsync('pullFromRemote - edit during vault flush is revision-gated and re-read once', async () => {
+    const sb = freshSandbox({stocks:[{id:'local'}],_priceCache:{}});
+    let finishOldFlush, flushes = 0, gets = 0;
+    sb._vaultManager = {
+      isEnabled: () => true,
+      flush: () => {
+        flushes++;
+        return flushes === 1 ? new Promise(resolve => { finishOldFlush = resolve; }) : Promise.resolve(true);
+      }
+    };
+    sb.fetch = async () => {
+      gets++;
+      return {json:async()=>({schema:'kujira-portfolio',_savedAt:'server-'+gets,stocks:[{id:'remote-'+gets}]})};
+    };
+    const pulling = sb.pullFromRemote();
+    while (!finishOldFlush) await Promise.resolve();
+    sb._localSaveRevision++;
+    sb._markLocalUnsaved();
+    let finishNewSave;
+    const newerSave = new Promise(resolve => { finishNewSave = () => {
+      sb._clearLocalUnsaved(sb._localSaveRevision);
+      sb._activeLocalSave = null;
+      resolve(true);
+    }; });
+    sb._activeLocalSave = newerSave;
+    finishOldFlush(true);
+    await Promise.resolve();
+    assert.strictEqual(sb._hasLocalUnsaved(), true);
+    finishNewSave();
+    assert.strictEqual(await pulling, true);
+    assert.strictEqual(gets, 2);
+    assert.strictEqual(sb.DB.stocks[0].id, 'remote-2');
+  });
+
+  /* ═══ Trash restore schema validation ═══ */
+
+  function installStockRestoreSchema(sb){
+    sb.ENTITY_SCHEMAS = { stocks:{
+      fields:[
+        {key:'symbol',label:'Symbol',type:'text',required:true},
+        {key:'market',label:'Market',type:'select',required:true,options:[['US','US'],['SGX','SGX']],default:'US'},
+        {key:'shares',label:'Shares',type:'number',required:true,min:'0'},
+        {key:'avgCost',label:'Avg cost',type:'number',required:true,min:'0'},
+        {key:'notes',label:'Notes',type:'textarea'}
+      ],
+      afterRead:item => { item.symbol = (item.symbol || '').trim().toUpperCase(); }
+    } };
+  }
+
+  test('normaliseEntityRow - rejects structural numeric values and ignores unsafe or inherited keys', () => {
+    const sb = freshSandbox();
+    installStockRestoreSchema(sb);
+    const hostile = JSON.parse('{"id":"s1","symbol":"SAFE","market":"US","shares":[],"avgCost":10,"__proto__":{"polluted":true}}');
+    assert.strictEqual(sb.normaliseEntityRow('stocks', hostile).ok, false);
+    const inherited = Object.create({shares:99});
+    Object.assign(inherited, {id:'s2',symbol:'SAFE',market:'US',avgCost:10});
+    assert.strictEqual(sb.normaliseEntityRow('stocks', inherited).ok, false);
+    assert.strictEqual({}.polluted, undefined);
+  });
+
+  test('_sanitiseList - imported trash copies only inert own data until restore', () => {
+    const sb = freshSandbox();
+    const hostile = JSON.parse('[{"id":"tr1","table":"stocks","data":{"id":"s1","symbol":"<img src=x onerror=alert(1)>","shares":[],"avgCost":10,"__proto__":{"polluted":true}}}]');
+    const rows = sb._sanitiseList(hostile, 'trash');
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(rows[0].data, '__proto__'), false);
+    assert.strictEqual(rows[0].data.symbol, '<img src=x onerror=alert(1)>');
+    assert.strictEqual({}.polluted, undefined);
+    assert.ok(extractFunction('renderTrash').includes('kjrEscape(trashLabel(e.table, e.data))'));
+    assert.ok(appSrc.includes('${kjrEscape(r.shares)}<span class="hint"'));
+  });
+
+  await testAsync('restoreFromTrash - malformed row is rejected without consuming trash or saving', async () => {
+    const sb = freshSandbox({
+      stocks:[],
+      trash:[{id:'tr1',table:'stocks',data:{id:'s1',symbol:'<img>',market:'US',shares:{value:1},avgCost:10}}]
+    });
+    installStockRestoreSchema(sb);
+    let saves = 0;
+    sb.saveData = () => { saves++; return true; };
+    assert.strictEqual(await sb.restoreFromTrash('tr1'), false);
+    assert.strictEqual(saves, 0);
+    assert.strictEqual(sb.DB.stocks.length, 0);
+    assert.strictEqual(sb.DB.trash.length, 1);
+  });
+
+  await testAsync('restoreFromTrash - valid row is normalised, persisted and acknowledged', async () => {
+    const sb = freshSandbox({
+      stocks:[],
+      trash:[{id:'tr1',table:'stocks',data:{id:'s1',symbol:'safe',market:'US',shares:'2',avgCost:'10',notes:'<b>literal</b>',legacyCode:'kept'}}]
+    });
+    installStockRestoreSchema(sb);
+    const toasts = [];
+    sb.saveData = () => true;
+    sb.showToast = (message, kind) => toasts.push({message, kind});
+    assert.strictEqual(await sb.restoreFromTrash('tr1'), true);
+    assert.strictEqual(sb.DB.trash.length, 0);
+    assert.strictEqual(sb.DB.stocks[0].symbol, 'SAFE');
+    assert.strictEqual(sb.DB.stocks[0].shares, 2);
+    assert.strictEqual(sb.DB.stocks[0].notes, '<b>literal</b>');
+    assert.strictEqual(sb.DB.stocks[0].legacyCode, 'kept');
+    assert.deepStrictEqual(toasts.at(-1), {message:'Restored',kind:'success'});
+  });
+
+  await testAsync('entityModalSave - pending save blocks duplicates and failed persistence stays retryable', async () => {
+    const sb = freshSandbox({stocks:[],trash:[]});
+    installStockRestoreSchema(sb);
+    const values = {symbol:'safe',market:'US',shares:'2',avgCost:'10',notes:'note'};
+    sb.document = { getElementById:id => id === 'em-body' ? {
+      querySelector: selector => {
+        const match = selector.match(/data-fkey="([^"]+)"/);
+        return match ? {value:values[match[1]] == null ? '' : values[match[1]]} : null;
+      }
+    } : null };
+    sb._modalState = {table:'stocks',item:{id:'s1'},isNew:true};
+    let resolveSave;
+    sb.saveData = () => new Promise(resolve => { resolveSave = resolve; });
+    const first = sb.entityModalSave();
+    assert.strictEqual(await sb.entityModalSave(), false);
+    assert.strictEqual(sb.DB.stocks.length, 1);
+    resolveSave(false);
+    assert.strictEqual(await first, false);
+    assert.strictEqual(sb.DB.stocks.length, 1);
+    assert.strictEqual(sb._modalState.isNew, false);
+    sb.saveData = () => true;
+    assert.strictEqual(await sb.entityModalSave(), true);
+    assert.strictEqual(sb.DB.stocks.length, 1);
+  });
+
+  await testAsync('entityModalDelete - pending delete blocks duplicates and cannot close a newer modal', async () => {
+    const sb = freshSandbox({stocks:[{id:'s1'}],stockTxns:[],cashTxns:[],trash:[]});
+    const oldModal = {table:'stocks',item:{id:'s1'},isNew:false};
+    const newModal = {table:'cash',item:{id:'c1'},isNew:true};
+    sb._modalState = oldModal;
+    let finishDelete, deletes = 0, closes = 0;
+    sb.sendToTrash = () => { deletes++; return new Promise(resolve => { finishDelete = resolve; }); };
+    sb.closeEntityModal = () => { closes++; sb._modalState = null; };
+    const deleting = sb.entityModalDelete();
+    assert.strictEqual(await sb.entityModalDelete(), false);
+    assert.strictEqual(deletes, 1);
+    sb._modalState = newModal;
+    finishDelete(true);
+    assert.strictEqual(await deleting, true);
+    assert.strictEqual(closes, 0);
+    assert.strictEqual(sb._modalState, newModal);
+  });
+
+  test('mutation handlers - false persistence cannot reach Saved, Deleted or Imported acknowledgements', () => {
+    ['entityModalSave','entityModalDelete','restoreFromTrash','purgeTrashItem','emptyTrash','ibkrConfirmImport','insuranceImportConfirm'].forEach(name => {
+      const src = extractFunction(name);
+      assert.ok(src.includes('await Promise.resolve('), name + ' must await persistence');
+    });
+    const importSrc = extractFunction('importBackupFromFile');
+    assert.ok(importSrc.includes('const saved = await Promise.resolve(saveData())'));
+    assert.ok(importSrc.indexOf('if (!saved)') < importSrc.indexOf("showToast('Backup imported"));
+  });
+
+  await testAsync('Chart Builder - persistence keeps current state across failed and interleaved saves', async () => {
+    const sb = freshSandbox({settings:{savedCharts:[],salary:{},tax:{},fxOverrides:{},fxRates:{}}});
+    const toasts = [];
+    sb.showToast = (message, kind) => toasts.push({message, kind});
+    let finishSave, saves = 0;
+    sb.saveData = () => { saves++; return new Promise(resolve => { finishSave = resolve; }); };
+    const adding = sb.pbSaveChart();
+    assert.strictEqual(await sb.pbSaveChart(), false);
+    assert.strictEqual(saves, 1);
+    assert.strictEqual(sb.DB.settings.savedCharts.length, 1);
+    finishSave(false);
+    assert.strictEqual(await adding, false);
+    assert.strictEqual(toasts.some(t => t.message === 'Chart added to dashboard'), false);
+
+    sb.DB.settings.savedCharts = [{id:'c1',title:'One',pinned:false}];
+    sb.prompt = () => 'Added during pin';
+    let finishPin;
+    saves = 0;
+    sb.saveData = () => ++saves === 1 ? new Promise(resolve => { finishPin = resolve; }) : true;
+    const pinning = sb.pbTogglePin('c1');
+    assert.strictEqual(await sb.pbSaveChart(), true);
+    finishPin(false);
+    assert.strictEqual(await pinning, false);
+    assert.strictEqual(sb.DB.settings.savedCharts.find(c => c.id === 'c1').pinned, true);
+    assert.strictEqual(sb.DB.settings.savedCharts.some(c => c.title === 'Added during pin'), true);
+    assert.strictEqual(toasts.some(t => /pinned|unpinned/.test(t.message)), false);
+
+    sb.DB.settings.savedCharts = [{id:'c2',title:'Two',pinned:false}];
+    let confirmDelete;
+    sb._pbConfirm = (_message, onYes) => { confirmDelete = onYes; };
+    sb.pbDeleteSaved('c2');
+    sb.prompt = () => 'Added before confirm';
+    sb.saveData = () => true;
+    assert.strictEqual(await sb.pbSaveChart(), true);
+    assert.strictEqual(await confirmDelete(), true);
+    assert.strictEqual(sb.DB.settings.savedCharts.some(c => c.id === 'c2'), false);
+    assert.strictEqual(sb.DB.settings.savedCharts.some(c => c.title === 'Added before confirm'), true);
+    clearTimeout(sb._pbUndoTimer); sb._pbUndoTimer = null;
+
+    sb.DB.settings.savedCharts = [{id:'c3',title:'Three',pinned:false}];
+    sb._pbConfirm = (_message, onYes) => { sb._pbConfirmPromise = Promise.resolve(onYes()); };
+    let finishDelete;
+    saves = 0;
+    sb.saveData = () => ++saves === 1 ? new Promise(resolve => { finishDelete = resolve; }) : true;
+    const deletedToastCount = toasts.filter(t => t.message === 'Chart deleted').length;
+    sb.pbDeleteSaved('c3');
+    sb.prompt = () => 'Added during delete';
+    assert.strictEqual(await sb.pbSaveChart(), true);
+    finishDelete(false);
+    assert.strictEqual(await sb._pbConfirmPromise, false);
+    assert.strictEqual(sb.DB.settings.savedCharts.some(c => c.id === 'c3'), false);
+    assert.strictEqual(sb.DB.settings.savedCharts.some(c => c.title === 'Added during delete'), true);
+    assert.strictEqual(toasts.filter(t => t.message === 'Chart deleted').length, deletedToastCount);
+
+    const oldUndo = {id:'c4',title:'Old undo',pinned:false};
+    const newerDelete = {id:'c5',title:'Newer delete',pinned:false};
+    sb.DB.settings.savedCharts = [newerDelete];
+    sb._pbUndoChart = oldUndo;
+    let finishUndo;
+    saves = 0;
+    sb.saveData = () => ++saves === 1 ? new Promise(resolve => { finishUndo = resolve; }) : true;
+    const undoing = sb.pbUndoDelete();
+    sb.pbDeleteSaved('c5');
+    assert.strictEqual(await sb._pbConfirmPromise, true);
+    const restoredToastCount = toasts.filter(t => t.message === 'Chart restored').length;
+    finishUndo(true);
+    assert.strictEqual(await undoing, true);
+    assert.strictEqual(sb._pbUndoChart.id, 'c5');
+    assert.strictEqual(toasts.filter(t => t.message === 'Chart restored').length, restoredToastCount);
+    clearTimeout(sb._pbUndoTimer); sb._pbUndoTimer = null;
+
+    sb.DB.settings.savedCharts = [];
+    sb._pbUndoChart = oldUndo;
+    sb.saveData = () => false;
+    assert.strictEqual(await sb.pbUndoDelete(), false);
+    assert.strictEqual(sb.DB.settings.savedCharts.length, 1);
+    assert.strictEqual(sb._pbUndoChart.id, 'c4');
+    assert.strictEqual(toasts.some(t => t.message === 'Chart restored'), false);
+    sb.saveData = () => true;
+    assert.strictEqual(await sb.pbUndoDelete(), true);
+    assert.strictEqual(sb.DB.settings.savedCharts.length, 1);
+    assert.strictEqual(sb._pbUndoChart, null);
+    assert.strictEqual(toasts.at(-1).message, 'Chart restored');
+  });
+
+  await testAsync('Chart Builder history - missing FX clears stale charts and same-currency values render', async () => {
+    async function drawHistory(display, rowCcy, historyCcy, showAvgCost){
+      const sb = freshSandbox({settings:{savedCharts:[],salary:{},tax:{},fxOverrides:{},fxRates:{}}});
+      const symbol = rowCcy + '-TEST';
+      sb.displayCcy = () => display;
+      sb._pbCurSym = () => display === 'USD' ? 'US$' : 'S$';
+      sb._pbStockRows = () => [{
+        s:{symbol,market:'TEST'}, ysym:symbol, shares:2, avgCost:80,
+        ccy:rowCcy, priceCcy:rowCcy
+      }];
+      sb.fetchStockHistory = async () => ({
+        [symbol]:{ccy:historyCcy,points:[{t:Date.UTC(2026, 8, 5, 4),c:100}]}
+      });
+      let mounted = null, destroyed = 0;
+      sb._pbMountChart = (canvasId, spec) => { mounted = {canvasId, spec}; };
+      sb._pbCharts.history = {destroy(){ destroyed++; }};
+      const host = {
+        canvasId:'history', wrapEl:{style:{}}, emptyEl:{style:{},innerHTML:''}, summaryEl:{innerHTML:''}
+      };
+      const ok = await sb._pbDrawInto(host, {
+        source:'holdings', mode:'timeseries', tsSymbols:[symbol], range:'SIX_MONTHS',
+        tsValue:'price', tsAvgCost:showAvgCost
+      });
+      return {sb, host, ok, mounted, destroyed};
+    }
+
+    for (const [display, source] of [['SGD','USD'], ['USD','SGD']]){
+      const result = await drawHistory(display, source, source, false);
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.mounted, null);
+      assert.strictEqual(result.destroyed, 1);
+      assert.strictEqual(result.sb._pbCharts.history, undefined);
+      assert.strictEqual(result.host.emptyEl.innerHTML.includes('FX rate missing'), true);
+      assert.strictEqual(result.host.emptyEl.innerHTML.includes(source), true);
+    }
+
+    const missingCost = await drawHistory('SGD', 'USD', 'SGD', true);
+    assert.strictEqual(missingCost.ok, false);
+    assert.strictEqual(missingCost.mounted, null);
+    assert.strictEqual(missingCost.destroyed, 1);
+    assert.strictEqual(missingCost.host.emptyEl.innerHTML.includes('USD'), true);
+
+    for (const currency of ['SGD','USD']){
+      const result = await drawHistory(currency, currency, currency, true);
+      assert.strictEqual(result.ok, true);
+      assert.ok(result.mounted);
+      assert.deepStrictEqual(Array.from(result.mounted.spec.data.datasets[0].data), [100]);
+      assert.deepStrictEqual(Array.from(result.mounted.spec.data.datasets[1].data), [80]);
+      assert.strictEqual(result.host.wrapEl.style.display, 'block');
+      assert.strictEqual(result.host.emptyEl.style.display, 'none');
+    }
+  });
+
+  await testAsync('refreshFx - native and vault persistence failures suppress success', async () => {
+    for (const mode of ['native','vault']) {
+      const initialRate = mode === 'native' ? 1.2 : 1.3;
+      const sb = freshSandbox({settings:{salary:{},tax:{},fxOverrides:{},fxRates:{USDSGD:initialRate}},cash:[],expenses:[]});
+      const toasts = [];
+      sb.showToast = (message, kind) => toasts.push({message, kind});
+      sb.fetch = async () => ({json:async()=>({rates:{USDSGD:{rate:1.3}}})});
+      if (mode === 'native') sb.saveData = () => false;
+      else {
+        sb.saveLocal = () => true;
+        sb._vaultManager = {isEnabled:()=>true,flush:()=>Promise.reject(new Error('vault failed'))};
+      }
+      assert.strictEqual(await sb.refreshFx({silent:false}), false);
+      assert.strictEqual(toasts.some(t => /^FX refreshed:/.test(t.message)), false);
+    }
   });
 
   /* ═══ Same-origin full-blob concurrency ═══ */
@@ -712,7 +1351,7 @@ async function runTests(){
     assert.strictEqual(result.value.cash[0].balance, 25);
   });
 
-  test('_reconcileIncomingLocalStorage - storage event immediately persists both tabs and does not echo canonical state', () => {
+  await testAsync('_reconcileIncomingLocalStorage - storage event immediately persists both tabs and does not echo canonical state', async () => {
     const sb = freshSandbox();
     const base = { stocks:[{id:'s1',name:'Base'}], cash:[{id:'c1',balance:10}], settings:{} };
     const localUnsaved = { stocks:[{id:'s1',name:'Typing'}], cash:[{id:'c1',balance:10}], settings:{}, _priceCache:{} };
@@ -726,16 +1365,79 @@ async function runTests(){
       realSet(key, value);
     };
     realSet('kjr-pf-db-v1', JSON.stringify(incoming));
-    const result = sb._reconcileIncomingLocalStorage(JSON.stringify(incoming));
+    const result = await sb._reconcileIncomingLocalStorage(JSON.stringify(incoming));
     assert.strictEqual(result.persisted, true);
     assert.strictEqual(primaryWrites, 1);
     const persisted = JSON.parse(sb.localStorage.getItem('kjr-pf-db-v1'));
     assert.strictEqual(persisted.stocks[0].name, 'Typing');
     assert.strictEqual(persisted.cash[0].balance, 25);
 
-    const echo = sb._reconcileIncomingLocalStorage(JSON.stringify(persisted));
+    const echo = await sb._reconcileIncomingLocalStorage(JSON.stringify(persisted));
     assert.strictEqual(echo.persisted, false);
     assert.strictEqual(primaryWrites, 1);
+  });
+
+  await testAsync('_reconcileIncomingLocalStorage - stale active ACK cannot clear a newer external revision', async () => {
+    const oldDb = {stocks:[{id:'s1',name:'Old'}],cash:[],settings:{},_priceCache:{}};
+    const incoming = {stocks:[{id:'s1',name:'New'}],cash:[],settings:{}};
+    const sb = freshSandbox(oldDb);
+    sb._localBase = JSON.parse(JSON.stringify(sb.localPersistPayload()));
+    sb._localSaveRevision = 1;
+    sb._markCloudDirty();
+    const queued = [];
+    sb.setTimeout = fn => { queued.push(fn); return queued.length; };
+    sb.clearTimeout = () => {};
+    let releaseOld;
+    const posted = [];
+    sb.fetch = async (_url, request) => {
+      posted.push(JSON.parse(request.body));
+      if (posted.length === 1) return new Promise(resolve => { releaseOld = () => resolve({status:200,text:async()=>JSON.stringify({savedAt:'old-ack'})}); });
+      return {status:200,text:async()=>JSON.stringify({savedAt:'new-ack'})};
+    };
+    const oldPush = sb.pushToRemote();
+    while (!releaseOld) await Promise.resolve();
+    sb.localStorage.setItem('kjr-pf-db-v1', JSON.stringify(incoming));
+    const merged = await sb._reconcileIncomingLocalStorage(JSON.stringify(incoming));
+    assert.strictEqual(merged.changed, true);
+    assert.strictEqual(sb._localSaveRevision, 2);
+    assert.strictEqual(sb._hasCloudDirty(), true);
+    assert.strictEqual(sb._syncTimer, 1);
+    releaseOld();
+    assert.strictEqual(await oldPush, true);
+    assert.strictEqual(sb._hasCloudDirty(), true);
+    queued[0]();
+    const followUp = sb._activeSyncLatest;
+    assert.ok(followUp);
+    assert.strictEqual(await followUp, true);
+    assert.strictEqual(posted[0].stocks[0].name, 'Old');
+    assert.strictEqual(posted[1].stocks[0].name, 'New');
+    assert.strictEqual(sb._hasCloudDirty(), false);
+  });
+
+  await testAsync('_reconcileIncomingLocalStorage - vault merge waits for encryption and fails dirty on rejection', async () => {
+    for (const reject of [false, true]) {
+      const sb = freshSandbox({
+        stocks:[{id:'s1',name:'Typing'}], cash:[{id:'c1',balance:10}], settings:{}, _priceCache:{}
+      });
+      sb._localBase = {stocks:[{id:'s1',name:'Base'}],cash:[{id:'c1',balance:10}],settings:{}};
+      const incoming = {stocks:[{id:'s1',name:'Base'}],cash:[{id:'c1',balance:25}],settings:{}};
+      sb.localStorage.setItem('kjr-pf-db-v1', JSON.stringify(incoming));
+      let finishFlush;
+      sb._vaultManager = {
+        isEnabled: () => true,
+        flush: () => new Promise((resolve, rejectFlush) => { finishFlush = reject ? () => rejectFlush(new Error('vault failed')) : resolve; })
+      };
+      let settled = false;
+      const merging = sb._reconcileIncomingLocalStorage(JSON.stringify(incoming)).then(result => { settled = true; return result; });
+      while (!finishFlush) await Promise.resolve();
+      assert.strictEqual(settled, false);
+      finishFlush(true);
+      const result = await merging;
+      assert.strictEqual(result.persisted, !reject);
+      assert.strictEqual(sb._hasLocalUnsaved(), reject);
+      assert.strictEqual(sb.DB.stocks[0].name, 'Typing');
+      assert.strictEqual(sb.DB.cash[0].balance, 25);
+    }
   });
 
   /* ═══ Reset vs queued and active sync ═══ */
@@ -824,8 +1526,20 @@ async function runTests(){
     assert.ok(toast.message.includes('automatic cloud writes are paused'));
   });
 
-  test('Portfolio dynamic filters and chart controls keep accessible names', () => {
-    const expected = {
+  await testAsync('resetLocalConfirm - failed local persistence restores prior in-memory data and has no success claim', async () => {
+    const sb = freshSandbox({stocks:[{id:'s1',name:'Keep me'}],cash:[],crypto:[],settings:{},_priceCache:{}});
+    const toasts = [];
+    sb.getSyncUrl = () => '';
+    sb.saveLocal = () => false;
+    sb.showToast = (message, kind) => toasts.push({message, kind});
+    assert.strictEqual(await sb.resetLocalConfirm(), false);
+    assert.strictEqual(sb.DB.stocks[0].name, 'Keep me');
+    assert.strictEqual(toasts.some(t => t.kind === 'success'), false);
+    assert.strictEqual(toasts.at(-1).kind, 'error');
+  });
+
+ test('Portfolio dynamic filters and chart controls keep accessible names', () => {
+   const expected = {
       'sf-market':'Filter stocks by market',
       'sf-sector':'Filter stocks by sector',
       'pb-source-select':'Chart data source',
@@ -838,10 +1552,50 @@ async function runTests(){
       const match = appSrc.match(select);
       assert.ok(match, id + ' select must exist');
       assert.ok(match[0].includes('aria-label="' + name + '"'), id + ' must expose the expected accessible name');
+   });
+ });
+
+  test('Portfolio modal lifecycle and dynamically inserted inputs retain accessible focus and names', () => {
+    ['openModalFocus', 'closeModalFocus', '_modalFocusable', '_modalFocusVisible'].forEach(name => {
+      assert.ok(extractFunction(name), name + ' must remain an app helper');
     });
+    assert.ok(appSrc.includes("openModalFocus(overlay, closeSetupWizard)"));
+    assert.ok(appSrc.includes("openModalFocus(ov);"));
+    assert.ok(appSrc.includes("openModalFocus(_overlay, closeEntityModal)"));
+    assert.strictEqual(appSrc.includes('_modalKeyTrap'), false);
+    assert.strictEqual(appSrc.includes('_modalOpener'), false);
+    assert.ok(appSrc.includes('for="sw-url-input"'));
+    assert.ok(appSrc.includes('aria-describedby="sw-url-help"'));
+    assert.ok(appSrc.includes('id="pb-palette-search" class="fi fi-sm" placeholder="Search fields..." data-input="pbFilterPalette" aria-label="Search available fields"'));
+    assert.ok(appSrc.includes('id="pb-kw" class="cb-drop-zone"'));
+    assert.ok(appSrc.includes('aria-label="Filter holdings by symbol or sector"'));
   });
 
-  test('setup wizard links to the active Apps Script source path', () => {
+  test('Portfolio sortable headers use native buttons once and restore keyboard focus after render', () => {
+    ['data-sort-key', 'data-wl-sort-key', 'data-board-sort-key', 'data-ins-sort-key'].forEach(attribute => {
+      assert.ok(appSrc.includes(attribute + '="${key}"'), attribute + ' header must be rendered');
+    });
+    assert.ok(appSrc.includes('class="sortable sortable-button${extraCls'));
+    assert.ok(appSrc.includes('<button type="button" class="sort-button"'));
+    assert.ok(appSrc.includes('aria-sort="${ariaSort}"'));
+    assert.ok(appSrc.includes('function _activateSortButton'));
+    assert.ok(appSrc.includes('function _restoreSortableFocus'));
+    assert.strictEqual(appSrc.includes('Keyboard sort: sortable headers are tabbable'), false);
+  });
+
+  test('Dashboard arrange controls provide bounded named move buttons and an announcement', () => {
+    ['_dashArrangeItems', '_dashWidgetName', '_announceDashArrange', 'moveDashWidget'].forEach(name => {
+      assert.ok(extractFunction(name), name + ' must remain an app helper');
+    });
+    assert.ok(appSrc.includes("button.setAttribute('data-click', 'moveDashWidget')"));
+    assert.ok(appSrc.includes("button.setAttribute('data-dash-move', placement)"));
+    assert.ok(appSrc.includes("button.setAttribute('aria-label', 'Move ' + name + ' ' + placement)"));
+    assert.ok(appSrc.includes("button.disabled = direction < 0 ? index === 0 : index === items.length - 1;"));
+    assert.ok(appSrc.includes("_announceDashArrange('Dashboard order saved.')"));
+    assert.ok(indexSrc.includes('id="dash-arrange-status" class="sr-only" role="status" aria-live="polite"'));
+  });
+
+ test('setup wizard links to the active Apps Script source path', () => {
     assert.ok(appSrc.includes('/blob/main/Portfolio/Worker/apps-script.gs'));
     assert.strictEqual(appSrc.includes('/blob/main/Portfolio/apps-script.gs'), false);
   });
@@ -909,6 +1663,20 @@ async function runTests(){
       kind:'success'
     });
     assert.strictEqual(toast.message.includes('cloud writes'), false);
+  });
+
+  await testAsync('_handleRemovedLocalStorage - local persistence failure cannot report reset success', async () => {
+    const sb = freshSandbox({stocks:[{id:'s1'}],cash:[],crypto:[],settings:{},_priceCache:{}});
+    let status = null, toast = null;
+    sb.getSyncUrl = () => '';
+    sb.saveLocal = () => false;
+    sb.setSyncStatus = (state, detail) => { status = {state, detail}; };
+    sb.showToast = (message, kind) => { toast = {message, kind}; };
+    const result = await sb._handleRemovedLocalStorage();
+    assert.strictEqual(result.persisted, false);
+    assert.strictEqual(status.state, 'failed');
+    assert.strictEqual(toast.kind, 'error');
+    assert.strictEqual(toast.message.includes('reset') && toast.message.includes('could not be stored'), true);
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

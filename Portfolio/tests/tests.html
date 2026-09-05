@@ -8,28 +8,36 @@
   h1   { font-size: 1rem; color: #aaa; margin-bottom: 1rem; }
   .suite { margin-bottom: 1.5rem; }
   .suite-name { font-weight: bold; color: #7df; margin-bottom: .4rem; }
-  .pass { color: #4d4; }
-  .fail { color: #f55; }
-  .summary { margin-top: 1rem; font-weight: bold; }
+    .pass { color: #4d4; }
+    .fail { color: #f55; }
+    .summary { margin-top: 1rem; font-weight: bold; }
+    .report { margin-top: .75rem; font-weight: bold; }
 </style>
 </head>
 <body>
 <h1>Portfolio unit tests</h1>
 <div id="output"></div>
 
-<script src="../Worker/kjr-sortable.js?v=1.5"></script>
+<script src="../Worker/kjr-sortable.js?v=2.63"></script>
 <script>
 /* ── tiny test harness ── */
-var _pass = 0, _fail = 0, _lines = [];
+var _pass = 0, _fail = 0, _lines = [], _failures = [];
 
 function suite(name) { _lines.push('<div class="suite"><div class="suite-name">' + name + '</div>'); }
 function suiteEnd()  { _lines.push('</div>'); }
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, function(ch) {
+    return ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[ch];
+  });
+}
 function ok(label, cond) {
-  if (cond) { _pass++; _lines.push('<div class="pass">  ✓ ' + label + '</div>'); }
-  else       { _fail++; _lines.push('<div class="fail">  ✗ ' + label + '</div>'); }
+  var text = String(label);
+  if (cond) { _pass++; _lines.push('<div class="pass">  ✓ ' + escapeHtml(text) + '</div>'); }
+  else       { _fail++; _failures.push(text); _lines.push('<div class="fail">  ✗ ' + escapeHtml(text) + '</div>'); }
 }
 function eq(label, a, b) { ok(label + ' (' + a + ' === ' + b + ')', a === b); }
 
+try {
 /* ── KjrSortable.indexForPointer ── */
 suite('KjrSortable.indexForPointer');
 
@@ -108,11 +116,91 @@ ok('destroy does not throw',     true);
 
 suiteEnd();
 
+/* ── KjrSortable browser DOM path ──
+   This runs the shipped drag engine against actual browser elements and
+   pointer events. It deliberately contains no financial data or app state. */
+suite('KjrSortable.create — browser DOM drag');
+
+function browserPointerEvent(type, pointerId, clientX, clientY) {
+  var event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    pointerId: { value: pointerId },
+    clientX: { value: clientX },
+    clientY: { value: clientY }
+  });
+  return event;
+}
+
+function browserDragFixture(ids) {
+  var root = document.createElement('div');
+  root.style.cssText = 'position:absolute;left:-10000px;top:100px;width:160px';
+  ids.forEach(function(id) {
+    var item = document.createElement('div');
+    var handle = document.createElement('button');
+    item.setAttribute('data-wid', id);
+    item.style.height = '32px';
+    handle.type = 'button';
+    handle.className = 'handle';
+    handle.textContent = 'Move ' + id;
+    item.appendChild(handle);
+    root.appendChild(item);
+  });
+  document.body.appendChild(root);
+  return root;
+}
+
+var dragRoot = browserDragFixture(['alpha', 'beta', 'gamma']);
+var commits = [];
+var dragSort = KjrSortable.create(dragRoot, {
+  itemSelector: '[data-wid]',
+  handleSelector: '.handle',
+  enabled: true,
+  scrollEdgePx: 0,
+  onReorder: function(order) { commits.push(order.join(',')); }
+});
+var firstHandle = dragRoot.querySelector('[data-wid="alpha"] .handle');
+var firstRect = firstHandle.getBoundingClientRect();
+var lastRect = dragRoot.querySelector('[data-wid="gamma"]').getBoundingClientRect();
+firstHandle.dispatchEvent(browserPointerEvent('pointerdown', 41, firstRect.left + 8, firstRect.top + 8));
+document.dispatchEvent(browserPointerEvent('pointermove', 41, lastRect.left + 8, lastRect.bottom + 8));
+window.dispatchEvent(browserPointerEvent('pointerup', 41, lastRect.left + 8, lastRect.bottom + 8));
+
+eq('pointer drag commits DOM order', dragSort.getOrder().join(','), 'beta,gamma,alpha');
+eq('pointer drag reports final order once', commits.length, 1);
+eq('reported order matches DOM', commits[0], 'beta,gamma,alpha');
+ok('pointer drag cleans the placeholder', !dragRoot.querySelector('.kjr-sortable-placeholder'));
+ok('pointer drag clears active state', !dragSort.isDragging());
+dragSort.destroy();
+dragRoot.remove();
+
+var tapRoot = browserDragFixture(['one', 'two']);
+var tapCommits = 0;
+var tapSort = KjrSortable.create(tapRoot, {
+  itemSelector: '[data-wid]',
+  handleSelector: '.handle',
+  enabled: true,
+  scrollEdgePx: 0,
+  onReorder: function() { tapCommits++; }
+});
+var tapHandle = tapRoot.querySelector('.handle');
+var tapRect = tapHandle.getBoundingClientRect();
+tapHandle.dispatchEvent(browserPointerEvent('pointerdown', 42, tapRect.left + 8, tapRect.top + 8));
+document.dispatchEvent(browserPointerEvent('pointerup', 42, tapRect.left + 8, tapRect.top + 8));
+eq('clean tap keeps DOM order', tapSort.getOrder().join(','), 'one,two');
+eq('clean tap does not report a reorder', tapCommits, 0);
+tapSort.destroy();
+tapRoot.remove();
+
+suiteEnd();
+
 /* ── KjrSortable VERSION ── */
 suite('KjrSortable meta');
 ok('VERSION is string', typeof KjrSortable.VERSION === 'string');
 ok('VERSION is 1.5',    KjrSortable.VERSION === '1.5');
 suiteEnd();
+} catch (err) {
+  ok('Unhandled test exception: ' + ((err && err.message) || String(err)), false);
+}
 
 /* ── render ── */
 var total = _pass + _fail;
@@ -120,6 +208,43 @@ _lines.push('<div class="summary ' + (_fail ? 'fail' : 'pass') + '">' +
   _pass + '/' + total + ' passed' + (_fail ? ' — ' + _fail + ' FAILED' : ' — all green') +
   '</div>');
 document.getElementById('output').innerHTML = _lines.join('');
+
+/* The page stays a normal standalone test when there is no test-run query.
+   The loopback runner supplies a one-use token and waits for this real browser
+   result. A reporting failure is visible here and never turns into a pass. */
+(function reportBrowserResult() {
+  var params = new URLSearchParams(window.location.search);
+  var token = params.get('test-run');
+  if (!token || params.getAll('test-run').length !== 1) return;
+
+  var status = document.createElement('div');
+  status.className = 'report';
+  status.textContent = 'Reporting browser result to the local runner...';
+  document.getElementById('output').appendChild(status);
+
+  var payload = {
+    token: token,
+    status: 'complete',
+    pass: _pass,
+    fail: _fail,
+    total: total,
+    failures: _failures
+  };
+  fetch('/__browser-test-report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(function(response) {
+    if (!response.ok) throw new Error('local runner rejected the result (' + response.status + ')');
+    status.className = 'report ' + (_fail ? 'fail' : 'pass');
+    status.textContent = _fail
+      ? 'Browser result reported with ' + _fail + ' failure' + (_fail === 1 ? '' : 's') + '.'
+      : 'Browser result reported. The local runner may now exit.';
+  }).catch(function(err) {
+    status.className = 'report fail';
+    status.textContent = 'Could not report the browser result: ' + ((err && err.message) || String(err)) + '. The local runner will time out instead of reporting a pass.';
+  });
+}());
 </script>
 </body>
 </html>

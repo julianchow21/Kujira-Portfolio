@@ -13,6 +13,7 @@ const ROOT = path.join(__dirname, '..');
 const INDEX_HTML_PATH = path.join(ROOT, 'index.html');
 const SW_JS_PATH = path.join(ROOT, 'sw.js');
 const APP_JS_PATH = path.join(ROOT, 'Worker', 'app.js');
+const TESTS_HTML_PATH = path.join(__dirname, 'tests.html');
 
 let failures = 0;
 function fail(msg) {
@@ -26,6 +27,7 @@ function pass(msg) {
 const indexHtml = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
 const swJs = fs.readFileSync(SW_JS_PATH, 'utf8');
 const appJs = fs.readFileSync(APP_JS_PATH, 'utf8');
+const testsHtml = fs.readFileSync(TESTS_HTML_PATH, 'utf8');
 
 /* ─── 1. Every local <script src> in index.html appears verbatim in sw.js
    CORE_ASSETS. "Local" excludes absolute URLs (the Chart.js CDN tag), which
@@ -96,6 +98,22 @@ const appJs = fs.readFileSync(APP_JS_PATH, 'utf8');
       pass('sw.js CORE_ASSETS entry "' + entry + '" matches an index.html script tag');
     }
   });
+})();
+
+/* ─── 1c. Browser sortable test loads the shipped sortable asset version. ── */
+(function checkSortableTestAsset() {
+  const testMatch = testsHtml.match(/<script\s+[^>]*src=["']([^"']*kjr-sortable\.js(?:\?[^"']*)?)["'][^>]*>/i);
+  const indexMatch = indexHtml.match(/<script\s+[^>]*src=["']([^"']*kjr-sortable\.js(?:\?[^"']*)?)["'][^>]*>/i);
+  if (!testMatch || !indexMatch) {
+    fail('could not find kjr-sortable.js script in tests.html and/or index.html');
+    return;
+  }
+  const normalised = testMatch[1].replace(/^\.\.\/Worker\//, 'Worker/');
+  if (normalised !== indexMatch[1]) {
+    fail('tests.html sortable script "' + testMatch[1] + '" does not match index.html "' + indexMatch[1] + '"');
+  } else {
+    pass('tests.html sortable script matches index.html: "' + indexMatch[1] + '"');
+  }
 })();
 
 /* ─── 2. sw.js CACHE_NAME equals 'kjr-portfolio-' + APP_VERSION. ────────

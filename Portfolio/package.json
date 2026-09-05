@@ -7,7 +7,8 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "node tests/test-core.js && node tests/test-app.js && node tests/test-vault.js && node tests/check-release.js"
+    "test": "node tests/test-core.js && node tests/test-app.js && node tests/test-vault.js && node tests/test-sortable.js && node tests/test-values.js && node tests/check-release.js",
+    "test:browser": "node tests/test-browser.js"
   },
   "keywords": [],
   "author": "",

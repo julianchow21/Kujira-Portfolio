@@ -1,0 +1,131 @@
+{
+  "stocks": [
+    {
+      "id": "stock_qa_usa",
+      "symbol": "QAAA",
+      "market": "US",
+      "sector": "Information Technology",
+      "shares": 10,
+      "avgCost": 80,
+      "currency": "USD",
+      "divPerShare": 4,
+      "notes": "Synthetic QA holding"
+    },
+    {
+      "id": "stock_qa_sgx",
+      "symbol": "QBBB",
+      "market": "SGX",
+      "sector": "Financials",
+      "shares": 100,
+      "avgCost": 8,
+      "currency": "SGD",
+      "divPerShare": 0.4,
+      "notes": "Synthetic QA holding"
+    }
+  ],
+  "stockTxns": [],
+  "crypto": [
+    {
+      "id": "crypto_qa_coin",
+      "symbol": "QAC",
+      "coingeckoId": "qa-coin",
+      "amount": 2,
+      "avgCost": 400,
+      "currency": "USD",
+      "notes": "Synthetic QA holding"
+    }
+  ],
+  "realestate": [
+    {
+      "id": "property_qa_home",
+      "name": "QA Sample Home",
+      "value": 100000,
+      "currency": "SGD",
+      "notes": "Synthetic QA property"
+    }
+  ],
+  "cash": [
+    {
+      "id": "cash_qa_sgd",
+      "name": "QA Cash SGD",
+      "account": "Savings",
+      "amount": 4000,
+      "asOf": "2026-09-05",
+      "currency": "SGD",
+      "apy": 2.5,
+      "notes": "Synthetic QA cash"
+    },
+    {
+      "id": "cash_qa_usd",
+      "name": "QA Cash USD",
+      "account": "Foreign",
+      "amount": 800,
+      "asOf": "2026-09-05",
+      "currency": "USD",
+      "apy": 0,
+      "notes": "Synthetic QA cash"
+    }
+  ],
+  "cashTxns": [],
+  "cpfBalances": {
+    "OA": 5000,
+    "SA": 3000,
+    "MA": 2000,
+    "RA": 0,
+    "updatedAt": "2026-09-05T00:00:00.000Z",
+    "anchorDate": "2026-09-05"
+  },
+  "cpfHistory": [],
+  "income": [],
+  "expenses": [],
+  "snapshots": [],
+  "insurance": [
+    {
+      "id": "insurance_qa_whole",
+      "insurer": "QA Assurance",
+      "plan": "Sample Whole Life",
+      "type": "Whole Life",
+      "insured": "QA Owner",
+      "status": "Active",
+      "premium": 120,
+      "premiumFreq": "Annual",
+      "premiumMode": "Cash",
+      "cashValue": 2000,
+      "currency": "SGD",
+      "notes": "Synthetic QA policy"
+    }
+  ],
+  "insuranceRiders": [],
+  "settings": {
+    "baseCurrency": "SGD",
+    "tabCurrency": {
+      "stocks": "SGD",
+      "board": "SGD"
+    },
+    "fxOverrides": {
+      "USDSGD": 1.25
+    },
+    "efTarget": 5000
+  },
+  "_priceCache": {
+    "QAAA": {
+      "symbol": "QAAA",
+      "price": 120,
+      "currency": "USD",
+      "fetchedAt": "2026-09-05T23:59:59.000Z"
+    },
+    "QBBB.SI": {
+      "symbol": "QBBB.SI",
+      "price": 11,
+      "currency": "SGD",
+      "fetchedAt": "2026-09-05T23:59:59.000Z"
+    },
+    "qa-coin": {
+      "sgd": 750,
+      "usd": 600,
+      "change24h": 0,
+      "fetchedAt": "2026-09-05T23:59:59.000Z",
+      "source": "synthetic"
+    }
+  }
+}
