@@ -1,0 +1,15 @@
+{
+  // Replace this sentinel with the single owner identity before installing the policy.
+  // Keep the destination tagged, and grant only the HTTPS Serve port.
+  // Tailscale Serve only is permitted. LAN access and the host firewall are separate controls.
+  "tagOwners": {
+    "tag:portfolio-nas": ["OWNER_IDENTITY_PLACEHOLDER"]
+  },
+  "grants": [
+    {
+      "src": ["OWNER_IDENTITY_PLACEHOLDER"],
+      "dst": ["tag:portfolio-nas"],
+      "ip": ["tcp:443"]
+    }
+  ]
+}

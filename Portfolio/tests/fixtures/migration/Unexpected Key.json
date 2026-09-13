@@ -1,0 +1,21 @@
+{
+  "stocks": [],
+  "stockTxns": [],
+  "watchlist": [],
+  "crypto": [],
+  "realestate": [],
+  "cash": [],
+  "cashTxns": [],
+  "cpfHistory": [],
+  "income": [],
+  "expenses": [],
+  "snapshots": [],
+  "trash": [],
+  "insurance": [],
+  "insuranceRiders": [],
+  "cpfBalances": {},
+  "categories": {},
+  "settings": {},
+  "_meta": {},
+  "notAllowed": true
+}

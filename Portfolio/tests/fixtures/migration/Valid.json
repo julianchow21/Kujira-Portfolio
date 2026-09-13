@@ -1,0 +1,74 @@
+{
+  "stocks": [
+    { "id": "stock-a", "ticker": "SYN", "shares": 10, "note": "synthetic holding 😀" }
+  ],
+  "stockTxns": [
+    { "id": "stock-txn-a", "stockId": "stock-a", "cashAccountId": "cash-main", "shares": 1, "price": 2.5 }
+  ],
+  "watchlist": [
+    { "id": "watch-a", "ticker": "WATCH", "enabled": true }
+  ],
+  "crypto": [
+    { "id": "crypto-a", "symbol": "SYN", "units": 2 }
+  ],
+  "realestate": [
+    { "id": "property-a", "name": "Synthetic home", "value": 3 }
+  ],
+  "cash": [
+    { "id": "cash-main", "name": "Synthetic cash", "currency": "SGD", "balance": 100 }
+  ],
+  "cashTxns": [
+    { "id": "cash-txn-a", "cashAccountId": "cash-main", "fromAccountId": "cash-main", "amount": 1 }
+  ],
+  "cpfHistory": [
+    { "id": "cpf-history-a", "year": 2026, "oa": 1, "sa": 2, "ma": 3 }
+  ],
+  "income": [
+    { "id": "income-a", "label": "Synthetic income", "amount": 4 }
+  ],
+  "expenses": [
+    { "id": "expense-a", "label": "Synthetic expense", "amount": 5 }
+  ],
+  "snapshots": [
+    { "id": "snapshot-a", "date": "2026-01-01", "netWorth": 6 }
+  ],
+  "trash": [
+    { "id": "", "recordType": "note", "deleted": true, "label": "Synthetic discarded item" }
+  ],
+  "insurance": [
+    { "id": "policy-a", "provider": "Synthetic cover", "premium": 7 }
+  ],
+  "insuranceRiders": [
+    { "id": "rider-a", "policyId": "policy-a", "name": "Synthetic rider", "premium": 8 }
+  ],
+  "cpfBalances": {
+    "OA": 10,
+    "SA": 11,
+    "MA": 12,
+    "RA": 13,
+    "updatedAt": "2026-01-01"
+  },
+  "categories": {
+    "income": ["Synthetic income"],
+    "expense": ["Synthetic expense"]
+  },
+  "settings": {
+    "baseCurrency": "SGD",
+    "display": { "compact": true },
+    "emptyValue": ""
+  },
+  "_meta": {
+    "appVersion": "test-fixture",
+    "createdAt": "2026-01-01T00:00:00.000Z"
+  },
+  "schema": "portfolio",
+  "version": 1,
+  "schemaVersion": 2,
+  "appVersion": "test-fixture",
+  "updatedAt": "2026-01-02T00:00:00.000Z",
+  "lastSeenRemoteAt": "2026-01-03T00:00:00.000Z",
+  "_savedAt": 1700000000000,
+  "_priceCache": {
+    "SYN": { "price": 999, "updatedAt": "2026-01-01T00:00:00.000Z" }
+  }
+}

@@ -91,6 +91,7 @@ const FUNCTION_TARGETS = [
   '_cloneLocalValue', '_sameLocalValue', '_localIdMap', '_recordLocalConflict',
   '_mergeLocalValue', 'mergeConcurrentLocalState', '_writeLocalPayload',
   '_reconcileIncomingLocalStorage', '_handleRemovedLocalStorage',
+  'backendMode', 'isNasMode', 'isLegacyReadonlyMode', 'legacyBackendAllowed', 'denyReadonlyMutation',
   '_scheduleCloudAfterLocalSave', 'saveData', '_awaitVaultFlushForRevision',
   '_persistLocalOnly', 'safeJson', 'pushToRemote',
   '_quiesceSavesBeforePull',
@@ -101,7 +102,7 @@ const FUNCTION_TARGETS = [
   '_pbDrawInto', '_pbDrawTimeSeries',
   'pbPersistSaved', 'pbSaveChart', 'pbTogglePin', 'pbDeleteSaved', 'pbUndoDelete'
 ];
-const CONST_TARGETS = ['APP_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'PB_PALETTE', 'PB_PERIOD_LABELS'];
+const CONST_TARGETS = ['APP_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS'];
 
 const extractedFns = {};
 const missingFns = [];
@@ -192,6 +193,7 @@ function freshSandbox(dbOverrides){
     _DATE_FIELDS_BY_TABLE: {},
     _sanitiseInvalidDateCount: 0,
     localStorage: fakeStorage,
+    window: { localStorage: fakeStorage },
     protectedStorage: fakeStorage,
     sessionStorage: {
       _data: new Map(),
@@ -1595,9 +1597,14 @@ async function runTests(){
     assert.ok(indexSrc.includes('id="dash-arrange-status" class="sr-only" role="status" aria-live="polite"'));
   });
 
- test('setup wizard links to the active Apps Script source path', () => {
+  test('setup wizard links to the active Apps Script source path', () => {
     assert.ok(appSrc.includes('/blob/main/Portfolio/Worker/apps-script.gs'));
     assert.strictEqual(appSrc.includes('/blob/main/Portfolio/apps-script.gs'), false);
+  });
+
+  test('NAS candidate stays behind its explicit local release gate', () => {
+    assert.ok(/const NAS_RELEASE_ENABLED\s*=\s*false\s*;/.test(appSrc));
+    assert.ok(appSrc.includes('NAS activation is held pending local release review'));
   });
 
   test('Cash account names expose full wrapped text at touch-mobile width', () => {

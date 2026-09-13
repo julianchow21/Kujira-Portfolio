@@ -1,0 +1,5 @@
+# The market image needs only its runtime source and Dockerfile. Operational
+# scripts, env templates, SQL, and policy files stay out of the daemon context.
+*
+!Market Service.js
+!Market Dockerfile

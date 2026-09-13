@@ -7,7 +7,7 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "node tests/test-core.js && node tests/test-app.js && node tests/test-vault.js && node tests/test-sortable.js && node tests/test-values.js && node tests/check-release.js",
+    "test": "node tests/test-core.js && node tests/test-app.js && node tests/test-vault.js && node tests/test-sortable.js && node tests/test-values.js && node tests/test-migration.js && node tests/test-supabase-schema.js && node tests/check-nas-config.js && node tests/test-nas.js && node tests/test-nas-app.js && node tests/check-release.js",
     "test:browser": "node tests/test-browser.js"
   },
   "keywords": [],

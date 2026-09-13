@@ -1,22 +1,26 @@
 /* Kujira Portfolio service worker — offline shell + installable PWA.
    Network-first for the app HTML (fresh code when online, shell when offline).
    Cache-first for local static assets and Chart.js CDN.
-   Apps Script (GAS) fetches are never intercepted — always live network.
+   Apps Script and private same-origin NAS API fetches are never intercepted,
+   always live network.
    Bump CACHE_NAME to force all clients to discard their old shell on next load.
    RULE: bump it whenever kjr-core.js or any other cached static asset changes —
    index.html is network-first (self-healing) but the rest are cache-first and
    will be served stale forever otherwise. */
 
-const CACHE_NAME = 'kjr-portfolio-v2.63';
+const CACHE_NAME = 'kjr-portfolio-v2.64';
 const CHART_JS_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
 
 const CORE_ASSETS = [
   './index.html',
   './Worker/theme-init.js',
-  './Worker/app.js?v=2.63',
-  './Worker/kjr-core.js?v=2.63',
-  './Worker/kjr-sortable.js?v=2.63',
-  './Worker/kjr-vault.js?v=2.63',
+  './Worker/app.js?v=2.64',
+  './Worker/kjr-core.js?v=2.64',
+  './Worker/kjr-sortable.js?v=2.64',
+  './Worker/kjr-vault.js?v=2.64',
+  './Worker/kjr-migration.js?v=2.64',
+  './Worker/supabase.js?v=2.64',
+  './Worker/kjr-nas.js?v=2.64',
   './Worker/manifest.webmanifest',
   './Worker/whale-icon.png',
   CHART_JS_URL,
@@ -46,6 +50,12 @@ self.addEventListener('fetch', (e) => {
 
   // Apps Script GAS calls: never intercept, always hit the network.
   if (url.host.endsWith('script.google.com') || url.host.endsWith('googleusercontent.com')) return;
+
+  // Supabase Auth, REST and the private market gateway carry live session or
+  // finance data. Never cache or serve stale responses for these routes.
+  if (/(^|\/)auth\/v1(?:\/|$)/.test(url.pathname) ||
+      /(^|\/)rest\/v1(?:\/|$)/.test(url.pathname) ||
+      /(^|\/)market\/v1(?:\/|$)/.test(url.pathname)) return;
 
   // Chart.js CDN: cache-first (pre-cached on install for offline use).
   if (req.url === CHART_JS_URL) {

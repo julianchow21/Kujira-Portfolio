@@ -1,0 +1,32 @@
+{
+  admin off
+  auto_https off
+}
+
+:8080 {
+  # The market proxy is an allowlisted internal service. Preserve /market/v1
+  # so its fixed route parser remains the authority for query validation.
+  @market_api path /market/v1 /market/v1/*
+  handle @market_api {
+    reverse_proxy portfolio-market:8081
+  }
+
+  # handle preserves the request URI, so the upstream receives the API path unchanged.
+  @supabase_api path /auth/v1 /auth/v1/* /rest/v1 /rest/v1/*
+  handle @supabase_api {
+    reverse_proxy api-gw:8000
+  }
+
+  # Only the checked-in SPA assets are served from the operator-prepared,
+  # read-only directory. Unknown paths receive the shell, so a broad static
+  # mount cannot become an accidental file browser.
+  root * /srv/portfolio-public
+  @public_asset path /index.html /sw.js /Worker/theme-init.js /Worker/manifest.webmanifest /Worker/whale-icon.png /Worker/kjr-core.js /Worker/kjr-sortable.js /Worker/kjr-vault.js /Worker/kjr-migration.js /Worker/supabase.js /Worker/kjr-nas.js /Worker/app.js
+  handle @public_asset {
+    file_server
+  }
+  handle {
+    rewrite * /index.html
+    file_server
+  }
+}

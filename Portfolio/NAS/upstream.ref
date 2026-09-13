@@ -1,0 +1,6 @@
+# Portfolio's self-hosted Supabase dependency is pinned by tag and immutable commit.
+repository=https://github.com/supabase/supabase.git
+release=self-hosted/v0.8.0
+tag=self-hosted/v0.8.0
+commit=241bb11c0627f2981746d37033f57dbfa81d29b0
+compose_path=docker/docker-compose.yml

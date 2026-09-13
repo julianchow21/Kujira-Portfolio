@@ -6,8 +6,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- Content Security Policy: lock down what this page can load and connect to.
      If a future XSS slipped past kjrEscape, the attacker still cannot exfil
-     data to a third-party domain, connect-src restricts fetches to Apps Script
-     only. script-src has NO 'unsafe-inline': all former inline event handlers
+     data to a third-party domain, connect-src restricts fetches to the
+     same-origin NAS gateway and Apps Script only. script-src has NO 'unsafe-inline': all former inline event handlers
      were replaced by the delegated dispatcher in installEventDelegation()
      (see app.js), so script-src is 'self' plus the Chart.js CDN only.
      style-src still needs 'unsafe-inline' for inline style="" attributes used
@@ -212,6 +212,8 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
 .sync-pill.s-syncing{color:var(--amber)}
 .sync-pill.s-synced{color:var(--green);border-color:var(--green-border)}
 .sync-pill.s-failed{color:var(--red);border-color:var(--red-border)}
+.sync-pill.s-queued{color:var(--amber);border-color:var(--amber-border)}
+.sync-pill.s-conflict{color:var(--red);border-color:var(--red-border)}
 /* Never colour-alone: a distinct glyph per state alongside the dot, so the
    state also reads by shape for colour-blind/greyscale viewing. */
 .sync-pill::after{font-size:10px;line-height:1;flex-shrink:0}
@@ -219,6 +221,8 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
 .sync-pill.s-syncing::after{content:'\21bb'}
 .sync-pill.s-synced::after{content:'\2713'}
 .sync-pill.s-failed::after{content:'\2715'}
+.sync-pill.s-queued::after{content:'\21bb'}
+.sync-pill.s-conflict::after{content:'\26a0'}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
 
 /* MAIN */
@@ -311,6 +315,11 @@ textarea.fi{resize:vertical;min-height:70px}
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
 .overlay.open{display:flex}
 #vault-gate{z-index:300}
+.backend-banner{display:none;margin:0 auto 14px;max-width:1200px;padding:10px 14px;border:1px solid var(--amber-border);border-radius:var(--radius);background:var(--amber-soft);color:var(--amber);font-size:13px;line-height:1.45}
+.backend-banner[hidden]{display:none}
+.backend-banner-readonly{border-color:var(--red-border);background:var(--red-soft);color:var(--red);font-weight:600}
+.backend-banner-nas{border-color:var(--accent-border);background:var(--accent-soft);color:var(--accent)}
+.nas-secret{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;user-select:text}
 .modal{background:var(--glass-strong);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);width:100%;max-width:560px;max-height:90vh;max-height:calc(90vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));max-height:90dvh;max-height:calc(90dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,0.5),inset 0 1px 0 var(--glass-hi);display:flex;flex-direction:column}
 .modal-head{padding:16px 20px;border-bottom:1px solid var(--glass-border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .modal-head h3{font-size:15px;font-weight:600}
@@ -771,6 +780,10 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   </div>
 </header>
 
+<div id="backend-banner" class="backend-banner" role="status" aria-live="polite" hidden>
+  <span id="backend-banner-copy"></span>
+</div>
+
 <!-- MAIN -->
 <main class="main">
 
@@ -970,7 +983,44 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       </div>
     </div>
 
-    <div class="card full">
+    <div class="card full" id="backend-card">
+      <div class="card-head"><h3>Backend</h3><span class="hint" id="backend-mode-label">Legacy Apps Script</span></div>
+      <div class="card-body">
+        <p class="hint" style="margin-bottom:12px">Choose where this browser stores and syncs portfolio data. NAS uses the private same-origin Supabase gateway with account sign-in and verified TOTP. Device encryption must be enabled before activation.</p>
+        <p class="hint" id="nas-market-warning" hidden style="margin-bottom:12px;color:var(--amber)">NAS mode currently keeps any cached prices visible, but live quotes, FX, fundamentals, crypto prices and history are unavailable until a private same-origin market proxy is added.</p>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="lbl" for="cfg-nas-origin">NAS origin</label>
+            <input type="url" id="cfg-nas-origin" class="fi" readonly aria-describedby="nas-origin-hint">
+            <div class="hint" id="nas-origin-hint">Fixed to this page's origin, arbitrary hosts are rejected.</div>
+          </div>
+          <div class="form-group">
+            <label class="lbl" for="cfg-nas-anon-key">Supabase anon key</label>
+            <input type="password" id="cfg-nas-anon-key" class="fi" maxlength="4096" autocomplete="off" spellcheck="false" aria-describedby="nas-key-hint">
+            <div class="hint" id="nas-key-hint">Stored only inside the encrypted vault, never paste a service_role key.</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;align-items:center">
+          <button type="button" class="btn btn-primary" id="btn-activate-nas" data-click="activateNasFromForm">Activate NAS</button>
+          <button type="button" class="btn" id="btn-import-legacy-nas" data-click="importLegacySnapshotNas" style="display:none">Import local legacy snapshot</button>
+          <button type="button" class="btn btn-danger" id="btn-nas-readonly" data-click="switchNasToReadonly" style="display:none">Use legacy read-only rollback</button>
+          <button type="button" class="btn" id="btn-return-to-nas" data-click="returnToNas" style="display:none">Return to NAS</button>
+          <button type="button" class="btn" id="btn-nas-settings-signout" data-click="signOutNas" style="display:none">Sign out of NAS</button>
+        </div>
+        <p class="hint" id="nas-config-status" role="status" style="margin-top:12px"></p>
+        <div id="nas-conflict-actions" hidden style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+          <p class="hint" id="nas-conflict-note" style="margin-bottom:10px;color:var(--amber)">NAS reported a compare-and-swap conflict. Choose how to resolve it, no action is automatic.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button type="button" class="btn" id="nas-rebase-pending" data-click="rebaseNasPending">Keep queued data</button>
+            <button type="button" class="btn btn-danger" id="nas-discard-pending" data-click="discardNasPending">Use current NAS data</button>
+            <button type="button" class="btn" id="nas-restore-recovery" data-click="restoreLatestRecoveryNas">Restore latest recovery</button>
+            <button type="button" class="btn btn-primary" id="nas-retry-conflict" data-click="retryNasConflict" hidden>Retry queued sync</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card full" id="legacy-sync-card">
       <div class="card-head"><h3>Sync</h3><span id="sync-status-detail" class="hint"></span></div>
       <div class="card-body">
         <div class="form-grid">
@@ -1322,14 +1372,14 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <div class="card-head"><h3>Privacy</h3></div>
       <div class="card-body">
         <div class="hint" style="line-height:1.7;font-size:13px">
-          <p style="margin-bottom:10px"><strong>Your data lives in two places, and only two places:</strong></p>
+          <p style="margin-bottom:10px"><strong>Your data stays with the backend you choose:</strong></p>
           <ol style="margin-left:18px;margin-bottom:12px;display:flex;flex-direction:column;gap:6px">
             <li>This browser's local storage on the device you're using right now.</li>
-            <li>The Google Sheet you created and own. No one else has access to it unless you share it.</li>
+            <li>Legacy mode uses the Google Sheet you created and own. NAS mode uses the private same-origin Supabase gateway configured in the Backend card.</li>
           </ol>
-          <p style="margin-bottom:10px"><strong>What we do not store:</strong> nothing on any server we run. There is no central database. This app is static HTML hosted on GitHub Pages, and the only thing it can do is talk to <em>your own</em> Apps Script.</p>
-          <p style="margin-bottom:10px"><strong>What you are responsible for:</strong> keeping your Apps Script URL secret (treat it like a password), and securing the device this app runs on (browser lock, device passcode).</p>
-          <p><strong>To delete your data:</strong> click <em>Reset local data</em> above to wipe the browser cache, then delete your Google Sheet to wipe the cloud copy. We have nothing to delete on our end.</p>
+          <p style="margin-bottom:10px"><strong>What the public site stores:</strong> nothing. This static page has no central portfolio database. It calls the backend selected in Settings, legacy Apps Script or your private NAS gateway, and rejects arbitrary backend hosts.</p>
+          <p style="margin-bottom:10px"><strong>What you are responsible for:</strong> securing the Apps Script URL or NAS account, keeping TOTP and device passphrases private, and protecting the device this app runs on.</p>
+          <p><strong>To delete your data:</strong> use <em>Reset local data</em> for the legacy browser cache. In NAS mode, use the NAS recovery and administration procedure for server records, then sign out and clear this device's protected cache.</p>
         </div>
         <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn" data-click="openSetupWizard">Open setup wizard</button>
@@ -1471,6 +1521,49 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   </div>
 </div>
 
+<!-- NAS AUTHENTICATION GATE, shown after the vault gate and before finance data -->
+<div class="overlay" id="nas-auth-gate" role="dialog" aria-modal="true" aria-labelledby="nas-auth-title" aria-describedby="nas-auth-copy">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-head"><h3 id="nas-auth-title">Open NAS portfolio</h3></div>
+    <form id="nas-auth-form">
+      <div class="modal-body">
+        <p class="hint" id="nas-auth-copy" style="margin-bottom:14px">Your account and a verified authenticator challenge are required before finance data opens.</p>
+        <div id="nas-signin-panel">
+          <div class="form-group" style="margin-bottom:12px">
+            <label class="lbl" for="nas-email">Email</label>
+            <input type="email" id="nas-email" class="fi" maxlength="254" autocomplete="username" required>
+          </div>
+          <div class="form-group">
+            <label class="lbl" for="nas-password">Password</label>
+            <input type="password" id="nas-password" class="fi" maxlength="1024" autocomplete="current-password" required>
+          </div>
+        </div>
+        <div id="nas-factor-panel" hidden>
+          <p class="hint" id="nas-factor-note" style="margin-bottom:10px"></p>
+          <div id="nas-totp-qr" aria-label="NAS TOTP QR code" style="margin-bottom:10px"></div>
+          <p id="nas-totp-secret" class="hint nas-secret" style="margin-bottom:12px"></p>
+          <div class="form-group">
+            <label class="lbl" for="nas-totp-code">Authenticator code</label>
+            <input type="text" id="nas-totp-code" class="fi" inputmode="numeric" pattern="[0-9]{6,8}" maxlength="8" autocomplete="one-time-code" required>
+          </div>
+        </div>
+        <p class="hint" id="nas-auth-status" role="alert" aria-live="polite" style="min-height:20px;margin-top:12px"></p>
+        <div id="nas-blocked-config" hidden style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+          <p class="hint" style="margin-bottom:8px">The NAS setup is unavailable. If the vault is unlocked, replace the anon key here. It is checked locally and saved only inside the encrypted vault.</p>
+          <label class="lbl" for="nas-blocked-anon-key">Replacement Supabase anon key</label>
+          <input type="password" id="nas-blocked-anon-key" class="fi" maxlength="4096" autocomplete="off" spellcheck="false" style="margin-top:5px">
+          <button type="button" class="btn btn-sm" data-click="replaceNasConfigFromBlockedGate" style="margin-top:8px">Save replacement key</button>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn" id="nas-auth-signout" data-click="signOutNas" hidden>Sign out</button>
+        <button type="button" class="btn" id="nas-readonly-escape" data-click="openLegacyReadonlyEscape" hidden>Open read-only legacy snapshot</button>
+        <button type="submit" class="btn btn-primary" id="nas-auth-submit">Sign in</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- TOAST HOST -->
 <div id="toast-host" aria-live="polite" role="status"></div>
 
@@ -1479,9 +1572,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.63"></script>
-<script src="Worker/kjr-sortable.js?v=2.63"></script>
-<script src="Worker/kjr-vault.js?v=2.63"></script>
-<script src="Worker/app.js?v=2.63"></script>
+<script src="Worker/kjr-core.js?v=2.64"></script>
+<script src="Worker/kjr-sortable.js?v=2.64"></script>
+<script src="Worker/kjr-vault.js?v=2.64"></script>
+<script src="Worker/kjr-migration.js?v=2.64"></script>
+<script src="Worker/supabase.js?v=2.64"></script>
+<script src="Worker/kjr-nas.js?v=2.64"></script>
+<script src="Worker/app.js?v=2.64"></script>
 </body>
 </html>

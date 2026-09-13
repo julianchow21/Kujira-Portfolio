@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.63';
-const APP_DISPLAY_VERSION = 'v2.63 (05 Sep)';
+const APP_VERSION = 'v2.64';
+const APP_DISPLAY_VERSION = 'v2.64 (12 Sep)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -32,6 +32,17 @@ const LK_THEME     = 'kjr-pf-theme-v1';
 const LK_PRIVACY   = 'kjr-pf-privacy-v1';   // blur all money figures (shoulder-surfing guard)
 const LK_PRICE_CACHE = 'kjr-pf-price-cache-v1'; // persisted separately so first paint uses last-known prices
 const LK_VAULT     = 'kjr-pf-encrypted-vault-v1';
+// Backend selection stays in harmless native metadata. NAS configuration,
+// user cache, queue and recovery journal remain behind protectedStorage.
+const LK_BACKEND_MODE = 'kjr-pf-backend-mode-v1';
+const LK_NAS_CONFIG   = 'kjr-pf-nas-config-v1';
+const LK_NAS_IMPORT_RECEIPT = 'kjr-pf-nas-import-receipt-v1';
+const LK_NAS_PREFIX   = 'kjr-pf-nas-v1:';
+const NAS_MODES       = new Set(['legacy', 'nas', 'legacy-readonly']);
+/* The NAS candidate stays behind a local release gate until its durable
+   reload, preview, and cancellation proofs have been reviewed. Controller
+   tests still exercise the integration paths with synthetic doubles. */
+const NAS_RELEASE_ENABLED = false;
 
 /* Optional encrypted-at-rest storage. The facade stays synchronous for the
    existing app code by keeping an unlocked in-memory map, while kjr-vault.js
@@ -42,8 +53,8 @@ const _vaultManager = window.KjrVault ? window.KjrVault.createManager({
   storage: window.localStorage,
   crypto: window.crypto,
   envelopeKey: LK_VAULT,
-  sensitiveKeys: [LK_DB, LK_SYNC_URL, LK_PRICE_CACHE],
-  sensitivePrefixes: ['LK_DB_'],
+  sensitiveKeys: [LK_DB, LK_SYNC_URL, LK_PRICE_CACHE, LK_NAS_CONFIG],
+  sensitivePrefixes: ['LK_DB_', LK_NAS_PREFIX],
   onError: err => {
     console.error('[vault] encrypted save failed', err);
     _markLocalUnsaved();
@@ -54,6 +65,36 @@ const _vaultManager = window.KjrVault ? window.KjrVault.createManager({
   }
 }) : null;
 const protectedStorage = _vaultManager ? _vaultManager.storage : window.localStorage;
+
+/* KjrNas refuses an unmarked storage facade. Keep a narrow adapter so the
+   controller cannot accidentally be handed native storage. */
+const nasProtectedStorage = Object.freeze({
+  isProtectedStorage: true,
+  getItem: key => protectedStorage.getItem(key),
+  setItem: (key, value) => protectedStorage.setItem(key, value),
+  removeItem: key => protectedStorage.removeItem(key)
+});
+
+/* NAS state is session-only apart from encrypted values written through the
+   vault facade. Auth credentials and tokens are never persisted by the app. */
+let _nasConfig = null;
+let _nasController = null;
+let _nasUserId = null;
+let _nasReady = false;
+let _nasAuthBusy = false;
+let _nasAuthStep = 'signin';
+let _nasFactorId = null;
+let _nasEnrollment = null;
+let _nasPendingCount = 0;
+let _nasState = 'local';
+let _nasLifecycleChain = Promise.resolve();
+let _nasAppGeneration = 0;
+let _nasSyncTimer = null;
+let _nasLegacyReadonlyRaw = null;
+let _nasReadonlyRestoring = false;
+let _nasImportReceipt = null;
+let _nasAuthSessionPresent = false;
+let _nasConflictRetryReady = false;
 
 /* Sync constants. PAYLOAD_HARD_CAP is a soft cap now the backend chunks large
    payloads across sheet cells (Worker/apps-script.gs writePayloadRaw_), it no
@@ -1061,6 +1102,356 @@ function showToast(msg, kind, action){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   BACKEND BOUNDARY — legacy Apps Script or authenticated self-hosted NAS
+   ═══════════════════════════════════════════════════════════════════════ */
+function backendMode(){
+  let mode = null;
+  try { mode = window.localStorage.getItem(LK_BACKEND_MODE); } catch (_) {}
+  return NAS_MODES.has(mode) ? mode : 'legacy';
+}
+function isNasMode(){ return backendMode() === 'nas'; }
+function isLegacyReadonlyMode(){ return backendMode() === 'legacy-readonly'; }
+function legacyBackendAllowed(){ return backendMode() === 'legacy'; }
+function setBackendMode(mode){
+  if (!NAS_MODES.has(mode)) throw new Error('Unsupported backend mode');
+  window.localStorage.setItem(LK_BACKEND_MODE, mode);
+}
+
+function nasVaultReady(){
+  return !!(_vaultManager && _vaultManager.isEnabled() && _vaultManager.isUnlocked()
+    && nasProtectedStorage && nasProtectedStorage.isProtectedStorage === true);
+}
+function requireNasVault(){
+  if (!nasVaultReady()) throw new Error('Device encryption must be enabled and unlocked before using NAS.');
+}
+
+function _nasBase64UrlDecode(value){
+  const raw = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+  if (!raw || raw.length > 8192 || /[^A-Za-z0-9+/=]/.test(raw)) throw new Error('Invalid NAS key');
+  const padded = raw + '='.repeat((4 - (raw.length % 4)) % 4);
+  let binary;
+  try {
+    if (typeof atob === 'function') binary = atob(padded);
+    else if (typeof Buffer !== 'undefined') binary = Buffer.from(padded, 'base64').toString('binary');
+    else throw new Error('base64 unavailable');
+  } catch (_) { throw new Error('Invalid NAS key'); }
+  try {
+    const bytes = Array.from(binary, c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
+    return decodeURIComponent(bytes);
+  } catch (_) { throw new Error('Invalid NAS key'); }
+}
+
+function nasJwtRole(anonKey){
+  const parts = String(anonKey || '').split('.');
+  if (parts.length !== 3) throw new Error('NAS key must be a JWT');
+  let payload;
+  try { payload = JSON.parse(_nasBase64UrlDecode(parts[1])); } catch (_) { throw new Error('NAS key must be a JWT'); }
+  if (!payload || payload.role !== 'anon') throw new Error('NAS key role must be anon');
+  return 'anon';
+}
+
+/* Validate before any config write. Only this origin is accepted, and only an
+   anon JWT is accepted. In particular, service_role is never usable here.
+   The decoded role is only a local misconfiguration guard. Supabase's server
+   signature checks, authentication, and the controller's owner/AAL2 RPC
+   boundary remain authoritative. */
+function validateNasConfig(value){
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('NAS config is invalid');
+  const names = Object.keys(value);
+  if (names.some(k => k !== 'url' && k !== 'anonKey')) throw new Error('NAS config is invalid');
+  const origin = location.origin;
+  if (!origin || origin === 'null' || value.url !== origin) throw new Error('NAS URL must be this origin');
+  const anonKey = typeof value.anonKey === 'string' ? value.anonKey.trim() : '';
+  if (!anonKey || anonKey.length > 4096) throw new Error('NAS anon key is invalid');
+  nasJwtRole(anonKey);
+  return { url: origin, anonKey };
+}
+
+function readNasConfig(){
+  requireNasVault();
+  const raw = nasProtectedStorage.getItem(LK_NAS_CONFIG);
+  if (!raw) return null;
+  let value;
+  try { value = JSON.parse(raw); } catch (_) { throw new Error('NAS config is invalid'); }
+  return validateNasConfig(value);
+}
+
+function writeNasConfig(anonKey){
+  _assertNasWriteAllowed();
+  requireNasVault();
+  const config = validateNasConfig({ url: location.origin, anonKey });
+  // The anon key is only ever written through the encrypted exact key.
+  nasProtectedStorage.setItem(LK_NAS_CONFIG, JSON.stringify(config));
+  return config;
+}
+
+function createNasClient(config){
+  if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+    throw new Error('The pinned Supabase client did not load');
+  }
+  // Do not substitute config.url here. The browser origin is the trust
+  // boundary, and persistSession:false keeps auth material in memory only.
+  // The local JWT role check below is not signature verification. Supabase's
+  // server auth and the controller's owner/AAL2 RPC checks are authoritative.
+  return window.supabase.createClient(location.origin, config.anonKey, {
+    auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false }
+  });
+}
+
+function createNasController(){
+  if (!isNasMode()) throw new Error('NAS backend is not active');
+  if (!NAS_RELEASE_ENABLED) throw new Error('NAS candidate is disabled pending local release review');
+  requireNasVault();
+  if (!window.KjrNas || typeof window.KjrNas.createController !== 'function'
+      || !window.KjrMigration || typeof window.KjrMigration.planLegacyImport !== 'function') {
+    throw new Error('The NAS support scripts did not load');
+  }
+  const config = readNasConfig();
+  if (!config) throw new Error('NAS is not configured');
+  const client = createNasClient(config);
+  _nasConfig = config;
+  _nasController = window.KjrNas.createController({
+    client,
+    storage: nasProtectedStorage,
+    migration: window.KjrMigration,
+    encryption: _vaultManager,
+    isLocalPreview
+  });
+  return _nasController;
+}
+
+function nasUserKey(userId, suffix){
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(userId || ''))) {
+    throw new Error('NAS identity is invalid');
+  }
+  if (!/^(app-db|price-cache|queue|recovery|records|cursor)$/.test(String(suffix || ''))) {
+    throw new Error('NAS cache key is invalid');
+  }
+  return LK_NAS_PREFIX + userId + ':' + suffix;
+}
+
+function _nasCachePayload(db){
+  const source = db || {};
+  const { _priceCache, ...rest } = source;
+  return rest;
+}
+function _assertNasWriteAllowed(){
+  if (isLocalPreview()) throw new Error('NAS writes are disabled in local preview');
+}
+function persistNasAppDb(db, state){
+  _assertNasWriteAllowed();
+  if (!_nasUserId) throw new Error('NAS identity is not ready');
+  requireNasVault();
+  const cacheState = state === 'pending-stage' || state === 'queued' || state === 'synced'
+    ? state : 'pending-stage';
+  nasProtectedStorage.setItem(nasUserKey(_nasUserId, 'app-db'), JSON.stringify({
+    version: 1,
+    state: cacheState,
+    db: _nasCachePayload(db)
+  }));
+  return true;
+}
+function readNasAppDb(){
+  if (!_nasUserId) return null;
+  requireNasVault();
+  const raw = nasProtectedStorage.getItem(nasUserKey(_nasUserId, 'app-db'));
+  if (!raw) return null;
+  let value;
+  try { value = JSON.parse(raw); } catch (_) { throw new Error('NAS app cache is invalid'); }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('NAS app cache is invalid');
+  if (value.version === 1 && value.db && typeof value.db === 'object' && !Array.isArray(value.db)) {
+    return {
+      state: value.state === 'pending-stage' || value.state === 'queued' || value.state === 'synced'
+        ? value.state : 'pending-stage',
+      db: value.db
+    };
+  }
+  /* A pre-envelope cache is read only as a recovery candidate. It is never
+     treated as a confirmed server snapshot. */
+  return { state: 'pending-stage', db: value };
+}
+async function _flushNasProtectedStorage(){
+  if (!_vaultManager || typeof _vaultManager.flush !== 'function') return true;
+  try {
+    await _vaultManager.flush();
+    return true;
+  } catch (error) {
+    _markLocalUnsaved();
+    console.error('[nas] encrypted cache flush failed', error);
+    return false;
+  }
+}
+function persistNasPriceCache(db){
+  _assertNasWriteAllowed();
+  if (!_nasUserId) throw new Error('NAS identity is not ready');
+  requireNasVault();
+  nasProtectedStorage.setItem(nasUserKey(_nasUserId, 'price-cache'), JSON.stringify((db && db._priceCache) || {}));
+  return true;
+}
+function readNasPriceCache(){
+  if (!_nasUserId) return {};
+  requireNasVault();
+  const raw = nasProtectedStorage.getItem(nasUserKey(_nasUserId, 'price-cache'));
+  if (!raw) return {};
+  try {
+    const value = JSON.parse(raw);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch (_) { return {}; }
+}
+
+function _nasErrorCode(error){ return error && typeof error.code === 'string' ? error.code : ''; }
+function _nasConflict(error){ return /CAS|CONFLICT|VERSION|USER_CHANGED/.test(_nasErrorCode(error)); }
+function _nasStatus(state, detail){
+  _nasState = state;
+  setSyncStatus(state, detail);
+  setNasConflictActions(state === 'conflict');
+  renderBackendBanner();
+}
+
+/* Every NAS mutation shares one lifecycle queue. A rejected operation is
+   consumed on the queue so a later explicit action can continue, while the
+   returned promise still lets its caller report the original failure. */
+function _nasEnqueue(task){
+  const run = _nasLifecycleChain.catch(() => {}).then(() => task());
+  _nasLifecycleChain = run.catch(() => {});
+  return run;
+}
+
+/* Save a recovery cache before staging, then wait for both the encrypted
+   cache and the controller queue to become durable. The pending-stage marker
+   is what lets the next authenticated boot recover a stage that failed after
+   the app-db write. */
+function saveNasLocal(){
+  const appGeneration = _nasAppGeneration;
+  if (isLocalPreview()) {
+    _nasStatus('local', 'Preview, NAS writes are disabled');
+    _markLocalUnsaved();
+    return false;
+  }
+  if (!_nasReady || !_nasController || !_nasUserId || !nasVaultReady()) {
+    _nasStatus('failed', 'NAS is not authenticated or the device vault is locked');
+    return false;
+  }
+  let snapshot;
+  let priceCache;
+  try {
+    snapshot = JSON.parse(JSON.stringify(_nasCachePayload(DB)));
+    priceCache = JSON.parse(JSON.stringify(DB._priceCache || {}));
+  }
+  catch (_) {
+    _markLocalUnsaved();
+    _nasStatus('failed', 'NAS snapshot could not be prepared safely');
+    return false;
+  }
+  const revision = ++_localSaveRevision;
+  _markLocalUnsaved();
+  const run = _nasEnqueue(async () => {
+    try {
+      if (appGeneration !== _nasAppGeneration) return false;
+      persistNasAppDb(snapshot, 'pending-stage');
+      persistNasPriceCache({ _priceCache: priceCache });
+      if (!(await _flushNasProtectedStorage())) throw new Error('Encrypted NAS cache could not be saved');
+      if (appGeneration !== _nasAppGeneration) return false;
+      const state = await _nasController.stage(snapshot);
+      if (appGeneration !== _nasAppGeneration) return false;
+      _nasPendingCount = state && Array.isArray(state.operations) ? state.operations.length : 0;
+      persistNasAppDb(snapshot, _nasPendingCount ? 'queued' : 'synced');
+      persistNasPriceCache({ _priceCache: priceCache });
+      if (!(await _flushNasProtectedStorage())) throw new Error('Encrypted NAS cache could not be verified');
+      if (appGeneration !== _nasAppGeneration) return false;
+      if (!_clearLocalUnsaved(revision)) return false;
+      _nasStatus(_nasPendingCount ? 'queued' : 'synced', _nasPendingCount
+        ? _nasPendingCount + ' change' + (_nasPendingCount === 1 ? '' : 's') + ' queued for NAS sync'
+        : 'NAS queue is clear');
+      return true;
+    } catch (error) {
+      _markLocalUnsaved();
+      if (appGeneration !== _nasAppGeneration) return false;
+      _nasStatus(_nasConflict(error) ? 'conflict' : 'failed', _nasConflict(error)
+        ? 'NAS conflict, local desired state is still queued'
+        : 'NAS stage failed, local desired state is retained for recovery');
+      return false;
+    }
+  });
+  _activeLocalSave = run;
+  run.finally(() => { if (_activeLocalSave === run) _activeLocalSave = null; }).catch(() => {});
+  return run;
+}
+
+function scheduleNasFlush(){
+  if (_nasSyncTimer) clearTimeout(_nasSyncTimer);
+  _nasSyncTimer = setTimeout(() => {
+    _nasSyncTimer = null;
+    flushNasNow().catch(() => {});
+  }, SYNC_DEBOUNCE_MS);
+}
+
+async function flushNasNow(){
+  if (isLocalPreview()) {
+    _nasStatus('local', 'Preview, NAS sync is disabled');
+    return false;
+  }
+  if (!isNasMode() || !_nasReady || !_nasController || !_nasUserId) {
+    _nasStatus('failed', 'NAS is not authenticated');
+    return false;
+  }
+  const run = _nasEnqueue(async () => {
+    _nasStatus('syncing', 'Syncing encrypted NAS queue');
+    const result = await _nasController.flush();
+    _nasPendingCount = Number(result && result.queued) || 0;
+    if (_nasPendingCount) {
+      _nasStatus('queued', _nasPendingCount + ' change' + (_nasPendingCount === 1 ? '' : 's') + ' remain queued');
+    } else {
+      persistNasAppDb(DB, 'synced');
+      persistNasPriceCache(DB);
+      if (!(await _flushNasProtectedStorage())) throw new Error('Encrypted NAS cache could not be verified');
+      _nasStatus('synced', 'NAS snapshot synced');
+    }
+    return true;
+  });
+  try {
+    return await run;
+  } catch (error) {
+    _nasStatus(_nasConflict(error) ? 'conflict' : 'failed', _nasConflict(error)
+      ? 'NAS conflict, queued changes were retained'
+      : 'NAS sync failed, queued changes were retained');
+    return false;
+  }
+}
+
+function restoreLegacyReadonly(reason){
+  if (_nasReadonlyRestoring) return false;
+  _nasReadonlyRestoring = true;
+  try {
+    const raw = _nasLegacyReadonlyRaw;
+    if (raw) {
+      // Restore the exact bytes captured at read-only boot. This is the only
+      // protected legacy key written by this path, and it is not a new value.
+      protectedStorage.setItem(LK_DB, raw);
+      DB = mergeDefaults(JSON.parse(raw));
+      _localBase = _cloneLocalValue(localPersistPayload());
+    } else {
+      DB = freshDB();
+      _localBase = _cloneLocalValue(localPersistPayload());
+    }
+    renderAll();
+    setSyncStatus('local', 'Read-only rollback, edits are not saved');
+    showToast((reason || 'Edit') + ' was reverted, this rollback view is read-only.', 'error');
+  } catch (_) {
+    showToast('Read-only rollback could not restore the saved local snapshot.', 'error');
+  } finally {
+    _nasReadonlyRestoring = false;
+  }
+  return false;
+}
+
+function denyReadonlyMutation(action){
+  if (!isLegacyReadonlyMode()) return false;
+  restoreLegacyReadonly(action || 'Edit');
+  return true;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    PERSISTENCE — local storage immediate, cloud debounced
    ═══════════════════════════════════════════════════════════════════════ */
 /* Build the canonical financial payload. Quotes are excluded here because
@@ -1287,6 +1678,8 @@ function _writeLocalPayload(payload, conflicts, opts){
 
 function saveLocal(opts){
   opts = opts || {};
+  if (isNasMode()) return saveNasLocal();
+  if (isLegacyReadonlyMode()) return restoreLegacyReadonly('Local save');
   // A reset is a local deletion broadcast. Until a valid cloud pull restores
   // the primary blob, no stale tab may recreate LK_DB from its old in-memory
   // copy. The pull path uses the narrow allowResetRestore bypass only after it
@@ -1309,9 +1702,12 @@ function saveLocal(opts){
    "seed an empty DB", but 'corrupt' means there was recoverable data that
    must not be silently overwritten (see boot()). */
 function loadLocal(){
+  // NAS boot is owner-gated and must not inspect the untouched legacy blob.
+  if (isNasMode()) return false;
   let raw;
   try {
     raw = protectedStorage.getItem(LK_DB);
+    if (isLegacyReadonlyMode()) _nasLegacyReadonlyRaw = raw || null;
     if (!raw) return false;
     const obj = JSON.parse(raw);
     DB = mergeDefaults(obj);
@@ -1537,6 +1933,18 @@ function _scheduleCloudAfterLocalSave(revision){
   return true;
 }
 function saveData(){
+  if (isNasMode()) {
+    const saved = saveLocal();
+    if (!saved || typeof saved.then !== 'function') return saved;
+    return saved.then(ok => {
+      if (ok) scheduleNasFlush();
+      return ok;
+    });
+  }
+  if (isLegacyReadonlyMode()) {
+    denyReadonlyMutation('Save');
+    return false;
+  }
   const revision = ++_localSaveRevision;
   _markLocalUnsaved();
   if (_syncTimer) { clearTimeout(_syncTimer); _syncTimer = null; }
@@ -1590,7 +1998,15 @@ async function _persistLocalOnly(opts){
   opts = opts || {};
   const revision = opts.revision == null ? _localSaveRevision : opts.revision;
   _markLocalUnsaved();
-  if (!saveLocal(opts.saveOptions || {})) return false;
+  const localSaved = saveLocal(opts.saveOptions || {});
+  if (!localSaved) return false;
+  if (localSaved && typeof localSaved.then === 'function') {
+    /* NAS saveLocal is asynchronous because its encrypted app-db recovery
+       write and durable controller stage must both settle before success. */
+    const result = await localSaved;
+    if (result && isNasMode()) scheduleNasFlush();
+    return result;
+  }
   if (!(await _awaitVaultFlushForRevision(revision))) return false;
   return _clearLocalUnsaved(revision);
 }
@@ -1599,7 +2015,12 @@ async function _persistLocalOnly(opts){
    SYNC — Apps Script JSON blob, optimistic concurrency
    Pattern lifted from Send Ops, schema identifier swapped.
    ═══════════════════════════════════════════════════════════════════════ */
-function getSyncUrl(){ return (protectedStorage.getItem(LK_SYNC_URL) || '').trim(); }
+function getSyncUrl(){
+  // NAS and rollback views have no Apps Script route. Returning an empty
+  // value also closes every existing price/history helper at this boundary.
+  if (!legacyBackendAllowed()) return '';
+  return (protectedStorage.getItem(LK_SYNC_URL) || '').trim();
+}
 
 /* AGENTS.md data-safety rule 1: never let a preview origin push to the cloud.
    Origin isolation (localhost never shares a sync URL with the live site)
@@ -1611,9 +2032,14 @@ function isLocalPreview(){
   return location.protocol === 'file:' || h === 'localhost' || h === '127.0.0.1';
 }
 function setSyncUrl(u){
+  if (!legacyBackendAllowed()) {
+    showToast('Apps Script writes are disabled for this backend.', 'error');
+    return false;
+  }
   if (u) protectedStorage.setItem(LK_SYNC_URL, u.trim());
   else   protectedStorage.removeItem(LK_SYNC_URL);
   updateSyncStatusPill();
+  return true;
 }
 
 /* _priceCache is stripped, same as localPersistPayload: it is refetchable and
@@ -1733,6 +2159,12 @@ function setStrictConflicts(on){
 
 async function pushToRemote(opts){
   opts = opts || {};
+  if (!legacyBackendAllowed()) {
+    _nasStatus(isLegacyReadonlyMode() ? 'local' : 'failed', isLegacyReadonlyMode()
+      ? 'Read-only rollback, Apps Script writes are disabled'
+      : 'NAS mode never uses Apps Script');
+    return false;
+  }
   const url = getSyncUrl();
   if (!url) { setSyncStatus('local'); return false; }
   // Preview guard (AGENTS.md data-safety rule 1): never let a localhost/file:
@@ -1946,6 +2378,12 @@ function _cancelPullForUnsavedChanges(){
 
 async function pullFromRemote(opts){
   opts = opts || {};
+  if (!legacyBackendAllowed()) {
+    _nasStatus(isLegacyReadonlyMode() ? 'local' : 'failed', isLegacyReadonlyMode()
+      ? 'Read-only rollback, Apps Script reads are disabled'
+      : 'NAS mode never uses Apps Script');
+    return false;
+  }
   const url = getSyncUrl();
   if (!url) { setSyncStatus('local'); return false; }
   if (localStorage.getItem(LK_LOSSY_SYNC_BLOCK)) {
@@ -2319,8 +2757,8 @@ function setSyncStatus(state, detail){
   const pill = document.getElementById('sync-pill');
   if (!pill) return;
   const label = document.getElementById('sync-pill-label') || pill;
-  pill.classList.remove('s-local','s-syncing','s-synced','s-failed');
-  const ts = localStorage.getItem(LK_SYNC_TS);
+  pill.classList.remove('s-local','s-syncing','s-synced','s-failed','s-queued','s-conflict');
+  const ts = legacyBackendAllowed() ? localStorage.getItem(LK_SYNC_TS) : null;
   const tsLabel = ts ? ' · ' + relTime(ts) : '';
   let text = '';
   switch (state) {
@@ -2328,9 +2766,13 @@ function setSyncStatus(state, detail){
     case 'syncing': pill.classList.add('s-syncing'); text = 'Syncing…'; break;
     case 'synced':  pill.classList.add('s-synced');  text = 'Synced' + tsLabel; break;
     case 'failed':  pill.classList.add('s-failed');  text = 'Sync failed'; break;
+    case 'queued':  pill.classList.add('s-queued');  text = 'Queued'; break;
+    case 'conflict':pill.classList.add('s-conflict'); text = 'Conflict'; break;
   }
   label.textContent = text;
-  pill.title = detail || (state === 'synced' ? 'All changes pushed to the cloud' : (state === 'local' ? 'No Apps Script URL set' : ''));
+  pill.title = detail || (state === 'synced'
+    ? (isNasMode() ? 'All queued changes are synced to NAS' : 'All changes pushed to the cloud')
+    : (state === 'local' ? 'No Apps Script URL set' : ''));
   const det = document.getElementById('sync-status-detail');
   if (det) det.textContent = detail || (ts ? 'Last sync ' + relTime(ts) : 'No sync yet');
   // The pill itself is dot-only on every width now (see index.html), the text
@@ -2341,6 +2783,15 @@ function setSyncStatus(state, detail){
 }
 
 function updateSyncStatusPill(){
+  if (isNasMode()) {
+    _nasStatus(_nasState === 'synced' && !_nasPendingCount ? 'synced' : (_nasPendingCount ? 'queued' : 'local'),
+      _nasPendingCount ? _nasPendingCount + ' change' + (_nasPendingCount === 1 ? '' : 's') + ' queued for NAS sync' : 'Sign in to sync with NAS');
+    return;
+  }
+  if (isLegacyReadonlyMode()) {
+    setSyncStatus('local', 'Read-only rollback, Apps Script is disabled');
+    return;
+  }
   if (_hasLocalUnsaved()) setSyncStatus('failed', 'Unsaved changes remain in this tab. Export a backup before closing it.');
   else if (_hasCloudDirty()) setSyncStatus('failed', 'Local changes have not reached the cloud. Use Push to cloud before pulling.');
   else if (!getSyncUrl()) setSyncStatus('local');
@@ -2349,17 +2800,25 @@ function updateSyncStatusPill(){
 }
 
 async function manualSync(){
+  if (isNasMode()) { await flushNasNow(); return; }
+  if (isLegacyReadonlyMode()) { denyReadonlyMutation('Sync'); return; }
   if (!getSyncUrl()) { navigate('settings'); showToast('Set the Apps Script URL first'); return; }
   await pushToRemote();
 }
 
 async function manualPull(){
+  if (!legacyBackendAllowed()) {
+    showToast(isLegacyReadonlyMode() ? 'Read-only rollback cannot pull from Apps Script.' : 'NAS mode uses its authenticated controller, not Apps Script.', 'error');
+    return false;
+  }
   if (!getSyncUrl()) { showToast('Set the Apps Script URL first', 'error'); return; }
   const ok = await pullFromRemote({ allowSeed: true });
   if (ok) showToast('Pulled from cloud', 'success');
 }
 
 async function manualPush(){
+  if (isNasMode()) { await flushNasNow(); return; }
+  if (isLegacyReadonlyMode()) { denyReadonlyMutation('Push'); return; }
   if (!getSyncUrl()) { showToast('Set the Apps Script URL first', 'error'); return; }
   const afterReset = !!localStorage.getItem(LK_RESET_SYNC_BLOCK);
   if (afterReset && !confirm('Local data was reset and automatic cloud writes are paused. Push the current local data and replace the cloud copy?')) return;
@@ -2372,6 +2831,10 @@ async function manualPush(){
 }
 
 function saveSyncUrlFromForm(){
+  if (!legacyBackendAllowed()) {
+    showToast(isLegacyReadonlyMode() ? 'Read-only rollback cannot change the Apps Script URL.' : 'NAS mode does not use Apps Script.', 'error');
+    return false;
+  }
   const v = document.getElementById('cfg-sync-url').value.trim();
   // Validate the URL is the Apps Script form, not something random pasted in
   if (v && !/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec(\?.*)?$/.test(v)){
@@ -2380,6 +2843,7 @@ function saveSyncUrlFromForm(){
   setSyncUrl(v);
   showToast(v ? 'URL saved' : 'URL cleared', 'success');
   renderDiagnostics();
+  return true;
 }
 
 /* ─── Setup wizard ──────────────────────────────────────────────────────
@@ -2553,6 +3017,10 @@ function _downloadVaultEnvelope(){
 }
 
 function _importVaultEnvelope(input){
+  if (denyReadonlyMutation('Encrypted vault import')) {
+    if (input) input.value = '';
+    return false;
+  }
   const file = input && input.files && input.files[0];
   if (!file || !_vaultManager) return;
   const reader = new FileReader();
@@ -2583,6 +3051,7 @@ function _importVaultEnvelope(input){
 }
 
 function _resetEncryptedBrowserData(){
+  if (denyReadonlyMutation('Encrypted vault reset')) return false;
   if (!_vaultManager) return;
   const answer = prompt(
     'This deletes the encrypted copy in this browser after downloading an encrypted recovery file. Your Google Sheet and other downloaded backups are not deleted.\n\n' +
@@ -2616,7 +3085,13 @@ function showVaultUnlockGate(){
     return new Promise(() => {});
   }
   if (exportBtn) exportBtn.onclick = () => _downloadVaultEnvelope();
-  if (importBtn && importInput) importBtn.onclick = () => importInput.click();
+  if (importBtn && importInput) importBtn.onclick = () => {
+    if (denyReadonlyMutation('Encrypted vault import')) {
+      importInput.value = '';
+      return;
+    }
+    importInput.click();
+  };
   if (importInput) importInput.onchange = () => _importVaultEnvelope(importInput);
   if (resetBtn) resetBtn.onclick = () => _resetEncryptedBrowserData();
   return new Promise(resolve => {
@@ -2642,18 +3117,754 @@ function showVaultUnlockGate(){
   });
 }
 
+function _nasDisplayError(error, fallback){
+  const code = _nasErrorCode(error);
+  const messages = {
+    PORTFOLIO_NAS_AUTH_INPUT: 'Enter a valid email, password or authenticator code.',
+    PORTFOLIO_NAS_AUTH_FAILED: 'Sign-in or verification failed.',
+    PORTFOLIO_NAS_AAL2_REQUIRED: 'A verified TOTP challenge is required before opening finance data.',
+    PORTFOLIO_NAS_BOUNDARY_FAILED: 'The NAS owner check failed, finance data stayed closed.',
+    PORTFOLIO_NAS_ENCRYPTION_LOCKED: 'Unlock the device vault before using NAS.',
+    PORTFOLIO_NAS_CAS_FAILED: 'NAS reported a conflict, your queued data was retained.',
+    PORTFOLIO_NAS_RECOVERY_REASON: 'The NAS recovery journal does not accept this recovery reason.'
+  };
+  return messages[code] || fallback || 'NAS request failed, finance data stayed closed.';
+}
+
+function renderBackendBanner(){
+  const banner = document.getElementById('backend-banner');
+  const copy = document.getElementById('backend-banner-copy');
+  if (!banner || !copy) return;
+  const mode = backendMode();
+  if (mode === 'legacy-readonly') {
+    banner.hidden = false;
+    banner.className = 'backend-banner backend-banner-readonly';
+    copy.textContent = 'Read-only legacy rollback. Apps Script is disabled, and edits are reverted to the saved local snapshot.';
+    return;
+  }
+  if (mode === 'nas') {
+    banner.hidden = false;
+    banner.className = 'backend-banner backend-banner-nas';
+    if (!NAS_RELEASE_ENABLED) {
+      copy.textContent = 'NAS candidate is disabled pending local durability and cancellation review. Legacy Apps Script remains available.';
+    } else if (_nasPendingCount) {
+      copy.textContent = _nasPendingCount + ' NAS change' + (_nasPendingCount === 1 ? '' : 's') + ' queued. Server hydrate is paused until the queue is resolved.';
+    } else if (_nasState === 'conflict') {
+      copy.textContent = 'NAS conflict. Your desired local state is retained in the encrypted queue.';
+    } else {
+      copy.textContent = _nasReady ? 'Authenticated NAS backend.' : 'NAS backend selected. Sign in to open finance data.';
+    }
+    return;
+  }
+  banner.hidden = true;
+  banner.className = 'backend-banner';
+  copy.textContent = '';
+}
+
+function loadBackendSettingsUI(){
+  const mode = backendMode();
+  const modeLabel = document.getElementById('backend-mode-label');
+  const origin = document.getElementById('cfg-nas-origin');
+  const key = document.getElementById('cfg-nas-anon-key');
+  const activate = document.getElementById('btn-activate-nas');
+  const importBtn = document.getElementById('btn-import-legacy-nas');
+  const rollbackBtn = document.getElementById('btn-nas-readonly');
+  const returnBtn = document.getElementById('btn-return-to-nas');
+  const settingsSignout = document.getElementById('btn-nas-settings-signout');
+  const marketWarning = document.getElementById('nas-market-warning');
+  const status = document.getElementById('nas-config-status');
+  const legacyControls = document.querySelectorAll('#legacy-sync-card [data-click="saveSyncUrl"], #legacy-sync-card [data-click="manualPull"], #legacy-sync-card [data-click="manualPush"], #legacy-sync-card [data-click="manualSync"]');
+  if (modeLabel) {
+    modeLabel.textContent = mode === 'nas' ? 'NAS' : (mode === 'legacy-readonly' ? 'Legacy read-only' : 'Legacy Apps Script');
+    modeLabel.style.color = mode === 'legacy' ? '' : 'var(--amber)';
+  }
+  if (origin) origin.value = location.origin === 'null' ? '' : location.origin;
+  if (key && mode !== 'legacy') key.value = '';
+  if (activate) {
+    activate.style.display = mode === 'legacy' ? '' : 'none';
+    activate.disabled = !NAS_RELEASE_ENABLED;
+    activate.title = NAS_RELEASE_ENABLED ? '' : 'NAS activation is held until the local release gates pass.';
+  }
+  if (importBtn) importBtn.style.display = mode === 'nas' && _nasReady ? '' : 'none';
+  if (rollbackBtn) rollbackBtn.style.display = mode === 'nas' ? '' : 'none';
+  if (returnBtn) returnBtn.style.display = mode === 'legacy-readonly' ? '' : 'none';
+  if (settingsSignout) settingsSignout.style.display = mode === 'nas' && _nasReady ? '' : 'none';
+  if (marketWarning) marketWarning.hidden = mode !== 'nas';
+  legacyControls.forEach(control => {
+    control.disabled = mode !== 'legacy';
+    control.setAttribute('aria-disabled', mode !== 'legacy' ? 'true' : 'false');
+  });
+  if (status) {
+    if (mode === 'legacy') {
+      status.textContent = NAS_RELEASE_ENABLED
+        ? 'Legacy Apps Script writes are active until NAS is explicitly activated.'
+        : 'Legacy Apps Script writes are active. NAS activation is held pending local release review.';
+    } else if (mode === 'legacy-readonly') {
+      status.textContent = 'Rollback view only. Return to NAS to write again.';
+    } else if (_nasImportReceipt) {
+      status.textContent = 'Last legacy import receipt, source ' + _nasImportReceipt.sourceHash + ', records ' + _nasImportReceipt.recordsHash;
+    } else {
+      status.textContent = _nasReady ? 'NAS authenticated in this tab.' : 'NAS is awaiting authentication.';
+    }
+  }
+  setNasConflictActions(_nasState === 'conflict' || _nasConflictRetryReady);
+  renderBackendBanner();
+}
+
+function _loadNasImportReceipt(){
+  try {
+    const raw = window.localStorage.getItem(LK_NAS_IMPORT_RECEIPT);
+    const value = raw ? JSON.parse(raw) : null;
+    if (value && typeof value.sourceHash === 'string' && typeof value.recordsHash === 'string') {
+      _nasImportReceipt = { sourceHash: value.sourceHash, recordsHash: value.recordsHash, importedAt: value.importedAt || '' };
+    }
+  } catch (_) { _nasImportReceipt = null; }
+}
+
+function setNasConflictActions(show){
+  const panel = document.getElementById('nas-conflict-actions');
+  const keep = document.getElementById('nas-rebase-pending');
+  const discard = document.getElementById('nas-discard-pending');
+  const restore = document.getElementById('nas-restore-recovery');
+  const retry = document.getElementById('nas-retry-conflict');
+  const active = !!show && isNasMode() && _nasReady && !!_nasController;
+  if (!active) _nasConflictRetryReady = false;
+  if (panel) panel.hidden = !active;
+  if (keep) keep.hidden = !active || _nasConflictRetryReady;
+  if (discard) discard.hidden = !active || _nasConflictRetryReady;
+  if (restore) restore.hidden = !active || _nasConflictRetryReady;
+  if (retry) retry.hidden = !active || !_nasConflictRetryReady;
+}
+
+function showNasConflictRetry(){
+  _nasConflictRetryReady = true;
+  setNasConflictActions(true);
+  const note = document.getElementById('nas-conflict-note');
+  if (note) note.textContent = 'Queued data was rebased. Retry NAS sync only when you are ready.';
+}
+
+function _looksLikeNasDb(value){
+  return !!(value && typeof value === 'object' && !Array.isArray(value)
+    && Array.isArray(value.stocks) && Array.isArray(value.crypto)
+    && Array.isArray(value.cash));
+}
+
+function _nasResultDb(value, names){
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const name of (names || [])) {
+      if (_looksLikeNasDb(value[name])) return value[name];
+    }
+    if (_looksLikeNasDb(value)) return value;
+  }
+  return null;
+}
+
+function _nasQueuedCount(result, fallback){
+  if (result && Number.isFinite(Number(result.queued))) return Math.max(0, Number(result.queued));
+  if (result && Array.isArray(result.operations)) return result.operations.length;
+  return Number.isFinite(Number(fallback)) ? Math.max(0, Number(fallback)) : 0;
+}
+
+async function rebaseNasPending(){
+  if (isLocalPreview()) { _nasStatus('local', 'Preview, NAS writes are disabled'); return false; }
+  if (!isNasMode() || !_nasReady || !_nasController || _nasState !== 'conflict') {
+    showToast('Keep queued data is available only after a NAS conflict.', 'error');
+    return false;
+  }
+  if (!confirm('Keep the queued data and rebase it on the current NAS version? No retry will run until you choose it.')) return false;
+  const run = _nasEnqueue(async () => {
+    if (typeof _nasController.rebasePending !== 'function') throw new Error('This NAS controller cannot rebase queued data yet');
+    const result = await _nasController.rebasePending();
+    const desired = _nasResultDb(result, ['desiredDb', 'db']);
+    if (!desired) throw new Error('NAS returned no rebased desired database');
+    DB = mergeDefaults(desired);
+    DB._priceCache = readNasPriceCache();
+    persistNasAppDb(DB, 'queued');
+    if (!(await _flushNasProtectedStorage())) throw new Error('Encrypted NAS cache could not be verified');
+    _nasPendingCount = _nasQueuedCount(result, _nasPendingCount);
+    _nasStatus('queued', 'Queued NAS data was rebased and remains pending');
+    showNasConflictRetry();
+    loadBackendSettingsUI();
+    renderAll();
+    showToast('Queued data kept. Use Retry queued sync when you are ready.', 'success');
+    return true;
+  });
+  try {
+    return await run;
+  } catch (error) {
+    _nasStatus('conflict', _nasDisplayError(error, 'NAS could not rebase the queued data.'));
+    return false;
+  }
+}
+
+async function discardNasPending(){
+  if (isLocalPreview()) { _nasStatus('local', 'Preview, NAS writes are disabled'); return false; }
+  if (!isNasMode() || !_nasReady || !_nasController || _nasState !== 'conflict') {
+    showToast('Use current NAS data is available only after a NAS conflict.', 'error');
+    return false;
+  }
+  if (!confirm('Discard the queued local data and use the current NAS data? This cannot be undone here.')) return false;
+  const run = _nasEnqueue(async () => {
+    if (typeof _nasController.discardPending !== 'function') throw new Error('This NAS controller cannot discard queued data yet');
+    const result = await _nasController.discardPending();
+    const serverDb = _nasResultDb(result, ['serverDb', 'db']);
+    if (!serverDb) throw new Error('NAS returned no current server database');
+    DB = mergeDefaults(serverDb);
+    DB._priceCache = readNasPriceCache();
+    persistNasAppDb(DB, 'synced');
+    persistNasPriceCache(DB);
+    if (!(await _flushNasProtectedStorage())) throw new Error('Encrypted NAS cache could not be verified');
+    _nasPendingCount = 0;
+    _nasStatus('synced', 'Current NAS data is now displayed');
+    loadBackendSettingsUI();
+    renderAll();
+    showToast('Current NAS data loaded. Queued local data was discarded.', 'success');
+    return true;
+  });
+  try {
+    return await run;
+  } catch (error) {
+    _nasStatus('conflict', _nasDisplayError(error, 'NAS could not discard queued data.'));
+    return false;
+  }
+}
+
+async function restoreLatestRecoveryNas(){
+  if (isLocalPreview()) { _nasStatus('local', 'Preview, NAS writes are disabled'); return false; }
+  if (!isNasMode() || !_nasReady || !_nasController || _nasState !== 'conflict') {
+    showToast('Recovery restore is available only after a NAS conflict.', 'error');
+    return false;
+  }
+  const run = _nasEnqueue(async () => {
+    if (typeof _nasController.listRecovery !== 'function' || typeof _nasController.restoreRecovery !== 'function') {
+      throw new Error('This NAS controller does not expose recovery restore yet');
+    }
+    const listed = await _nasController.listRecovery();
+    const entries = Array.isArray(listed) ? listed
+      : (listed && Array.isArray(listed.entries) ? listed.entries : []);
+    const last = entries.length ? entries[entries.length - 1] : null;
+    if (!last) {
+      showToast('No NAS recovery entry is available.', 'error');
+      return false;
+    }
+    if (!confirm('Restore the latest encrypted recovery snapshot, then queue it for NAS sync?')) return false;
+    const result = await _nasController.restoreRecovery(last);
+    const restored = _nasResultDb(result, ['db', 'restoredDb', 'serverDb']);
+    if (!restored) throw new Error('NAS returned no recovery database');
+    const state = await _nasController.stage(_nasCachePayload(restored));
+    DB = mergeDefaults(restored);
+    DB._priceCache = readNasPriceCache();
+    persistNasAppDb(DB, 'queued');
+    persistNasPriceCache(DB);
+    if (!(await _flushNasProtectedStorage())) throw new Error('Encrypted NAS cache could not be verified');
+    _nasPendingCount = _nasQueuedCount(state, 1);
+    _nasStatus('queued', 'Latest recovery snapshot was staged for NAS sync');
+    loadBackendSettingsUI();
+    renderAll();
+    showToast('Latest recovery snapshot queued for NAS sync.', 'success');
+    return true;
+  });
+  try {
+    return await run;
+  } catch (error) {
+    _nasStatus('conflict', _nasDisplayError(error, 'NAS recovery restore failed.'));
+    return false;
+  }
+}
+
+async function retryNasConflict(){
+  if (isLocalPreview()) { _nasStatus('local', 'Preview, NAS sync is disabled'); return false; }
+  if (!_nasConflictRetryReady) {
+    showToast('Rebase queued data first, then retry deliberately.', 'error');
+    return false;
+  }
+  _nasConflictRetryReady = false;
+  setNasConflictActions(false);
+  return flushNasNow();
+}
+
+async function activateNasFromForm(){
+  if (backendMode() !== 'legacy') return false;
+  if (!NAS_RELEASE_ENABLED) {
+    showToast('NAS activation is held pending local durability and cancellation review.', 'error');
+    return false;
+  }
+  if (!nasVaultReady()) {
+    showToast('Enable and unlock device encryption before activating NAS.', 'error');
+    return false;
+  }
+  if (!window.KjrNas || !window.KjrMigration || !window.supabase) {
+    showToast('NAS support scripts did not load. Activation was not saved.', 'error');
+    return false;
+  }
+  const input = document.getElementById('cfg-nas-anon-key');
+  const value = input ? input.value.trim() : '';
+  try {
+    writeNasConfig(value);
+    if (input) input.value = '';
+    setBackendMode('nas');
+    location.reload();
+    return true;
+  } catch (error) {
+    if (input) input.value = '';
+    showToast(error && error.message ? error.message : 'NAS configuration was rejected.', 'error');
+    return false;
+  }
+}
+
+function switchNasToReadonly(){
+  if (!isNasMode()) return false;
+  if (!confirm('Switch to the legacy read-only rollback view? NAS writes will stop after reload.')) return false;
+  setBackendMode('legacy-readonly');
+  location.reload();
+  return true;
+}
+
+function returnToNas(){
+  if (!isLegacyReadonlyMode()) return false;
+  if (!nasVaultReady()) {
+    showToast('Unlock device encryption before returning to NAS.', 'error');
+    return false;
+  }
+  try { readNasConfig(); } catch (error) {
+    showToast('NAS configuration is invalid, so the rollback view stayed active.', 'error');
+    return false;
+  }
+  setBackendMode('nas');
+  location.reload();
+  return true;
+}
+
+/* The blocked NAS gate must always have a local escape. This changes only the
+   harmless mode flag, and deliberately does not inspect NAS config or finance
+   keys before reloading into the vault-gated read-only path. */
+function openLegacyReadonlyEscape(){
+  if (!isNasMode()) return false;
+  setBackendMode('legacy-readonly');
+  location.reload();
+  return true;
+}
+
+/* If the vault is already unlocked, a rejected NAS config can be replaced in
+   place. The origin is still fixed by writeNasConfig(), and the anon key only
+   crosses the protected exact-key adapter. */
+function replaceNasConfigFromBlockedGate(){
+  if (!isNasMode() || !nasVaultReady()) {
+    showToast('Unlock device encryption before replacing the NAS configuration.', 'error');
+    return false;
+  }
+  const input = document.getElementById('nas-blocked-anon-key');
+  const value = input ? input.value.trim() : '';
+  try {
+    writeNasConfig(value);
+    if (input) input.value = '';
+    location.reload();
+    return true;
+  } catch (error) {
+    if (input) input.value = '';
+    showToast(error && error.message ? error.message : 'NAS configuration was rejected.', 'error');
+    return false;
+  }
+}
+
+function _nasSetGateMessage(message, isError){
+  const el = document.getElementById('nas-auth-status');
+  if (!el) return;
+  el.textContent = message || '';
+  el.style.color = isError ? 'var(--red)' : '';
+}
+
+function clearNasAuthFields(){
+  ['nas-email', 'nas-password', 'nas-totp-code'].forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.value = '';
+  });
+  const qr = document.getElementById('nas-totp-qr');
+  if (qr) {
+    qr.querySelectorAll('img').forEach(img => img.removeAttribute('src'));
+    qr.replaceChildren();
+  }
+  const secret = document.getElementById('nas-totp-secret');
+  if (secret) secret.textContent = '';
+  const note = document.getElementById('nas-factor-note');
+  if (note) note.textContent = '';
+  _nasFactorId = null;
+  _nasEnrollment = null;
+  _nasAuthStep = 'signin';
+}
+
+function renderNasAuthStep(step, opts){
+  opts = opts || {};
+  _nasAuthStep = step;
+  const signin = document.getElementById('nas-signin-panel');
+  const factor = document.getElementById('nas-factor-panel');
+  const submit = document.getElementById('nas-auth-submit');
+  const signout = document.getElementById('nas-auth-signout');
+  if (signin) signin.hidden = step !== 'signin';
+  if (factor) factor.hidden = step !== 'factor';
+  if (submit) {
+    submit.disabled = false;
+    submit.textContent = step === 'signin' ? 'Sign in' : 'Verify and open portfolio';
+  }
+  if (signout) signout.hidden = step === 'signin' && !opts.showSignout;
+}
+
+function showNasAuthGate(){
+  const gate = document.getElementById('nas-auth-gate');
+  if (!gate) return;
+  gate.classList.add('open');
+  clearNasAuthFields();
+  _nasAuthSessionPresent = false;
+  const escape = document.getElementById('nas-readonly-escape');
+  const replacement = document.getElementById('nas-blocked-config');
+  if (escape) escape.hidden = true;
+  if (replacement) replacement.hidden = true;
+  renderNasAuthStep('signin');
+  _nasSetGateMessage('Sign in with your NAS account. A verified TOTP challenge is required.', false);
+  const email = document.getElementById('nas-email');
+  if (email) setTimeout(() => email.focus(), 0);
+}
+
+function showNasBlockedGate(message){
+  const gate = document.getElementById('nas-auth-gate');
+  if (!gate) return;
+  gate.classList.add('open');
+  clearNasAuthFields();
+  _nasAuthSessionPresent = false;
+  renderNasAuthStep('signin');
+  const signin = document.getElementById('nas-signin-panel');
+  const submit = document.getElementById('nas-auth-submit');
+  const signout = document.getElementById('nas-auth-signout');
+  const escape = document.getElementById('nas-readonly-escape');
+  const replacement = document.getElementById('nas-blocked-config');
+  if (signin) signin.hidden = true;
+  if (submit) submit.disabled = true;
+  if (signout) signout.hidden = true;
+  if (escape) escape.hidden = false;
+  if (replacement) replacement.hidden = !nasVaultReady();
+  _nasSetGateMessage(message, true);
+}
+
+function renderNasFactor(enrolment){
+  const qr = document.getElementById('nas-totp-qr');
+  const secret = document.getElementById('nas-totp-secret');
+  const note = document.getElementById('nas-factor-note');
+  if (qr) qr.replaceChildren();
+  if (secret) secret.textContent = '';
+  if (enrolment) {
+    const qrData = typeof enrolment.qrCode === 'string' ? enrolment.qrCode : '';
+    if (qr && /^data:image\//i.test(qrData)) {
+      const img = document.createElement('img');
+      img.alt = 'Scan this NAS TOTP QR code';
+      img.src = qrData;
+      img.width = 180;
+      img.height = 180;
+      qr.appendChild(img);
+    } else if (secret && typeof enrolment.secret === 'string' && enrolment.secret.length <= 512) {
+      secret.textContent = 'Setup secret: ' + enrolment.secret;
+    }
+    if (note) note.textContent = 'No verified factor was found. Add this TOTP factor to your authenticator, then enter its current code.';
+  } else if (note) {
+    note.textContent = 'Enter the current code from your verified authenticator.';
+  }
+}
+
+async function submitNasAuth(){
+  if (_nasAuthBusy || !_nasController) return;
+  const submit = document.getElementById('nas-auth-submit');
+  _nasAuthBusy = true;
+  if (submit) submit.disabled = true;
+  try {
+    if (_nasAuthStep === 'signin') {
+      const emailEl = document.getElementById('nas-email');
+      const passwordEl = document.getElementById('nas-password');
+      const email = emailEl ? emailEl.value.trim() : '';
+      const password = passwordEl ? passwordEl.value : '';
+      try {
+        await _nasController.signInWithPassword(email, password);
+      } finally {
+        if (passwordEl) passwordEl.value = '';
+      }
+      _nasAuthSessionPresent = true;
+      const factors = await _nasController.listTotpFactors();
+      const verifiedFactor = factors.find(factor => factor &&
+        (factor.status === 'verified' || factor.verification_status === 'verified'));
+      if (verifiedFactor) {
+        _nasFactorId = verifiedFactor.id;
+        _nasEnrollment = null;
+      } else {
+        const enrolled = await _nasController.enrolTotp('Kujira Portfolio');
+        _nasEnrollment = {
+          factorId: enrolled && enrolled.factorId,
+          qrCode: enrolled && enrolled.qrCode,
+          secret: enrolled && enrolled.secret,
+          uri: enrolled && enrolled.uri
+        };
+        _nasFactorId = _nasEnrollment.factorId;
+      }
+      if (!kjrSafeId(_nasFactorId)) throw new Error('NAS did not return a valid TOTP factor');
+      renderNasFactor(_nasEnrollment);
+      renderNasAuthStep('factor');
+      _nasSetGateMessage(_nasEnrollment ? 'TOTP factor enrolled, verify it to finish setup.' : 'Verify your TOTP code to continue.', false);
+      const code = document.getElementById('nas-totp-code');
+      if (code) setTimeout(() => code.focus(), 0);
+      return;
+    }
+
+    const codeEl = document.getElementById('nas-totp-code');
+    const code = codeEl ? codeEl.value.trim() : '';
+    try {
+      await _nasController.challengeAndVerify(_nasFactorId, code);
+    } finally {
+      if (codeEl) codeEl.value = '';
+    }
+    _nasSetGateMessage('Checking owner access before opening finance data…', false);
+    await loadNasFinance();
+    clearNasAuthFields();
+    _nasAuthSessionPresent = false;
+  } catch (error) {
+    const keepSignout = _nasAuthSessionPresent;
+    clearNasAuthFields();
+    renderNasAuthStep('signin', { showSignout: keepSignout });
+    _nasSetGateMessage(_nasDisplayError(error), true);
+  } finally {
+    _nasAuthBusy = false;
+    if (submit && document.getElementById('nas-auth-gate')?.classList.contains('open')) submit.disabled = false;
+  }
+}
+
+async function loadNasFinance(){
+  if (!isNasMode() || !_nasController) throw new Error('NAS controller is not ready');
+  requireNasVault();
+  // pending() performs the owner/AAL2 boundary before it reads any queue or
+  // user finance namespace. Never hydrate first, because desired queued state
+  // is the user's current intent and must remain visible.
+  const pending = await _nasController.pending();
+  const status = _nasController.status();
+  _nasUserId = status && status.userId;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(_nasUserId || ''))) {
+    throw new Error('NAS did not verify a user identity');
+  }
+  const cache = readNasPriceCache();
+  const appCache = readNasAppDb();
+  if (pending && pending.count > 0) {
+    DB = mergeDefaults(pending.desiredDb || freshDB());
+    DB._priceCache = cache;
+    persistNasAppDb(DB, 'queued');
+    if (!(await _flushNasProtectedStorage())) throw new Error('Encrypted NAS cache could not be verified');
+    _nasPendingCount = pending.count;
+    _nasReady = true;
+    _nasStatus('queued', pending.count + ' change' + (pending.count === 1 ? '' : 's') + ' queued, hydrate paused');
+  } else if (appCache && (appCache.state === 'pending-stage' || appCache.state === 'queued')) {
+    /* A cache marker without a queue means a previous stage reached the
+       encrypted app-db write but did not receive a durable queue result (or
+       the queue was damaged). Hydrate the verified baseline first, then
+       re-stage the cached desired state. Never overwrite it by silently
+       accepting the server snapshot. */
+    await _nasController.hydrate();
+    DB = mergeDefaults(appCache.db || freshDB());
+    DB._priceCache = cache;
+    _nasReady = true;
+    try {
+      const recovered = await _nasController.stage(_nasCachePayload(DB));
+      _nasPendingCount = _nasQueuedCount(recovered, 0);
+      persistNasAppDb(DB, _nasPendingCount ? 'queued' : 'synced');
+      persistNasPriceCache(DB);
+      if (!(await _flushNasProtectedStorage())) throw new Error('Encrypted NAS cache could not be verified');
+      _nasStatus(_nasPendingCount ? 'queued' : 'synced', _nasPendingCount
+        ? _nasPendingCount + ' recovered NAS change' + (_nasPendingCount === 1 ? '' : 's') + ' queued'
+        : 'NAS cache matched the hydrated snapshot');
+    } catch (error) {
+      /* Keep the recovery cache marker and leave the controller queue intact
+         if its write failed. The caller stays behind the auth gate and can
+         retry after the failure is understood. */
+      _nasReady = false;
+      _nasStatus(_nasConflict(error) ? 'conflict' : 'failed', _nasConflict(error)
+        ? 'Recovered NAS data still has a conflict, no server hydrate replaced it'
+        : 'Recovered NAS data could not be re-queued, no server hydrate replaced it');
+      throw error;
+    }
+  } else {
+    const hydrated = await _nasController.hydrate();
+    DB = mergeDefaults(hydrated || freshDB());
+    DB._priceCache = cache;
+    persistNasAppDb(DB, 'synced');
+    persistNasPriceCache(DB);
+    if (!(await _flushNasProtectedStorage())) throw new Error('Encrypted NAS cache could not be verified');
+    _nasPendingCount = 0;
+    _nasReady = true;
+    _nasStatus('synced', 'NAS snapshot hydrated');
+  }
+  clearNasAuthFields();
+  _nasAuthSessionPresent = false;
+  const gate = document.getElementById('nas-auth-gate');
+  if (gate) gate.classList.remove('open');
+  loadSettingsForm();
+  renderAll();
+  route();
+}
+
+async function signOutNas(){
+  if (isLocalPreview()) {
+    _nasStatus('local', 'Preview, NAS auth writes are disabled');
+    return false;
+  }
+  if (!_nasController) {
+    clearNasAuthFields();
+    _nasAuthSessionPresent = false;
+    location.reload();
+    return false;
+  }
+  /* Invalidate queued app-side saves before the first await. The controller
+     has its own lifecycle fence for remote flushes, while this generation
+     fence prevents a late cache write or success acknowledgement from a
+     signed-out app save. */
+  _nasAppGeneration += 1;
+  _nasAuthBusy = true;
+  if (_nasSyncTimer) { clearTimeout(_nasSyncTimer); _nasSyncTimer = null; }
+  const controller = _nasController;
+  /* Sign-out is the cancellation boundary. Do not enqueue it behind a
+     blocked local save, because the controller must be reached while an
+     active flush can still be cancelled under its bounded deadline. */
+  const run = Promise.resolve().then(() => controller.signOut());
+  try { await run; } catch (_) {}
+  // KjrNas preserves durable unresolved queue and recovery state during its
+  // own local-scope sign-out. The app never inspects a user id or queue here,
+  // including before AAL2 has completed.
+  clearNasAuthFields();
+  _nasAuthSessionPresent = false;
+  DB = freshDB();
+  _localBase = null;
+  _nasController = null;
+  _nasConfig = null;
+  _nasUserId = null;
+  _nasReady = false;
+  _nasPendingCount = 0;
+  _nasState = 'local';
+  _nasConflictRetryReady = false;
+  _nasLifecycleChain = Promise.resolve();
+  _nasAuthBusy = false;
+  location.reload();
+  return true;
+}
+
+async function bootNas(){
+  renderBackendBanner();
+  if (!NAS_RELEASE_ENABLED) {
+    showNasBlockedGate('The NAS candidate is disabled pending local durability, reload recovery and cancellation review. Legacy Apps Script remains available.');
+    return false;
+  }
+  if (!nasVaultReady()) {
+    showNasBlockedGate('NAS requires device encryption to be enabled and unlocked. Enable it in the legacy Settings view, then activate NAS again.');
+    return false;
+  }
+  try {
+    createNasController();
+    showNasAuthGate();
+    return true;
+  } catch (error) {
+    showNasBlockedGate(_nasDisplayError(error, 'NAS configuration or support scripts are invalid.'));
+    return false;
+  }
+}
+
+async function importLegacySnapshotNas(){
+  if (isLocalPreview()) {
+    _nasStatus('local', 'Preview, NAS writes are disabled');
+    return false;
+  }
+  if (!isNasMode() || !_nasReady || !_nasController || !_nasUserId) {
+    showToast('Sign in to NAS before importing the local legacy snapshot.', 'error');
+    return false;
+  }
+  requireNasVault();
+  let raw;
+  try { raw = protectedStorage.getItem(LK_DB); } catch (_) { raw = null; }
+  if (!raw) {
+    showToast('No local legacy snapshot was found. NAS data was unchanged.', 'error');
+    return false;
+  }
+  let detached;
+  let plan;
+  try {
+    detached = JSON.parse(JSON.stringify(JSON.parse(raw)));
+    plan = window.KjrMigration.planLegacyImport(detached);
+  } catch (error) {
+    showToast('The local legacy snapshot is invalid. NAS data was unchanged.', 'error');
+    return false;
+  }
+  if (!plan || !Array.isArray(plan.records) || !plan.relationships || plan.relationships.valid !== true) {
+    showToast('The local legacy snapshot failed validation. NAS data was unchanged.', 'error');
+    return false;
+  }
+  if (!confirm('Import the local legacy snapshot into NAS? Current NAS data will be retained in encrypted recovery first, then the validated snapshot will be queued.')) return false;
+
+  const run = _nasEnqueue(async () => {
+    const current = _nasCachePayload(DB);
+    let recovery;
+    // Newer controllers accept the explicit reason. The current vendored
+    // controller uses the compatible before-import label, so keep a narrow
+    // fallback until that controller's allowlist is updated.
+    try {
+      recovery = await _nasController.stashRecovery(current, 'before-legacy-import');
+    } catch (error) {
+      if (_nasErrorCode(error) !== 'PORTFOLIO_NAS_RECOVERY_REASON') throw error;
+      recovery = await _nasController.stashRecovery(current, 'before-import');
+    }
+    const imported = mergeDefaults(detached);
+    imported._priceCache = {};
+    const state = await _nasController.stage(_nasCachePayload(imported));
+    // The durable local cache follows the durable recovery and stage calls.
+    DB = imported;
+    persistNasAppDb(DB, 'queued');
+    persistNasPriceCache(DB);
+    if (!(await _flushNasProtectedStorage())) throw new Error('Encrypted NAS cache could not be verified');
+    _nasPendingCount = state && Array.isArray(state.operations) ? state.operations.length : plan.records.length;
+    _nasImportReceipt = {
+      sourceHash: plan.sourceHash,
+      recordsHash: plan.recordsHash,
+      importedAt: new Date().toISOString()
+    };
+    window.localStorage.setItem(LK_NAS_IMPORT_RECEIPT, JSON.stringify(_nasImportReceipt));
+    _nasStatus('queued', 'Legacy snapshot validated and queued for NAS sync');
+    loadBackendSettingsUI();
+    renderAll();
+    showToast('Legacy snapshot queued for NAS sync. Hash receipt retained in Settings.', 'success');
+    return true;
+  });
+  try {
+    return await run;
+  } catch (error) {
+    _nasStatus(_nasConflict(error) ? 'conflict' : 'failed', _nasDisplayError(error, 'Legacy import failed, current NAS data was retained where possible.'));
+    return false;
+  }
+}
+
 function updateVaultSettingsUI(){
   const status = document.getElementById('vault-status');
   const off = document.getElementById('vault-off-panel');
   const on = document.getElementById('vault-on-panel');
+  const disable = document.getElementById('vault-disable-btn');
+  const modeNote = document.getElementById('vault-mode-note');
   const enabled = !!(_vaultManager && _vaultManager.isEnabled());
   const unlocked = !!(_vaultManager && _vaultManager.isUnlocked());
+  const protectedMode = isNasMode() || isLegacyReadonlyMode();
   if (status) {
     status.textContent = enabled ? (unlocked ? 'On · unlocked in this tab' : 'On · locked') : 'Off';
     status.style.color = enabled ? 'var(--green)' : '';
   }
   if (off) off.style.display = enabled ? 'none' : '';
   if (on) on.style.display = enabled ? '' : 'none';
+  if (disable) {
+    disable.disabled = protectedMode;
+    disable.setAttribute('aria-disabled', protectedMode ? 'true' : 'false');
+    disable.title = protectedMode ? 'NAS and legacy read-only keep protected data encrypted' : '';
+  }
+  if (modeNote) {
+    modeNote.textContent = protectedMode
+      ? 'Encryption cannot be turned off in NAS or legacy read-only mode, because that would migrate protected caches and recovery data to plaintext. Passphrase change and encrypted export remain available.'
+      : '';
+  }
 }
 
 async function enableVaultProtection(){
@@ -2697,6 +3908,11 @@ async function changeVaultPassphrase(){
 
 async function disableVaultProtection(){
   if (!_vaultManager || !_vaultManager.isUnlocked()) return;
+  if (isNasMode() || isLegacyReadonlyMode()) {
+    showToast('Device encryption cannot be disabled in NAS or legacy read-only mode, protected data must stay encrypted.', 'error');
+    updateVaultSettingsUI();
+    return false;
+  }
   if (!confirm('Turn off device encryption? Protected values will be written back to browser storage as plaintext.')) return;
   try {
     await _vaultManager.disable();
@@ -2804,6 +4020,7 @@ function loadSettingsForm(){
   // Recently deleted (trash)
   renderTrash();
   updateVaultSettingsUI();
+  loadBackendSettingsUI();
 }
 
 /* Live sum hint for the target allocation inputs. */
@@ -3089,6 +4306,11 @@ function _cancelSyncForReset(){
 }
 
 async function resetLocalConfirm(){
+  if (isNasMode()) {
+    showToast('NAS mode keeps its user-scoped cache and queue. Use the NAS controls in Settings.', 'error');
+    return false;
+  }
+  if (denyReadonlyMutation('Reset')) return false;
   const hasCloud = !!getSyncUrl();
   const confirmation = hasCloud
     ? 'Reset local data? This clears this browser only. Automatic cloud writes will pause until you pull from cloud or explicitly choose Push to cloud. A technical snapshot will be retained in browser storage for support recovery.'
@@ -3187,6 +4409,15 @@ function exportBackup(){
 }
 
 function importBackupFromFile(input){
+  if (isNasMode()) {
+    showToast('NAS mode uses the explicit legacy snapshot import action.', 'error');
+    if (input) input.value = '';
+    return false;
+  }
+  if (denyReadonlyMutation('Import')) {
+    if (input) input.value = '';
+    return false;
+  }
   const file = input && input.files && input.files[0];
   if (!file) return;
   const reader = new FileReader();
@@ -3277,7 +4508,10 @@ function renderDiagnostics(){
   const lines = [
     'App version    : ' + APP_VERSION,
     'Schema         : ' + SCHEMA,
-    'Apps Script URL: ' + (getSyncUrl() ? '✓ set' : '✗ not set'),
+    'Backend mode   : ' + backendMode(),
+    'Apps Script URL: ' + (legacyBackendAllowed() && getSyncUrl() ? '✓ set' : '✗ inactive'),
+    'NAS gateway    : ' + (isNasMode() ? (_nasReady ? '✓ authenticated' : 'selected, auth required') : '✗ inactive'),
+    'NAS queue      : ' + (isNasMode() ? String(_nasPendingCount) + ' pending' : '—'),
     'Last sync (TS) : ' + (ts ? ts + ' (' + relTime(ts) + ')' : '—'),
     'Last pull seen : ' + (last || '—'),
     'Theme          : ' + (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
@@ -5440,6 +6674,7 @@ function ibkrShowPreview(matched, skippedCount){
 
 let _ibkrImportInFlight = false;
 async function ibkrConfirmImport(){
+  if (denyReadonlyMutation('IBKR import')) return false;
   if (_ibkrImportInFlight) return false;
   _ibkrImportInFlight = true;
   const overlay = document.getElementById('ibkr-preview-overlay');
@@ -5732,6 +6967,7 @@ let _insuranceImportInFlight = false;
    one saveData()/renderAll() after, so Ctrl+Z reverses the entire import in
    a single action rather than row-by-row. */
 async function insuranceImportConfirm(){
+  if (denyReadonlyMutation('Insurance import')) return false;
   const ready = _insImportReady || [];
   if (!ready.length || _insuranceImportInFlight) return false;
   _insuranceImportInFlight = true;
@@ -10263,6 +11499,17 @@ function installEventDelegation(){
     testPriceFetch:      () => testPriceFetch(),
     renderDiagnostics:   () => renderDiagnostics(),
     resetLocalConfirm:   () => resetLocalConfirm(),
+    activateNasFromForm: () => activateNasFromForm(),
+    importLegacySnapshotNas: () => importLegacySnapshotNas(),
+    switchNasToReadonly: () => switchNasToReadonly(),
+    returnToNas:          () => returnToNas(),
+    signOutNas:           () => signOutNas(),
+    openLegacyReadonlyEscape: () => openLegacyReadonlyEscape(),
+    replaceNasConfigFromBlockedGate: () => replaceNasConfigFromBlockedGate(),
+    rebaseNasPending:     () => rebaseNasPending(),
+    discardNasPending:    () => discardNasPending(),
+    restoreLatestRecoveryNas: () => restoreLatestRecoveryNas(),
+    retryNasConflict:     () => retryNasConflict(),
     dismissConflict:     () => { const m = document.getElementById('conflict-modal'); if (m) m.remove(); setSyncStatus('failed', 'Conflict unresolved'); },
     setStrictConflicts:  (el) => setStrictConflicts(el.checked),
     setAutoRefreshEnabled: (el) => setAutoRefreshEnabled(el.checked),
@@ -10375,6 +11622,12 @@ function installEventDelegation(){
   document.addEventListener('click',  (e) => { const el = e.target.closest('[data-click]');  if (el) runAction('data-click', el, e); });
   document.addEventListener('change', (e) => { const el = e.target.closest('[data-change]'); if (el) runAction('data-change', el, e); });
   document.addEventListener('input',  (e) => { const el = e.target.closest('[data-input]');  if (el) runAction('data-input', el, e); });
+  document.addEventListener('submit', (e) => {
+    if (e.target && e.target.id === 'nas-auth-form') {
+      e.preventDefault();
+      submitNasAuth();
+    }
+  });
   // Chart-builder drag and drop. The tap fallback is data-click="pbAssignField".
   document.addEventListener('dragstart', (e) => {
     const el = e.target.closest('[data-drag-key]');
@@ -10403,11 +11656,43 @@ async function boot(){
   renderNav();
   installEventDelegation();
   installAutoRefreshVisibility();
+  _loadNasImportReceipt();
+  renderBackendBanner();
   // Never interpret an encrypted profile as an empty first run. Boot stays
   // behind the modal until the user supplies the passphrase. If the vault
   // module failed to load, showVaultUnlockGate fails closed and leaves the
   // encrypted bytes untouched instead of seeding a new blank database.
   if (window.localStorage.getItem(LK_VAULT)) await showVaultUnlockGate();
+
+  /* NAS has a separate owner-gated boot path. It never calls loadLocal(),
+     runs migration engines, or inspects a finance cache before sign-in,
+     verified TOTP and the controller's owner/AAL2 boundary complete. */
+  if (isNasMode()) {
+    renderAll();
+    if (!location.hash) history.replaceState(null, '', '#dashboard');
+    route();
+    updateSyncStatusPill();
+    await bootNas();
+    return;
+  }
+
+  /* Rollback is intentionally read-only. Capture the legacy bytes before the
+     ordinary loader and skip every automatic engine or Apps Script path. */
+  if (isLegacyReadonlyMode()) {
+    const hadReadonly = loadLocal();
+    if (hadReadonly === 'corrupt') {
+      showToast('The legacy rollback snapshot is unreadable and was not replaced.', 'error');
+    } else if (!hadReadonly) {
+      DB = freshDB();
+      _localBase = _cloneLocalValue(localPersistPayload());
+      showToast('No legacy rollback snapshot is present. The read-only view is empty.', 'error');
+    }
+    renderAll();
+    if (!location.hash) history.replaceState(null, '', '#dashboard');
+    route();
+    updateSyncStatusPill();
+    return;
+  }
   // ── 1. First paint from cached local data ─────────────────────────────────
   // Render immediately so the app is interactive fast. The heavy salary/snapshot
   // engines and the network pull are deferred below — neither blocks first paint.

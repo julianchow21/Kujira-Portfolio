@@ -1,0 +1,68 @@
+# Portfolio's narrow overlay for the official Supabase self-hosted/v0.8.0 tree.
+# Requires Docker Compose >= 2.24.4 for !override and !reset.
+# Run from the checked-out upstream repository, with this file supplied as the overlay.
+
+services:
+  api-gw:
+    networks:
+      - default
+    # Keep the gateway reachable only from the NAS host. Tailscale Serve can proxy
+    # this loopback listener without publishing the gateway to LAN interfaces.
+    ports: !override
+      - "127.0.0.1:${PORTFOLIO_API_GW_HTTP_PORT:-8000}:8000/tcp"
+
+  supavisor:
+    # The pooler is not a host-facing service. Applications use the gateway.
+    ports: !reset []
+
+  portfolio-market:
+    build:
+      context: "${PORTFOLIO_MARKET_BUILD_CONTEXT:?set absolute market service context}"
+      dockerfile: "Market Dockerfile"
+    image: portfolio-market:node-24.20.0
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,nodev,size=16m"
+    expose:
+      - "8081/tcp"
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8081/healthz').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  db:
+    volumes:
+      - "${PORTFOLIO_SCHEMA_FILE:?set absolute Portfolio schema path}:/docker-entrypoint-initdb.d/migrations/zz-portfolio.sql:ro"
+
+  auth:
+    environment:
+      GOTRUE_DISABLE_SIGNUP: "true"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+      API_EXTERNAL_URL: "${API_EXTERNAL_URL:?set in the external env file}"
+      GOTRUE_SITE_URL: "${SITE_URL:?set in the external env file}"
+      GOTRUE_URI_ALLOW_LIST: "${ADDITIONAL_REDIRECT_URLS:?set in the external env file}"
+
+  caddy:
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    depends_on:
+      - api-gw
+      - portfolio-market
+    networks:
+      - default
+    ports:
+      - "127.0.0.1:${PORTFOLIO_WEB_PORT:-8080}:8080/tcp"
+    volumes:
+      - "${PORTFOLIO_PUBLIC_DIR:?set absolute curated public directory}:/srv/portfolio-public:ro"
+      - "${PORTFOLIO_CADDYFILE:?set absolute NAS Caddyfile path}:/etc/caddy/Caddyfile:ro"

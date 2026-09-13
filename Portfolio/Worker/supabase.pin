@@ -1,0 +1,6 @@
+package: @supabase/supabase-js
+version: 2.112.4
+npm tarball SHA-256: 7d4666756f1cdd53f10e6b71192a20c69dc950b9556dce35a0868a458235d6a4
+UMD SHA-256: f8ce7fab799af1916019cbd0b485b39bb80dbdbc6dc062909a751c9e5198e04c
+licence SHA-256: 334dd6820e2eaeab2064e7c59001b810566728a28a41a7c1dbf69bbee17d0936
+source: https://www.npmjs.com/package/@supabase/supabase-js/v/2.112.4
