@@ -19,9 +19,11 @@ const INDEX_PATH = path.join(__dirname, '..', 'index.html');
 const SCHEMA_PATH = path.join(__dirname, '..', 'schema.sql');
 const CAL_PATH = path.join(__dirname, '..', 'lib', 'kjr-calendar.js');
 const FMT_PATH = path.join(__dirname, '..', 'lib', 'kjr-format.js');
+const WORKER_PATH = path.join(__dirname, '..', 'Worker', 'Stripe Webhook Worker v0 (1 Aug).js');
 const indexSrc = fs.readFileSync(INDEX_PATH, 'utf8');
 const schemaSrc = fs.readFileSync(SCHEMA_PATH, 'utf8');
 const calSrc = fs.readFileSync(CAL_PATH, 'utf8');
+const workerSrc = fs.readFileSync(WORKER_PATH, 'utf8');
 
 /* ====================== Extraction helpers (see Trading/tests/test-trading.js for full notes) ====================== */
 
@@ -149,6 +151,73 @@ vm.runInContext(syncCode, syncContext, { filename: 'extracted-forex-sync.js' });
 const calSandbox = {};
 const calContext = vm.createContext(calSandbox);
 vm.runInContext(calCode, calContext, { filename: 'extracted-kjr-calendar.js' });
+
+/* ====================== Evaluate the dormant Stripe Worker seam ====================== */
+// The Worker is loaded from its real source with only its ESM wrapper adapted
+// for vm. Its fetch is replaced per test, so no network or live Supabase data
+// can be touched.
+const { webcrypto } = require('crypto');
+const { TextEncoder } = require('util');
+const workerCode = workerSrc.replace('export default {', 'const workerDefault = {')
+  + '\nthis.workerDefault = workerDefault;\n';
+const WORKER_NOW_SECONDS = 1770000000;
+class FixedDate extends Date {
+  static now() { return WORKER_NOW_SECONDS * 1000; }
+}
+class TestResponse {
+  constructor(body = '', init = {}) {
+    this._body = String(body);
+    this.status = init.status === undefined ? 200 : init.status;
+    this.ok = this.status >= 200 && this.status < 300;
+    const headerMap = new Map(Object.entries(init.headers || {})
+      .map(([key, value]) => [String(key).toLowerCase(), String(value)]));
+    this.headers = {
+      get(name) {
+        const key = String(name).toLowerCase();
+        return headerMap.has(key) ? headerMap.get(key) : null;
+      }
+    };
+  }
+  async text() { return this._body; }
+  async json() { return JSON.parse(this._body); }
+}
+const workerSandbox = {
+  crypto: webcrypto,
+  TextEncoder,
+  URL,
+  Response: TestResponse,
+  Date: FixedDate,
+};
+const workerContext = vm.createContext(workerSandbox);
+vm.runInContext(workerCode, workerContext, { filename: WORKER_PATH });
+
+function makeWebhookRequest(body, signatureHeader) {
+  return {
+    method: 'POST',
+    url: 'https://forex-worker.test/webhook',
+    headers: {
+      get(name) {
+        return String(name).toLowerCase() === 'stripe-signature' ? signatureHeader : null;
+      }
+    },
+    text: async () => body,
+  };
+}
+async function hmacHex(timestamp, rawBody, secret) {
+  const key = await webcrypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await webcrypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(`${timestamp}.${rawBody}`)
+  );
+  return Buffer.from(new Uint8Array(signature)).toString('hex');
+}
 
 /* ====================== Test runner ====================== */
 
@@ -620,15 +689,74 @@ test('375px mobile rules shrink the topbar without removing app links or theme',
   for (const label of ['Trading', 'Forex', 'Portfolio']) assert.match(indexSrc, new RegExp('class="tb-tab[^>]*>\\s*' + label));
   assert.match(indexSrc, /id="theme-btn"/);
 });
-test('schema defines authenticated, RLS-invoker CAS and durable tombstones', () => {
+test('schema defines authenticated read-only tables, trusted CAS and durable tombstones', () => {
+  assert.match(schemaSrc, /^begin;\s*$/m);
+  assert.match(schemaSrc, /^commit;\s*$/m);
   assert.match(schemaSrc, /deleted_at\s+timestamptz/);
   assert.match(schemaSrc, /create or replace function public\.sync_trade/);
-  assert.match(schemaSrc, /security invoker/);
+  assert.match(schemaSrc, /security definer/);
+  assert.match(schemaSrc, /set search_path = ''/);
+  assert.match(schemaSrc, /alter function public\.sync_trade[^\n]+owner to postgres/);
   assert.match(schemaSrc, /for update;/);
   assert.match(schemaSrc, /auth\.uid\(\)/);
   assert.match(schemaSrc, /revoke all on function public\.sync_trade[^\n]+from anon/);
   assert.match(schemaSrc, /grant execute on function public\.sync_trade[^\n]+to authenticated/);
   assert.strictEqual((schemaSrc.match(/drop policy if exists/g) || []).length, 4);
+  assert.match(schemaSrc, /create unique index if not exists profiles_stripe_customer_id_uidx/);
+  assert.match(schemaSrc, /stripe_customer_id is not null/);
+  assert.match(schemaSrc, /create policy "own profile read"/);
+  assert.doesNotMatch(schemaSrc, /create policy "own profile write"/);
+  assert.match(schemaSrc, /revoke all on table profiles from anon, authenticated, public/);
+  assert.match(schemaSrc, /grant select on table profiles to authenticated/);
+  assert.match(schemaSrc, /grant select, insert, update, delete on table profiles to service_role/);
+  assert.doesNotMatch(schemaSrc, /create policy "own trades write"/);
+  assert.match(schemaSrc, /revoke all on table trades from anon, authenticated, public/);
+  assert.match(schemaSrc, /grant select on table trades to authenticated/);
+  assert.match(schemaSrc, /grant select, insert, update, delete on table trades to service_role/);
+  assert.match(schemaSrc, /on conflict \(user_id, id\) do nothing/);
+  assert.doesNotMatch(schemaSrc, /on conflict \(id\) do nothing/);
+  assert.match(schemaSrc, /v_is_scoped_pk/);
+  assert.doesNotMatch(schemaSrc, /drop constraint[^;]+cascade/i);
+  assert.match(schemaSrc, /pg_catalog\.clock_timestamp\(\)/);
+  assert.match(schemaSrc, /old\.updated_at \+ interval '1 microsecond'/);
+  assert.match(schemaSrc, /create table if not exists stripe_webhook_events/);
+  assert.match(schemaSrc, /stripe_subscription_id/);
+  assert.match(schemaSrc, /profiles_stripe_subscription_id_uidx/);
+  assert.match(schemaSrc, /last_billing_subscription_id/);
+  assert.match(schemaSrc, /subscription_id text not null/);
+  assert.match(schemaSrc, /last_billing_event_created/);
+  assert.match(schemaSrc, /create or replace function public\.apply_stripe_event/);
+  assert.match(schemaSrc, /p_subscription_id text/);
+  assert.match(schemaSrc, /lock table public\.profiles in share row exclusive mode/);
+  assert.match(schemaSrc, /alter function public\.apply_stripe_event\([^\n]+owner to postgres/);
+  assert.match(schemaSrc, /grant execute on function public\.apply_stripe_event\([^\n]+to service_role/);
+  assert.match(schemaSrc, /revoke all on function public\.apply_stripe_event\([^\n]+from authenticated/);
+  assert.match(schemaSrc, /on conflict \(event_id\) do nothing/);
+  assert.match(schemaSrc, /billing subscription fence uninitialised/);
+  assert.match(schemaSrc, /billing subscription fence mismatch/);
+  assert.match(workerSrc, /STRIPE_BILLING_ENABLED=true/);
+  assert.match(workerSrc, /checkout entitlement is disabled/);
+  assert.match(workerSrc, /p_subscription_id/);
+  assert.match(workerSrc, /items\.has_more === true/);
+  assert.match(workerSrc, /payload\.length !== 1/);
+  assert.doesNotMatch(workerSrc, /method:\s*['"]PATCH['"]/);
+  assert.doesNotMatch(schemaSrc, /grant (?:all|insert|update|delete|truncate)[^\n]*profiles[^\n]*authenticated/i);
+});
+test('Stripe signature parser preserves timestamp text and rejects ambiguous or whitespace timestamps', () => {
+  const timestamp = '001770000000';
+  const validV1 = 'a'.repeat(64);
+  const parsed = workerContext.parseStripeSignature(
+    ` t=${timestamp},v1=malformed,v0=${validV1},v1=${validV1},foo=ignored`
+  );
+  assert.deepStrictEqual(toPlain(parsed), {
+    timestamp,
+    timestampSeconds: WORKER_NOW_SECONDS,
+    v1Values: [validV1],
+  });
+  assert.strictEqual(workerContext.parseStripeSignature(`t=${timestamp} ,v1=${validV1}`), null);
+  assert.strictEqual(workerContext.parseStripeSignature(`t=${timestamp},t=${timestamp},v1=${validV1}`), null);
+  assert.strictEqual(workerContext.parseStripeSignature(`t=${WORKER_NOW_SECONDS}oops,v1=${validV1}`), null);
+  assert.strictEqual(workerContext.parseStripeSignature(`t=${timestamp},v1=not-hex`), null);
 });
 test('dashboard emits exactly one Profit factor stat card', () => {
   const source = extractFunction(indexSrc, 'renderDashboard', INDEX_PATH);
@@ -638,6 +766,259 @@ test('dashboard emits exactly one Profit factor stat card', () => {
 async function testAsync(name, fn) {
   try { await fn(); console.log(`✅ PASS: ${name}`); passed++; }
   catch (e) { console.error(`❌ FAIL: ${name}`); console.error(e); failed++; }
+}
+
+async function runWorkerContractTests() {
+  const secret = 'whsec_synthetic';
+  const env = {
+    STRIPE_WEBHOOK_SECRET: secret,
+    SB_URL: 'https://supabase.synthetic.test',
+    SB_SERVICE_ROLE_KEY: 'service-role-synthetic',
+    STRIPE_BILLING_ENABLED: 'true',
+    STRIPE_PRO_PRICE_ID: 'price_synthetic',
+    STRIPE_PRO_PRODUCT_ID: 'prod_synthetic',
+  };
+  function priceItem(overrides = {}) {
+    return {
+      price: {
+        id: 'price_synthetic',
+        type: 'recurring',
+        product: 'prod_synthetic',
+        ...overrides,
+      }
+    };
+  }
+  function subscriptionEvent(id, overrides = {}) {
+    return {
+      id,
+      created: WORKER_NOW_SECONDS,
+      type: 'customer.subscription.updated',
+      data: { object: {
+        id: 'sub_synthetic',
+        customer: 'cus_synthetic',
+        status: 'active',
+        items: { data: [priceItem()] },
+        ...overrides,
+      } }
+    };
+  }
+  function checkoutEvent(id, overrides = {}) {
+    return {
+      id,
+      created: WORKER_NOW_SECONDS,
+      type: 'checkout.session.completed',
+      data: { object: {
+        mode: 'subscription',
+        payment_status: 'paid',
+        subscription: 'sub_synthetic',
+        customer: 'cus_synthetic',
+        line_items: { data: [priceItem()] },
+        ...overrides,
+      } }
+    };
+  }
+  async function signedRequest(event, signatureTimestamp = String(WORKER_NOW_SECONDS)) {
+    const body = JSON.stringify(event);
+    const validV1 = await hmacHex(signatureTimestamp, body, secret);
+    return makeWebhookRequest(body, `t=${signatureTimestamp},v1=${validV1}`);
+  }
+
+  await testAsync('Stripe Worker sends verified events to the atomic RPC and accepts the 300-second boundary', async () => {
+    const event = subscriptionEvent('evt_rotated');
+    const body = JSON.stringify(event);
+    const validV1 = await hmacHex('001770000000', body, secret);
+    const calls = [];
+    workerSandbox.fetch = async (url, options) => {
+      calls.push({ url, options });
+      return new TestResponse(JSON.stringify([{
+        applied: true, duplicate: false, matched: 1, reason: 'applied'
+      }]), { status: 200 });
+    };
+    const response = await workerContext.workerDefault.fetch(
+      makeWebhookRequest(
+        body,
+        `t=001770000000,v1=not-hex,v1=${'0'.repeat(64)},v1=${validV1},v0=${validV1}`
+      ),
+      env
+    );
+    assert.strictEqual(response.status, 200);
+    assert.deepStrictEqual(toPlain(await response.json()), {
+      received: true, synced: true, status: 200, matched: 1, reason: 'applied'
+    });
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].options.method, 'POST');
+    assert.strictEqual(calls[0].url, `${env.SB_URL}/rest/v1/rpc/apply_stripe_event`);
+    assert.strictEqual(calls[0].options.headers.Prefer, 'return=representation');
+    assert.deepStrictEqual(JSON.parse(calls[0].options.body), {
+      p_event_id: 'evt_rotated',
+      p_event_type: 'customer.subscription.updated',
+      p_event_created: WORKER_NOW_SECONDS,
+      p_customer_id: 'cus_synthetic',
+      p_subscription_id: 'sub_synthetic',
+      p_plan: 'pro',
+    });
+
+    const deletedEvent = subscriptionEvent('evt_deleted', { status: 'canceled' });
+    deletedEvent.type = 'customer.subscription.deleted';
+    const deletedResponse = await workerContext.workerDefault.fetch(
+      await signedRequest(deletedEvent), env
+    );
+    assert.strictEqual(deletedResponse.status, 200);
+    assert.strictEqual(JSON.parse(calls[1].options.body).p_plan, 'free');
+    assert.strictEqual(JSON.parse(calls[1].options.body).p_subscription_id, 'sub_synthetic');
+
+    const boundaryEvent = subscriptionEvent('evt_boundary');
+    const boundaryRequest = await signedRequest(
+      boundaryEvent, String(WORKER_NOW_SECONDS - 300)
+    );
+    const boundaryResponse = await workerContext.workerDefault.fetch(boundaryRequest, env);
+    assert.strictEqual(boundaryResponse.status, 200);
+    assert.strictEqual(calls.length, 3);
+  });
+
+  await testAsync('Stripe Worker keeps billing disabled without explicit configuration', async () => {
+    const disabledEnv = { ...env };
+    delete disabledEnv.STRIPE_BILLING_ENABLED;
+    delete disabledEnv.STRIPE_PRO_PRICE_ID;
+    delete disabledEnv.STRIPE_PRO_PRODUCT_ID;
+    workerSandbox.fetch = async () => { throw new Error('unexpected Supabase call'); };
+    const response = await workerContext.workerDefault.fetch(
+      await signedRequest(subscriptionEvent('evt_disabled')), disabledEnv
+    );
+    assert.strictEqual(response.status, 503);
+    assert.match((await response.json()).reason, /billing writes are disabled/);
+
+    const incompleteEnv = { ...env, STRIPE_PRO_PRODUCT_ID: '' };
+    const incompleteResponse = await workerContext.workerDefault.fetch(
+      await signedRequest(subscriptionEvent('evt_incomplete_config')), incompleteEnv
+    );
+    assert.strictEqual(incompleteResponse.status, 503);
+    assert.match((await incompleteResponse.json()).reason, /explicit STRIPE_PRO_PRICE_ID/);
+  });
+
+  await testAsync('Stripe Worker rejects non-paid or wrong-plan checkout and subscription events', async () => {
+    const cases = [
+      ['checkout payment mode', checkoutEvent('evt_payment_mode', { mode: 'payment' })],
+      ['checkout unpaid', checkoutEvent('evt_unpaid', { payment_status: 'unpaid' })],
+      ['checkout no payment required', checkoutEvent('evt_no_payment', { payment_status: 'no_payment_required' })],
+      ['checkout missing subscription', checkoutEvent('evt_no_subscription', { subscription: null })],
+      ['checkout missing customer', checkoutEvent('evt_no_customer', { customer: null })],
+      ['checkout wrong price', checkoutEvent('evt_wrong_price', {
+        line_items: { data: [priceItem({ id: 'price_other' })] }
+      })],
+      ['checkout wrong product', checkoutEvent('evt_wrong_product', {
+        line_items: { data: [priceItem({ product: 'prod_other' })] }
+      })],
+      ['checkout one-time price', checkoutEvent('evt_one_time', {
+        line_items: { data: [priceItem({ type: 'one_time' })] }
+      })],
+      ['checkout mixed wrong item', checkoutEvent('evt_mixed_items', {
+        line_items: { data: [priceItem(), priceItem({ id: 'price_other' })] }
+      })],
+      ['checkout missing line items', checkoutEvent('evt_no_line_items', { line_items: null })],
+      ['subscription unsupported status', subscriptionEvent('evt_bad_status', { status: 'past_due_pending' })],
+      ['subscription wrong product', subscriptionEvent('evt_sub_wrong_product', {
+        items: { data: [priceItem({ product: 'prod_other' })] }
+      })],
+      ['subscription missing items', subscriptionEvent('evt_sub_no_items', { items: null })],
+      ['subscription truncated items', subscriptionEvent('evt_sub_truncated', {
+        items: { has_more: true, data: [priceItem()] }
+      })],
+      ['deleted subscription with active status', (() => {
+        const event = subscriptionEvent('evt_deleted_active', { status: 'active' });
+        event.type = 'customer.subscription.deleted';
+        return event;
+      })()],
+    ];
+    workerSandbox.fetch = async () => { throw new Error('unexpected Supabase call'); };
+    for (const [label, event] of cases) {
+      const response = await workerContext.workerDefault.fetch(await signedRequest(event), env);
+      assert.strictEqual(response.status, 400, label);
+      const payload = await response.json();
+      assert.strictEqual(payload.received, true, label);
+      assert.strictEqual(payload.synced, false, label);
+    }
+    const validCheckoutResponse = await workerContext.workerDefault.fetch(
+      await signedRequest(checkoutEvent('evt_valid_checkout')), env
+    );
+    assert.strictEqual(validCheckoutResponse.status, 503, 'valid checkout entitlement is disabled');
+    assert.match((await validCheckoutResponse.json()).reason, /server-owned subscription binding/);
+    const missingId = subscriptionEvent('evt_missing_id');
+    delete missingId.id;
+    const missingCreated = subscriptionEvent('evt_missing_created');
+    delete missingCreated.created;
+    for (const [label, event] of [['missing event ID', missingId], ['missing event timestamp', missingCreated]]) {
+      const response = await workerContext.workerDefault.fetch(await signedRequest(event), env);
+      assert.strictEqual(response.status, 400, label);
+    }
+  });
+
+  await testAsync('Stripe Worker rejects missing or non-exact RPC attribution proofs', async () => {
+    const cases = [
+      { label: 'duplicate event', result: { applied: false, duplicate: true, matched: 1, reason: 'duplicate' }, status: 200, duplicate: true },
+      { label: 'stale event', result: { applied: false, duplicate: false, matched: 1, reason: 'stale event' }, status: 200, ignored: 'stale' },
+      { label: 'ambiguous equal-time event', result: { applied: false, duplicate: false, matched: 1, reason: 'ambiguous event ordering' }, status: 503 },
+      { label: 'zero profiles', result: { applied: false, duplicate: false, matched: 0, reason: 'customer attribution failed' }, status: 503 },
+      { label: 'multiple profiles', result: { applied: false, duplicate: false, matched: 2, reason: 'customer attribution failed' }, status: 503 },
+      { label: 'missing count', result: { applied: true, duplicate: false, reason: 'applied' }, status: 503 },
+      { label: 'string count', result: { applied: true, duplicate: false, matched: '1', reason: 'applied' }, status: 503 },
+      { label: 'invalid result', result: { applied: true }, status: 503 },
+      { label: 'applied and duplicate together', result: { applied: true, duplicate: true, matched: 1, reason: 'applied' }, status: 503 },
+      { label: 'empty RPC array', payload: [], status: 503 },
+      { label: 'multiple RPC rows', payload: [
+        { applied: true, duplicate: false, matched: 1, reason: 'applied' },
+        { applied: true, duplicate: false, matched: 1, reason: 'applied' },
+      ], status: 503 },
+      { label: 'object RPC row', payload: { applied: true, duplicate: false, matched: 1, reason: 'applied' }, status: 503 },
+    ];
+    for (const [index, item] of cases.entries()) {
+      let request;
+      workerSandbox.fetch = async (url, options) => {
+        request = { url, options };
+        const payload = Object.prototype.hasOwnProperty.call(item, 'payload')
+          ? item.payload : [item.result];
+        return new TestResponse(JSON.stringify(payload), { status: 200 });
+      };
+      const event = subscriptionEvent(`evt_rpc_${index}`);
+      const response = await workerContext.workerDefault.fetch(await signedRequest(event), env);
+      assert.strictEqual(response.status, item.status, item.label);
+      const payload = await response.json();
+      assert.strictEqual(payload.received, true, item.label);
+      assert.strictEqual(payload.synced, item.status === 200, item.label);
+      if (item.duplicate) assert.strictEqual(payload.duplicate, true, item.label);
+      if (item.ignored) assert.strictEqual(payload.ignored, item.ignored, item.label);
+      assert.strictEqual(request.url, `${env.SB_URL}/rest/v1/rpc/apply_stripe_event`, item.label);
+    }
+  });
+
+  await testAsync('Stripe Worker rejects missing, malformed, stale, future and changed-body signatures', async () => {
+    const event = subscriptionEvent('evt_signature');
+    const body = JSON.stringify(event);
+    const timestamp = '001770000000';
+    const validV1 = await hmacHex(timestamp, body, secret);
+    const staleTimestamp = String(WORKER_NOW_SECONDS - 301);
+    const futureTimestamp = String(WORKER_NOW_SECONDS + 301);
+    const staleV1 = await hmacHex(staleTimestamp, body, secret);
+    const futureV1 = await hmacHex(futureTimestamp, body, secret);
+    const cases = [
+      ['missing signature', null, body],
+      ['malformed timestamp', `t=not-a-number,v1=${validV1}`, body],
+      ['partial numeric timestamp', `t=${WORKER_NOW_SECONDS}oops,v1=${validV1}`, body],
+      ['malformed v1', `t=${timestamp},v1=not-hex`, body],
+      ['duplicate timestamp', `t=${timestamp},t=${timestamp},v1=${validV1}`, body],
+      ['stale timestamp', `t=${staleTimestamp},v1=${staleV1}`, body],
+      ['future timestamp', `t=${futureTimestamp},v1=${futureV1}`, body],
+      ['changed raw body', `t=${timestamp},v1=${validV1}`, body.replace('active', 'trialing')],
+    ];
+    workerSandbox.fetch = async () => { throw new Error('unexpected Supabase call'); };
+    for (const [label, signature, requestBody] of cases) {
+      const response = await workerContext.workerDefault.fetch(
+        makeWebhookRequest(requestBody, signature), env
+      );
+      assert.strictEqual(response.status, 400, label);
+      assert.strictEqual((await response.json()).error, 'invalid signature', label);
+    }
+  });
 }
 
 async function runSyncContractTests() {
@@ -776,6 +1157,7 @@ async function runSyncContractTests() {
 }
 
 (async () => {
+  await runWorkerContractTests();
   await runSyncContractTests();
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
   if (failed > 0) process.exit(1);
