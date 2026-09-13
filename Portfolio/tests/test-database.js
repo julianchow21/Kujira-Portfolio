@@ -45,6 +45,10 @@ function sqlLiteral(value) {
   return "'" + String(value).replace(/'/g, "''") + "'";
 }
 
+function psqlMetaQuote(value) {
+  return "'" + String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+}
+
 function jsonbLiteral(value) {
   return sqlLiteral(JSON.stringify(value)) + '::jsonb';
 }
@@ -895,7 +899,7 @@ async function main() {
   const bodyAuditPath = path.join(tempRoot, 'restore-security-body.sql');
   fs.writeFileSync(bodyAuditPath, [
     'set portfolio.trusted_function_hashes = ' + sqlLiteral(trustedBodyManifest) + ';',
-    '\\i ' + RESTORE_SECURITY_PATH
+    '\\i ' + psqlMetaQuote(RESTORE_SECURITY_PATH)
   ].join('\n') + '\n', 'utf8');
   const restoreSecurityOutput = runSqlFile(bodyAuditPath,
     'run exact staged restore security audit');
@@ -916,7 +920,7 @@ async function main() {
   fs.writeFileSync(negativeRestorePath, [
     'begin;',
     'alter table public.portfolio_records alter column payload drop not null;',
-    '\\i ' + bodyAuditPath
+    '\\i ' + psqlMetaQuote(bodyAuditPath)
   ].join('\n') + '\n', 'utf8');
   expectSqlFileFailure(negativeRestorePath, 'negative missing-NOT-NULL restore audit',
     'P0001', 'Portfolio column structure mismatch');
@@ -933,7 +937,7 @@ async function main() {
     '  return 0::bigint;',
     'end;',
     '$portfolio_tampered_body$;',
-    '\\i ' + bodyAuditPath
+    '\\i ' + psqlMetaQuote(bodyAuditPath)
   ].join('\n') + '\n', 'utf8');
   expectSqlFileFailure(tamperedBodyPath, 'negative tampered function body audit',
     'P0001', 'Portfolio function body content mismatch');
