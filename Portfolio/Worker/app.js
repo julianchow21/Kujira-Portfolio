@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.64';
-const APP_DISPLAY_VERSION = 'v2.64 (12 Sep)';
+const APP_VERSION = 'v2.65';
+const APP_DISPLAY_VERSION = 'v2.65 (18 Sep)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -22,10 +22,12 @@ const SCHEMA_VERSION = 3;
 const LK_DB        = 'kjr-pf-db-v1';
 const LK_SYNC_URL  = 'kjr-pf-sync-url-v1';
 const LK_SYNC_TS   = 'kjr-pf-sync-ts-v1';
+const LK_SYNC_CONFIRMED_TS = 'kjr-pf-sync-confirmed-ts-v1'; // last server timestamp validated by this client
 const LK_LAST_PULL = 'kjr-pf-last-pull-v1';
 const LK_LAST_PULL_SRC = 'kjr-pf-last-pull-src-v1';  // 'server' if from doGet._savedAt or doPost.savedAt, else 'client'
 const LK_RESET_SYNC_BLOCK = 'kjr-pf-reset-sync-block-v1'; // blocks automatic writes after a local-only reset until a pull or explicit push
 const LK_LOSSY_SYNC_BLOCK = 'kjr-pf-lossy-sync-block-v1'; // old backend acknowledged a write after stripping/truncating data
+const LK_SYNC_DIAGNOSTICS = 'kjr-pf-sync-diagnostics-v1'; // protected, bounded sync failure metadata only
 const LK_UNSAVED   = 'kjr-pf-unsaved-v1'; // durable warning that the latest in-memory financial change did not reach protected storage
 const LK_CLOUD_DIRTY = 'kjr-pf-cloud-dirty-v1'; // locally durable financial changes that have not reached the configured cloud
 const LK_THEME     = 'kjr-pf-theme-v1';
@@ -53,7 +55,7 @@ const _vaultManager = window.KjrVault ? window.KjrVault.createManager({
   storage: window.localStorage,
   crypto: window.crypto,
   envelopeKey: LK_VAULT,
-  sensitiveKeys: [LK_DB, LK_SYNC_URL, LK_PRICE_CACHE, LK_NAS_CONFIG],
+  sensitiveKeys: [LK_DB, LK_SYNC_URL, LK_PRICE_CACHE, LK_NAS_CONFIG, LK_SYNC_DIAGNOSTICS],
   sensitivePrefixes: ['LK_DB_', LK_NAS_PREFIX],
   onError: err => {
     console.error('[vault] encrypted save failed', err);
@@ -1919,7 +1921,7 @@ function _scheduleCloudAfterLocalSave(revision){
     return true;
   }
   if (localStorage.getItem(LK_LOSSY_SYNC_BLOCK)) {
-    setSyncStatus('failed', 'Cloud writes paused because the Apps Script backend must be redeployed.');
+    setSyncStatus('failed', 'Cloud writes paused because the backend may not preserve every submitted field. Export a backup, check the latest Apps Script, review field limits if current, then Push to cloud before Pull.');
     return true;
   }
   // Null the flag the moment the debounce actually fires, not just when a
@@ -2060,24 +2062,206 @@ let _bloatWarned = false;
 let _activeSyncController = null;
 const _activeSyncCompletions = new Set();
 let _activeSyncLatest = null;
+let _syncDiagnosticsMemory = null;
+let _syncDiagnosticsStorageFailed = false;
+
+/* Sync diagnostics are deliberately a small, protected record. Never persist
+   response bodies, URLs, tokens or arbitrary backend text here. Field paths
+   are accepted only when they name a known Portfolio key and field, with a
+   bounded array index. */
+function _syncDiagPath(value){
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text || text.length > 96) return null;
+  const roots = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfBalances','cpfHistory','income','expenses','snapshots','categories','settings','trash','insurance','insuranceRiders'];
+  const arrayRoots = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns','cpfHistory','income','expenses','snapshots','trash','insurance','insuranceRiders'];
+  const fields = ['id','symbol','market','sector','shares','avgCost','currency','divPerShare','divExDate','divPayDate','notes','stockId','date','side','price','fees','cashAccountId','targetPrice','coingeckoId','amount','name','value','account','asOf','apy','type','fromAccountId','amountIn','source','gross','net','employerCPF','employeeCPF','subcategory','merchant','insurer','plan','policyNo','insured','status','coverDeath','coverTPD','coverCI','coverHosp','coverIncomeMonthly','coverLTCMonthly','premium','premiumFreq','premiumMode','premiumDue','cashValue','maturityValue','beneficiary','docUrl','policyId','benefit','cover','baseCurrency','birthYear','retirementAge','expectedReturn','inflationRate','fireMultiple','fireTarget','savedCharts','chartBuilder','dashLayout','updatedAt'];
+  const match = /^([A-Za-z][A-Za-z0-9_]*)(?:\[(\d{1,4})\])?(?:\.([A-Za-z][A-Za-z0-9_]*))?$/.exec(text);
+  if (!match || !roots.includes(match[1])) return null;
+  if (match[2] != null && !arrayRoots.includes(match[1])) return null;
+  if (match[3] && !fields.includes(match[3])) return null;
+  const index = match[2] == null ? '' : '[' + String(Math.min(Number(match[2]), 9999)) + ']';
+  return match[1] + index + (match[3] ? '.' + match[3] : '');
+}
+
+function _syncDiagList(value, paths){
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  const seen = new Set();
+  for (let i = 0; i < value.length && out.length < 8; i++){
+    const raw = typeof value[i] === 'string' ? value[i] : '';
+    const safe = paths ? _syncDiagPath(raw) : _syncDiagPath(raw && raw.split('.')[0]);
+    if (!safe || seen.has(safe)) continue;
+    seen.add(safe);
+    out.push(safe);
+  }
+  return out;
+}
+
+function _syncDiagLossy(data){
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  const strippedRaw = Array.isArray(data.strippedKeys) ? data.strippedKeys : [];
+  const pathsRaw = Array.isArray(data.truncatedPaths) ? data.truncatedPaths : [];
+  const hasTruncated = !!data.truncated;
+  if (!strippedRaw.length && !pathsRaw.length && !hasTruncated) return null;
+  const strippedKeys = _syncDiagList(strippedRaw, false);
+  const truncatedPaths = _syncDiagList(pathsRaw, true);
+  return {
+    code: 'lossy_ack',
+    at: new Date().toISOString(),
+    strippedKeys,
+    truncatedPaths,
+    truncated: hasTruncated || pathsRaw.length > 0,
+    counts: {
+      stripped: Math.min(strippedRaw.length, 999),
+      truncated: Math.min(pathsRaw.length, 999)
+    }
+  };
+}
+
+function _syncDiagSafeCode(code){
+  const allowed = ['lossy_ack','backend_error','non_json','payload_limit','timeout','conflict_unverified','write_failed','read_failed','schema_mismatch','unverified_timestamp','local_persist','reset_blocked','unknown'];
+  return allowed.includes(code) ? code : 'unknown';
+}
+
+function _syncDiagRecordSafe(record){
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
+  const out = { code: _syncDiagSafeCode(record.code) };
+  if (typeof record.at === 'string' && _isCanonicalServerTimestamp(record.at)) out.at = record.at;
+  if (Number.isFinite(Number(record.status))){
+    const status = Number(record.status);
+    if (status >= 100 && status <= 599) out.status = Math.round(status);
+  }
+  if (out.code === 'lossy_ack'){
+    out.strippedKeys = _syncDiagList(record.strippedKeys, false);
+    out.truncatedPaths = _syncDiagList(record.truncatedPaths, true);
+    out.truncated = !!record.truncated || out.truncatedPaths.length > 0;
+    out.counts = {
+      stripped: Math.min(Math.max(Number(record.counts && record.counts.stripped) || out.strippedKeys.length, out.strippedKeys.length), 999),
+      truncated: Math.min(Math.max(Number(record.counts && record.counts.truncated) || out.truncatedPaths.length, out.truncatedPaths.length), 999)
+    };
+  }
+  return out;
+}
+
+function _readSyncDiagnostics(){
+  if (_syncDiagnosticsMemory) return _syncDiagnosticsMemory;
+  let raw;
+  try { raw = protectedStorage.getItem(LK_SYNC_DIAGNOSTICS); }
+  catch (err) {
+    _syncDiagnosticsStorageFailed = true;
+    return { version:1 };
+  }
+  if (!raw) {
+    _syncDiagnosticsStorageFailed = false;
+    return { version:1 };
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    const out = { version:1 };
+    const read = _syncDiagRecordSafe(parsed && parsed.readFailure);
+    const write = _syncDiagRecordSafe(parsed && parsed.writeFailure);
+    if (read) out.readFailure = read;
+    if (write) out.writeFailure = write;
+    _syncDiagnosticsMemory = out;
+    _syncDiagnosticsStorageFailed = false;
+    return out;
+  } catch (err) {
+    _syncDiagnosticsStorageFailed = true;
+    return { version:1 };
+  }
+}
+
+function _storeSyncDiagnostics(next){
+  const safe = { version:1 };
+  const read = _syncDiagRecordSafe(next && next.readFailure);
+  const write = _syncDiagRecordSafe(next && next.writeFailure);
+  if (read) safe.readFailure = read;
+  if (write) safe.writeFailure = write;
+  // Keep the sanitised record available for this tab even when the protected
+  // storage write fails. The failure is surfaced as a diagnostic warning and
+  // the record is intentionally not treated as durable across reloads.
+  _syncDiagnosticsMemory = safe;
+  try {
+    if (safe.readFailure || safe.writeFailure) protectedStorage.setItem(LK_SYNC_DIAGNOSTICS, JSON.stringify(safe));
+    else protectedStorage.removeItem(LK_SYNC_DIAGNOSTICS);
+    _syncDiagnosticsStorageFailed = false;
+    return true;
+  } catch (err) {
+    _syncDiagnosticsStorageFailed = true;
+    console.warn('[sync] bounded diagnostics could not be stored');
+    return false;
+  }
+}
+
+function _recordSyncFailure(kind, code, extra){
+  const slot = kind === 'read' ? 'readFailure' : 'writeFailure';
+  const current = _readSyncDiagnostics();
+  const record = { code: _syncDiagSafeCode(code), at: new Date().toISOString() };
+  if (extra && Number.isFinite(Number(extra.status))) record.status = Number(extra.status);
+  if (record.code === 'lossy_ack' && extra){
+    record.strippedKeys = _syncDiagList(extra.strippedKeys, false);
+    record.truncatedPaths = _syncDiagList(extra.truncatedPaths, true);
+    record.truncated = !!extra.truncated || record.truncatedPaths.length > 0;
+    record.counts = {
+      stripped: Math.min(Math.max(Number(extra.counts && extra.counts.stripped) || record.strippedKeys.length, record.strippedKeys.length), 999),
+      truncated: Math.min(Math.max(Number(extra.counts && extra.counts.truncated) || record.truncatedPaths.length, record.truncatedPaths.length), 999)
+    };
+  }
+  const next = { version:1, readFailure: current.readFailure, writeFailure: current.writeFailure };
+  next[slot] = record;
+  _storeSyncDiagnostics(next);
+  return record;
+}
+
+function _clearSyncDiagnostic(kind){
+  const slot = kind === 'read' ? 'readFailure' : 'writeFailure';
+  const current = _readSyncDiagnostics();
+  const storageWasUnavailable = _syncDiagnosticsStorageFailed;
+  if (!current[slot]) return !storageWasUnavailable;
+  const next = { version:1, readFailure: current.readFailure, writeFailure: current.writeFailure };
+  delete next[slot];
+  return _storeSyncDiagnostics(next);
+}
+
+function _syncDiagReason(record){
+  if (!record) return '';
+  const labels = {
+    lossy_ack: 'The backend reported that some submitted fields may be dropped or shortened. This can happen with an older Apps Script deployment or a submitted field over its limit. The sync guard kept your local copy.',
+    backend_error: 'The backend rejected the cloud operation.',
+    non_json: 'The backend returned a response the app could not read.',
+    payload_limit: 'The submitted data is over the sync limit.',
+    timeout: 'The cloud operation timed out.',
+    conflict_unverified: 'The app could not verify the cloud copy after a sync conflict.',
+    write_failed: 'The cloud write did not complete safely.',
+    read_failed: 'The app could not read the cloud copy.',
+    schema_mismatch: 'The cloud copy uses an unexpected Portfolio schema.',
+    unverified_timestamp: 'The cloud response did not include a confirmed server timestamp.',
+    local_persist: 'The local copy could not be stored safely.',
+    reset_blocked: 'Cloud writes are paused after a local reset.',
+    unknown: 'The last cloud operation did not complete safely.'
+  };
+  return labels[record.code] || labels.unknown;
+}
 
 function _lossyAckReason(data){
-  if (!data || typeof data !== 'object') return '';
-  const stripped = Array.isArray(data.strippedKeys) ? data.strippedKeys.filter(Boolean) : [];
-  const paths = Array.isArray(data.truncatedPaths) ? data.truncatedPaths.filter(Boolean) : [];
-  if (!stripped.length && !paths.length && !data.truncated) return '';
+  const details = _syncDiagLossy(data);
+  if (!details) return '';
   const parts = [];
-  if (stripped.length) parts.push('stripped keys: ' + stripped.join(', '));
-  if (paths.length) parts.push('truncated values: ' + paths.join(', '));
-  else if (data.truncated) parts.push('truncated values');
+  if (details.strippedKeys.length) parts.push('stripped keys: ' + details.strippedKeys.join(', '));
+  if (details.truncatedPaths.length) parts.push('truncated values: ' + details.truncatedPaths.join(', '));
+  else if (details.truncated) parts.push('truncated values (field paths unavailable)');
+  if (!parts.length) parts.push('backend reported possible dropped or shortened fields');
   return parts.join('; ');
 }
+
 function _rejectLossyAck(data){
-  const reason = _lossyAckReason(data);
-  if (!reason) return false;
-  localStorage.setItem(LK_LOSSY_SYNC_BLOCK, '1');
-  setSyncStatus('failed', 'Backend rejected: ' + reason + '. Redeploy Apps Script before syncing.');
-  showToast('The backend could not preserve all submitted data (' + reason + '). Local data is intact. Redeploy Apps Script, then use Push to cloud.', 'error');
+  const details = _syncDiagLossy(data);
+  if (!details) return false;
+  try { localStorage.setItem(LK_LOSSY_SYNC_BLOCK, '1'); } catch (_) {}
+  _recordSyncFailure('write', 'lossy_ack', details);
+  setSyncStatus('failed', 'Cloud write blocked because the backend could not preserve every submitted field. Export a backup, check the latest Apps Script, review field limits if current, then Push to cloud before Pull.');
+  showToast('Some submitted fields may be dropped or shortened. Your local copy was kept by the sync guard. Open Sync details for recovery steps.', 'error');
   return true;
 }
 
@@ -2094,6 +2278,46 @@ function lastPullSource(){ return localStorage.getItem(LK_LAST_PULL_SRC) || 'cli
 function setLastPull(stamp, source){
   if (stamp != null) localStorage.setItem(LK_LAST_PULL, stamp);
   localStorage.setItem(LK_LAST_PULL_SRC, source === 'server' ? 'server' : 'client');
+}
+
+function _isCanonicalServerTimestamp(value){
+  return typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
+    && !Number.isNaN(Date.parse(value));
+}
+function _setConfirmedCloudTimestamp(value){
+  if (!_isCanonicalServerTimestamp(value)) return false;
+  try { localStorage.setItem(LK_SYNC_CONFIRMED_TS, value); return true; }
+  catch (_) { return false; }
+}
+function _confirmedCloudTimestamp(){
+  try {
+    const value = localStorage.getItem(LK_SYNC_CONFIRMED_TS);
+    return _isCanonicalServerTimestamp(value) ? value : '';
+  } catch (_) { return ''; }
+}
+function _displaySyncTimestamp(value){
+  if (!_isCanonicalServerTimestamp(value)) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-SG', {
+      timeZone: 'Asia/Singapore',
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false, hourCycle: 'h23'
+    }).formatToParts(new Date(value));
+    const get = type => {
+      const part = parts.find(item => item.type === type);
+      return part ? part.value : '';
+    };
+    const day = get('day');
+    const month = get('month');
+    const year = get('year');
+    const hour = get('hour');
+    const minute = get('minute');
+    const second = get('second');
+    if (![day, month, year, hour, minute, second].every(Boolean)) return '';
+    return day + '/' + month + '/' + year + ' ' + hour + ':' + minute + ':' + second + ' SGT';
+  } catch (_) { return ''; }
 }
 
 /* In single-user BYOB mode, every "conflict" is benign — there's no second
@@ -2173,11 +2397,12 @@ async function pushToRemote(opts){
   // untouched here, only the network write is skipped.
   if (isLocalPreview()) { setSyncStatus('local', 'Preview, sync disabled'); return false; }
   if (localStorage.getItem(LK_RESET_SYNC_BLOCK) && !opts.allowResetOverride) {
+    _recordSyncFailure('write', 'reset_blocked');
     setSyncStatus('failed', 'Cloud writes paused after local reset. Pull from cloud to restore, or use explicit Push to cloud.');
     return false;
   }
   if (localStorage.getItem(LK_LOSSY_SYNC_BLOCK) && !opts.retryLossyBackend) {
-    setSyncStatus('failed', 'Cloud writes paused because the Apps Script backend must be redeployed.');
+    setSyncStatus('failed', 'Cloud writes paused because the backend may not preserve every submitted field. Export a backup, check the latest Apps Script, review field limits if current, then Push to cloud before Pull.');
     return false;
   }
 
@@ -2201,6 +2426,7 @@ async function pushToRemote(opts){
       showToast('Data size at ' + pct + '% of sync limit. Consider trimming changelog.', 'error');
     }
     if (body.length > PAYLOAD_HARD_CAP) {
+      _recordSyncFailure('write', 'payload_limit');
       setSyncStatus('failed', 'Payload exceeds sync limit.');
       return false;
     }
@@ -2218,23 +2444,24 @@ async function pushToRemote(opts){
       // Apps Script returned HTML (404 from googleusercontent redirect, login
       // page, error page, etc.). Don't crash — log and set failed status.
       console.warn('[sync] non-JSON push response, status', parsed.status, 'body starts:', parsed.text.slice(0, 100));
+      _recordSyncFailure('write', 'non_json', { status: parsed.status });
       setSyncStatus('failed', 'Backend returned non-JSON (status ' + parsed.status + ')');
       return false;
     }
     const data = parsed.data;
     if (_rejectLossyAck(data)) return false;
     if (data.error) {
-      // Old backend (pre-A2, no chunked storage) still hard-rejects any body
-      // over its single-cell 49,500-char limit with this exact message. A
-      // new client sending a bigger payload hits it first, before this
-      // check exists on any newer deploy. Surface the same "redeploy"
-      // prompt used for the missing-_savedAt case (see pullFromRemote).
-      if (/Payload too large/i.test(data.error)) {
-        setSyncStatus('failed', 'Backend out of date, redeploy Apps Script.');
-        showToast('Backend out of date, redeploy Apps Script (see README) to sync larger payloads.', 'error');
+      // A backend may reject the payload because of its deployed field and
+      // size limits. Keep the response text out of the UI and diagnostics.
+      if (typeof data.error === 'string' && /Payload too large/i.test(data.error)) {
+        _recordSyncFailure('write', 'payload_limit');
+        setSyncStatus('failed', 'Backend rejected the payload size. Export a backup, check the latest Apps Script and field limits, then retry Push to cloud.');
+        showToast('Cloud rejected the payload size. Export a backup, check the latest Apps Script and field limits, then retry Push to cloud.', 'error');
         return false;
       }
-      throw new Error(data.error);
+      _recordSyncFailure('write', 'backend_error');
+      setSyncStatus('failed', 'Backend rejected the cloud write. Export a backup, check the latest Apps Script and field limits, then retry Push to cloud.');
+      return false;
     }
     if (data.conflict) {
       console.info('[sync] conflict — source:', lastPullSource(), 'strict:', strictConflictsEnabled());
@@ -2261,6 +2488,7 @@ async function pushToRemote(opts){
         remoteSnapshot = checkParsed.data;
       } catch (checkErr) {
         // Can't verify, don't force-push blind.
+        _recordSyncFailure('write', 'conflict_unverified');
         setSyncStatus('failed', 'Could not verify cloud state, use Settings to Pull or Push');
         showToast('Sync conflict, could not verify the cloud copy. Use Settings to Pull or Push.', 'error');
         return false;
@@ -2292,11 +2520,14 @@ async function pushToRemote(opts){
           r = await recover();
         }
         if (r.ok && !_rejectLossyAck(r.data) && !r.data.error && !r.data.conflict) {
-          const stamp2 = r.data.savedAt || new Date().toISOString();
+          const serverStamp2 = r.data.savedAt;
+          const stamp2 = serverStamp2 || new Date().toISOString();
           localStorage.setItem(LK_SYNC_TS, stamp2);
           setLastPull(stamp2, 'server');
+          _setConfirmedCloudTimestamp(serverStamp2);
           const pushedLatest = pushRevision === _localSaveRevision;
           if (pushedLatest) _clearCloudDirty(pushRevision);
+          _clearSyncDiagnostic('write');
           setSyncStatus(pushedLatest ? 'synced' : 'syncing', pushedLatest ? '' : 'Newer local changes are waiting to sync');
           localStorage.removeItem(LK_LOSSY_SYNC_BLOCK);
           if (opts.allowResetOverride) localStorage.removeItem(LK_RESET_SYNC_BLOCK);
@@ -2308,22 +2539,27 @@ async function pushToRemote(opts){
           return true;
         }
         console.warn('[sync] auto-recovery exhausted retries', r);
+        _recordSyncFailure('write', 'write_failed');
         setSyncStatus('failed', 'Auto-recovery failed, try Pull from cloud');
         showToast('Sync failed, Settings → Pull from cloud to recover', 'error');
         return false;
       } catch (recoverErr) {
         console.warn('[sync] auto-recovery threw:', recoverErr.message);
+        _recordSyncFailure('write', 'write_failed');
         setSyncStatus('failed', recoverErr.message);
         return false;
       } finally {
         _conflictResolvingNow = false;
       }
     }
-    const stamp = data.savedAt || new Date().toISOString();
+    const serverStamp = data.savedAt;
+    const stamp = serverStamp || new Date().toISOString();
     localStorage.setItem(LK_SYNC_TS, stamp);
     setLastPull(stamp, 'server');  // push response gives us the real server stamp
+    _setConfirmedCloudTimestamp(serverStamp);
     const pushedLatest = pushRevision === _localSaveRevision;
     if (pushedLatest) _clearCloudDirty(pushRevision);
+    _clearSyncDiagnostic('write');
     setSyncStatus(pushedLatest ? 'synced' : 'syncing', pushedLatest ? '' : 'Newer local changes are waiting to sync');
     localStorage.removeItem(LK_LOSSY_SYNC_BLOCK);
     if (opts.allowResetOverride) localStorage.removeItem(LK_RESET_SYNC_BLOCK);
@@ -2332,9 +2568,11 @@ async function pushToRemote(opts){
   } catch (err) {
     if (err.name === 'AbortError') return false; // superseded by a newer push
     if (err.name === 'TimeoutError') {
+      _recordSyncFailure('write', 'timeout');
       setSyncStatus('failed', 'Push timed out after 30 s');
       showToast('Push timed out. Will retry on next save.', 'error');
     } else {
+      _recordSyncFailure('write', 'write_failed');
       setSyncStatus('failed', err.message);
     }
     return false;
@@ -2386,9 +2624,20 @@ async function pullFromRemote(opts){
   }
   const url = getSyncUrl();
   if (!url) { setSyncStatus('local'); return false; }
+  // Preview guard: never let a localhost/file: session pull from a real
+  // sheet, even when a live URL is present in localStorage. Keep the local
+  // copy and all dirty or lossy safety markers untouched.
+  if (isLocalPreview()) {
+    let preserveWarning = false;
+    try { preserveWarning = !!localStorage.getItem(LK_LOSSY_SYNC_BLOCK); } catch (_) { preserveWarning = true; }
+    if (_hasLocalUnsaved()) preserveWarning = true;
+    if (preserveWarning) updateSyncStatusPill();
+    else setSyncStatus('local', 'Preview, sync disabled');
+    return false;
+  }
   if (localStorage.getItem(LK_LOSSY_SYNC_BLOCK)) {
-    setSyncStatus('failed', 'Pull blocked because the last backend acknowledgement lost data. Redeploy Apps Script, then Push to cloud first.');
-    showToast('Pull blocked to protect your local data. Redeploy Apps Script, then use Push to cloud before pulling.', 'error');
+    setSyncStatus('failed', 'Pull blocked because the backend may not preserve every submitted field. Export a backup, check the latest Apps Script, review field limits if current, then Push to cloud before Pull.');
+    showToast('Pull blocked to protect your local data. Your local copy was kept by the sync guard. Open Sync details for recovery steps.', 'error');
     return false;
   }
   // A pull is destructive to the in-memory working copy. Wait for native or
@@ -2404,7 +2653,10 @@ async function pullFromRemote(opts){
       signal: AbortSignal.timeout ? AbortSignal.timeout(30000) : undefined
     });
     const data = await resp.json();
-    if (data.error) throw new Error(data.error);
+    if (data.error) {
+      _recordSyncFailure('read', 'read_failed');
+      throw new Error('Cloud read failed');
+    }
     if (_localSaveRevision !== localRevisionAtRead || _activeLocalSave || _syncTimer || _activeSyncLatest) {
       if (opts._retriedAfterLocalEdit) return _cancelPullForUnsavedChanges();
       if (!(await _quiesceSavesBeforePull(opts))) return _cancelPullForUnsavedChanges();
@@ -2422,6 +2674,7 @@ async function pullFromRemote(opts){
       if (decision === 'refuse'){
         // Remote holds financial data under an unexpected schema (e.g. a
         // SCHEMA version bump). Never clobber it — #Crit-1.
+        _recordSyncFailure('read', 'schema_mismatch');
         setSyncStatus('failed', 'Remote has data under an unexpected schema, not overwriting.');
         showToast('Cloud has data under a different schema. Not overwriting it. To replace the cloud with this device, use Settings → Push to cloud.', 'error');
         return false;
@@ -2444,6 +2697,7 @@ async function pullFromRemote(opts){
         if (!(await _quiesceSavesBeforePull(opts))) return _cancelPullForUnsavedChanges();
         return pullFromRemote(Object.assign({}, opts, { _retriedAfterLocalEdit:true }));
       }
+      _recordSyncFailure('read', 'local_persist');
       throw new Error('Pulled cloud data but could not confirm local persistence. The cloud copy remains intact.');
     }
     if (opts.discardLocalChanges) _clearCloudDirty();
@@ -2453,23 +2707,28 @@ async function pullFromRemote(opts){
     // every reload, because C1 always differs slightly from the client's
     // updatedAt. We persist the source flag so the push path can detect
     // a stale client-side stamp and auto-recover even after a reload.
+    const serverStamp = _isCanonicalServerTimestamp(data._savedAt) ? data._savedAt : '';
     const hasServerStamp = !!data._savedAt;
     const stamp = data._savedAt || data.updatedAt || new Date().toISOString();
     if (!hasServerStamp) {
-      console.warn('[sync] pull response missing _savedAt — backend out of date');
-      showToast('Backend out of date, redeploy Apps Script (see README) to stop sync conflicts.', 'error');
+      console.warn('[sync] pull response missing _savedAt');
+      showToast('Cloud response did not include a server timestamp. Check the latest Apps Script before syncing again.', 'error');
     }
     localStorage.setItem(LK_SYNC_TS, stamp);
     setLastPull(stamp, hasServerStamp ? 'server' : 'client');
+    _setConfirmedCloudTimestamp(serverStamp);
+    _clearSyncDiagnostic('read');
     localStorage.removeItem(LK_RESET_SYNC_BLOCK);
     setSyncStatus('synced');
     renderAll();
     return true;
   } catch (err) {
     if (err.name === 'TimeoutError') {
+      _recordSyncFailure('read', 'timeout');
       setSyncStatus('failed', 'Pull timed out after 30 s');
       showToast('Pull timed out. Check your connection and try again.', 'error');
     } else {
+      _recordSyncFailure('read', 'read_failed');
       setSyncStatus('failed', err.message);
     }
     return false;
@@ -2727,59 +2986,277 @@ function showConflictModal(opts){
         method:'POST', mode:'cors', redirect:'follow',
         headers:{ 'Content-Type':'text/plain;charset=utf-8' },
         body: JSON.stringify(obj)
-      });
+    });
     const parsed = await safeJson(resp);
     if (!parsed.ok){
+      _recordSyncFailure('write', 'non_json', { status: parsed.status });
       setSyncStatus('failed', 'Backend returned a non-JSON response');
-      showToast('Cloud returned a non-JSON response. The sync URL may be wrong, or the Apps Script backend is not deployed. Check the sync URL in Settings.', 'error');
+      showToast('Cloud returned a response the app could not read. Check the sync URL and latest Apps Script, then retry.', 'error');
       return false;
     }
     const data = parsed.data;
     if (_rejectLossyAck(data)) return false;
-    if (data.error) throw new Error(data.error);
-      const stamp = data.savedAt || new Date().toISOString();
+    if (data.error) {
+      _recordSyncFailure('write', 'backend_error');
+      throw new Error('Backend rejected the cloud write');
+    }
+      const serverStamp = data.savedAt;
+      const stamp = serverStamp || new Date().toISOString();
       localStorage.setItem(LK_SYNC_TS, stamp);
       setLastPull(stamp, 'server');
+      _setConfirmedCloudTimestamp(serverStamp);
       const pushedLatest = forceRevision === _localSaveRevision;
       if (pushedLatest) _clearCloudDirty(forceRevision);
+      _clearSyncDiagnostic('write');
       setSyncStatus(pushedLatest ? 'synced' : 'syncing', pushedLatest ? '' : 'Newer local changes are waiting to sync');
+      localStorage.removeItem(LK_LOSSY_SYNC_BLOCK);
       showToast('Cloud overwritten with local version', 'success');
     } catch (err) {
+      _recordSyncFailure('write', 'write_failed');
       setSyncStatus('failed', err.message);
     }
   };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   SYNC PILL — visual state
+   SYNC PILL — visual state + durable details
    ═══════════════════════════════════════════════════════════════════════ */
+let _syncStatusState = 'local';
+let _syncStatusDetail = '';
+
+function _syncDetailsModel(){
+  const mode = backendMode();
+  const diagnostics = _readSyncDiagnostics();
+  const writeFailure = diagnostics.writeFailure || null;
+  const readFailure = diagnostics.readFailure || null;
+  let lossyBlocked = false;
+  try { lossyBlocked = mode === 'legacy' && !!localStorage.getItem(LK_LOSSY_SYNC_BLOCK); } catch (_) {}
+  let hasUrl = false;
+  try { hasUrl = legacyBackendAllowed() && !!getSyncUrl(); } catch (_) {}
+  const hasLocalPending = mode === 'legacy' && _hasLocalUnsaved();
+  const hasCloudPending = mode === 'legacy' && _hasCloudDirty();
+  const lossyRecord = (lossyBlocked || (writeFailure && writeFailure.code === 'lossy_ack'))
+    ? ((writeFailure && writeFailure.code === 'lossy_ack') ? writeFailure : { code:'lossy_ack' }) : null;
+  let state = _syncStatusState || 'local';
+  let reason = '';
+  let action = '';
+  let failure = null;
+  let pending = hasLocalPending ? 'Local save is pending or unconfirmed'
+    : (hasCloudPending ? 'Local changes are waiting to reach cloud' : 'No local cloud changes pending');
+
+  if (mode === 'nas') {
+    pending = _nasPendingCount ? 'NAS changes are queued' : 'No NAS changes are queued';
+    state = _nasState || state;
+    if (state === 'conflict') {
+      reason = 'NAS reported a conflict, and queued local data was retained.';
+      action = 'Use the NAS conflict controls in Settings to choose how to continue.';
+    } else if (state === 'failed') {
+      reason = 'The NAS operation did not complete safely.';
+      action = 'Open Settings and retry only after checking the NAS status.';
+    } else if (_nasPendingCount) {
+      reason = 'Local data is retained while the NAS queue is pending.';
+      action = 'Open Settings to review the queue and retry when ready.';
+    } else {
+      reason = _nasReady ? 'NAS is authenticated for this tab.' : 'NAS is selected but this tab is not authenticated.';
+      action = _nasReady ? 'No action needed.' : 'Open Settings to authenticate before using NAS sync.';
+    }
+  } else if (mode === 'legacy-readonly') {
+    state = 'local';
+    pending = 'Read-only rollback, edits are not saved';
+    reason = 'This browser is showing a read-only legacy snapshot.';
+    action = 'Return to NAS in Settings before making changes.';
+  } else if (lossyRecord) {
+    state = lossyBlocked ? 'pull-blocked' : 'failed';
+    failure = lossyRecord;
+    pending = hasLocalPending ? 'Local save is pending or unconfirmed'
+      : (hasCloudPending ? 'Local changes are waiting to reach cloud' : 'Local data is retained by the sync guard');
+    reason = _syncDiagReason(lossyRecord);
+    action = 'Export a backup. Check that the latest Apps Script is deployed. If it is current, review the reported fields and their limits. Use Push to cloud, then Pull only after Push succeeds.';
+  } else if (writeFailure) {
+    state = 'failed';
+    failure = writeFailure;
+    pending = hasLocalPending ? 'Local save is pending or unconfirmed' : pending;
+    reason = _syncDiagReason(writeFailure);
+    action = 'Export a backup if needed, then retry Push to cloud from Settings.';
+  } else if (readFailure) {
+    state = 'failed';
+    failure = readFailure;
+    reason = _syncDiagReason(readFailure);
+    action = 'Keep the local copy, check the backend, then retry Pull from cloud.';
+  } else if (hasLocalPending) {
+    state = 'failed';
+    pending = 'Local save is pending or unconfirmed';
+    reason = 'The latest local change has not been confirmed in protected storage.';
+    action = 'Export a backup and keep this tab open until local storage is available.';
+  } else if (hasCloudPending) {
+    pending = 'Local changes are waiting to reach cloud';
+    if (state === 'syncing') {
+      reason = 'Local changes are being sent to the cloud.';
+      action = 'Wait for the operation to finish.';
+    } else {
+      state = 'queued';
+      reason = 'Local data is saved, but the cloud copy is not confirmed.';
+      action = hasUrl ? 'Use Push to cloud before Pull from cloud.' : 'Open Settings and add the Apps Script URL.';
+    }
+  } else if (!hasUrl) {
+    state = 'local';
+    reason = 'No Apps Script URL is configured.';
+    action = 'Use Settings if you want to connect a cloud copy.';
+  } else if (state === 'syncing') {
+    reason = 'A cloud operation is in progress.';
+    action = 'Wait for the operation to finish.';
+  } else if (state === 'failed') {
+    reason = 'The last cloud operation did not complete safely.';
+    action = 'Open Settings to review the operation and retry.';
+  } else if (state === 'synced') {
+    reason = 'The latest cloud operation completed.';
+    action = 'No action needed.';
+  } else {
+    reason = 'Cloud sync is ready.';
+    action = 'Use Push to cloud or Pull from cloud from Settings.';
+  }
+
+  let cloudStamp = '';
+  let unconfirmedStamp = '';
+  let contactConfirmed = false;
+  if (mode === 'legacy') {
+    try {
+      const stamp = localStorage.getItem(LK_SYNC_TS);
+      const confirmed = _confirmedCloudTimestamp();
+      if (confirmed) cloudStamp = confirmed;
+      if (stamp && stamp !== confirmed) unconfirmedStamp = stamp;
+      contactConfirmed = !!stamp && !!confirmed && stamp === confirmed;
+    } catch (_) {}
+  }
+  const technical = [];
+  if (failure){
+    technical.push('Code: ' + String(failure.code || 'unknown').toUpperCase());
+    if (failure.status) technical.push('HTTP status: ' + String(failure.status));
+    if (failure.code === 'lossy_ack'){
+      if (failure.strippedKeys && failure.strippedKeys.length) technical.push('Stripped keys: ' + failure.strippedKeys.join(', '));
+      if (failure.truncatedPaths && failure.truncatedPaths.length) technical.push('Truncated paths: ' + failure.truncatedPaths.join(', '));
+      else if (failure.truncated) technical.push('Truncated paths: unavailable');
+      if (failure.counts) technical.push('Reported counts: stripped ' + failure.counts.stripped + ', truncated ' + failure.counts.truncated);
+    }
+  } else {
+    technical.push('No unresolved cloud failure recorded.');
+  }
+  if (_syncDiagnosticsStorageFailed) technical.push('Diagnostic record: could not be saved in this tab');
+  if (hasLocalPending && mode === 'legacy' && !reason.includes('latest local change')) {
+    reason += ' The latest local change is not confirmed in protected storage.';
+    action = 'Export a backup before closing this tab. ' + action;
+  }
+  return {
+    mode, state, reason, action, pending, failure,
+    failureAt: failure ? (failure.at || 'Unknown') : 'None recorded',
+    confirmedAt: cloudStamp || 'Unknown',
+    unconfirmedAt: unconfirmedStamp,
+    currentContactConfirmed: contactConfirmed,
+    technical: technical.join('\n'),
+    hasUrl
+  };
+}
+
+function renderSyncDetails(){
+  const overlay = document.getElementById('sync-details-modal');
+  if (!overlay) return;
+  const model = _syncDetailsModel();
+  const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+  const displayTime = value => value === 'Unknown' || value === 'None recorded'
+    ? value : (_displaySyncTimestamp(value) || 'Unknown');
+  const stateLabels = { local:'Local only', syncing:'Syncing', synced:'Synced', failed:'Sync failed', 'pull-blocked':'Cloud pull blocked', queued:'Queued', conflict:'Conflict' };
+  const stateText = stateLabels[model.state] || 'Sync status';
+  set('sync-details-state', stateText);
+  set('sync-details-summary', stateText + ' · ' + model.pending);
+  set('sync-details-reason', model.reason);
+  set('sync-details-action', model.action);
+  set('sync-details-pending', model.pending);
+  set('sync-details-failure-at', displayTime(model.failureAt));
+  set('sync-details-cloud-at', displayTime(model.confirmedAt));
+  set('sync-details-technical', model.technical);
+  const note = document.getElementById('sync-details-cloud-note');
+  if (note){
+    note.textContent = model.confirmedAt !== 'Unknown' && model.currentContactConfirmed
+      ? 'Confirmed by the backend response'
+      : (model.confirmedAt !== 'Unknown' && model.unconfirmedAt
+        ? 'Latest contact was not confirmed, this is the last confirmed server timestamp'
+        : (model.unconfirmedAt ? 'A local contact time exists, but the server timestamp was not confirmed' : 'No confirmed cloud timestamp'));
+  }
+  const push = document.getElementById('sync-details-push');
+  const pull = document.getElementById('sync-details-pull');
+  const settings = document.getElementById('sync-details-settings');
+  if (push) push.hidden = !model.hasUrl || model.mode !== 'legacy';
+  if (pull) pull.hidden = !model.hasUrl || model.mode !== 'legacy';
+  if (settings) settings.hidden = model.mode === 'legacy' && model.hasUrl;
+  const settingsSummary = document.getElementById('sync-settings-summary');
+  if (settingsSummary) settingsSummary.textContent = stateText + ' · ' + model.pending;
+}
+
+function openSyncDetails(){
+  const overlay = document.getElementById('sync-details-modal');
+  if (!overlay) return;
+  renderSyncDetails();
+  overlay.classList.add('open');
+  const pill = document.getElementById('sync-pill');
+  if (pill) pill.setAttribute('aria-expanded', 'true');
+  openModalFocus(overlay, closeSyncDetails);
+}
+
+function closeSyncDetails(){
+  const overlay = document.getElementById('sync-details-modal');
+  if (!overlay) return;
+  overlay.classList.remove('open');
+  const pill = document.getElementById('sync-pill');
+  if (pill) pill.setAttribute('aria-expanded', 'false');
+  closeModalFocus(overlay);
+}
+
+function openSyncSettings(){
+  closeSyncDetails();
+  navigate('settings');
+}
+
 function setSyncStatus(state, detail){
+  _syncStatusState = state || 'local';
+  _syncStatusDetail = typeof detail === 'string' ? detail.slice(0, 300) : '';
   const pill = document.getElementById('sync-pill');
   if (!pill) return;
   const label = document.getElementById('sync-pill-label') || pill;
   pill.classList.remove('s-local','s-syncing','s-synced','s-failed','s-queued','s-conflict');
   const ts = legacyBackendAllowed() ? localStorage.getItem(LK_SYNC_TS) : null;
-  const tsLabel = ts ? ' · ' + relTime(ts) : '';
+  const diagnostics = state === 'synced' && legacyBackendAllowed() ? _readSyncDiagnostics() : null;
+  const hasUnresolvedDiagnostic = !!(diagnostics && (diagnostics.readFailure || diagnostics.writeFailure));
+  const visibleState = state === 'synced' && hasUnresolvedDiagnostic ? 'failed' : state;
+  let pullBlocked = false;
+  if (visibleState === 'failed' && legacyBackendAllowed()) {
+    try { pullBlocked = !!localStorage.getItem(LK_LOSSY_SYNC_BLOCK); } catch (_) {}
+  }
   let text = '';
-  switch (state) {
+  switch (visibleState) {
     case 'local':   pill.classList.add('s-local');   text = 'Local only'; break;
-    case 'syncing': pill.classList.add('s-syncing'); text = 'Syncing…'; break;
-    case 'synced':  pill.classList.add('s-synced');  text = 'Synced' + tsLabel; break;
-    case 'failed':  pill.classList.add('s-failed');  text = 'Sync failed'; break;
+    case 'syncing': pill.classList.add('s-syncing'); text = 'Syncing'; break;
+    case 'synced':  pill.classList.add('s-synced');  text = 'Synced'; break;
+    case 'failed':  pill.classList.add('s-failed');  text = pullBlocked ? 'Pull blocked' : 'Sync failed'; break;
     case 'queued':  pill.classList.add('s-queued');  text = 'Queued'; break;
     case 'conflict':pill.classList.add('s-conflict'); text = 'Conflict'; break;
   }
   label.textContent = text;
-  pill.title = detail || (state === 'synced'
+  pill.setAttribute('aria-label', 'Sync status: ' + text);
+  const visibleDetail = detail || (visibleState === 'failed' && hasUnresolvedDiagnostic
+    ? _syncDiagReason(diagnostics.writeFailure || diagnostics.readFailure)
+    : '');
+  pill.title = visibleDetail || (visibleState === 'synced'
     ? (isNasMode() ? 'All queued changes are synced to NAS' : 'All changes pushed to the cloud')
-    : (state === 'local' ? 'No Apps Script URL set' : ''));
+    : (visibleState === 'local' ? 'No Apps Script URL set' : ''));
   const det = document.getElementById('sync-status-detail');
-  if (det) det.textContent = detail || (ts ? 'Last sync ' + relTime(ts) : 'No sync yet');
-  // The pill itself is dot-only on every width now (see index.html), the text
-  // moves into the dashboard hero subline instead. Null-checked: the subline
-  // only exists while the dashboard is the rendered/current page.
+  const confirmedTs = !isNasMode() ? _confirmedCloudTimestamp() : '';
+  if (det) det.textContent = visibleDetail || (ts && confirmedTs && ts === confirmedTs ? 'Last confirmed cloud contact ' + relTime(confirmedTs) : (ts ? 'Cloud contact not confirmed by server' : 'No confirmed cloud contact'));
+  // The pill keeps a compact text label on every width. The dashboard hero
+  // subline mirrors it while that page is rendered.
   const heroSync = document.getElementById('dash-hero-sync');
   if (heroSync) heroSync.textContent = text;
+  const details = document.getElementById('sync-details-modal');
+  if (details && details.classList.contains('open')) renderSyncDetails();
 }
 
 function updateSyncStatusPill(){
@@ -2792,10 +3269,16 @@ function updateSyncStatusPill(){
     setSyncStatus('local', 'Read-only rollback, Apps Script is disabled');
     return;
   }
+  const diagnostics = _readSyncDiagnostics();
+  let lossyBlocked = false;
+  try { lossyBlocked = !!localStorage.getItem(LK_LOSSY_SYNC_BLOCK); } catch (_) {}
   if (_hasLocalUnsaved()) setSyncStatus('failed', 'Unsaved changes remain in this tab. Export a backup before closing it.');
-  else if (_hasCloudDirty()) setSyncStatus('failed', 'Local changes have not reached the cloud. Use Push to cloud before pulling.');
+  else if (lossyBlocked || (diagnostics.writeFailure && diagnostics.writeFailure.code === 'lossy_ack')) setSyncStatus('failed', 'Cloud writes are blocked because the backend may not preserve every submitted field. Export a backup, check the latest Apps Script, review field limits if current, then Push to cloud before Pull.');
+  else if (diagnostics.writeFailure) setSyncStatus('failed', _syncDiagReason(diagnostics.writeFailure));
+  else if (diagnostics.readFailure) setSyncStatus('failed', _syncDiagReason(diagnostics.readFailure));
+  else if (_hasCloudDirty()) setSyncStatus('queued', 'Local changes have not reached the cloud. Use Push to cloud before pulling.');
   else if (!getSyncUrl()) setSyncStatus('local');
-  else if (localStorage.getItem(LK_SYNC_TS)) setSyncStatus('synced');
+  else if (localStorage.getItem(LK_SYNC_TS)) setSyncStatus('synced', _confirmedCloudTimestamp() === localStorage.getItem(LK_SYNC_TS) ? '' : 'Last recorded cloud contact, server timestamp not confirmed');
   else setSyncStatus('local', 'URL saved, run a pull or push to sync');
 }
 
@@ -4503,8 +4986,10 @@ function importBackupFromFile(input){
 function renderDiagnostics(){
   const out = document.getElementById('diag-output');
   if (!out) return;
-  const ts   = localStorage.getItem(LK_SYNC_TS);
-  const last = localStorage.getItem(LK_LAST_PULL);
+  const mode = backendMode();
+  const ts   = mode === 'legacy' ? localStorage.getItem(LK_SYNC_TS) : null;
+  const confirmedTs = mode === 'legacy' ? _confirmedCloudTimestamp() : '';
+  const last = mode === 'legacy' ? localStorage.getItem(LK_LAST_PULL) : null;
   const lines = [
     'App version    : ' + APP_VERSION,
     'Schema         : ' + SCHEMA,
@@ -4512,8 +4997,9 @@ function renderDiagnostics(){
     'Apps Script URL: ' + (legacyBackendAllowed() && getSyncUrl() ? '✓ set' : '✗ inactive'),
     'NAS gateway    : ' + (isNasMode() ? (_nasReady ? '✓ authenticated' : 'selected, auth required') : '✗ inactive'),
     'NAS queue      : ' + (isNasMode() ? String(_nasPendingCount) + ' pending' : '—'),
-    'Last sync (TS) : ' + (ts ? ts + ' (' + relTime(ts) + ')' : '—'),
-    'Last pull seen : ' + (last || '—'),
+    'Last confirmed : ' + (confirmedTs ? (_displaySyncTimestamp(confirmedTs) || 'Unknown') : 'Unknown'),
+    'Last contact   : ' + (ts ? (_displaySyncTimestamp(ts) || 'Unknown') : '—'),
+    'Last pull seen : ' + (last ? (_displaySyncTimestamp(last) || 'Unknown') : '—'),
     'Theme          : ' + (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
     'Local rows     : ' +
       'stocks=' + DB.stocks.length +
@@ -11442,7 +11928,8 @@ function installEventDelegation(){
     'entity-modal':     closeEntityModal,
     'stock-cols-modal': () => closeColumns('stocks'),
     'board-cols-modal': () => closeColumns('board'),
-    'setup-wizard':     closeSetupWizard
+    'setup-wizard':     closeSetupWizard,
+    'sync-details-modal': closeSyncDetails
   };
   document.addEventListener('click', (e) => {
     const fn = BACKDROP_CLOSE_FNS[e.target && e.target.id];
@@ -11495,6 +11982,9 @@ function installEventDelegation(){
     manualSync:          () => manualSync(),
     manualPush:          () => manualPush(),
     manualPull:          () => manualPull(),
+    openSyncDetails:     () => openSyncDetails(),
+    closeSyncDetails:    () => closeSyncDetails(),
+    openSyncSettings:     () => openSyncSettings(),
     refreshFx:           () => refreshFx(),
     testPriceFetch:      () => testPriceFetch(),
     renderDiagnostics:   () => renderDiagnostics(),

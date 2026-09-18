@@ -84,7 +84,12 @@ const FUNCTION_TARGETS = [
   'crossCurrencyTransferMissingAmount', 'cashTradeFlow', 'transferInAmount', 'deriveCashBalance',
   'annualPremium', 'cashPremiumPerYear', '_insurancePremiumSchedule',
   'estimateAnnualTax', 'toSGD', 'sgdOrNull', 'getFx', '_displayMoneyOrNull', '_ageOnYear',
-  '_stockMvSGDInfo', '_cryptoSGDInfo', '_lossyAckReason', '_rejectLossyAck',
+  '_stockMvSGDInfo', '_cryptoSGDInfo',
+  '_syncDiagPath', '_syncDiagList', '_syncDiagLossy', '_syncDiagSafeCode',
+  '_syncDiagRecordSafe', '_readSyncDiagnostics', '_storeSyncDiagnostics',
+  '_recordSyncFailure', '_clearSyncDiagnostic', '_syncDiagReason',
+  '_lossyAckReason', '_rejectLossyAck', '_isCanonicalServerTimestamp',
+  '_setConfirmedCloudTimestamp', '_confirmedCloudTimestamp', '_displaySyncTimestamp',
   '_markLocalUnsaved', '_clearLocalUnsaved', '_hasLocalUnsaved',
   '_markCloudDirty', '_clearCloudDirty', '_hasCloudDirty',
   '_stripBackupMetadata', 'localPersistPayload', 'syncPayload', 'backupExportPayload',
@@ -96,13 +101,14 @@ const FUNCTION_TARGETS = [
   '_persistLocalOnly', 'safeJson', 'pushToRemote',
   '_quiesceSavesBeforePull',
   '_cancelPullForUnsavedChanges', 'setLastPull', 'pullFromRemote',
+  '_syncDetailsModel', 'setSyncStatus', 'updateSyncStatusPill',
   '_copySafeOwnObject', '_sanitiseList', 'normaliseEntityRow', 'entityModalSave', 'entityModalDelete',
   'restoreFromTrash', 'runReconciliation',
   '_cancelSyncForReset', 'resetLocalConfirm', '_fxPairsInUse', 'refreshFx',
   '_pbDrawInto', '_pbDrawTimeSeries',
   'pbPersistSaved', 'pbSaveChart', 'pbTogglePin', 'pbDeleteSaved', 'pbUndoDelete'
 ];
-const CONST_TARGETS = ['APP_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS'];
+const CONST_TARGETS = ['APP_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS'];
 
 const extractedFns = {};
 const missingFns = [];
@@ -172,6 +178,13 @@ function freshSandbox(dbOverrides){
     _activeSyncController: null,
     _activeSyncCompletions: new Set(),
     _activeSyncLatest: null,
+    _syncDiagnosticsMemory: null,
+    _syncDiagnosticsStorageFailed: false,
+    _syncStatusState: 'local',
+    _syncStatusDetail: '',
+    _nasPendingCount: 0,
+    _nasState: 'local',
+    _nasReady: false,
     _activeLocalSave: null,
     _localSaveRevision: 0,
     _localUnsavedInMemory: false,
@@ -222,6 +235,7 @@ function freshSandbox(dbOverrides){
     fmt: n => String(n),
     ENTITY_SCHEMAS: {},
     document: { getElementById: () => null },
+    relTime: () => 'relative time',
     location: { protocol:'https:', hostname:'portfolio.example' },
     AbortController,
     AbortSignal,
@@ -260,6 +274,32 @@ function freshSandbox(dbOverrides){
   vm.createContext(sandbox);
   vm.runInContext(COMBINED_SRC, sandbox, { filename: 'app.js (extracted)' });
   return sandbox;
+}
+
+function installSyncStatusDom(sb){
+  const classes = new Set();
+  const pill = {
+    classList: {
+      add: (...names) => names.forEach(name => classes.add(name)),
+      remove: (...names) => names.forEach(name => classes.delete(name)),
+      contains: name => classes.has(name)
+    },
+    attrs: {},
+    setAttribute(name, value){ this.attrs[name] = String(value); },
+    title: '',
+    textContent: ''
+  };
+  const label = { textContent: '' };
+  const detail = { textContent: '' };
+  sb.document = {
+    getElementById(id){
+      if (id === 'sync-pill') return pill;
+      if (id === 'sync-pill-label') return label;
+      if (id === 'sync-status-detail') return detail;
+      return null;
+    }
+  };
+  return { classes, pill, label, detail };
 }
 
 /* Stubs Date inside an already-built sandbox so _insurancePremiumSchedule's
@@ -734,11 +774,126 @@ async function runTests(){
     assert.strictEqual(sb.localStorage.getItem('kjr-pf-lossy-sync-block-v1'), '1');
     assert.strictEqual(states.length, 1);
     assert.strictEqual(states[0].state, 'failed');
-    assert.match(states[0].detail, /insurance/);
+    assert.match(states[0].detail, /Export a backup/);
+    assert.match(states[0].detail, /review field limits if current/);
+    const stored = JSON.parse(sb.localStorage.getItem('kjr-pf-sync-diagnostics-v1'));
+    assert.deepStrictEqual(stored.writeFailure.strippedKeys, ['insurance']);
+    assert.strictEqual(stored.writeFailure.code, 'lossy_ack');
     const pushSrc = extractFunction('pushToRemote');
     const rejectAt = pushSrc.indexOf('if (_rejectLossyAck(data)) return false;');
-    const acceptedStampAt = pushSrc.indexOf('const stamp = data.savedAt', rejectAt);
+    const acceptedStampAt = pushSrc.indexOf('const serverStamp = data.savedAt', rejectAt);
     assert.ok(rejectAt >= 0 && acceptedStampAt > rejectAt);
+  });
+
+  test('sync diagnostics - allowlisted paths stay bounded and truthy legacy truncation remains blocked', () => {
+    const sb = freshSandbox();
+    assert.strictEqual(sb._syncDiagPath('insurance[12].notes'), 'insurance[12].notes');
+    assert.strictEqual(sb._syncDiagPath('insurance[12].privateToken'), null);
+    assert.strictEqual(sb._syncDiagPath('privateTable[0].notes'), null);
+    for (const marker of [true, 'true', 1]) {
+      const details = sb._syncDiagLossy({ truncated: marker });
+      assert.ok(details, 'truthy marker should remain a lossy acknowledgement');
+      assert.strictEqual(details.truncated, true);
+    }
+    const details = sb._syncDiagLossy({
+      strippedKeys: ['insurance', 'privateToken', 'stocks.secret', 'insurance'],
+      truncatedPaths: ['insurance[0].notes', 'insurance[0].privateToken', 'cash[999].amount']
+    });
+    assert.deepStrictEqual(Array.from(details.strippedKeys), ['insurance', 'stocks']);
+    assert.deepStrictEqual(Array.from(details.truncatedPaths), ['insurance[0].notes', 'cash[999].amount']);
+    assert.strictEqual(details.counts.stripped, 4);
+    assert.strictEqual(details.counts.truncated, 3);
+  });
+
+  test('sync diagnostics - stored timestamps accept canonical ISO values only', () => {
+    const sb = freshSandbox();
+    assert.strictEqual(sb._isCanonicalServerTimestamp('2026-09-18T12:34:56.789Z'), true);
+    assert.strictEqual(sb._isCanonicalServerTimestamp('2026-09-18T12:34:56Z'), false);
+    assert.strictEqual(sb._isCanonicalServerTimestamp('2026-99-99T12:34:56.789Z'), false);
+    assert.strictEqual(sb._syncDiagRecordSafe({ code:'write_failed', at:'2026-09-18T12:34:56Z' }).at, undefined);
+    assert.strictEqual(sb._syncDiagRecordSafe({ code:'write_failed', at:'2026-09-18T12:34:56.789Z' }).at, '2026-09-18T12:34:56.789Z');
+  });
+
+  test('sync details timestamps display as Singapore local time and reject unsafe values', () => {
+    const sb = freshSandbox();
+    assert.strictEqual(sb._displaySyncTimestamp('2026-09-18T00:34:56.789Z'), '18/09/2026 08:34:56 SGT');
+    assert.strictEqual(sb._displaySyncTimestamp('legacy-contact'), '');
+    assert.strictEqual(sb._displaySyncTimestamp('2026-09-18T00:34:56Z'), '');
+  });
+
+  test('sync diagnostics - read and write failures clear independently and retain safe detail in memory', () => {
+    const sb = freshSandbox();
+    sb._recordSyncFailure('write', 'backend_error', { status: 422 });
+    sb._recordSyncFailure('read', 'read_failed');
+    let stored = JSON.parse(sb.localStorage.getItem('kjr-pf-sync-diagnostics-v1'));
+    assert.strictEqual(stored.writeFailure.code, 'backend_error');
+    assert.strictEqual(stored.writeFailure.status, 422);
+    assert.strictEqual(stored.readFailure.code, 'read_failed');
+    assert.strictEqual(sb._clearSyncDiagnostic('write'), true);
+    stored = JSON.parse(sb.localStorage.getItem('kjr-pf-sync-diagnostics-v1'));
+    assert.strictEqual(stored.writeFailure, undefined);
+    assert.strictEqual(stored.readFailure.code, 'read_failed');
+
+    sb.protectedStorage.setItem = () => { throw new Error('diagnostics unavailable'); };
+    sb._recordSyncFailure('write', 'payload_limit');
+    assert.strictEqual(sb._syncDiagnosticsStorageFailed, true);
+    assert.strictEqual(sb._readSyncDiagnostics().writeFailure.code, 'payload_limit');
+    assert.strictEqual(sb._clearSyncDiagnostic('write'), false);
+    assert.strictEqual(sb._readSyncDiagnostics().readFailure.code, 'read_failed');
+  });
+
+  test('sync status - pre-upgrade recorded contact stays synced while confirmed time remains unknown', () => {
+    const sb = freshSandbox();
+    const ui = installSyncStatusDom(sb);
+    sb.localStorage.setItem('kjr-pf-sync-ts-v1', 'legacy-contact');
+    sb.updateSyncStatusPill();
+    assert.strictEqual(ui.label.textContent, 'Synced');
+    assert.strictEqual(ui.classes.has('s-synced'), true);
+    assert.strictEqual(sb._syncDetailsModel().confirmedAt, 'Unknown');
+    assert.strictEqual(sb._syncDetailsModel().failureAt, 'None recorded');
+  });
+
+  test('sync status - diagnostic storage failure alone stays secondary to local status', () => {
+    const sb = freshSandbox();
+    const ui = installSyncStatusDom(sb);
+    sb.protectedStorage = { getItem(){ throw new Error('diagnostics unavailable'); } };
+    sb.updateSyncStatusPill();
+    assert.strictEqual(ui.label.textContent, 'Local only');
+    assert.strictEqual(ui.classes.has('s-failed'), false);
+    assert.match(sb._syncDetailsModel().technical, /could not be saved/);
+  });
+
+  test('sync status - an unresolved read failure prevents a green synced pill', () => {
+    const sb = freshSandbox();
+    const ui = installSyncStatusDom(sb);
+    sb._recordSyncFailure('read', 'read_failed');
+    sb.setSyncStatus('synced');
+    assert.strictEqual(ui.label.textContent, 'Sync failed');
+    assert.strictEqual(ui.classes.has('s-failed'), true);
+  });
+
+  test('sync details - active syncing keeps a dirty queue in progress, idle dirty state is queued', () => {
+    const sb = freshSandbox();
+    const ui = installSyncStatusDom(sb);
+    sb._markCloudDirty();
+    sb._syncStatusState = 'syncing';
+    assert.strictEqual(sb._syncDetailsModel().state, 'syncing');
+    sb._syncStatusState = 'local';
+    assert.strictEqual(sb._syncDetailsModel().state, 'queued');
+    sb.updateSyncStatusPill();
+    assert.strictEqual(ui.label.textContent, 'Queued');
+    assert.strictEqual(ui.classes.has('s-queued'), true);
+  });
+
+  test('sync status and details - lossy marker exposes concise pull block labels', () => {
+    const sb = freshSandbox();
+    const ui = installSyncStatusDom(sb);
+    sb.localStorage.setItem('kjr-pf-lossy-sync-block-v1', 'legacy-marker-without-details');
+    sb.updateSyncStatusPill();
+    assert.strictEqual(ui.label.textContent, 'Pull blocked');
+    const model = sb._syncDetailsModel();
+    assert.strictEqual(model.state, 'pull-blocked');
+    assert.match(model.action, /If it is current, review the reported fields and their limits/);
   });
 
   test('apps-script sanitiser round-trips Insurance tables and reports array caps', () => {
@@ -863,6 +1018,21 @@ async function runTests(){
     assert.strictEqual(await sb.pushToRemote(), false);
     assert.strictEqual(requests, 0);
     assert.strictEqual(sb._hasCloudDirty(), true);
+  });
+
+  await testAsync('pullFromRemote - preview guard preserves dirty and lossy markers and makes no request', async () => {
+    const sb = freshSandbox();
+    const ui = installSyncStatusDom(sb);
+    sb._markCloudDirty();
+    sb.localStorage.setItem('kjr-pf-lossy-sync-block-v1', '1');
+    sb.isLocalPreview = () => true;
+    let requests = 0;
+    sb.fetch = async () => { requests++; throw new Error('must not fetch'); };
+    assert.strictEqual(await sb.pullFromRemote(), false);
+    assert.strictEqual(requests, 0);
+    assert.strictEqual(sb._hasCloudDirty(), true);
+    assert.strictEqual(sb.localStorage.getItem('kjr-pf-lossy-sync-block-v1'), '1');
+    assert.strictEqual(ui.label.textContent, 'Pull blocked');
   });
 
   await testAsync('pullFromRemote - a completed failed POST is retried before pull in both conflict modes', async () => {

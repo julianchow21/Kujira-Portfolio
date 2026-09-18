@@ -195,14 +195,13 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
   html.privacy td.num:hover{filter:none;-webkit-user-select:auto;user-select:auto}
 }
 
-/* SYNC PILL, a compact status-dot control in the topbar on every width. The
-   text label (Local only / Syncing… / Synced 2m / Sync failed) moves into the
-   dashboard hero subline instead (setSyncStatus keeps both in step); the pill
-   itself stays reachable and clickable from every tab via its dot + title. */
+/* SYNC PILL, a compact text status control in the topbar on every width. The
+   details modal carries timestamps and bounded technical context, while the
+   pill stays reachable and clickable from every tab. */
 .sync-pill{display:inline-flex;align-items:center;gap:6px;padding:7px 9px;border-radius:999px;border:1px solid var(--glass-border);background:var(--glass);font-size:12px;font-weight:600;color:var(--text2);font-family:inherit;cursor:pointer;transition:all 0.15s;white-space:nowrap}
-/* Text label stays in the accessibility tree (screen readers announce state)
-   even though the pill is dot-only for sighted users on every width. */
-#sync-pill-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+/* Keep a short text state beside the dot at every width. Details such as
+   timestamps and safe technical codes live in the accessible modal. */
+#sync-pill-label{display:inline;min-width:0;max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (hover:hover){.sync-pill:hover{background:var(--glass-strong);color:var(--text)}}
 .sync-pill::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--text3);flex-shrink:0}
 .sync-pill.s-local::before{background:var(--text3)}
@@ -325,6 +324,19 @@ textarea.fi{resize:vertical;min-height:70px}
 .modal-head h3{font-size:15px;font-weight:600}
 .modal-body{padding:20px;overflow-y:auto;flex:1 1 auto}
 .modal-foot{padding:14px 20px;border-top:1px solid var(--glass-border);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;flex-shrink:0}
+.sync-details-modal{max-width:620px}
+.sync-details-modal [hidden]{display:none !important}
+.sync-details-summary{margin-bottom:14px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2);font-size:13px;font-weight:600}
+.sync-details-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:14px}
+.sync-details-item{min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2)}
+.sync-details-item-wide{grid-column:1 / -1}
+.sync-details-label{display:block;margin-bottom:4px;color:var(--text3);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.sync-details-value{margin:0;color:var(--text2);font-size:13px;line-height:1.55;overflow-wrap:anywhere;white-space:pre-wrap}
+.sync-details-technical{font-family:'SF Mono',ui-monospace,monospace;font-size:12px}
+@media (max-width:560px){
+  .sync-details-grid{grid-template-columns:1fr}
+  .sync-details-item-wide{grid-column:auto}
+}
 
 /* MOBILE "MORE" SHEET, slides up from the bottom rather than the centred
    dialog every other .modal uses. Only reachable via the bottom tab bar,
@@ -762,7 +774,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       <button type="button" data-ccy="SGD" data-click="setDisplayCcy" data-a0="SGD">SGD</button>
       <button type="button" data-ccy="USD" data-click="setDisplayCcy" data-a0="USD">USD</button>
     </div>
-    <button id="sync-pill" class="sync-pill s-local" data-click="manualSync" title="Click to sync now"><span id="sync-pill-label">Local only</span></button>
+    <button id="sync-pill" class="sync-pill s-local" data-click="openSyncDetails" title="Open sync details" aria-haspopup="dialog" aria-controls="sync-details-modal" aria-expanded="false"><span id="sync-pill-label">Local only</span></button>
     <div class="icon-btn-group">
       <a class="icon-btn docs-link" href="https://kujira-journal.pages.dev" target="_blank" rel="noopener noreferrer" title="How it works (Journal docs)" aria-label="How it works">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
@@ -1038,6 +1050,10 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
           <button class="btn" data-click="manualPull">Pull from cloud</button>
           <button class="btn" data-click="manualPush">Push to cloud</button>
           <button class="btn btn-danger" data-click="resetLocalConfirm">Reset local data</button>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px;align-items:center;flex-wrap:wrap">
+          <span id="sync-settings-summary" class="hint" role="status" aria-live="polite">Sync details are available here.</span>
+          <button type="button" class="btn btn-ghost" data-click="openSyncDetails">View sync details</button>
         </div>
         <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px">
           <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
@@ -1564,6 +1580,57 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   </div>
 </div>
 
+<!-- PERSISTENT SYNC DETAILS, populated from bounded local diagnostics -->
+<div class="overlay" id="sync-details-modal" role="dialog" aria-modal="true" aria-labelledby="sync-details-title" aria-describedby="sync-details-summary" tabindex="-1">
+  <div class="modal sync-details-modal">
+    <div class="modal-head">
+      <h3 id="sync-details-title">Sync details</h3>
+      <button class="btn-ghost btn btn-sm" data-click="closeSyncDetails" aria-label="Close sync details">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="sync-details-summary" class="sync-details-summary" role="status" aria-live="polite"></div>
+      <div class="sync-details-grid">
+        <div class="sync-details-item">
+          <span class="sync-details-label">Status</span>
+          <p id="sync-details-state" class="sync-details-value"></p>
+        </div>
+        <div class="sync-details-item">
+          <span class="sync-details-label">Local pending state</span>
+          <p id="sync-details-pending" class="sync-details-value"></p>
+        </div>
+        <div class="sync-details-item sync-details-item-wide">
+          <span class="sync-details-label">Reason</span>
+          <p id="sync-details-reason" class="sync-details-value"></p>
+        </div>
+        <div class="sync-details-item sync-details-item-wide">
+          <span class="sync-details-label">Next step</span>
+          <p id="sync-details-action" class="sync-details-value"></p>
+        </div>
+        <div class="sync-details-item">
+          <span class="sync-details-label">Failure recorded</span>
+          <p id="sync-details-failure-at" class="sync-details-value"></p>
+        </div>
+        <div class="sync-details-item">
+          <span class="sync-details-label">Last confirmed cloud timestamp</span>
+          <p id="sync-details-cloud-at" class="sync-details-value"></p>
+          <span id="sync-details-cloud-note" class="hint"></span>
+        </div>
+        <div class="sync-details-item sync-details-item-wide">
+          <span class="sync-details-label">Technical details</span>
+          <p id="sync-details-technical" class="sync-details-value sync-details-technical"></p>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="sync-details-settings" data-click="openSyncSettings">Open Settings</button>
+      <button class="btn" data-click="exportBackup">Export backup</button>
+      <button class="btn" id="sync-details-pull" data-click="manualPull">Pull from cloud</button>
+      <button class="btn btn-primary" id="sync-details-push" data-click="manualPush">Push to cloud</button>
+      <button class="btn btn-ghost" data-click="closeSyncDetails">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- TOAST HOST -->
 <div id="toast-host" aria-live="polite" role="status"></div>
 
@@ -1572,12 +1639,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.64"></script>
-<script src="Worker/kjr-sortable.js?v=2.64"></script>
-<script src="Worker/kjr-vault.js?v=2.64"></script>
-<script src="Worker/kjr-migration.js?v=2.64"></script>
-<script src="Worker/supabase.js?v=2.64"></script>
-<script src="Worker/kjr-nas.js?v=2.64"></script>
-<script src="Worker/app.js?v=2.64"></script>
+<script src="Worker/kjr-core.js?v=2.65"></script>
+<script src="Worker/kjr-sortable.js?v=2.65"></script>
+<script src="Worker/kjr-vault.js?v=2.65"></script>
+<script src="Worker/kjr-migration.js?v=2.65"></script>
+<script src="Worker/supabase.js?v=2.65"></script>
+<script src="Worker/kjr-nas.js?v=2.65"></script>
+<script src="Worker/app.js?v=2.65"></script>
 </body>
 </html>
