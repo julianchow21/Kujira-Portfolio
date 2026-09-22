@@ -985,6 +985,14 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       </div>
     </div>
 
+    <div class="card" id="decision-notes-pilot-card" hidden>
+      <div class="card-head"><h3>Decision notes pilot</h3><span class="hint">Synthetic, local and loopback only.</span></div>
+      <div class="card-body">
+        <p class="hint" style="margin-bottom:12px">Record why a decision or assumption changed around a fixed synthetic snapshot. The pilot never reads or changes Portfolio records.</p>
+        <a class="btn btn-primary" id="decision-notes-pilot-link" href="./decision-notes-pilot.html">Open decision notes pilot</a>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-head"><h3>Appearance</h3><span class="hint">Switch between the light and dark look.</span></div>
       <div class="card-body">
@@ -1639,12 +1647,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.65"></script>
-<script src="Worker/kjr-sortable.js?v=2.65"></script>
-<script src="Worker/kjr-vault.js?v=2.65"></script>
-<script src="Worker/kjr-migration.js?v=2.65"></script>
-<script src="Worker/supabase.js?v=2.65"></script>
-<script src="Worker/kjr-nas.js?v=2.65"></script>
-<script src="Worker/app.js?v=2.65"></script>
+<script src="Worker/kjr-core.js?v=2.66"></script>
+<script src="Worker/kjr-sortable.js?v=2.66"></script>
+<script src="Worker/kjr-vault.js?v=2.66"></script>
+<script src="Worker/kjr-migration.js?v=2.66"></script>
+<script src="Worker/supabase.js?v=2.66"></script>
+<script src="Worker/kjr-nas.js?v=2.66"></script>
+<script src="Worker/app.js?v=2.66"></script>
 </body>
 </html>

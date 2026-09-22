@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.65';
-const APP_DISPLAY_VERSION = 'v2.65 (18 Sep)';
+const APP_VERSION = 'v2.66';
+const APP_DISPLAY_VERSION = 'v2.66 (23 Sep)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -2032,6 +2032,17 @@ function getSyncUrl(){
 function isLocalPreview(){
   const h = location.hostname;
   return location.protocol === 'file:' || h === 'localhost' || h === '127.0.0.1';
+}
+
+/* The synthetic decision-notes pilot is intentionally discoverable only from
+   a loopback HTTP(S) preview. Keep the link out of hosted Settings, and run
+   this before the ordinary app storage boot so the pilot boundary is clear. */
+function showDecisionNotesPilotLink(){
+  const hostname = String(location.hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  const loopback = (location.protocol === 'http:' || location.protocol === 'https:') &&
+    (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1');
+  const card = document.getElementById('decision-notes-pilot-card');
+  if (card) card.hidden = !loopback;
 }
 function setSyncUrl(u){
   if (!legacyBackendAllowed()) {
@@ -12138,6 +12149,7 @@ function installEventDelegation(){
 }
 
 async function boot(){
+  showDecisionNotesPilotLink();
   applyTheme(localStorage.getItem(LK_THEME) || 'dark');
   applyPrivacy(privacyOn());
   // Stamp display version into the logo (matches Collectibles app-ver format)
