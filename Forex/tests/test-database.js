@@ -17,6 +17,7 @@ const SCHEMA_PATH = path.join(REPO_ROOT, 'Forex', 'schema.sql');
 const USER_A = '00000000-0000-0000-0000-00000000000a';
 const USER_B = '00000000-0000-0000-0000-00000000000b';
 const USER_C = '00000000-0000-0000-0000-00000000000c';
+const USER_D = '00000000-0000-0000-0000-00000000000d';
 const BIN_NAMES = ['initdb', 'pg_ctl', 'psql'];
 
 function findExecutable(name) {
@@ -325,6 +326,7 @@ create role authenticated nologin;
 create role service_role nologin bypassrls;
 grant usage on schema auth, public to anon, authenticated, service_role;
 grant select on auth.users to service_role;
+insert into auth.users (id) values (${sqlLiteral(USER_D)});
 `;
   runSql(bootstrap, 'bootstrap Supabase auth fixture');
 
@@ -337,26 +339,274 @@ grant select on auth.users to service_role;
   runSql(`
 insert into auth.users (id) values
   (${sqlLiteral(USER_A)}), (${sqlLiteral(USER_B)}), (${sqlLiteral(USER_C)});
-insert into public.profiles (id, plan) values
-  (${sqlLiteral(USER_A)}, 'free'), (${sqlLiteral(USER_B)}, 'free');
 insert into public.trades (id, data, user_id) values
   ('a_trade', '{"owner":"a"}'::jsonb, ${sqlLiteral(USER_A)}),
   ('b_trade', '{"owner":"b"}'::jsonb, ${sqlLiteral(USER_B)}),
   ('stale_trade', '{"value":"initial"}'::jsonb, ${sqlLiteral(USER_A)}),
   ('clock_trade', '{"value":"initial"}'::jsonb, ${sqlLiteral(USER_A)}),
   ('cas_trade', '{"writer":"initial"}'::jsonb, ${sqlLiteral(USER_A)});
+insert into public.trades (id, data, user_id)
+select 'cap_' || g::text, jsonb_build_object('n', g), ${sqlLiteral(USER_C)}
+  from generate_series(1, 49) as g;
 create table public.test_barrier (id integer primary key, ready integer not null default 0);
 insert into public.test_barrier (id) values (1);
 `, 'seed synthetic rows');
+
+const bootstrapProfiles = runSql(`
+select count(*)::text from public.profiles
+ where id in (${sqlLiteral(USER_A)}, ${sqlLiteral(USER_B)}, ${sqlLiteral(USER_C)})
+   and plan = 'free';`, 'profile bootstrap').stdout.trim();
+assert(bootstrapProfiles === '3', `auth profile bootstrap did not create three free profiles: ${bootstrapProfiles}`);
+const preExistingProfile = runSql(`
+select plan || '|' || coalesce(stripe_customer_id, 'null') || '|' ||
+       coalesce(stripe_subscription_id, 'null')
+  from public.profiles where id = ${sqlLiteral(USER_D)};`,
+  'pre-existing auth profile backfill').stdout.trim();
+assert(preExistingProfile === 'free|null|null',
+  `pre-existing auth user was not bootstrapped safely: ${preExistingProfile}`);
+
+const accountStateA = runSql(`${rolePrefix('authenticated', USER_A)}
+select plan || '|' || trade_count::text || '|' || coalesce(trade_cap::text, 'null') || '|' ||
+       (entitlements->>'simulator') || '|' || (entitlements->>'csv_import')
+  from public.get_account_state();`, 'free account state').stdout.trim();
+assert(accountStateA === 'free|4|50|false|false', `unexpected free account state: ${accountStateA}`);
+const accountStateC = runSql(`${rolePrefix('authenticated', USER_C)}
+select plan || '|' || trade_count::text || '|' || coalesce(trade_cap::text, 'null')
+  from public.get_account_state();`, 'cap account state').stdout.trim();
+assert(accountStateC === 'free|49|50', `unexpected cap account state: ${accountStateC}`);
+const freeFeature = runSql(`${rolePrefix('authenticated', USER_A)}
+select allowed::text || ',' || feature || ',' || plan || ',' || reason
+  from public.authorise_feature('simulator');`, 'free feature denial').stdout.trim();
+assert(freeFeature === 'false,simulator,free,feature_requires_pro', `free feature denial was not explicit: ${freeFeature}`);
+const unknownFeature = runSql(`${rolePrefix('authenticated', USER_A)}
+select allowed::text || ',' || coalesce(feature, 'null') || ',' || plan || ',' || reason
+  from public.authorise_feature('not_declared');`, 'unknown feature denial').stdout.trim();
+assert(unknownFeature === 'false,not_declared,free,unknown_feature', `unknown feature denial was not explicit: ${unknownFeature}`);
+
+runSql('update public.test_barrier set ready = 0 where id = 1;', 'reset free-cap barrier');
+const capRaceResults = await Promise.all([
+  spawnSql(writerSql(USER_C, 'cap_writer_a', 'cap_race', 'null'), 'free-cap writer A'),
+  spawnSql(writerSql(USER_C, 'cap_writer_b', 'cap_race', 'null'), 'free-cap writer B'),
+]);
+const capRaceApplied = capRaceResults.map((result, index) => onlyResult(result, `free-cap writer ${index + 1}`));
+assert(capRaceApplied.filter(value => value === 'true').length === 1
+    && capRaceApplied.filter(value => value === 'false').length === 1,
+  `free-cap race result was ${capRaceApplied.join(',')}`);
+assert(runSql(`${rolePrefix('service_role')}
+select count(*)::text from public.trades where user_id = ${sqlLiteral(USER_C)} and deleted_at is null;`,
+  'check free cap after race').stdout.trim() === '50', 'free-cap race exceeded 50 live rows');
+
+const capDenied = expectSqlStateFailure(`${rolePrefix('authenticated', USER_C)}
+select * from public.sync_trade('cap_over', '{"n":51}'::jsonb, null, false);`,
+  'free create at cap', 'P0001');
+assert(/free_trade_cap/.test(`${capDenied.stderr}\n${capDenied.stdout}`), 'free-cap error was not distinct');
+const capEdit = runSql(`${rolePrefix('authenticated', USER_C)}
+select applied::text from public.sync_trade('cap_1', '{"n":"edited"}'::jsonb,
+  (select updated_at from public.trades where user_id = ${sqlLiteral(USER_C)} and id = 'cap_1'), false);`,
+  'free edit at cap').stdout.trim();
+assert(capEdit === 'true', `free live-row edit at cap failed: ${capEdit}`);
+const capDelete = runSql(`${rolePrefix('authenticated', USER_C)}
+select applied::text from public.sync_trade('cap_1', null,
+  (select updated_at from public.trades where user_id = ${sqlLiteral(USER_C)} and id = 'cap_1'), true);`,
+  'free delete at cap').stdout.trim();
+assert(capDelete === 'true', `free delete at cap failed: ${capDelete}`);
+assert(runSql(`${rolePrefix('authenticated', USER_C)}
+select count(*)::text from public.trades where deleted_at is null;`,
+  'count after free delete').stdout.trim() === '49', 'free delete did not reduce live count');
+const capReplacement = runSql(`${rolePrefix('authenticated', USER_C)}
+select applied::text from public.sync_trade('cap_replacement', '{"n":"replacement"}'::jsonb, null, false);`,
+  'free create after delete').stdout.trim();
+assert(capReplacement === 'true', `free create after delete failed: ${capReplacement}`);
+const restoreDenied = expectSqlStateFailure(`${rolePrefix('authenticated', USER_C)}
+select * from public.sync_trade('cap_1', '{"n":"restored"}'::jsonb,
+  (select updated_at from public.trades where user_id = ${sqlLiteral(USER_C)} and id = 'cap_1'), false);`,
+  'free restore at cap', 'P0001');
+assert(/free_trade_cap/.test(`${restoreDenied.stderr}\n${restoreDenied.stdout}`), 'free restore error was not distinct');
+
+const bindC = runSql(`${rolePrefix('service_role')}
+select bound::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.bind_stripe_customer(${sqlLiteral(USER_C)}, 'cus_c');`,
+  'bind synthetic pro customer').stdout.trim();
+assert(bindC === 'true,false,1,bound', `synthetic pro customer binding failed: ${bindC}`);
+const beginC = runSql(`${rolePrefix('service_role')}
+select accepted::text || ',' || existing::text || ',' || intent_id || ',' || status || ',' || reason
+  from public.begin_stripe_checkout(${sqlLiteral(USER_C)}, 'intent_c', 'idem_c');`,
+  'begin synthetic checkout').stdout.trim();
+assert(beginC === 'true,false,intent_c,pending,started', `synthetic checkout reservation failed: ${beginC}`);
+const recordC = runSql(`${rolePrefix('service_role')}
+select recorded::text || ',' || duplicate::text || ',' || reason
+  from public.record_stripe_checkout('intent_c', 'cs_c', 'cus_c');`,
+  'record synthetic checkout').stdout.trim();
+assert(recordC === 'true,false,recorded', `synthetic checkout recording failed: ${recordC}`);
+const completeC = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.complete_stripe_checkout('evt_checkout_c', 100, 'cus_c', 'sub_c', 'cs_c');`,
+  'complete synthetic checkout').stdout.trim();
+assert(completeC === 'true,false,1,applied', `synthetic checkout completion failed: ${completeC}`);
+const proCreate = runSql(`${rolePrefix('authenticated', USER_C)}
+select applied::text from public.sync_trade('pro_trade', '{"plan":"pro"}'::jsonb, null, false);`,
+  'pro create beyond cap').stdout.trim();
+assert(proCreate === 'true', `pro create beyond cap failed: ${proCreate}`);
+const proState = runSql(`${rolePrefix('authenticated', USER_C)}
+select plan || '|' || trade_count::text || '|' || coalesce(trade_cap::text, 'null') || '|' ||
+       (entitlements->>'csv_import')
+  from public.get_account_state();`, 'pro account state').stdout.trim();
+assert(proState === 'pro|51|null|true', `unexpected pro account state: ${proState}`);
+const proFeature = runSql(`${rolePrefix('authenticated', USER_C)}
+select allowed::text || ',' || reason from public.authorise_feature('csv_import');`,
+  'pro feature authorisation').stdout.trim();
+assert(proFeature === 'true,allowed', `pro feature authorisation failed: ${proFeature}`);
+const proImport = runSql(`${rolePrefix('authenticated', USER_C)}
+select imported::text || ',' || skipped_existing::text || ',' || reason
+  from public.import_trades('[
+    {"id":"pro_trade","data":{"symbol":"EURUSD"}},
+    {"id":"pro_import","data":{"symbol":"GBPUSD"}}
+  ]'::jsonb);`, 'pro import with existing row').stdout.trim();
+assert(proImport === '1,1,applied', `pro import semantics were unsafe: ${proImport}`);
+expectSqlStateFailure(`${rolePrefix('authenticated', USER_C)}
+select * from public.import_trades('[{"id":"atomic_good","data":{"symbol":"USDJPY"}},
+  {"id":"atomic_bad","data":[]}]'::jsonb);`,
+  'atomic import validation', '22023');
+assert(runSql(`select count(*)::text from public.trades
+ where user_id = ${sqlLiteral(USER_C)} and id = 'atomic_good';`,
+  'atomic import rollback').stdout.trim() === '0',
+  'invalid import partially committed a preceding row');
+
+const freeImport = runSql(`${rolePrefix('authenticated', USER_B)}
+select imported::text || ',' || skipped_existing::text || ',' || reason
+  from public.import_trades('[{"id":"free_import","data":{"symbol":"EURUSD"}}]'::jsonb);`,
+  'free import denial').stdout.trim();
+assert(freeImport === '0,0,feature_requires_pro', `free import was not denied: ${freeImport}`);
+
+const cancelC = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.apply_stripe_event('evt_cancel_c', 'customer.subscription.deleted', 150,
+    'cus_c', 'sub_c', 'free');`, 'record synthetic cancellation').stdout.trim();
+assert(cancelC === 'true,false,1,applied', `synthetic cancellation was not applied: ${cancelC}`);
+const beginC2 = runSql(`${rolePrefix('service_role')}
+select accepted::text || ',' || existing::text || ',' || intent_id || ',' || status || ',' || reason
+  from public.begin_stripe_checkout(${sqlLiteral(USER_C)}, 'intent_c2', 'idem_c2');`,
+  'begin replacement checkout').stdout.trim();
+assert(beginC2 === 'true,false,intent_c2,pending,started', `replacement checkout was blocked: ${beginC2}`);
+runSql(`${rolePrefix('service_role')}
+select recorded::text from public.record_stripe_checkout('intent_c2', 'cs_c2', 'cus_c');`,
+  'record replacement checkout');
+const completeC2 = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.complete_stripe_checkout('evt_checkout_c2', 151, 'cus_c', 'sub_c2', 'cs_c2');`,
+  'complete replacement checkout').stdout.trim();
+assert(completeC2 === 'true,false,1,applied', `replacement checkout completion failed: ${completeC2}`);
+const pastDueC = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.apply_stripe_event('evt_past_due_c', 'customer.subscription.updated', 160,
+    'cus_c', 'sub_c2', 'free');`, 'record past-due subscription').stdout.trim();
+assert(pastDueC === 'true,false,1,applied', `past-due subscription event was not applied: ${pastDueC}`);
+const activeCCheckout = runSql(`${rolePrefix('service_role')}
+select accepted::text || ',' || existing::text || ',' || coalesce(reason, 'null')
+  from public.begin_stripe_checkout(${sqlLiteral(USER_C)}, 'intent_c3', 'idem_c3');`,
+  'reject checkout with active past-due subscription').stdout.trim();
+assert(activeCCheckout === 'false,false,active subscription must be cancelled',
+  `past-due subscription was incorrectly treated as cancelled: ${activeCCheckout}`);
+const cancelC2 = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.apply_stripe_event('evt_cancel_c2', 'customer.subscription.deleted', 170,
+    'cus_c', 'sub_c2', 'free');`, 'record replacement cancellation').stdout.trim();
+assert(cancelC2 === 'true,false,1,applied', `replacement cancellation was not applied: ${cancelC2}`);
+const deletedPro = expectSqlStateFailure(`${rolePrefix('service_role')}
+select * from public.apply_stripe_event('evt_bad_deleted_plan', 'customer.subscription.deleted', 171,
+  'cus_c', 'sub_c2', 'pro');`, 'reject deleted event granting pro', '22023');
+assert(/Deleted subscription event cannot grant pro/.test(`${deletedPro.stderr}\n${deletedPro.stdout}`),
+  'deleted subscription event accepted a pro plan');
+const lateSameSubscription = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.apply_stripe_event('evt_late_update_c2', 'customer.subscription.updated', 180,
+    'cus_c', 'sub_c2', 'pro');`, 'reject late same-subscription reactivation').stdout.trim();
+assert(lateSameSubscription === 'false,false,1,subscription permanently fenced',
+  `deleted subscription was reactivated by a later update: ${lateSameSubscription}`);
+const beginC3 = runSql(`${rolePrefix('service_role')}
+select accepted::text || ',' || existing::text || ',' || intent_id || ',' || status || ',' || reason
+  from public.begin_stripe_checkout(${sqlLiteral(USER_C)}, 'intent_c3', 'idem_c3');`,
+  'begin post-cancellation checkout').stdout.trim();
+assert(beginC3 === 'true,false,intent_c3,pending,started', `post-cancellation checkout was blocked: ${beginC3}`);
+const beginC3Again = runSql(`${rolePrefix('service_role')}
+select accepted::text || ',' || existing::text || ',' || intent_id || ',' || status || ',' || reason
+  from public.begin_stripe_checkout(${sqlLiteral(USER_C)}, 'intent_c3_other', 'idem_c3_other');`,
+  'reuse active checkout reservation').stdout.trim();
+assert(beginC3Again === 'true,true,intent_c3,pending,existing checkout',
+  `concurrent checkout reservation was not reused: ${beginC3Again}`);
+const expireC3 = runSql(`${rolePrefix('service_role')}
+select expired::text || ',' || duplicate::text || ',' || reason
+  from public.expire_stripe_checkout('intent_c3', null, 'cus_c');`,
+  'release failed checkout reservation').stdout.trim();
+assert(expireC3 === 'true,false,expired', `checkout reservation release failed: ${expireC3}`);
 
   assert(runSql(`select count(*)::text from public.profiles where id = ${sqlLiteral(USER_B)};`,
     'admin profile seed visibility').stdout.trim() === '1',
     'admin could not see seeded second profile');
 
-  runSql(`${rolePrefix('service_role')}
-update public.profiles
-   set stripe_customer_id = 'cus_a', stripe_subscription_id = 'sub_a'
- where id = ${sqlLiteral(USER_A)};`, 'seed Stripe customer attribution');
+  const bindA = runSql(`${rolePrefix('service_role')}
+select bound::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.bind_stripe_customer(${sqlLiteral(USER_A)}, 'cus_a');`,
+    'bind primary Stripe customer').stdout.trim();
+  assert(bindA === 'true,false,1,bound', `primary Stripe customer binding failed: ${bindA}`);
+  const bindARepeat = runSql(`${rolePrefix('service_role')}
+select bound::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.bind_stripe_customer(${sqlLiteral(USER_A)}, 'cus_a');`,
+    'repeat primary Stripe customer binding').stdout.trim();
+  assert(bindARepeat === 'true,true,1,already bound', `repeat customer binding was not idempotent: ${bindARepeat}`);
+  const bindAMismatch = runSql(`${rolePrefix('service_role')}
+select bound::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.bind_stripe_customer(${sqlLiteral(USER_A)}, 'cus_other');`,
+    'reject primary customer rebinding').stdout.trim();
+  assert(bindAMismatch === 'false,false,1,profile already bound to another customer',
+    `customer rebinding fence failed: ${bindAMismatch}`);
+  const bindDToA = runSql(`${rolePrefix('service_role')}
+select bound::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.bind_stripe_customer(${sqlLiteral(USER_D)}, 'cus_a');`,
+    'reject duplicate Stripe customer binding').stdout.trim();
+  assert(bindDToA === 'false,false,1,customer already bound', `duplicate customer fence failed: ${bindDToA}`);
+
+  const beginA = runSql(`${rolePrefix('service_role')}
+select accepted::text || ',' || existing::text || ',' || intent_id || ',' || status || ',' || reason
+  from public.begin_stripe_checkout(${sqlLiteral(USER_A)}, 'intent_a', 'idem_a');`,
+    'begin primary checkout').stdout.trim();
+  assert(beginA === 'true,false,intent_a,pending,started', `primary checkout reservation failed: ${beginA}`);
+  const recordA = runSql(`${rolePrefix('service_role')}
+select recorded::text || ',' || duplicate::text || ',' || reason
+  from public.record_stripe_checkout('intent_a', 'cs_a', 'cus_a');`,
+    'record primary checkout').stdout.trim();
+  assert(recordA === 'true,false,recorded', `primary checkout recording failed: ${recordA}`);
+  const completeA = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.complete_stripe_checkout('evt_checkout_a', 100, 'cus_a', 'sub_a', 'cs_a');`,
+    'complete primary checkout').stdout.trim();
+  assert(completeA === 'true,false,1,applied', `primary checkout completion failed: ${completeA}`);
+  const completeARepeat = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.complete_stripe_checkout('evt_checkout_a', 100, 'cus_a', 'sub_a', 'cs_a');`,
+    'replay primary checkout').stdout.trim();
+  assert(completeARepeat === 'false,true,1,duplicate', `checkout completion replay was unsafe: ${completeARepeat}`);
+
+  const bindB = runSql(`${rolePrefix('service_role')}
+select bound::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.bind_stripe_customer(${sqlLiteral(USER_B)}, 'cus_b');`,
+    'bind second Stripe customer').stdout.trim();
+  assert(bindB === 'true,false,1,bound', `second Stripe customer binding failed: ${bindB}`);
+  const beginB = runSql(`${rolePrefix('service_role')}
+select accepted::text || ',' || existing::text || ',' || intent_id || ',' || status || ',' || reason
+  from public.begin_stripe_checkout(${sqlLiteral(USER_B)}, 'intent_b', 'idem_b');`,
+    'begin second checkout').stdout.trim();
+  assert(beginB === 'true,false,intent_b,pending,started', `second checkout reservation failed: ${beginB}`);
+  const recordB = runSql(`${rolePrefix('service_role')}
+select recorded::text || ',' || duplicate::text || ',' || reason
+  from public.record_stripe_checkout('intent_b', 'cs_b', 'cus_b');`,
+    'record second checkout').stdout.trim();
+  assert(recordB === 'true,false,recorded', `second checkout recording failed: ${recordB}`);
+  const completeB = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.complete_stripe_checkout('evt_checkout_b', 101, 'cus_b', 'sub_b', 'cs_b');`,
+    'complete second checkout').stdout.trim();
+  assert(completeB === 'true,false,1,applied', `second checkout completion failed: ${completeB}`);
 
   const privilegeOutput = runSql(`
 select
@@ -399,11 +649,22 @@ select
   has_table_privilege('authenticated', 'public.stripe_webhook_events', 'UPDATE')::text || ',' ||
   has_table_privilege('authenticated', 'public.stripe_webhook_events', 'DELETE')::text || ',' ||
   has_table_privilege('authenticated', 'public.stripe_webhook_events', 'TRUNCATE')::text;
+select
+  has_table_privilege('authenticated', 'public.stripe_checkout_sessions', 'SELECT')::text || ',' ||
+  has_table_privilege('authenticated', 'public.stripe_checkout_sessions', 'INSERT')::text || ',' ||
+  has_table_privilege('authenticated', 'public.stripe_checkout_sessions', 'UPDATE')::text || ',' ||
+  has_table_privilege('authenticated', 'public.stripe_checkout_sessions', 'DELETE')::text || ',' ||
+  has_table_privilege('service_role', 'public.stripe_checkout_sessions', 'SELECT')::text || ',' ||
+  has_table_privilege('service_role', 'public.stripe_checkout_sessions', 'INSERT')::text || ',' ||
+  has_table_privilege('service_role', 'public.stripe_checkout_sessions', 'UPDATE')::text || ',' ||
+  has_table_privilege('service_role', 'public.stripe_checkout_sessions', 'DELETE')::text;
 `, 'inspect profile and event grants').stdout.trim().split(/\n/);
-  assert(profilePrivilegeOutput[0] === 'true,false,false,false,false;true,true,true,true',
+  assert(profilePrivilegeOutput[0] === 'true,false,false,false,false;false,false,false,false',
     `unexpected profile grants: ${profilePrivilegeOutput[0]}`);
   assert(profilePrivilegeOutput[1] === 'false,false,false,false,false',
     `unexpected event table grants: ${profilePrivilegeOutput[1]}`);
+  assert(profilePrivilegeOutput[2] === 'false,false,false,false,false,false,false,false',
+    `unexpected checkout table grants: ${profilePrivilegeOutput[2]}`);
 
   const billingPrivilegeOutput = runSql(`
 select
@@ -415,11 +676,33 @@ select p.prosecdef::text || ';' || pg_get_userbyid(p.proowner) || ';' || coalesc
   join pg_catalog.pg_namespace n on n.oid = p.pronamespace
  where n.nspname = 'public' and p.proname = 'apply_stripe_event'
    and pg_catalog.pg_get_function_identity_arguments(p.oid) = 'p_event_id text, p_event_type text, p_event_created bigint, p_customer_id text, p_subscription_id text, p_plan text';
+select
+  has_function_privilege('anon', 'public.get_account_state()', 'EXECUTE')::text || ',' ||
+  has_function_privilege('authenticated', 'public.get_account_state()', 'EXECUTE')::text || ',' ||
+  has_function_privilege('anon', 'public.authorise_feature(text)', 'EXECUTE')::text || ',' ||
+  has_function_privilege('authenticated', 'public.authorise_feature(text)', 'EXECUTE')::text || ',' ||
+  has_function_privilege('anon', 'public.import_trades(jsonb)', 'EXECUTE')::text || ',' ||
+  has_function_privilege('authenticated', 'public.import_trades(jsonb)', 'EXECUTE')::text;
+select
+  has_function_privilege('authenticated', 'public.bind_stripe_customer(uuid,text)', 'EXECUTE')::text || ',' ||
+  has_function_privilege('service_role', 'public.bind_stripe_customer(uuid,text)', 'EXECUTE')::text || ',' ||
+  has_function_privilege('authenticated', 'public.begin_stripe_checkout(uuid,text,text)', 'EXECUTE')::text || ',' ||
+  has_function_privilege('service_role', 'public.begin_stripe_checkout(uuid,text,text)', 'EXECUTE')::text || ',' ||
+  has_function_privilege('authenticated', 'public.record_stripe_checkout(text,text,text)', 'EXECUTE')::text || ',' ||
+  has_function_privilege('service_role', 'public.record_stripe_checkout(text,text,text)', 'EXECUTE')::text || ',' ||
+  has_function_privilege('authenticated', 'public.expire_stripe_checkout(text,text,text)', 'EXECUTE')::text || ',' ||
+  has_function_privilege('service_role', 'public.expire_stripe_checkout(text,text,text)', 'EXECUTE')::text || ',' ||
+  has_function_privilege('authenticated', 'public.complete_stripe_checkout(text,bigint,text,text,text)', 'EXECUTE')::text || ',' ||
+  has_function_privilege('service_role', 'public.complete_stripe_checkout(text,bigint,text,text,text)', 'EXECUTE')::text;
 `, 'inspect billing RPC grants').stdout.trim().split(/\n/);
   assert(billingPrivilegeOutput[0] === 'false,false,true',
     `unexpected billing RPC grants: ${billingPrivilegeOutput[0]}`);
   assert(billingPrivilegeOutput[1] === 'true;postgres;search_path=""',
     `unexpected billing RPC owner/config: ${billingPrivilegeOutput[1]}`);
+  assert(billingPrivilegeOutput[2] === 'false,true,false,true,false,true',
+    `unexpected account RPC grants: ${billingPrivilegeOutput[2]}`);
+  assert(billingPrivilegeOutput[3] === 'false,true,false,true,false,true,false,true,false,true',
+    `unexpected checkout RPC grants: ${billingPrivilegeOutput[3]}`);
 
   const ownSelect = runSql(`${rolePrefix('authenticated', USER_A)}
 select count(*)::text from public.trades where id = 'a_trade';
@@ -440,23 +723,33 @@ insert into public.profiles (id, plan) values (${sqlLiteral(USER_B)}, 'pro');`, 
 delete from public.profiles where id = ${sqlLiteral(USER_A)};`, 'authenticated direct profile DELETE');
   expectSqlFailure(`${rolePrefix('authenticated', USER_A)}
 truncate public.profiles;`, 'authenticated direct profile TRUNCATE');
-  expectSqlStateFailure(`${rolePrefix('service_role')}
-insert into public.profiles (id, plan, stripe_customer_id)
-values (${sqlLiteral(USER_C)}, 'free', 'cus_a');`, 'duplicate Stripe customer INSERT', '23505');
+  expectSqlFailure(`${rolePrefix('service_role')}
+update public.profiles set plan = 'free' where id = ${sqlLiteral(USER_A)};`,
+    'service-role direct profile UPDATE');
+  expectSqlFailure(`${rolePrefix('service_role')}
+update public.profiles set stripe_customer_id = 'cus_service_tamper' where id = ${sqlLiteral(USER_A)};`,
+    'service-role direct binding UPDATE');
+  expectSqlFailure(`${rolePrefix('service_role')}
+insert into public.profiles (id, plan) values (${sqlLiteral(USER_D)}, 'pro');`,
+    'service-role direct profile INSERT');
+  expectSqlFailure(`${rolePrefix('service_role')}
+delete from public.profiles where id = ${sqlLiteral(USER_D)};`,
+    'service-role direct profile DELETE');
+  const bindD = runSql(`${rolePrefix('service_role')}
+select bound::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.bind_stripe_customer(${sqlLiteral(USER_D)}, 'cus_d');`,
+    'bind duplicate-subscription test customer').stdout.trim();
+  assert(bindD === 'true,false,1,bound', `duplicate-subscription customer binding failed: ${bindD}`);
   runSql(`${rolePrefix('service_role')}
-update public.profiles
-   set stripe_customer_id = 'cus_b', stripe_subscription_id = 'sub_b'
- where id = ${sqlLiteral(USER_B)};`, 'seed duplicate customer update fixture');
+select accepted::text from public.begin_stripe_checkout(${sqlLiteral(USER_D)}, 'intent_d', 'idem_d');
+select recorded::text from public.record_stripe_checkout('intent_d', 'cs_d', 'cus_d');`,
+    'prepare duplicate-subscription checkout');
   expectSqlStateFailure(`${rolePrefix('service_role')}
-update public.profiles
-   set stripe_customer_id = 'cus_a'
- where id = ${sqlLiteral(USER_B)};`, 'duplicate Stripe customer UPDATE', '23505');
+select * from public.complete_stripe_checkout('evt_checkout_d', 180, 'cus_d', 'sub_b', 'cs_d');`,
+    'duplicate Stripe subscription completion', '23505');
   expectSqlStateFailure(`${rolePrefix('service_role')}
-update public.profiles
-   set stripe_subscription_id = 'sub_a'
- where id = ${sqlLiteral(USER_B)};`, 'duplicate Stripe subscription UPDATE', '23505');
-  runSql(`delete from public.profiles where id = ${sqlLiteral(USER_B)};`,
-    'remove seeded second profile before service-role CRUD');
+select * from public.complete_stripe_checkout('evt_checkout_a_replay', 100, 'cus_a', 'sub_a', 'cs_a');`,
+    'completed checkout replay with new event ID', '22023');
 
   expectSqlFailure(`${rolePrefix('authenticated', USER_A)}
 insert into public.trades (id, data, user_id) values ('direct_insert', '{}'::jsonb, ${sqlLiteral(USER_A)});`, 'authenticated direct INSERT');
@@ -471,6 +764,24 @@ select * from public.sync_trade('a_trade', '{}'::jsonb, null, false);`, 'anon RP
   expectSqlFailure(`set role authenticated;
 select * from public.sync_trade('a_trade', '{}'::jsonb, null, false);`, 'unauthenticated RPC call');
   expectSqlFailure(`set role authenticated;
+select * from public.get_account_state();`, 'unauthenticated account state call');
+  expectSqlFailure(`set role authenticated;
+select * from public.authorise_feature('simulator');`, 'unauthenticated feature call');
+  expectSqlFailure(`set role authenticated;
+select * from public.import_trades('[]'::jsonb);`, 'unauthenticated import call');
+  expectSqlFailure(`${rolePrefix('authenticated', USER_A)}
+select * from public.bind_stripe_customer(${sqlLiteral(USER_A)}, 'cus_auth_tamper');`,
+    'authenticated customer binding call');
+  expectSqlFailure(`${rolePrefix('authenticated', USER_A)}
+select * from public.begin_stripe_checkout(${sqlLiteral(USER_A)}, 'intent_auth', 'idem_auth');`,
+    'authenticated checkout reservation call');
+  expectSqlStateFailure(`${rolePrefix('authenticated', USER_A)}
+select * from public.sync_trade('primitive_data', '[]'::jsonb, null, false);`,
+    'primitive trade data', '22023');
+  expectSqlStateFailure(`${rolePrefix('authenticated', USER_A)}
+select * from public.import_trades('[{"id":"primitive_import","data":[]}]'::jsonb);`,
+    'primitive import data', '22023');
+  expectSqlFailure(`set role authenticated;
 select * from public.apply_stripe_event('evt_client', 'customer.subscription.updated', 1, 'cus_a', 'sub_a', 'pro');`,
     'authenticated billing RPC execute');
   expectSqlFailure(`set role anon;
@@ -484,18 +795,6 @@ insert into public.stripe_webhook_events
   (event_id, event_type, customer_id, subscription_id, event_created, plan)
 values ('evt_client_write', 'customer.subscription.updated', 'cus_a', 'sub_a', 1, 'pro');`,
     'authenticated direct event ledger INSERT');
-
-  runSql(`${rolePrefix('service_role')}
-insert into public.profiles (id, plan, stripe_customer_id)
-values (${sqlLiteral(USER_B)}, 'free', 'cus_database_test');
-update public.profiles set plan = 'pro' where id = ${sqlLiteral(USER_B)};
-do $$
-declare v_plan text;
-begin
-  select plan into v_plan from public.profiles where id = ${sqlLiteral(USER_B)};
-  if v_plan is distinct from 'pro' then raise exception 'service role profile update failed'; end if;
-end $$;
-delete from public.profiles where id = ${sqlLiteral(USER_B)};`, 'service-role profile CRUD');
 
   runSql('update public.test_barrier set ready = 0 where id = 1;', 'reset billing barrier');
   const billingResults = await Promise.all([
@@ -552,34 +851,30 @@ select * from public.apply_stripe_event('evt_after_concurrent', 'customer.subscr
   assert(runSql(`select plan from public.profiles where id = ${sqlLiteral(USER_A)};`,
     'check billing plan').stdout.trim() === 'pro', 'billing fence changed the plan after rejected events');
 
-  runSql(`${rolePrefix('service_role')}
-update public.profiles
-   set stripe_subscription_id = 'sub_b'
- where id = ${sqlLiteral(USER_A)};`, 'switch server binding without fence reset');
   const newSubscriptionEarlier = runSql(`${rolePrefix('service_role')}
 select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
   from public.apply_stripe_event('evt_new_sub_earlier', 'customer.subscription.updated', 199, 'cus_a', 'sub_b', 'free');`,
-    'reject new subscription earlier event until trusted reset').stdout.trim();
-  assert(newSubscriptionEarlier === 'false,false,1,billing subscription fence mismatch',
-    `new subscription inherited the old timestamp fence: ${newSubscriptionEarlier}`);
+    'reject unbound new subscription event').stdout.trim();
+  assert(newSubscriptionEarlier === 'false,false,1,subscription attribution failed',
+    `unbound new subscription was accepted: ${newSubscriptionEarlier}`);
   const newSubscriptionReplay = runSql(`${rolePrefix('service_role')}
 select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
   from public.apply_stripe_event('evt_new_sub_earlier', 'customer.subscription.updated', 199, 'cus_a', 'sub_b', 'free');`,
-    'replay rejected new subscription event').stdout.trim();
+    'replay rejected unbound subscription event').stdout.trim();
   assert(newSubscriptionReplay === newSubscriptionEarlier,
     `rejected new subscription replay changed result: ${newSubscriptionReplay}`);
   const newSubscriptionEqual = runSql(`${rolePrefix('service_role')}
 select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
   from public.apply_stripe_event('evt_new_sub_equal', 'customer.subscription.updated', 201, 'cus_a', 'sub_b', 'free');`,
-    'reject new subscription equal-time event until trusted reset').stdout.trim();
-  assert(newSubscriptionEqual === 'false,false,1,billing subscription fence mismatch',
-    `new subscription equal-time event bypassed the binding fence: ${newSubscriptionEqual}`);
+    'reject unbound new subscription equal-time event').stdout.trim();
+  assert(newSubscriptionEqual === 'false,false,1,subscription attribution failed',
+    `unbound new subscription equal-time event was accepted: ${newSubscriptionEqual}`);
   const lateOldCancellation = runSql(`${rolePrefix('service_role')}
 select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
-  from public.apply_stripe_event('evt_old_sub_late_cancel', 'customer.subscription.deleted', 999, 'cus_a', 'sub_a', 'free');`,
-    'reject late old subscription cancellation').stdout.trim();
+  from public.apply_stripe_event('evt_old_sub_late_cancel', 'customer.subscription.deleted', 999, 'cus_a', 'sub_b', 'free');`,
+    'reject late unbound subscription cancellation').stdout.trim();
   assert(lateOldCancellation === 'false,false,1,subscription attribution failed',
-    `late old subscription cancellation was accepted: ${lateOldCancellation}`);
+    `late unbound subscription cancellation was accepted: ${lateOldCancellation}`);
   const oldSubscriptionReplay = runSql(`${rolePrefix('service_role')}
 select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
   from public.apply_stripe_event('evt_after_concurrent', 'customer.subscription.updated', 201, 'cus_a', 'sub_a', 'pro');`,
@@ -590,6 +885,45 @@ select applied::text || ',' || duplicate::text || ',' || matched::text || ',' ||
  where event_id in ('evt_new_sub_earlier', 'evt_new_sub_equal', 'evt_old_sub_late_cancel');`,
     'check rejected binding events were not consumed').stdout.trim() === '0',
     'rejected binding transition events were written to the ledger');
+
+  const pausedBilling = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.apply_stripe_event('evt_paused_a', 'customer.subscription.paused', 202,
+    'cus_a', 'sub_a', 'free');`, 'apply paused subscription event').stdout.trim();
+  assert(pausedBilling === 'true,false,1,applied',
+    `paused subscription event was not applied: ${pausedBilling}`);
+  assert(runSql(`select plan from public.profiles where id = ${sqlLiteral(USER_A)};`,
+    'check paused billing plan').stdout.trim() === 'free',
+    'paused subscription did not remove Pro access');
+  expectSqlStateFailure(`${rolePrefix('service_role')}
+select * from public.apply_stripe_event('evt_bad_paused_a', 'customer.subscription.paused', 202,
+  'cus_a', 'sub_a', 'pro');`, 'reject paused event granting pro', '22023');
+
+  const resumedBilling = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.apply_stripe_event('evt_resumed_a', 'customer.subscription.resumed', 203,
+    'cus_a', 'sub_a', 'pro');`, 'apply resumed subscription event').stdout.trim();
+  assert(resumedBilling === 'true,false,1,applied',
+    `resumed subscription event was not applied: ${resumedBilling}`);
+  assert(runSql(`select plan from public.profiles where id = ${sqlLiteral(USER_A)};`,
+    'check resumed billing plan').stdout.trim() === 'pro',
+    'resumed subscription did not restore Pro access');
+  expectSqlStateFailure(`${rolePrefix('service_role')}
+select * from public.apply_stripe_event('evt_bad_resumed_a', 'customer.subscription.resumed', 203,
+  'cus_a', 'sub_a', 'free');`, 'reject resumed event without pro', '22023');
+
+  const deletedAfterResume = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.apply_stripe_event('evt_deleted_after_resume_a', 'customer.subscription.deleted', 204,
+    'cus_a', 'sub_a', 'free');`, 'apply deleted subscription event after resume').stdout.trim();
+  assert(deletedAfterResume === 'true,false,1,applied',
+    `deleted subscription event after resume was not applied: ${deletedAfterResume}`);
+  const resumedAfterDelete = runSql(`${rolePrefix('service_role')}
+select applied::text || ',' || duplicate::text || ',' || matched::text || ',' || reason
+  from public.apply_stripe_event('evt_resumed_after_delete_a', 'customer.subscription.resumed', 205,
+    'cus_a', 'sub_a', 'pro');`, 'reject resumed event after deletion').stdout.trim();
+  assert(resumedAfterDelete === 'false,false,1,subscription permanently fenced',
+    `deleted subscription was reactivated by a later resumed event: ${resumedAfterDelete}`);
 
   runSql(`${rolePrefix('service_role')}
 do $$
@@ -694,6 +1028,64 @@ end $$;`, 'cross-user guessed ID');
     'owner-scoped guessed ID did not coexist with the existing row');
   assert(runSql(`select data->>'owner' from public.trades where id = 'a_trade' and user_id = ${sqlLiteral(USER_A)};`, 'verify cross-user target').stdout.trim() === 'a',
     'cross-user guessed ID changed the existing owner row');
+
+  // Exercise the migration path separately from the fresh-schema reapply. An
+  // empty legacy table can be completed safely, while an existing incomplete
+  // row must abort instead of fabricating billing attribution.
+  const legacyTablePrefix = `
+alter table public.stripe_checkout_sessions rename to stripe_checkout_sessions_saved;
+alter index public.stripe_checkout_sessions_pkey rename to stripe_checkout_sessions_saved_pkey;
+alter index public.stripe_checkout_sessions_session_uidx rename to stripe_checkout_sessions_saved_session_uidx;
+alter index public.stripe_checkout_sessions_idempotency_uidx rename to stripe_checkout_sessions_saved_idempotency_uidx;
+alter index public.stripe_checkout_sessions_active_user_uidx rename to stripe_checkout_sessions_saved_active_user_uidx;
+create table public.stripe_checkout_sessions (intent_id text);
+`;
+  const legacyShapePath = path.join(tempRoot, 'legacy-shape.sql');
+  fs.writeFileSync(legacyShapePath, `${legacyTablePrefix}
+${schema}
+select count(*)::text from information_schema.columns
+ where table_schema = 'public' and table_name = 'stripe_checkout_sessions';
+select count(*)::text from information_schema.columns
+ where table_schema = 'public' and table_name = 'stripe_checkout_sessions' and is_nullable = 'NO';
+select
+  (select count(*) from pg_catalog.pg_constraint where conrelid = 'public.stripe_checkout_sessions'::regclass and contype = 'p')::text || ',' ||
+  (select count(*) from pg_catalog.pg_constraint where conrelid = 'public.stripe_checkout_sessions'::regclass and contype = 'f' and confrelid = 'public.profiles'::regclass)::text || ',' ||
+  (select count(*) from pg_catalog.pg_constraint where conrelid = 'public.stripe_checkout_sessions'::regclass and conname = 'stripe_checkout_sessions_status_ck')::text;
+`, 'utf8');
+  const legacyShape = spawnSync(binaries.psql, psqlArgs(['-f', legacyShapePath]), {
+    cwd: REPO_ROOT,
+    env: processEnvironment(),
+    encoding: 'utf8',
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  assert(legacyShape.status === 0,
+    `empty legacy checkout table did not upgrade: ${(legacyShape.stderr || legacyShape.stdout).slice(-2000)}`);
+  const legacyShapeOutput = legacyShape.stdout.trim().split(/\n/).slice(-3);
+  assert(legacyShapeOutput.join(',') === '9,6,1,1,1',
+    `legacy checkout table shape was incomplete: ${legacyShapeOutput.join(',')}`);
+  runSql(`
+drop table public.stripe_checkout_sessions;
+alter table public.stripe_checkout_sessions_saved rename to stripe_checkout_sessions;
+alter index public.stripe_checkout_sessions_saved_pkey rename to stripe_checkout_sessions_pkey;
+alter index public.stripe_checkout_sessions_saved_session_uidx rename to stripe_checkout_sessions_session_uidx;
+alter index public.stripe_checkout_sessions_saved_idempotency_uidx rename to stripe_checkout_sessions_idempotency_uidx;
+alter index public.stripe_checkout_sessions_saved_active_user_uidx rename to stripe_checkout_sessions_active_user_uidx;
+`, 'restore checkout table after legacy shape test');
+
+  const legacyRowsPath = path.join(tempRoot, 'legacy-rows.sql');
+  fs.writeFileSync(legacyRowsPath, `${legacyTablePrefix}
+insert into public.stripe_checkout_sessions (intent_id) values ('legacy_intent');
+${schema}
+`, 'utf8');
+  const legacyRows = spawnSync(binaries.psql, psqlArgs(['-f', legacyRowsPath]), {
+    cwd: REPO_ROOT,
+    env: processEnvironment(),
+    encoding: 'utf8',
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  assert(legacyRows.status !== 0, 'incomplete legacy checkout row was silently upgraded');
+  assert(/Backfill stripe_checkout_sessions identity columns/.test(`${legacyRows.stderr}\n${legacyRows.stdout}`),
+    `legacy checkout row did not fail with a controlled migration error: ${(legacyRows.stderr || legacyRows.stdout).slice(-2000)}`);
 
   if (!cleanup()) throw new Error('temporary PostgreSQL cluster cleanup was not verified');
   console.log('PASS: genuine PostgreSQL schema, grants, RLS, CAS, tombstone and concurrency contracts');

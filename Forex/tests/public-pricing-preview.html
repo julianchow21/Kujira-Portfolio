@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f0f0f">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://project.synthetic.supabase.co https://billing.synthetic.test; base-uri 'none'; object-src 'none'; frame-ancestors 'none';">
+<title>Synthetic pricing preview</title>
+<script>
+window.__KJR_FOREX_CONFIG__ = {
+  authEnabled: true,
+  supabaseUrl: 'https://project.synthetic.supabase.co',
+  supabaseAnonKey: 'sb_publishable_fixture',
+  workerUrl: 'https://billing.synthetic.test',
+  workerConnectOrigin: 'https://billing.synthetic.test'
+};
+</script>
+<script src="../config.js?v=1.0"></script>
+<script>
+window.KJR_PUBLIC_CONFIG = Object.freeze({
+  schemaVersion: 1,
+  mode: 'READY',
+  reviewFlags: { pricing: true, operator: true, legal: true },
+  currency: 'USD',
+  proPriceMonthly: 12.34,
+  proPriceAnnual: 123.45,
+  proFeatures: ['Unlimited trades', 'Simulator', 'Chart markers'],
+  signUpHref: '#synthetic-signup',
+  signInHref: '#synthetic-signin',
+  checkoutEnabled: true
+});
+</script>
+<script src="../lib/public.js?v=0.14"></script>
+<link rel="stylesheet" href="../lib/public.css?v=0.14">
+</head>
+<body>
+<header class="public-topbar">
+  <a class="brand" href="#synthetic-home">Kujira Forex</a>
+  <span class="status-pill">Synthetic fixture, no API calls</span>
+</header>
+<main class="public-main" data-public-pricing>
+  <section class="pricing-hero" aria-labelledby="synthetic-title">
+    <div>
+      <span class="status-pill" data-public-status>Private preview</span>
+      <div class="eyebrow">Synthetic READY state</div>
+      <h1 id="synthetic-title">Pricing state fixture</h1>
+      <p class="pricing-copy" data-pricing-copy>Loading state</p>
+      <div class="hero-actions"><a class="button button-primary" data-signup-link href="#synthetic-signup">Create account</a><a class="button" data-signin-link href="#synthetic-signin">Sign in</a></div>
+    </div>
+    <aside class="pricing-callout" aria-label="Synthetic status"><strong data-pricing-state>Loading</strong><p data-preview-copy>Loading</p></aside>
+  </section>
+  <section class="section" aria-labelledby="synthetic-plans">
+    <div class="section-head"><div class="eyebrow">Fixture plans</div><h2 id="synthetic-plans">Rendered by the production public renderer</h2><p data-plan-list-copy>Loading</p></div>
+    <div class="pricing-grid">
+      <article class="pricing-card" data-local-plan><div class="plan-kicker" data-local-kicker>Available now</div><h3>Local journal</h3><div class="price-display">On this device</div><p data-local-copy>Loading</p><ul class="plan-list"><li data-local-access>Loading</li></ul><a class="button button-primary" data-local-cta href="#synthetic-local">Open local journal</a></article>
+      <article class="pricing-card"><div class="plan-kicker" data-free-kicker>Planned</div><h3>Free account</h3><div class="price-display" data-free-price>Loading</div><p data-free-copy>Loading</p><ul class="plan-list"><li data-free-availability>Loading</li></ul><a class="button" data-free-cta href="#synthetic-signup">View account options</a></article>
+      <article class="pricing-card featured"><div class="plan-kicker" data-pro-kicker>Planned</div><h3>Pro</h3><div class="price-display" data-pro-price-monthly>Loading</div><p data-pro-copy>Loading</p><div class="price-alt" data-pro-price-annual>Loading</div><ul class="plan-list" data-pro-features></ul><a class="button button-muted" data-checkout-link data-checkout-state aria-disabled="true" href="#synthetic-signup">Checkout unavailable</a></article>
+    </div>
+  </section>
+  <section class="section"><div class="entry-card"><div><div class="eyebrow">Fixture control</div><h2 data-entry-title>Loading</h2><p data-entry-copy>Loading</p></div><div class="entry-actions"><button class="button" id="show-preview" type="button">Show preview state</button></div></div></section>
+</main>
+<footer class="public-footer"><span data-public-footer>Loading</span><span>Synthetic data only</span></footer>
+<script>
+document.getElementById('show-preview').addEventListener('click', function () {
+  window.KjrPublic.render(document, {
+    mode: 'PREVIEW',
+    reviewFlags: { pricing: false, operator: false, legal: false },
+    currency: null,
+    proPriceMonthly: null,
+    proPriceAnnual: null,
+    checkoutEnabled: false
+  }, {
+    mode: 'offline',
+    authEnabled: false,
+    complete: false,
+    workerUrl: '',
+    workerConnectOrigin: '',
+    errors: []
+  });
+});
+</script>
+</body>
+</html>

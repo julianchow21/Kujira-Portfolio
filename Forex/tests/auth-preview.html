@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forex synthetic Auth preview</title>
+  <style>
+    :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e8e8e8;background:#101010}
+    body{max-width:1180px;margin:0 auto;padding:20px;background:#101010}
+    h1{font-size:20px;margin:0 0 6px}
+    p{color:#b7b7b7;margin:6px 0 14px;line-height:1.45}
+    .banner{border:1px solid #d97706;background:#2a1f0a;color:#fbbf24;border-radius:8px;padding:10px 12px;font-weight:700;margin-bottom:14px}
+    .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
+    button{font:inherit;color:#e8e8e8;background:#252525;border:1px solid #4a4a4a;border-radius:7px;padding:7px 10px;cursor:pointer}
+    button:hover{background:#333}
+    button:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}
+    .status{font-size:12px;color:#9ca3af;margin-left:auto}
+    iframe{display:block;width:100%;height:820px;border:1px solid #383838;border-radius:10px;background:#0f0f0f}
+    .blocked{border:1px solid #e24b4a;background:#2a1515;color:#fca5a5;border-radius:8px;padding:14px}
+  </style>
+</head>
+<body>
+  <div class="banner">Synthetic Auth preview, localhost only. No real credentials, accounts, network APIs or stored user data are used.</div>
+  <h1>Forex hosted Auth fixture</h1>
+  <p>Use the controls to switch synthetic accounts, plans and failure states, then use the real Forex account, registration and sign-in controls inside the frame.</p>
+  <div id="blocked" class="blocked" hidden>This fixture is disabled outside localhost or 127.0.0.1.</div>
+  <div id="controls" class="controls" hidden>
+    <button type="button" data-action="switch" data-value="a">Switch to A</button>
+    <button type="button" data-action="switch" data-value="b">Switch to B</button>
+    <button type="button" data-action="switch" data-value="long">Long email account</button>
+    <button type="button" data-action="switch" data-value="signed-out">Signed out</button>
+    <button type="button" data-action="route" data-value="signup">Open #signup Create account</button>
+    <button type="button" data-action="plan" data-value="free">Free plan</button>
+    <button type="button" data-action="plan" data-value="pro">Pro plan</button>
+    <button type="button" data-action="billing" data-value="history-off">Disable history</button>
+    <button type="button" data-action="billing" data-value="history-on">Enable history</button>
+    <button type="button" data-action="billing" data-value="cancel-off">Disable cancel</button>
+    <button type="button" data-action="billing" data-value="cancel-on">Enable cancel</button>
+    <button type="button" data-action="error" data-value="on">Simulate Auth error</button>
+    <button type="button" data-action="error" data-value="off">Clear Auth error</button>
+    <span id="loaded-version" class="status" aria-live="polite">Synthetic frame not loaded</span>
+    <span id="status" class="status" aria-live="polite"></span>
+  </div>
+  <iframe id="app" title="Synthetic Auth preview of Kujira Forex" hidden></iframe>
+  <script>
+    (function () {
+      'use strict';
+      const blocked = document.getElementById('blocked');
+      const controls = document.getElementById('controls');
+      const frame = document.getElementById('app');
+      const loadedVersion = document.getElementById('loaded-version');
+      const status = document.getElementById('status');
+      const localOnly = (location.protocol === 'http:' || location.protocol === 'https:') && (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+      if (!localOnly) { blocked.hidden = false; return; }
+      controls.hidden = false;
+      frame.hidden = false;
+
+      function syntheticBootstrapScript(origin) {
+        'use strict';
+        const users = {
+          a: { id: 'synthetic-user-a', email: 'synthetic-a@example.invalid' },
+          b: { id: 'synthetic-user-b', email: 'synthetic-b@example.invalid' },
+          long: { id: 'synthetic-user-long', email: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@example.invalid' }
+        };
+        let active = users.a;
+        let plan = 'free';
+        let authFailure = false;
+        let historyEnabled = true;
+        let cancelEnabled = true;
+        let session = { access_token: 'synthetic-token-a', user: active };
+        const cloudRows = new Map();
+        const rowsForActive = () => {
+          const key = active && active.id;
+          if (!key) return null;
+          if (!cloudRows.has(key)) cloudRows.set(key, new Map());
+          return cloudRows.get(key);
+        };
+        const callbacks = new Set();
+        const makeMemoryStorage = () => {
+          const values = new Map();
+          return {
+            get length() { return values.size; },
+            key(index) { return [...values.keys()][index] || null; },
+            getItem(key) { const name = String(key); return values.has(name) ? values.get(name) : null; },
+            setItem(key, value) { values.set(String(key), String(value)); },
+            removeItem(key) { values.delete(String(key)); },
+            clear() { values.clear(); }
+          };
+        };
+        try {
+          Object.defineProperty(window, 'localStorage', { configurable: true, enumerable: true, value: makeMemoryStorage() });
+          Object.defineProperty(window, 'sessionStorage', { configurable: true, enumerable: true, value: makeMemoryStorage() });
+        } catch (error) {
+          throw new Error('Synthetic preview could not install memory-only storage');
+        }
+        const json = (body, status) => new Response(JSON.stringify(body), { status: status || 200, headers: { 'Content-Type': 'application/json' } });
+        const account = () => ({ plan, trade_count: 0, trade_cap: plan === 'pro' ? null : 50, entitlements: plan === 'pro' ? { unlimited_trades: true, simulator: true, advanced_analytics: true, ai_coach: true, chart_markers: true, csv_import: true } : {} });
+        const billing = () => ({ plan, trade_count: 0, trade_cap: plan === 'pro' ? null : 50, allowed_features: account().entitlements, billing_status: plan === 'pro' ? 'active' : 'free', billing_enabled: true, checkout_available: plan !== 'pro', portal_available: plan === 'pro', portal_enabled: plan === 'pro', history_enabled: plan === 'pro' && historyEnabled, cancel_enabled: plan === 'pro' && cancelEnabled });
+        const notify = event => {
+          callbacks.forEach(callback => callback(event, session));
+          window.parent.postMessage({ source: 'kjr-synthetic-auth', active: active && active.id, email: active && active.email, plan, event, authError: authFailure, billing: billing() }, '*');
+        };
+        const reportBillingAction = (action, status, reason) => window.parent.postMessage({ source: 'kjr-synthetic-auth', active: active && active.id, email: active && active.email, plan, authError: authFailure, billing: billing(), event: 'BILLING_ACTION', action, status, reason: reason || '' }, '*');
+        const setActive = value => {
+          active = value === 'a' ? users.a : value === 'b' ? users.b : value === 'long' ? users.long : null;
+          session = active ? { access_token: 'synthetic-token-' + value, user: active } : null;
+          notify(active ? 'SIGNED_IN' : 'SIGNED_OUT');
+        };
+        const auth = {
+          async getSession() { return authFailure ? { data: { session: null }, error: { message: 'Synthetic Auth failure' } } : { data: { session }, error: null }; },
+          async getUser() { return authFailure ? { data: { user: null }, error: { message: 'Synthetic Auth failure' } } : { data: { user: active }, error: null }; },
+          onAuthStateChange(callback) { callbacks.add(callback); return { data: { subscription: { unsubscribe() { callbacks.delete(callback); } } } }; },
+          async signInWithPassword(args) { setActive('a'); return { data: { user: active, session }, error: null }; },
+          async signUp(args) { setActive('signed-out'); return { data: { user: { id: 'synthetic-pending', email: args.email }, session: null }, error: null }; },
+          async signInWithOAuth() { setActive('a'); return { data: { provider: 'synthetic' }, error: null }; },
+          async signInWithOtp() { setActive('signed-out'); return { data: {}, error: null }; },
+          async signOut() { setActive('signed-out'); return { error: null }; }
+        };
+        window.__KJR_FOREX_CONFIG__ = {
+          authEnabled: true,
+          supabaseUrl: 'https://synthetic.supabase.invalid',
+          supabaseAnonKey: 'synthetic-public-key',
+          workerUrl: origin,
+          workerConnectOrigin: origin,
+          authProviders: ['synthetic']
+        };
+        window.supabase = { createClient() { return { auth }; } };
+        const realFetch = window.fetch.bind(window);
+        window.fetch = async function (input, options) {
+          const url = typeof input === 'string' ? input : input && input.url ? input.url : String(input || '');
+          if (url.includes('/rest/v1/rpc/get_account_state')) return json([account()]);
+          if (url.includes('/rest/v1/rpc/authorise_feature')) {
+            let body = {};
+            try { body = JSON.parse(options && options.body || '{}'); } catch (e) {}
+            const allowed = plan === 'pro' || !['simulator', 'advanced_analytics', 'ai_coach', 'chart_markers', 'csv_import', 'unlimited_trades'].includes(body.p_feature);
+            return json([{ allowed, feature: body.p_feature || '', plan, reason: allowed ? null : 'Synthetic Free plan denial' }]);
+          }
+          if (url.includes('/rest/v1/rpc/import_trades')) return json([{ allowed: plan === 'pro', imported: plan === 'pro' ? 1 : 0, skipped_existing: plan === 'pro' ? 0 : 1, reason: plan === 'pro' ? null : 'Synthetic Free plan denial' }]);
+          if (url === origin + '/account') return json(billing());
+          if (url === origin + '/checkout') {
+            reportBillingAction('checkout', 'controlled-503', 'Checkout is disabled in the synthetic preview');
+            return json({ code: 'synthetic_preview', reason: 'Checkout is disabled in the synthetic preview' }, 503);
+          }
+          if (url === origin + '/portal') {
+            let body = {};
+            try { body = JSON.parse(options && options.body || '{}'); } catch (e) {}
+            const action = body.action || 'manage';
+            const enabled = action === 'history' ? historyEnabled && plan === 'pro' : action === 'cancel' ? cancelEnabled && plan === 'pro' : plan === 'pro';
+            reportBillingAction(action, enabled ? 'controlled-503' : 'controlled-403', enabled ? 'Billing links are disabled in the synthetic preview' : 'This billing action is disabled in the synthetic preview');
+            return enabled ? json({ code: 'synthetic_preview', reason: 'Billing links are disabled in the synthetic preview' }, 503) : json({ code: 'synthetic_disabled', reason: 'This billing action is disabled in the synthetic preview' }, 403);
+          }
+          if (url.includes('/rest/v1/rpc/sync_trade')) {
+            let body = {};
+            try { body = JSON.parse(options && options.body || '{}'); } catch (e) {}
+            const id = typeof body.p_id === 'string' ? body.p_id : '';
+            const rows = rowsForActive();
+            if (!rows || !id) return json({ applied: false, row_id: id || 'synthetic_invalid', row_data: {}, server_updated_at: new Date().toISOString(), server_deleted_at: null }, 401);
+            const previous = rows.get(id);
+            const now = new Date().toISOString();
+            const deleted = body.p_delete === true;
+            const row = { data: deleted ? (previous ? previous.data : {}) : (body.p_data || {}), updated_at: now, deleted_at: deleted ? now : null };
+            rows.set(id, row);
+            return json([{ applied: true, row_id: id, row_data: row.data, server_updated_at: row.updated_at, server_deleted_at: row.deleted_at }]);
+          }
+          if (url.includes('/rest/v1/trades')) {
+            const rows = rowsForActive();
+            return json(rows ? [...rows.entries()].map(([id, row]) => ({ id, data: row.data, updated_at: row.updated_at, deleted_at: row.deleted_at })) : []);
+          }
+          const resolved = new URL(url, window.location.href);
+          if (resolved.origin !== origin) throw new Error('Synthetic preview blocked an external request');
+          return realFetch(input, options);
+        };
+        window.addEventListener('message', event => {
+          const message = event.data && event.data.source === 'kjr-synthetic-auth' ? event.data : null;
+          if (!message) return;
+          if (message.action === 'switch') setActive(message.value);
+          if (message.action === 'route' && message.value === 'signup') window.location.hash = '#signup';
+          if (message.action === 'plan' && (message.value === 'free' || message.value === 'pro')) { plan = message.value; notify('TOKEN_REFRESHED'); }
+          if (message.action === 'billing') {
+            if (message.value === 'history-on' || message.value === 'history-off') historyEnabled = message.value === 'history-on';
+            if (message.value === 'cancel-on' || message.value === 'cancel-off') cancelEnabled = message.value === 'cancel-on';
+            notify('TOKEN_REFRESHED');
+          }
+          if (message.action === 'error') { authFailure = message.value === 'on'; notify('TOKEN_REFRESHED'); }
+        });
+        window.parent.postMessage({ source: 'kjr-synthetic-auth', active: active && active.id, email: active && active.email, plan, event: 'INITIAL', authError: authFailure, billing: billing() }, '*');
+      }
+
+      async function load() {
+        const response = await fetch('../index.html?v=auth-preview-' + Date.now());
+        if (!response.ok) throw new Error('Could not load the local Forex app shell');
+        const source = await response.text();
+        const version = /const APP = \{[\s\S]*?version:'([^']+)'/.exec(source);
+        const sdkTag = /<script\b[^>]*\bsrc=["']lib\/supabase-2\.117\.2\.umd\.js\?v=2\.117\.2["'][^>]*><\/script>/i;
+        if (!version || version[1] !== 'v0.14 (03 Oct)' || !source.includes('id="account-btn"') || !sdkTag.test(source)) {
+          throw new Error('Refused stale Forex app bytes. Expected v0.14 with Account controls');
+        }
+        const injection = '<script>(' + syntheticBootstrapScript.toString() + ')(' + JSON.stringify(location.origin) + ');<\/script>';
+        const fixtureCsp = '<meta http-equiv="Content-Security-Policy" content="connect-src \'self\' ' + location.origin + '">';
+        // The production UMD must remain in the real app shell. Remove only
+        // that script tag in this isolated frame so it cannot overwrite the
+        // synthetic SDK installed by the preboot script.
+        const isolatedSource = source.replace(sdkTag, '');
+        frame.srcdoc = isolatedSource.replace('<head>', '<head>' + fixtureCsp + '<base href="../">' + injection);
+        loadedVersion.textContent = 'Loaded ' + version[1] + ', synthetic SDK, memory-only storage';
+      }
+
+      document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => {
+        const action = button.dataset.action, value = button.dataset.value;
+        frame.contentWindow.postMessage({ source: 'kjr-synthetic-auth', action, value }, '*');
+        status.textContent = action === 'switch' ? 'Requested account: ' + value : action === 'route' ? 'Requested route: #' + value : action === 'plan' ? 'Requested plan: ' + value : action === 'billing' ? 'Requested billing state: ' + value : 'Requested Auth error: ' + value;
+      }));
+      window.addEventListener('message', event => {
+        if (!event.data || event.data.source !== 'kjr-synthetic-auth') return;
+        const billingReceipt = event.data.event === 'BILLING_ACTION' ? ', billing ' + event.data.action + ' ' + event.data.status : '';
+        status.textContent = 'Active: ' + (event.data.active || 'signed out') + ', plan: ' + event.data.plan + (event.data.email ? ', ' + event.data.email : '') + (event.data.authError ? ', Auth error' : '') + (event.data.event === 'BILLING_CHANGED' ? ', Billing updated' : '') + billingReceipt;
+      });
+      load().catch(error => { status.textContent = error.message; frame.hidden = true; });
+    }());
+  </script>
+</body>
+</html>

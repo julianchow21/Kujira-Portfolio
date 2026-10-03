@@ -1,9 +1,9 @@
 /* Release consistency check (mirrors Portfolio/tests/check-release.js house style).
    Node, zero dependencies. Catches the "shipped stale code to returning
-   visitors" class of bug: index.html's local <script src> tags, sw.js's
-   pre-cache SHELL list, and the APP.version badge must all agree, every
-   deploy, or a returning visitor's service worker keeps serving an old
-   build forever.
+   visitors" class of bug: the six Forex pages' local runtime assets,
+   sw.js's pre-cache SHELL list, and the APP.version badge must all agree,
+   every deploy, or a returning visitor's service worker keeps serving an
+   old build forever.
 
    Mapping rule (documented here, enforced by check 2 below): sw.js CACHE
    must equal 'kjr-forex-v' + the numeric part of APP.version in index.html
@@ -18,8 +18,8 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const INDEX_HTML_PATH = path.join(ROOT, 'index.html');
 const SW_JS_PATH = path.join(ROOT, 'sw.js');
+const RUNTIME_PAGES = ['index.html', 'welcome.html', 'pricing.html', 'terms.html', 'privacy.html', 'refunds.html'];
 
 let failures = 0;
 function fail(msg) {
@@ -30,13 +30,18 @@ function pass(msg) {
   console.log('PASS: ' + msg);
 }
 
-let indexHtml, swJs;
-try {
-  indexHtml = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
-} catch (e) {
-  console.error('HARNESS ERROR: could not read ' + INDEX_HTML_PATH + ': ' + e.message);
-  process.exit(1);
+const pageHtml = {};
+for (const page of RUNTIME_PAGES) {
+  const file = path.join(ROOT, page);
+  try {
+    pageHtml[page] = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    console.error('HARNESS ERROR: could not read ' + file + ': ' + e.message);
+    process.exit(1);
+  }
 }
+const indexHtml = pageHtml['index.html'];
+let swJs;
 try {
   swJs = fs.readFileSync(SW_JS_PATH, 'utf8');
 } catch (e) {
@@ -44,22 +49,42 @@ try {
   process.exit(1);
 }
 
-/* ─── 1. Every versioned local <script src> tag in index.html matches an
-   entry in sw.js SHELL with the identical path AND identical ?v= string
-   (forward), and every ?v= SHELL entry matches an index.html script tag
-   (reverse). Unversioned SHELL entries (the app shell itself, icon,
-   manifest) are exempt from the reverse check. ────────────────────────── */
-(function checkScriptTagsVsShell() {
-  const scriptSrcRe = /<script\s+[^>]*src=["']([^"']+)["'][^>]*>/g;
-  const localSrcs = [];
-  let m;
-  while ((m = scriptSrcRe.exec(indexHtml))) {
-    const src = m[1];
-    if (/^https?:\/\//i.test(src)) continue; // CDN scripts, none expected here, tracked separately if added
-    localSrcs.push(src);
+/* ─── 1. Every local runtime script and stylesheet referenced by the six
+   public Forex pages must appear in sw.js SHELL with the identical path AND
+   identical query string. The reverse check applies to every versioned SHELL
+   runtime asset, so a stale or arbitrary versioned cache entry fails. ────── */
+(function checkRuntimeAssetsVsShell() {
+  const runtimeAssets = [];
+  const tagRe = /<(script|link)\b[^>]*>/gi;
+  const attr = (tag, name) => {
+    const match = new RegExp("\\b" + name + "\\s*=\\s*[\"']([^\"']+)[\"']", 'i').exec(tag);
+    return match ? match[1] : '';
+  };
+  const external = (value) => /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(value);
+
+  for (const page of RUNTIME_PAGES) {
+    let match;
+    tagRe.lastIndex = 0;
+    while ((match = tagRe.exec(pageHtml[page]))) {
+      const tag = match[0];
+      const kind = match[1].toLowerCase();
+      if (kind === 'link' && !/\brel\s*=\s*["']stylesheet["']/i.test(tag)) continue;
+      const source = attr(tag, kind === 'script' ? 'src' : 'href');
+      if (!source || external(source)) continue;
+      runtimeAssets.push({ page, kind, source });
+    }
   }
-  if (!localSrcs.length) {
-    fail('found no local <script src> tags in index.html, check the regex or the file moved');
+
+  const runtimeByRef = new Map();
+  runtimeAssets.forEach((asset) => {
+    const key = asset.source.startsWith('./') ? asset.source.slice(2) : asset.source;
+    const existing = runtimeByRef.get(key);
+    if (existing) existing.pages.push(asset.page);
+    else runtimeByRef.set(key, { ...asset, pages: [asset.page] });
+  });
+  const runtimeRefs = [...runtimeByRef.values()];
+  if (!runtimeRefs.length) {
+    fail('found no local runtime script or stylesheet references across the Forex pages');
     return;
   }
 
@@ -79,55 +104,50 @@ try {
   }
 
   const normalise = (p) => (p.startsWith('./') ? p.slice(2) : p);
-
-  // Forward: every versioned script tag must appear in SHELL with the identical
-  // path and identical ?v= string. A version mismatch prints both values, this
-  // is the near-miss class this file exists to catch.
-  const versionedSrcs = localSrcs.filter((src) => src.includes('?v='));
-  if (!versionedSrcs.length) {
-    fail('found no versioned (?v=) local <script src> tags in index.html, check the regex or the tags moved');
-  }
-  versionedSrcs.forEach((src) => {
-    const normSrc = normalise(src);
-    const srcPath = normSrc.split('?')[0];
-    const srcVersion = normSrc.split('?')[1];
-    const shellMatchEntry = shellEntries.find((e) => normalise(e).split('?')[0] === srcPath);
-    if (!shellMatchEntry) {
-      fail(
-        'index.html references "' + src + '" but sw.js SHELL has no matching path. ' +
-        'Add "./' + normSrc + '" to SHELL.'
-      );
-      return;
-    }
-    const shellVersion = normalise(shellMatchEntry).split('?')[1];
-    if (shellVersion !== srcVersion) {
-      fail(
-        'version mismatch for "' + srcPath + '": index.html has "?' + (srcVersion || '(none)') +
-        '" but sw.js SHELL has "?' + (shellVersion || '(none)') + '". Every ?v= query string must match exactly.'
-      );
-    } else {
-      pass('index.html script "' + src + '" matches sw.js SHELL entry "' + shellMatchEntry + '"');
-    }
+  const shellByPath = new Map();
+  shellEntries.forEach((entry) => {
+    const normal = normalise(entry);
+    const sourcePath = normal.split('?')[0];
+    if (!shellByPath.has(sourcePath)) shellByPath.set(sourcePath, []);
+    shellByPath.get(sourcePath).push(normal);
   });
 
-  // Reverse: every SHELL entry containing ?v= must match a script tag in
-  // index.html with the identical ?v= string. Catches a stale leftover SHELL
-  // entry (e.g. a deleted or renamed lib script) the forward check can't see.
-  const exemptShellEntries = new Set(['./', './index.html', './icon.svg', './manifest.webmanifest']);
-  const versionedShellEntries = shellEntries.filter((e) => e.includes('?v=') && !exemptShellEntries.has(e));
+  // Forward: every local runtime reference must appear in SHELL with the
+  // identical path and query string. A path with a different query is a
+  // mismatch, even if another SHELL entry has the same path.
+  runtimeRefs.forEach((asset) => {
+    const normal = asset.source.startsWith('./') ? asset.source.slice(2) : asset.source;
+    const sourcePath = normal.split('?')[0];
+    const matches = shellByPath.get(sourcePath) || [];
+    if (!matches.includes(normal)) {
+      if (!matches.length) {
+        fail(asset.page + ' ' + asset.kind + ' "' + asset.source + '" has no matching sw.js SHELL path. Add "./' + normal + '" to SHELL.');
+      } else {
+        fail('query mismatch for ' + asset.page + ' ' + asset.kind + ' "' + sourcePath + '": page has "' + (normal.split('?')[1] || '(none)') + '" but sw.js SHELL has "' + matches.join(', ') + '". Every query string must match exactly.');
+      }
+      return;
+    }
+    const shellEntry = shellEntries.find((entry) => normalise(entry) === normal);
+    pass(asset.page + ' ' + asset.kind + ' "' + asset.source + '" matches sw.js SHELL entry "' + shellEntry + '"');
+  });
+
+  // Reverse: every versioned SHELL entry must match one of the runtime assets
+  // in the six pages. Unversioned shell documents, icons and manifests remain
+  // explicit offline-shell entries and are not treated as runtime references.
+  const versionedShellEntries = shellEntries.filter((e) => e.includes('?v='));
   if (!versionedShellEntries.length) {
     fail('found no versioned (?v=) entries in sw.js SHELL, check the regex or the entries moved');
   }
-  const indexScriptSet = new Set(localSrcs.map((src) => normalise(src)));
+  const runtimeSet = new Set(runtimeRefs.map((asset) => normalise(asset.source)));
   versionedShellEntries.forEach((entry) => {
     const normEntry = normalise(entry);
-    if (!indexScriptSet.has(normEntry)) {
+    if (!runtimeSet.has(normEntry)) {
       fail(
-        'sw.js SHELL has "' + entry + '" but index.html has no matching <script src> tag with the identical ?v=. ' +
-        'Remove the stale SHELL entry or add/update the matching script tag.'
+        'sw.js SHELL has "' + entry + '" but the Forex runtime pages have no matching script or stylesheet reference with the identical query string. ' +
+        'Remove the stale SHELL entry or add/update the matching page asset.'
       );
     } else {
-      pass('sw.js SHELL entry "' + entry + '" matches an index.html script tag');
+      pass('sw.js SHELL entry "' + entry + '" matches a Forex runtime script or stylesheet reference');
     }
   });
 })();

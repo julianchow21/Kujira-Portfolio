@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f0f0f">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none';">
+<title>Kujira Forex | Private preview</title>
+<script src="lib/theme-init.js?v=1.0"></script>
+<link rel="stylesheet" href="lib/public.css?v=0.14">
+</head>
+<body>
+<header class="public-topbar">
+  <a class="brand" href="./welcome.html" aria-label="Kujira Forex home">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="public-logo-gradient" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset=".5" stop-color="#a78bfa"/><stop offset="1" stop-color="#f472b6"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#public-logo-gradient)"/><path d="M9 18c3 3 11 3 14 0" stroke="#04201c" stroke-width="2.2" fill="none" stroke-linecap="round"/><circle cx="12" cy="13" r="1.5" fill="#04201c"/></svg>
+    <span class="brand-name">Kujira Forex</span>
+  </a>
+  <nav class="public-nav" aria-label="Primary">
+    <a href="./pricing.html">Plans</a>
+    <a href="#about">How it works</a>
+    <a class="button button-primary nav-primary" href="./index.html?v=0.14">Open local journal</a>
+  </nav>
+  <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle colour theme" title="Toggle colour theme">◐</button>
+</header>
+
+<main class="public-main">
+  <section class="hero" aria-labelledby="hero-title">
+    <div>
+      <span class="status-pill">Private preview</span>
+      <h1 id="hero-title">Record trades.<br><span>Review the decisions.</span></h1>
+      <p class="hero-copy">A private workspace for recording trades and reviewing the decisions around them.</p>
+      <div class="hero-actions">
+        <a class="button button-primary" href="./index.html?v=0.14">Open local journal</a>
+        <a class="button" href="./index.html?v=0.14#account">View account options</a>
+        <a class="button" href="./pricing.html">View pricing</a>
+      </div>
+      <p class="hero-note">Online accounts and paid plans are not available in this preview.</p>
+    </div>
+
+    <div class="preview-frame" aria-label="Synthetic sample journal preview">
+      <div class="preview-head"><span>Journal preview</span><span class="sample-label">Synthetic sample data</span></div>
+      <div class="preview-row">
+        <div><div class="preview-symbol">EUR/USD</div><div class="preview-meta"><span class="preview-chip">Open</span><span>Long · review notes</span></div></div>
+        <div class="preview-value"><strong>1.0842</strong>entry</div>
+      </div>
+      <div class="preview-row">
+        <div><div class="preview-symbol">GBP/JPY</div><div class="preview-meta"><span class="preview-chip closed">Closed</span><span>Short · tagged</span></div></div>
+        <div class="preview-value"><strong>190.18</strong>exit</div>
+      </div>
+      <div class="preview-row">
+        <div><div class="preview-symbol">USD/CHF</div><div class="preview-meta"><span class="preview-chip">Open</span><span>Long · awaiting review</span></div></div>
+        <div class="preview-value"><strong>0.8951</strong>entry</div>
+      </div>
+      <p class="preview-foot">Example rows show the journal shape only. They are not market data or performance results.</p>
+    </div>
+  </section>
+
+  <section class="section" id="plans" aria-labelledby="plans-title">
+    <div class="section-head">
+      <div class="eyebrow">Access options</div>
+      <h2 id="plans-title">Start locally, keep the choice clear</h2>
+      <p>The current preview keeps the journal on this device. Online account access is planned for a later review.</p>
+    </div>
+    <div class="plans">
+      <article class="plan-card featured">
+        <div class="plan-kicker">Available now</div>
+        <h3>Local journal</h3>
+        <p>Record and review trades on this device with the local journal experience.</p>
+        <span class="plan-state active">Available on this device</span>
+        <ul class="plan-list"><li>Local-first journal</li><li>Review views and notes</li><li>No account required for this preview</li></ul>
+        <a class="button button-primary" href="./index.html?v=0.14">Open local journal</a>
+      </article>
+      <article class="plan-card">
+        <div class="plan-kicker">Planned</div>
+        <h3>Free account</h3>
+        <p>Up to 50 saved trades when online accounts open.</p>
+        <span class="plan-state pending">Online account planned</span>
+        <ul class="plan-list"><li>Up to 50 saved trades</li><li>Open and closed trades count towards the limit</li><li>Availability to be announced</li></ul>
+        <a class="button" href="./index.html?v=0.14#account">View account options</a>
+      </article>
+      <article class="plan-card">
+        <div class="plan-kicker">Planned</div>
+        <h3>Pro</h3>
+        <p>Pro pricing is not set, and checkout is unavailable in this preview.</p>
+        <span class="plan-state pending">Pricing: To be announced</span>
+        <ul class="plan-list"><li>Unlimited trades planned</li><li>Advanced review and simulator planned</li><li>Chart markers and CSV import planned</li><li>Pricing is not set</li></ul>
+        <span class="button button-muted" aria-disabled="true">Checkout unavailable</span>
+      </article>
+    </div>
+  </section>
+
+  <section class="section" id="about" aria-labelledby="about-title">
+    <div class="section-head">
+      <div class="eyebrow">Product direction</div>
+      <h2 id="about-title">A clear place to look back</h2>
+      <p>The journal keeps the work close at hand while online access is considered for a later review.</p>
+    </div>
+    <div class="explain-grid">
+      <article class="explain-card"><h3>Work locally first</h3><p>The local journal opens on this device and keeps the preview useful without a sign-in or payment step.</p></article>
+      <article class="explain-card"><h3>Online access later</h3><p>Online accounts and paid plans are not available in this preview and remain subject to a later product review.</p></article>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="entry-title">
+    <div class="entry-card">
+      <div><h2 id="entry-title">Ready to look around?</h2><p>Open the journal or view the account entry point inside the preview.</p></div>
+      <div class="entry-actions"><a class="button button-primary" href="./index.html?v=0.14">Open local journal</a><a class="button" href="./index.html?v=0.14#account">View account options</a></div>
+    </div>
+  </section>
+</main>
+
+<footer class="public-footer">
+  <span>© Kujira Forex · Private preview</span>
+  <nav class="footer-links" aria-label="Footer"><a href="./terms.html">Terms</a><a href="./privacy.html">Privacy</a><a href="./refunds.html">Refunds</a></nav>
+</footer>
+
+<script>
+(function(){
+  var key='kjr_journal_v1_theme';
+  var button=document.getElementById('theme-toggle');
+  function sync(){
+    var light=document.documentElement.classList.contains('light');
+    button.setAttribute('aria-pressed',String(light));
+    document.querySelector('meta[name="theme-color"]').setAttribute('content',light?'#f0f2f5':'#0f0f0f');
+  }
+  button.addEventListener('click',function(){
+    var light=!document.documentElement.classList.contains('light');
+    document.documentElement.classList.toggle('light',light);
+    try{localStorage.setItem(key,light?'light':'dark');}catch(e){}
+    sync();
+  });
+  sync();
+}());
+</script>
+</body>
+</html>

@@ -6,19 +6,21 @@ Multi-tenant SaaS trading journal (TraderSync-style). Phase 1 is single-user (Ju
 
 Single-file SPA, all CSS/JS/HTML in `index.html`. No framework, no bundler. Built on the hardened web-app-starter: localStorage-first Supabase sync, preview guard, dirty-row tracking, light/dark theme, designed empty/error states, version badge. Shared engines vendored in `lib/` (`kjr-format.js`, `kjr-calendar.js`), configured not forked.
 
-### Scale-ready seams (single-user now, multi-user + billing later)
+### Scale-ready seams (local owner or configured hosted account)
 
-- `currentUser()` returns a local owner now (`{id:null}`). Phase 2 returns the Supabase Auth user. The only place the app asks "who is this".
-- `entitlement(feature)` is the paywall gate. Returns true for everything while `PLAN==='owner'`. Phase 2 reads the plan from the `profiles` row and gates the paid features. Every paid-only feature must call it.
-- Rows carry `user_id`, stamped in `sbBatchUpsert` when `currentUser().id` exists. `schema.sql` ships RLS-ready (option C). Phase 2 swaps the anon key for the user JWT in `SB_HDR` (one line, marked in the file).
-- `profiles` table (plan, stripe_customer_id) stubbed in `schema.sql` so adding Stripe later only writes to it.
-- `FREE_TRADE_CAP` constant present, unused while owner, enforced in Phase 2.
+- `currentUser()` is the identity seam. When `config.js` resolves `mode:'offline'`, it returns the local owner (`{id:null}`). With complete hosted configuration and a verified Supabase session, it returns the authenticated user. The rest of the app must not identify users independently.
+- `entitlement(feature)` is the paywall gate. It allows all features for the local owner and reads the authenticated hosted account state for other users. Every paid-only feature must call it.
+- Local browser data is stored under the local-owner scope. Hosted rows are account-scoped by `auth.uid()`, and writes use the `sync_trade` RPC. `schema.sql` ships RLS-ready (option C). `lib/auth-client.js` supplies the verified bearer JWT for Supabase REST/RPC and Worker requests, so there is no manual `SB_HDR` swap.
+- `profiles` owns the hosted plan and Stripe identity fields. Direct table writes are denied, and trusted billing RPCs are the mutation path.
+- The free-trade cap does not apply to the local owner. Hosted free accounts enforce `FREE_TRADE_CAP` through the server RPCs.
 
-### Phase 2 cutover checklist (before enabling RLS / auth)
+### Hosted cutover checklist (before enabling hosted access)
 
-- **Backfill `user_id`.** Phase 1 rows were written with `user_id` NULL (stamped only when `currentUser().id` exists). Enabling the `own trades` policies before backfilling hides the whole journal. Run `migrations/phase2-user-id-backfill.sql` as the owner first.
-- **Server timestamps.** `sbBatchUpsert` no longer sends `updated_at`; the server stamps inserts and the `set_updated_at()` trigger in `schema.sql` advances it on updates, and the client echoes it back via `Prefer: return=representation`. The schema trigger must be applied or re-syncs of edited rows keep their old timestamp.
-- **Stripe blocker.** Nothing writes `profiles.stripe_customer_id`, so `checkout.session.completed` matches zero rows and buyers stay on `free` silently. Wire customer capture at Checkout Session creation before taking real money. The webhook now fails loudly (503, `matched 0 profiles`) when it cannot attribute a customer.
+- **Choose the database path.** For a fresh empty isolated Supabase test project, apply `schema.sql` directly and skip `migrations/phase2-user-id-backfill.sql`. For an existing cloud database, inspect `trades` first. Phase 1 cloud rows may have `user_id` NULL, and enabling the own-row policies before assigning ownership hides the journal. Run the backfill as the database owner only after confirming every NULL row belongs to one known `auth.users.id`.
+- **Keep local data separate.** The owner’s existing browser data remains in its local scope. The schema backfill only assigns ownership to rows already in the cloud and does not import local browser data. Any move from local mode to a hosted account requires an explicit, reviewed export/import path.
+- **Use the verified Auth transport.** Enable hosted mode only after `config.js` has valid public Supabase settings and the Auth client can verify a session. It supplies the JWT to REST, RPC and Worker calls; do not edit the unused legacy `SB_HDR` constant as a cutover step.
+- **Server timestamps and CAS.** `sync_trade` receives the last `server_updated_at` token as `p_expected_updated_at`, locks and compares the row, and returns `applied`, `server_updated_at` and `server_deleted_at`. The `set_updated_at()` trigger stamps updates, and the client stores the returned server timestamp as the next CAS token. `Prefer: return=representation` is only the REST transport hint, not the version source.
+- **Billing proof.** `profiles.stripe_customer_id` is server-bound through the trusted checkout and billing RPCs, not browser writes. Keep hosted billing disabled until test-mode customer binding, checkout attribution and webhook matching have all been verified.
 
 ### Data layer
 
@@ -29,7 +31,7 @@ Inherited from the starter, keep the gotchas true: preview guard at the TOP of t
 - `APP` — name, storageKey, version badge.
 - `TABLES` — `['trades']` for now.
 - Seams block — `currentUser`, `PLAN`, `ENTITLEMENTS`, `entitlement`, `FREE_TRADE_CAP`.
-- Supabase block — empty (runs fully local in Phase 1). Fill in to enable cloud.
+- `config.js` — public Supabase, Auth and Worker settings, disabled by default until a complete hosted configuration is supplied.
 
 ## Files
 

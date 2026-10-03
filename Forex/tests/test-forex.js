@@ -83,7 +83,7 @@ const CONST_NAMES = ['PLAN', 'ENTITLEMENTS', 'STORED_ID_MAX'];
 
 // allTags() reads the module-level `DB.trades` array; stub the minimal shape it needs
 // (a plain data global, not app behaviour) so the function is callable in isolation.
-let extractedCode = 'var DB = { trades: [] };\n';
+let extractedCode = 'var DB = { trades: [] }; function isLocalOwner(){ return true; }\n';
 const missing = [];
 for (const n of FN_NAMES) {
   try { extractedCode += extractFunction(indexSrc, n, INDEX_PATH) + '\n'; }
@@ -105,11 +105,15 @@ let syncCode = [
   'var STORED_ID_MAX=64, SB_PAGE_SIZE=1000;',
   "var SB_URL='https://mock.supabase.test', SB_HDR={'Content-Type':'application/json'};",
   'var DB={trades:[]}, _dirty={trades:new Set()}, _rowRev={trades:new Map()};',
-  "var APP={storageKey:'test_forex'}, persistedStore={};",
+  "var APP={storageKey:'test_forex'}, STORAGE_KEY='test_forex', persistedStore={};",
   "var PDEL_KEY='test_pending_deletes', CONFLICT_KEY='test_sync_conflicts';",
   "var localStorage={setItem:(k,v)=>{persistedStore[k]=v;},getItem:(k)=>persistedStore[k]||null};",
   'function toast(){}',
   'function isLocalhostPreview(){return false;} function sbConfigured(){return true;} function setSync(){}',
+  "var _activeScope='test', _scopeEpoch=0, _authEpoch=0, _syncAbortController=null;",
+  'function scopeSnapshot(){return {scope:_activeScope,epoch:_scopeEpoch,authEpoch:_authEpoch,key:STORAGE_KEY,userId:currentUser().id||null};}',
+  "function scopeIsCurrent(s){return !!s&&s.scope===_activeScope&&s.epoch===_scopeEpoch&&s.authEpoch===_authEpoch&&(s.userId||null)===(currentUser().id||null);}",
+  'async function sbHeaders(){return SB_HDR;}',
   'var _flushPromise=null, _flushQueued=false, flushCalls=0, flushGate=null;',
   'async function _flushDirtyOnce(){ flushCalls++; if(flushGate) await flushGate; }',
   "function currentUser(){ return {id:'00000000-0000-0000-0000-000000000001'}; }",
@@ -708,13 +712,18 @@ test('schema defines authenticated read-only tables, trusted CAS and durable tom
   assert.doesNotMatch(schemaSrc, /create policy "own profile write"/);
   assert.match(schemaSrc, /revoke all on table profiles from anon, authenticated, public/);
   assert.match(schemaSrc, /grant select on table profiles to authenticated/);
-  assert.match(schemaSrc, /grant select, insert, update, delete on table profiles to service_role/);
+  assert.match(schemaSrc, /revoke all on table profiles from service_role/);
+  assert.match(schemaSrc, /grant execute on function public\.apply_stripe_event\([^\n]+to service_role/);
   assert.doesNotMatch(schemaSrc, /create policy "own trades write"/);
   assert.match(schemaSrc, /revoke all on table trades from anon, authenticated, public/);
   assert.match(schemaSrc, /grant select on table trades to authenticated/);
   assert.match(schemaSrc, /grant select, insert, update, delete on table trades to service_role/);
-  assert.match(schemaSrc, /on conflict \(user_id, id\) do nothing/);
-  assert.doesNotMatch(schemaSrc, /on conflict \(id\) do nothing/);
+  const syncTradeStart = schemaSrc.indexOf('create or replace function public.sync_trade');
+  const syncTradeEnd = schemaSrc.indexOf('alter function public.sync_trade', syncTradeStart);
+  assert.ok(syncTradeStart >= 0 && syncTradeEnd > syncTradeStart, 'sync_trade function section is present');
+  const syncTradeSrc = schemaSrc.slice(syncTradeStart, syncTradeEnd);
+  assert.match(syncTradeSrc, /on conflict \(user_id, id\) do nothing/);
+  assert.doesNotMatch(syncTradeSrc, /on conflict \(id\) do nothing/);
   assert.match(schemaSrc, /v_is_scoped_pk/);
   assert.doesNotMatch(schemaSrc, /drop constraint[^;]+cascade/i);
   assert.match(schemaSrc, /pg_catalog\.clock_timestamp\(\)/);
@@ -772,11 +781,18 @@ async function runWorkerContractTests() {
   const secret = 'whsec_synthetic';
   const env = {
     STRIPE_WEBHOOK_SECRET: secret,
-    SB_URL: 'https://supabase.synthetic.test',
+    SB_URL: 'https://forex-legacy-synthetic.supabase.co',
+    SB_PUBLISHABLE_KEY: 'sb_publishable_synthetic',
     SB_SERVICE_ROLE_KEY: 'service-role-synthetic',
     STRIPE_BILLING_ENABLED: 'true',
     STRIPE_PRO_PRICE_ID: 'price_synthetic',
     STRIPE_PRO_PRODUCT_ID: 'prod_synthetic',
+    STRIPE_SECRET_KEY: 'sk_test_synthetic',
+    STRIPE_API_VERSION: '2026-09-30.endive',
+    STRIPE_SUCCESS_URL: 'https://forex.synthetic.test/Forex/?billing=success',
+    STRIPE_CANCEL_URL: 'https://forex.synthetic.test/Forex/?billing=cancel',
+    STRIPE_PORTAL_RETURN_URL: 'https://forex.synthetic.test/Forex/settings',
+    BILLING_ALLOWED_ORIGINS: 'https://forex.synthetic.test',
   };
   function priceItem(overrides = {}) {
     return {
@@ -797,6 +813,7 @@ async function runWorkerContractTests() {
         id: 'sub_synthetic',
         customer: 'cus_synthetic',
         status: 'active',
+        livemode: false,
         items: { data: [priceItem()] },
         ...overrides,
       } }
@@ -808,10 +825,12 @@ async function runWorkerContractTests() {
       created: WORKER_NOW_SECONDS,
       type: 'checkout.session.completed',
       data: { object: {
+        id: 'cs_synthetic',
         mode: 'subscription',
         payment_status: 'paid',
         subscription: 'sub_synthetic',
         customer: 'cus_synthetic',
+        livemode: false,
         line_items: { data: [priceItem()] },
         ...overrides,
       } }
@@ -828,8 +847,17 @@ async function runWorkerContractTests() {
     const body = JSON.stringify(event);
     const validV1 = await hmacHex('001770000000', body, secret);
     const calls = [];
+    const rpcCalls = [];
+    let providerStatus = 'active';
     workerSandbox.fetch = async (url, options) => {
       calls.push({ url, options });
+      if (url.includes('/v1/subscriptions/')) {
+        return new TestResponse(JSON.stringify({
+          id: 'sub_synthetic', customer: 'cus_synthetic', status: providerStatus,
+          livemode: false, items: { data: [priceItem()] },
+        }), { status: 200 });
+      }
+      rpcCalls.push({ url, options });
       return new TestResponse(JSON.stringify([{
         applied: true, duplicate: false, matched: 1, reason: 'applied'
       }]), { status: 200 });
@@ -845,11 +873,12 @@ async function runWorkerContractTests() {
     assert.deepStrictEqual(toPlain(await response.json()), {
       received: true, synced: true, status: 200, matched: 1, reason: 'applied'
     });
-    assert.strictEqual(calls.length, 1);
-    assert.strictEqual(calls[0].options.method, 'POST');
-    assert.strictEqual(calls[0].url, `${env.SB_URL}/rest/v1/rpc/apply_stripe_event`);
-    assert.strictEqual(calls[0].options.headers.Prefer, 'return=representation');
-    assert.deepStrictEqual(JSON.parse(calls[0].options.body), {
+    assert.strictEqual(calls.length, 2);
+    assert.strictEqual(rpcCalls.length, 1);
+    assert.strictEqual(rpcCalls[0].options.method, 'POST');
+    assert.strictEqual(rpcCalls[0].url, `${env.SB_URL}/rest/v1/rpc/apply_stripe_event`);
+    assert.strictEqual(rpcCalls[0].options.headers.Prefer, 'return=representation');
+    assert.deepStrictEqual(JSON.parse(rpcCalls[0].options.body), {
       p_event_id: 'evt_rotated',
       p_event_type: 'customer.subscription.updated',
       p_event_created: WORKER_NOW_SECONDS,
@@ -860,20 +889,23 @@ async function runWorkerContractTests() {
 
     const deletedEvent = subscriptionEvent('evt_deleted', { status: 'canceled' });
     deletedEvent.type = 'customer.subscription.deleted';
+    providerStatus = 'canceled';
     const deletedResponse = await workerContext.workerDefault.fetch(
       await signedRequest(deletedEvent), env
     );
     assert.strictEqual(deletedResponse.status, 200);
-    assert.strictEqual(JSON.parse(calls[1].options.body).p_plan, 'free');
-    assert.strictEqual(JSON.parse(calls[1].options.body).p_subscription_id, 'sub_synthetic');
+    assert.strictEqual(JSON.parse(rpcCalls[1].options.body).p_plan, 'free');
+    assert.strictEqual(JSON.parse(rpcCalls[1].options.body).p_subscription_id, 'sub_synthetic');
 
     const boundaryEvent = subscriptionEvent('evt_boundary');
+    providerStatus = 'active';
     const boundaryRequest = await signedRequest(
       boundaryEvent, String(WORKER_NOW_SECONDS - 300)
     );
     const boundaryResponse = await workerContext.workerDefault.fetch(boundaryRequest, env);
     assert.strictEqual(boundaryResponse.status, 200);
-    assert.strictEqual(calls.length, 3);
+    assert.strictEqual(rpcCalls.length, 3);
+    assert.strictEqual(calls.length, 6);
   });
 
   await testAsync('Stripe Worker keeps billing disabled without explicit configuration', async () => {
@@ -938,11 +970,31 @@ async function runWorkerContractTests() {
       assert.strictEqual(payload.received, true, label);
       assert.strictEqual(payload.synced, false, label);
     }
+    workerSandbox.fetch = async (url, options) => {
+      if (url.includes('/v1/checkout/sessions/')) {
+        return new TestResponse(JSON.stringify({
+          id: 'cs_synthetic', customer: 'cus_synthetic', subscription: 'sub_synthetic',
+          mode: 'subscription', status: 'complete', payment_status: 'paid', livemode: false,
+          line_items: { data: [priceItem()] },
+        }), { status: 200 });
+      }
+      if (url.includes('/v1/subscriptions/')) {
+        return new TestResponse(JSON.stringify({
+          id: 'sub_synthetic', customer: 'cus_synthetic', status: 'active', livemode: false,
+          items: { data: [priceItem()] },
+        }), { status: 200 });
+      }
+      return new TestResponse(JSON.stringify([{
+        applied: true, duplicate: false, matched: 1, reason: 'applied',
+      }]), { status: 200 });
+    };
     const validCheckoutResponse = await workerContext.workerDefault.fetch(
       await signedRequest(checkoutEvent('evt_valid_checkout')), env
     );
-    assert.strictEqual(validCheckoutResponse.status, 503, 'valid checkout entitlement is disabled');
-    assert.match((await validCheckoutResponse.json()).reason, /server-owned subscription binding/);
+    assert.strictEqual(validCheckoutResponse.status, 200, 'valid checkout is proved by the provider fixtures');
+    assert.deepStrictEqual(await validCheckoutResponse.json(), {
+      received: true, synced: true, status: 200, matched: 1, reason: 'applied',
+    });
     const missingId = subscriptionEvent('evt_missing_id');
     delete missingId.id;
     const missingCreated = subscriptionEvent('evt_missing_created');
@@ -972,9 +1024,15 @@ async function runWorkerContractTests() {
       { label: 'object RPC row', payload: { applied: true, duplicate: false, matched: 1, reason: 'applied' }, status: 503 },
     ];
     for (const [index, item] of cases.entries()) {
-      let request;
+      let rpcRequest;
       workerSandbox.fetch = async (url, options) => {
-        request = { url, options };
+        if (url.includes('/v1/subscriptions/')) {
+          return new TestResponse(JSON.stringify({
+            id: 'sub_synthetic', customer: 'cus_synthetic', status: 'active', livemode: false,
+            items: { data: [priceItem()] },
+          }), { status: 200 });
+        }
+        rpcRequest = { url, options };
         const payload = Object.prototype.hasOwnProperty.call(item, 'payload')
           ? item.payload : [item.result];
         return new TestResponse(JSON.stringify(payload), { status: 200 });
@@ -987,7 +1045,7 @@ async function runWorkerContractTests() {
       assert.strictEqual(payload.synced, item.status === 200, item.label);
       if (item.duplicate) assert.strictEqual(payload.duplicate, true, item.label);
       if (item.ignored) assert.strictEqual(payload.ignored, item.ignored, item.label);
-      assert.strictEqual(request.url, `${env.SB_URL}/rest/v1/rpc/apply_stripe_event`, item.label);
+      assert.strictEqual(rpcRequest.url, `${env.SB_URL}/rest/v1/rpc/apply_stripe_event`, item.label);
     }
   });
 
@@ -1060,7 +1118,7 @@ async function runSyncContractTests() {
     const local = { id: 'trade_delete_1', symbol: 'LOCAL', _updatedAt: '2026-08-29T02:00:00Z' };
     assert.strictEqual(await syncSandbox.sbDelete('trades', local.id, local._updatedAt, local), false);
     assert.strictEqual(await syncSandbox.sbDelete('trades', local.id, local._updatedAt, local), false);
-    const queued = JSON.parse(syncSandbox.persistedStore.test_pending_deletes);
+    const queued = JSON.parse(syncSandbox.persistedStore.test_forex_pendingdel);
     const conflicts = JSON.parse(syncSandbox.persistedStore.test_sync_conflicts);
     assert.strictEqual(queued.length, 1);
     assert.strictEqual(conflicts.length, 1);
@@ -1071,7 +1129,7 @@ async function runSyncContractTests() {
 
   await testAsync('flushPendingDeletes - stale queued delete remains durable and does not duplicate its audit', async () => {
     syncSandbox.persistedStore = {
-      test_pending_deletes: JSON.stringify([{
+      test_forex_pendingdel: JSON.stringify([{
         table: 'trades', id: 'trade_delete_2', expectedUpdatedAt: '2026-08-29T02:00:00Z',
         data: { id: 'trade_delete_2', symbol: 'QUEUED LOCAL', _updatedAt: '2026-08-29T02:00:00Z' },
       }]),
@@ -1082,7 +1140,7 @@ async function runSyncContractTests() {
     }] });
     await syncSandbox.flushPendingDeletes();
     await syncSandbox.flushPendingDeletes();
-    const queued = JSON.parse(syncSandbox.persistedStore.test_pending_deletes);
+    const queued = JSON.parse(syncSandbox.persistedStore.test_forex_pendingdel);
     const conflicts = JSON.parse(syncSandbox.persistedStore.test_sync_conflicts);
     assert.strictEqual(queued.length, 1);
     assert.strictEqual(conflicts.length, 1);

@@ -1,8 +1,19 @@
-# M7 STUB, NOT DEPLOYED. Stripe webhook seam for Kujira Forex.
-# Deploying needs Julian: a Stripe account, a Forex Supabase project, then
-#   wrangler secret put STRIPE_WEBHOOK_SECRET
-#   wrangler secret put SB_URL
-#   wrangler secret put SB_SERVICE_ROLE_KEY
+# Local implementation candidate, not deployed by this change.
+# Billing stays disabled unless an operator supplies all explicit test-mode
+# secrets and vars. Never put Stripe or Supabase server secrets in this file.
 name = "kjr-forex-stripe"
 main = "Stripe Webhook Worker v0 (1 Aug).js"
 compatibility_date = "2026-08-01"
+
+# Required server-only secrets, set with `wrangler secret put` in the target
+# test environment: STRIPE_SECRET_KEY (sk_test_*), STRIPE_WEBHOOK_SECRET,
+# SB_URL, SB_PUBLISHABLE_KEY and SB_SERVICE_ROLE_KEY or SB_SECRET_KEY.
+# Required vars are environment-specific and must be exact, fixed values:
+# STRIPE_BILLING_ENABLED=true
+# STRIPE_PRO_PRICE_ID, STRIPE_PRO_PRODUCT_ID
+# STRIPE_SUCCESS_URL, STRIPE_CANCEL_URL, STRIPE_PORTAL_RETURN_URL
+# Optional test-mode portal configuration used for invoice history and
+# hosted subscription cancellation: STRIPE_PORTAL_CONFIGURATION_ID (bpc_...)
+# BILLING_ALLOWED_ORIGINS, STRIPE_API_VERSION
+# STRIPE_TEST_INJECTION and STRIPE_TEST_API_BASE_URL are test-harness-only,
+# never configure them in a deployed environment

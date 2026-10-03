@@ -66,6 +66,7 @@ button{font-family:inherit}
 .subnav .seg button{padding:6px 14px;border-radius:999px;font-size:13px;font-weight:600;color:var(--text2);border:none;background:none;cursor:pointer}
 .subnav .seg button.active{background:var(--accent);color:#04201c}
 .subnav .right{margin-left:auto;display:flex;gap:8px}
+.account-status{font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* DASHBOARD */
 .dash{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;margin-bottom:16px}
@@ -171,6 +172,9 @@ th.sortable.desc::after{content:'\25BC'}
 .field label{font-size:12px;color:var(--text2);font-weight:500}
 .field .req{color:var(--red)}
 .field .err{font-size:11px;color:var(--red);min-height:14px}
+.billing-error{font-size:12px;color:var(--red);min-height:14px}
+.billing-error:empty{display:none}
+.account-email{overflow-wrap:anywhere;word-break:break-word}
 .frow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .tag-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
 .tag-row:last-child{border:none}
@@ -190,6 +194,10 @@ th.sortable.desc::after{content:'\25BC'}
   .tb-tab{padding:5px 7px}
   .sync{min-width:0}
   .search{min-width:110px}
+  .subnav{align-items:flex-start}
+  .subnav .seg{max-width:100%;overflow-x:auto}
+  .subnav .right{flex:1 1 100%;width:100%;min-width:0;margin-left:0;flex-wrap:wrap;justify-content:flex-end}
+  .subnav #account-btn{max-width:min(180px,100%);overflow:hidden;text-overflow:ellipsis}
   .frow{grid-template-columns:1fr}
   .cmp{grid-template-columns:1.2fr 1fr 1fr 1fr;font-size:12px}
   th,td{padding:8px 9px}
@@ -226,6 +234,13 @@ th.sortable.desc::after{content:'\25BC'}
     <button class="btn" onclick="boot()">Retry</button>
   </div>
 
+  <div id="auth-required" class="state hidden">
+    <div class="big">◉</div>
+    <h3 id="auth-required-title">Sign in to continue</h3>
+    <p id="auth-required-copy">This hosted journal needs an authenticated account before it can load data.</p>
+    <button class="btn btn-primary" onclick="openAccountSettings()">Open account</button>
+  </div>
+
   <!-- view switch -->
   <div class="subnav hidden" id="subnav">
     <div class="seg">
@@ -236,6 +251,7 @@ th.sortable.desc::after{content:'\25BC'}
     </div>
     <div class="right">
       <button class="btn" onclick="openTagManager()">Tags</button>
+      <button class="btn account-status" id="account-btn" onclick="openAccountSettings()">Account</button>
       <button class="icon-btn" title="Settings" aria-label="Open settings" onclick="openSettings()">⚙</button>
       <button class="btn btn-primary" onclick="openTradeModal()">+ Log trade</button>
     </div>
@@ -312,12 +328,15 @@ th.sortable.desc::after{content:'\25BC'}
 
 <script src="lib/kjr-format.js?v=1.2"></script>
 <script src="lib/kjr-calendar.js?v=1.0"></script>
+<script src="config.js?v=1.0"></script>
+<script src="lib/supabase-2.117.2.umd.js?v=2.117.2" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+<script src="lib/auth-client.js?v=1.0"></script>
 
 <script>
 /* ============================================================================
    APP CONFIG
    ========================================================================== */
-const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.13 (29 Aug)' };
+const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.14 (03 Oct)' };
 const CCY = '$';
 const TABLES = ['trades'];
 const PAGE_SIZE = 25;
@@ -329,26 +348,236 @@ const TAG_CATS = [
 ];
 
 /* ============================================================================
-   SCALE-READY SEAMS (single-user now, multi-user + Stripe later, no rework)
+   AUTH + SCALE-READY SEAMS
    ========================================================================== */
-function currentUser(){ return { id:null, email:null, local:true }; }
+const FOREX_CONFIG = (window.KjrForexConfig && window.KjrForexConfig.resolve)
+  ? window.KjrForexConfig.resolve(window.__KJR_FOREX_CONFIG__ || {}, window.location)
+  : { mode:'broken', authEnabled:false, errors:['Auth configuration module is unavailable'], supabaseUrl:'', supabaseAnonKey:'', workerUrl:'', workerConnectOrigin:'', authProviders:[] };
+const FOREX_AUTH = (window.KjrForexAuth && window.KjrForexAuth.createAuthClient)
+  ? window.KjrForexAuth.createAuthClient(FOREX_CONFIG, { location:window.location })
+  : null;
+let _authUser = FOREX_AUTH ? FOREX_AUTH.currentUser() : { id:null, email:null, local:false, hosted:true, authenticated:false, scope:'hosted-anonymous' };
+let _authEpoch = 0, _scopeEpoch = 0, _activeScope = '', _syncAbortController = null;
+let _authUnsubscribe = null, _authReloadPromise = null, _authReloadQueued = false, _authActionInFlight = 0, _authRun = 0;
+let _saveTimer=null;
+let STORAGE_KEY = APP.storageKey;
+let DIRTY_KEY = '', PDEL_KEY = '', QUARANTINE_KEY = '', CONFLICT_KEY = '';
+let TAG_UNDO_KEY = '', CHART_PROXY_KEY = '', THEME_KEY = '', ANTHROPIC_KEY = '';
+
+function currentUser(){
+  const user={ id:_authUser.id||null, email:_authUser.email||null, local:!!_authUser.local };
+  if(!user.local){ user.hosted=true; user.authenticated=!!_authUser.authenticated; user.scope=_authUser.scope||scopeForUser(_authUser); }
+  return user;
+}
+function isLocalOwner(){ return FOREX_CONFIG.mode==='offline' && !!currentUser().local; }
+function isHostedMode(){ return FOREX_CONFIG.mode==='hosted' || FOREX_CONFIG.mode==='broken'; }
+function isHostedBroken(){
+  if(FOREX_CONFIG.mode==='broken') return true;
+  try{ const state=FOREX_AUTH&&FOREX_AUTH.snapshot?FOREX_AUTH.snapshot().status:''; return FOREX_CONFIG.mode==='hosted'&&state==='broken'; }
+  catch(e){ return FOREX_CONFIG.mode==='hosted'&&!FOREX_AUTH; }
+}
+function isHostedAuthenticated(){ return FOREX_CONFIG.mode==='hosted' && !!currentUser().id && !!currentUser().authenticated; }
+function scopeForUser(user){
+  if(user&&user.local) return 'local-owner';
+  if(user&&user.id&&/^[A-Za-z0-9_-]{1,128}$/.test(user.id)) return 'user-'+user.id;
+  return 'hosted-anonymous';
+}
+function storageKeyForScope(scope){ return scope==='local-owner' ? APP.storageKey : APP.storageKey+'_'+scope; }
+function setStorageScope(scope){
+  const next=scope||'hosted-anonymous';
+  if(_activeScope===next && STORAGE_KEY) return;
+  _scopeEpoch++;
+  if(_syncAbortController) _syncAbortController.abort();
+  _syncAbortController=null;
+  clearTimeout(_saveTimer);
+  _activeScope=next; STORAGE_KEY=storageKeyForScope(next);
+  DIRTY_KEY=STORAGE_KEY+'_dirty'; PDEL_KEY=STORAGE_KEY+'_pendingdel';
+  QUARANTINE_KEY=STORAGE_KEY+'_quarantine'; CONFLICT_KEY=STORAGE_KEY+'_syncconflicts';
+  TAG_UNDO_KEY=STORAGE_KEY+'_tagundo'; CHART_PROXY_KEY=STORAGE_KEY+'_chartProxy';
+  THEME_KEY=STORAGE_KEY+'_theme'; ANTHROPIC_KEY=APP.storageKey+'_anthropicKey';
+}
+setStorageScope(FOREX_CONFIG.mode==='offline'?'local-owner':'hosted-anonymous');
+function scopeSnapshot(){ return { scope:_activeScope, epoch:_scopeEpoch, authEpoch:_authEpoch, key:STORAGE_KEY, userId:currentUser().id||null }; }
+function scopeIsCurrent(s){ return !!s && s.scope===_activeScope && s.epoch===_scopeEpoch && s.authEpoch===_authEpoch && (s.userId||null)===(currentUser().id||null); }
+function resetRuntimeState(){
+  TABLES.forEach(t=>{ DB[t]=[]; _dirty[t]=new Set(); _rowRev[t]=new Map(); });
+  clearTimeout(_saveTimer); _saveTimer=null;
+  _page=1; _view='journal'; _filter={q:'',status:'all'}; _sim={excl:new Set(),only:new Set(),side:'all'}; _simMis=[]; _simSet=[]; _tagList=[]; _accountState=defaultAccountState(); _accountStateError='';
+  if(typeof _billingError!=='undefined') _billingError='';
+  if(typeof _billingState!=='undefined') _billingState={configured:false,available:false,plan:'free',trade_count:0,trade_cap:FREE_TRADE_CAP,allowed_features:{},billing_status:'free',billing_enabled:false,checkout_available:false,portal_enabled:false,portal_available:false,history_enabled:false,cancel_enabled:false,reason:''};
+  if(typeof _checkoutOperation!=='undefined') _checkoutOperation=null;
+  try{ closeModal(); }catch(e){}
+  try{ const coach=document.getElementById('coach-body'); if(coach){ coach.dataset.done=''; coach.innerHTML=''; } }catch(e){}
+  try{ if(typeof _tradeChart!=='undefined'&&_tradeChart){ _tradeChart.remove(); _tradeChart=null; } }catch(e){}
+}
+function applyAuthUser(user){
+  const next=user&&typeof user==='object' ? user : { id:null,email:null,local:false,hosted:true,authenticated:false,scope:'hosted-anonymous' };
+  const nextScope=scopeForUser(next), changed=nextScope!==_activeScope || (next.id||null)!==(_authUser.id||null)
+    || !!next.authenticated!==!!_authUser.authenticated;
+  _authUser={...next,scope:nextScope};
+  if(changed){ _authEpoch++; setStorageScope(nextScope); resetRuntimeState(); _loadDirty(); }
+  updateAccountUI();
+}
+
 const PLAN = 'owner';
 const ENTITLEMENTS = { unlimited_trades:true, simulator:true, advanced_analytics:true, ai_coach:true, chart_markers:true, csv_import:true };
-function entitlement(feature){ return PLAN==='owner' ? true : !!ENTITLEMENTS[feature]; }
 const FREE_TRADE_CAP = 50;
-/* Gate for paid-only feature entry points. No-ops with an upgrade toast when entitlement() is false (never happens while PLAN==='owner', wired for Phase 2). */
+let _accountState = { plan:'free', trade_count:0, trade_cap:FREE_TRADE_CAP, entitlements:{} };
+let _accountStateError = '';
+let _billingError = '';
+let _billingState = { configured:false,available:false,plan:'free',trade_count:0,trade_cap:FREE_TRADE_CAP,allowed_features:{},billing_status:'free',billing_enabled:false,checkout_available:false,portal_enabled:false,portal_available:false,history_enabled:false,cancel_enabled:false,reason:'' };
+let _checkoutOperation = null;
+function defaultAccountState(){ return isLocalOwner() ? { plan:'owner',trade_count:DB.trades?DB.trades.length:0,trade_cap:null,entitlements:{...ENTITLEMENTS} } : { plan:'free',trade_count:0,trade_cap:FREE_TRADE_CAP,entitlements:{} }; }
+function accountEntitlements(){ return _accountState&&_accountState.entitlements&&typeof _accountState.entitlements==='object' ? _accountState.entitlements : {}; }
+function entitlement(feature){ return isLocalOwner() ? true : accountEntitlements()[feature]===true; }
 function requireEntitlement(feature,label){ if(entitlement(feature)) return true; toast((label||'This feature')+' needs a plan upgrade.',true); return false; }
+function hostedFreeCapReached(){
+  if(isLocalOwner() || entitlement('unlimited_trades')) return false;
+  const cap=Number(_accountState.trade_cap||FREE_TRADE_CAP), count=Math.max(Number(_accountState.trade_count)||0,DB.trades.length);
+  return cap>0 && count>=cap;
+}
+async function canCreateTrade(){
+  if(isLocalOwner()) return true;
+  if(!isHostedAuthenticated()){ toast('Sign in to log trades.',true); return false; }
+  if(!hostedFreeCapReached()) return true;
+  return authoriseFeature('unlimited_trades','Logging trades');
+}
 
 /* ============================================================================
    SUPABASE CONFIG (empty = fully local, Phase 1)
    ========================================================================== */
 const USE_WORKER_DB = false;
-const SB_DIRECT_URL = '', SB_PROXY_URL = '', SB_ANON_KEY = '';
+const SB_DIRECT_URL = FOREX_CONFIG.supabaseUrl || '', SB_PROXY_URL = '', SB_ANON_KEY = FOREX_CONFIG.supabaseAnonKey || '';
 const SB_URL = USE_WORKER_DB ? SB_PROXY_URL : SB_DIRECT_URL;
-const SB_HDR = USE_WORKER_DB
-  ? { 'Content-Type':'application/json' }
-  : { 'Content-Type':'application/json', 'apikey':SB_ANON_KEY, 'Authorization':'Bearer '+SB_ANON_KEY };
-function sbConfigured(){ return !!SB_URL && (USE_WORKER_DB || !!SB_ANON_KEY); }
+const SB_HDR = { 'Content-Type':'application/json', 'apikey':SB_ANON_KEY };
+function sbConfigured(){ return isHostedAuthenticated() && !!SB_URL && !!SB_ANON_KEY; }
+async function sbHeaders(){
+  if(!sbConfigured()) throw new Error('Cloud sync requires an authenticated user');
+  if(FOREX_AUTH&&FOREX_AUTH.headers) return FOREX_AUTH.headers();
+  throw new Error('Hosted Auth is unavailable');
+}
+function normaliseAccountState(raw){
+  const value=Array.isArray(raw)?raw[0]:raw, v=value&&typeof value==='object'?value:{};
+  const plan=v.plan==='pro'?'pro':'free';
+  const source=v.entitlements&&typeof v.entitlements==='object'&&!Array.isArray(v.entitlements)?v.entitlements:{};
+  const entitlements={};
+  ['unlimited_trades','simulator','advanced_analytics','ai_coach','chart_markers','csv_import']
+    .forEach(feature=>{ entitlements[feature]=plan==='pro'&&source[feature]===true; });
+  const tradeCount=Number.isSafeInteger(v.trade_count)&&v.trade_count>=0?v.trade_count:0;
+  const tradeCap=plan==='pro'?null:(Number.isSafeInteger(v.trade_cap)&&v.trade_cap>=0?v.trade_cap:FREE_TRADE_CAP);
+  return { plan, trade_count:tradeCount, trade_cap:tradeCap, entitlements };
+}
+async function sbRpc(name,body,scope){
+  const snap=scope||scopeSnapshot();
+  if(!scopeIsCurrent(snap)||!sbConfigured()) throw new Error('Hosted account is unavailable');
+  const headers=await sbHeaders();
+  if(!scopeIsCurrent(snap)||currentUser().id!==snap.userId) throw new Error('Account session changed');
+  const r=await fetch(SB_URL+'/rest/v1/rpc/'+encodeURIComponent(name),{method:'POST',headers:{...headers,'Prefer':'return=representation'},body:JSON.stringify(body||{}),signal:_syncAbortController?_syncAbortController.signal:undefined});
+  if(!r.ok) throw new Error('Account request failed ('+r.status+')');
+  const data=await r.json();
+  if(!scopeIsCurrent(snap)) throw new Error('Account session changed during request');
+  return Array.isArray(data)&&data.length===1?data[0]:data;
+}
+async function loadAccountState(scope){
+  const snap=scope||scopeSnapshot();
+  if(isLocalOwner()){ _accountState=defaultAccountState(); _accountStateError=''; return _accountState; }
+  if(!isHostedAuthenticated()){ _accountState=defaultAccountState(); return _accountState; }
+  try{
+    const state=normaliseAccountState(await sbRpc('get_account_state',{},snap));
+    if(!scopeIsCurrent(snap)) return _accountState;
+    _accountState=state; _accountStateError='';
+  }catch(e){
+    if(!scopeIsCurrent(snap)) return _accountState;
+    _accountState=defaultAccountState(); _accountStateError='Account plan is unavailable';
+  }
+  updateAccountUI();
+  return _accountState;
+}
+async function authoriseFeature(feature,label){
+  if(isLocalOwner()) return true;
+  if(!isHostedAuthenticated()){ toast('Sign in to use '+(label||feature)+'.',true); return false; }
+  if(!sbConfigured()){ toast('Hosted '+(label||feature)+' is unavailable.',true); return false; }
+  const snap=scopeSnapshot();
+  try{
+    const result=await sbRpc('authorise_feature',{p_feature:feature},snap);
+    if(!scopeIsCurrent(snap)) return false;
+    const allowed=result&&result.allowed===true;
+    if(!allowed){ toast((result&&result.reason)||((label||'This feature')+' needs a plan upgrade.'),true); updateAccountUI(); return false; }
+    return true;
+  }catch(e){ if(!scopeIsCurrent(snap)) return false; toast('Could not verify '+(label||'this feature')+'. Try again.',true); return false; }
+}
+const BILLING_FEATURE_KEYS=['unlimited_trades','simulator','advanced_analytics','ai_coach','chart_markers','csv_import'];
+function emptyBillingState(reason){
+  return {configured:!!FOREX_CONFIG.workerUrl,available:false,plan:'free',trade_count:0,trade_cap:FREE_TRADE_CAP,allowed_features:{},billing_status:'free',billing_enabled:false,checkout_available:false,portal_enabled:false,portal_available:false,history_enabled:false,cancel_enabled:false,reason:reason||''};
+}
+function normaliseBillingState(raw){
+  if(!raw||typeof raw!=='object'||Array.isArray(raw)) throw new Error('Billing account returned an invalid response');
+  const plan=raw.plan==='pro'?'pro':'free', allowed={};
+  const source=raw.allowed_features&&typeof raw.allowed_features==='object'&&!Array.isArray(raw.allowed_features)?raw.allowed_features:{};
+  BILLING_FEATURE_KEYS.forEach(key=>{ allowed[key]=plan==='pro'&&source[key]===true; });
+  const count=Number.isSafeInteger(raw.trade_count)&&raw.trade_count>=0?raw.trade_count:0;
+  const cap=plan==='pro'?null:(Number.isSafeInteger(raw.trade_cap)&&raw.trade_cap>=0?raw.trade_cap:FREE_TRADE_CAP);
+  const portalEnabled=raw.portal_enabled===true||raw.portal_available===true;
+  return {configured:true,available:true,plan,trade_count:count,trade_cap:cap,allowed_features:allowed,billing_status:typeof raw.billing_status==='string'&&raw.billing_status.length<=64?raw.billing_status:'free',billing_enabled:raw.billing_enabled===true,checkout_available:raw.checkout_available===true,portal_enabled:portalEnabled,portal_available:portalEnabled,history_enabled:raw.history_enabled===true,cancel_enabled:raw.cancel_enabled===true,reason:''};
+}
+function billingFailure(result,fallback){
+  const payload=result&&result.payload&&typeof result.payload==='object'?result.payload:{};
+  const error=new Error(typeof payload.reason==='string'&&payload.reason?payload.reason:fallback||'Billing request failed');
+  error.code=typeof payload.code==='string'&&payload.code?payload.code:'billing_unavailable';
+  error.status=result&&result.response?result.response.status:0;
+  return error;
+}
+async function billingRequest(path,method,body,scope){
+  const before=scope||scopeSnapshot();
+  if(!scopeIsCurrent(before)||!isHostedAuthenticated()||!FOREX_CONFIG.workerUrl){
+    const error=new Error('Billing is unavailable'); error.code='billing_unavailable'; throw error;
+  }
+  const headers=await sbHeaders();
+  const captured=scopeSnapshot();
+  if(!scopeIsCurrent(before)||!scopeIsCurrent(captured)||currentUser().id!==before.userId){
+    const error=new Error('Billing session changed'); error.code='billing-session-changed'; throw error;
+  }
+  const options={method:method||'GET',headers:{...headers,Accept:'application/json'}};
+  if(body!==undefined){ options.headers['Content-Type']='application/json'; options.body=JSON.stringify(body); }
+  const response=await fetch(FOREX_CONFIG.workerUrl+path,options);
+  if(!scopeIsCurrent(captured)){ const error=new Error('Billing session changed'); error.code='billing-session-changed'; throw error; }
+  let payload=null;
+  try{ payload=await response.json(); }catch(e){ payload=null; }
+  if(!scopeIsCurrent(captured)){ const error=new Error('Billing session changed'); error.code='billing-session-changed'; throw error; }
+  return {response,payload,snapshot:captured};
+}
+async function loadBillingState(scope){
+  const snap=scope||scopeSnapshot();
+  if(!isHostedAuthenticated()||!FOREX_CONFIG.workerUrl){ if(scopeIsCurrent(snap)) _billingState=emptyBillingState('Billing is not configured'); return _billingState; }
+  try{
+    const result=await billingRequest('/account','GET',undefined,snap);
+    if(!scopeIsCurrent(result.snapshot)) return _billingState;
+    if(!result.response.ok) throw billingFailure(result,'Billing is temporarily unavailable');
+    const state=normaliseBillingState(result.payload);
+    if(!scopeIsCurrent(result.snapshot)) return _billingState;
+    _billingState=state;
+    _accountState={plan:state.plan,trade_count:state.trade_count,trade_cap:state.trade_cap,entitlements:{...state.allowed_features}};
+    _accountStateError='';
+  }catch(e){
+    if(!scopeIsCurrent(snap)) return _billingState;
+    _billingState={...emptyBillingState('Billing is temporarily unavailable'),configured:true};
+  }
+  return _billingState;
+}
+function safeBillingUrl(value,kind){
+  if(typeof value!=='string'||!value.trim()) return '';
+  try{
+    const url=new URL(value.trim());
+    const host=kind==='checkout'?'checkout.stripe.com':'billing.stripe.com';
+    if(url.protocol!=='https:'||url.hostname!==host||url.username||url.password) return '';
+    return url.toString();
+  }catch(e){ return ''; }
+}
+function setBillingError(message){
+  _billingError=typeof message==='string'?message:'';
+  const el=document.getElementById('billing-error');
+  if(el) el.textContent=_billingError;
+}
 
 /* ============================================================================
    STATE
@@ -362,8 +591,6 @@ let _page = 1;
 let _sim = { excl:new Set(), only:new Set(), side:'all' };
 let _simMis = [], _simSet = [], _tagList = [];
 
-const DIRTY_KEY = APP.storageKey + '_dirty', PDEL_KEY = APP.storageKey + '_pendingdel';
-const QUARANTINE_KEY = APP.storageKey + '_quarantine', CONFLICT_KEY = APP.storageKey + '_syncconflicts';
 const STORED_ID_MAX = 64, SB_PAGE_SIZE = 1000;
 const uid = KjrFmt.uid, escapeHtml = KjrFmt.esc;
 
@@ -414,16 +641,21 @@ function setSync(s,msg){
   else if(s==='preview'){ el.textContent='● Preview'; el.style.color='var(--amber)'; }
   else el.textContent='';
 }
-async function sbSyncRow(table,item,isDelete){
+async function sbSyncRow(table,item,isDelete,scope){
   assertSyncTable(table); assertStoredId(item.id);
+  const snap=scope||sbSyncRow.__kjrScope||scopeSnapshot();
+  if(!scopeIsCurrent(snap)||currentUser().id!==snap.userId) throw new Error('Sync session changed');
   const u=currentUser();
   if(!u||!u.id) throw new Error('Cloud sync requires an authenticated user');
   const {id,_updatedAt,_deletedAt,...data}=item;
-  const r=await fetch(SB_URL+'/rest/v1/rpc/sync_trade',{method:'POST',headers:{...SB_HDR,'Prefer':'return=representation'},body:JSON.stringify({
+  const headers=await sbHeaders();
+  if(!scopeIsCurrent(snap)||currentUser().id!==snap.userId) throw new Error('Sync session changed');
+  const r=await fetch(SB_URL+'/rest/v1/rpc/sync_trade',{method:'POST',headers:{...headers,'Prefer':'return=representation'},body:JSON.stringify({
     p_id:id, p_data:isDelete?null:data, p_expected_updated_at:_updatedAt||null, p_delete:!!isDelete
-  })});
+  }),signal:_syncAbortController?_syncAbortController.signal:undefined});
   if(!r.ok) throw new Error('Sync failed ('+r.status+'): '+await r.text());
   const payload=await r.json(), out=Array.isArray(payload)?payload[0]:payload;
+  if(!scopeIsCurrent(snap)) throw new Error('Sync session changed');
   if(!out||typeof out.applied!=='boolean') throw new Error('Sync returned an invalid response');
   if(out.row_id&&!isValidStoredId(out.row_id)) throw new Error('Sync returned an invalid stored trade ID');
   const serverRow=out.row_id?{...(out.row_data||{}),id:out.row_id,_updatedAt:out.server_updated_at||null,_deletedAt:out.server_deleted_at||null}:null;
@@ -431,10 +663,15 @@ async function sbSyncRow(table,item,isDelete){
   if(!serverRow||!serverRow._updatedAt) throw new Error('Sync response omitted the server revision');
   return serverRow;
 }
-async function sbBatchUpsert(table,items){
+async function sbBatchUpsert(table,items,scope){
   if(isLocalhostPreview()) return []; if(!items.length) return [];
+  const captured=scope||scopeSnapshot();
+  if(!scopeIsCurrent(captured)||currentUser().id!==captured.userId) throw new Error('Cloud session changed');
   const echoed=[];
-  for(const item of items) echoed.push(await sbSyncRow(table,item,false));
+  for(const item of items){
+    if(!scopeIsCurrent(captured)) throw new Error('Cloud session changed');
+    echoed.push(await sbSyncRow(table,item,false,captured));
+  }
   return echoed;
 }
 function sbPageUrl(table,cursor){
@@ -444,10 +681,13 @@ function sbPageUrl(table,cursor){
   return url;
 }
 async function sbFetchAll(table){
-  const rows=[]; let cursor=null;
+  const snap=scopeSnapshot(), rows=[]; let cursor=null;
   while(true){
-    const r=await fetch(sbPageUrl(table,cursor),{headers:SB_HDR});
+    const headers=await sbHeaders();
+    if(!scopeIsCurrent(snap)||currentUser().id!==snap.userId) throw new Error('Cloud session changed');
+    const r=await fetch(sbPageUrl(table,cursor),{headers,signal:_syncAbortController?_syncAbortController.signal:undefined});
     if(!r.ok) throw new Error(await r.text());
+    if(!scopeIsCurrent(snap)) throw new Error('Cloud session changed');
     const page=await r.json(); if(!Array.isArray(page)) throw new Error('Cloud read returned an invalid response');
     const checked=splitValidRows(page); if(checked.rejected.length){ quarantineRows('cloud',table,checked.rejected); throw new Error('Cloud data contains an invalid stored trade ID'); }
     checked.valid.forEach(row=>rows.push({...row.data,id:row.id,_updatedAt:row.updated_at,_deletedAt:row.deleted_at||null}));
@@ -456,48 +696,60 @@ async function sbFetchAll(table){
   }
   return rows;
 }
-async function sbDelete(table,id,expectedUpdatedAt,data){
-  if(isLocalhostPreview()||!sbConfigured()||!currentUser().id) return true;
+async function sbDelete(table,id,expectedUpdatedAt,data,scope){
+  const snap=scope||scopeSnapshot();
   assertSyncTable(table); assertStoredId(id);
+  if(isLocalhostPreview()) return true;
+  // A caller that captured an older account must still write the tombstone to
+  // that account's durable queue, then stop before any request. Dropping it
+  // here would make an account switch lose a local delete intent.
+  if(scope&&!scopeIsCurrent(snap)){ _queueDelete(table,id,expectedUpdatedAt,data,snap); return false; }
+  if(!sbConfigured()||!currentUser().id) return true;
   // Write-ahead: queue the delete BEFORE the request, so a page close while it
   // is in flight (or before it starts) still reaches the cloud via
   // flushPendingDeletes on next boot. Removed from the queue only on success.
-  _queueDelete(table,id,expectedUpdatedAt,data);
-  try{ await sbSyncRow(table,{...(data||{}),id,_updatedAt:expectedUpdatedAt},true); _unqueueDelete(table,id); return true; }
-  catch(e){ if(e.code==='STALE_WRITE') _recordConflict(table,id,e.serverRow,e.message,'delete',data); setSync('error',e.message); return false; }
+  _queueDelete(table,id,expectedUpdatedAt,data,snap);
+  try{ await sbSyncRow(table,{...(data||{}),id,_updatedAt:expectedUpdatedAt},true,snap); if(scopeIsCurrent(snap)) _unqueueDelete(table,id,snap); return true; }
+  catch(e){ if(e.code==='STALE_WRITE'&&scopeIsCurrent(snap)) _recordConflict(table,id,e.serverRow,e.message,'delete',data,snap); if(scopeIsCurrent(snap)) setSync('error',e.message); return false; }
 }
-function _queueDelete(table,id,expectedUpdatedAt,data){
+function _queueDelete(table,id,expectedUpdatedAt,data,snap){
   assertSyncTable(table); assertStoredId(id);
   try{
-    const parsed=JSON.parse(localStorage.getItem(PDEL_KEY)||'[]'), l=Array.isArray(parsed)?parsed:[];
+    const key=snap&&snap.key?snap.key+'_pendingdel':PDEL_KEY;
+    const parsed=JSON.parse(localStorage.getItem(key)||'[]'), l=Array.isArray(parsed)?parsed:[];
     const next={table,id,expectedUpdatedAt:expectedUpdatedAt||null,data:data||null};
     const i=l.findIndex(x=>x&&x.table===table&&x.id===id); if(i>=0) l[i]=next; else l.push(next);
-    localStorage.setItem(PDEL_KEY,JSON.stringify(l));
+    localStorage.setItem(key,JSON.stringify(l));
   }catch(e){}
 }
-function _unqueueDelete(table,id){ try{ const l=JSON.parse(localStorage.getItem(PDEL_KEY)||'[]'); const k=l.filter(x=>!(x.table===table&&x.id===id)); localStorage.setItem(PDEL_KEY,JSON.stringify(k)); }catch(e){} }
-async function flushPendingDeletes(){
+function _unqueueDelete(table,id,snap){ try{ const key=snap&&snap.key?snap.key+'_pendingdel':PDEL_KEY; const l=JSON.parse(localStorage.getItem(key)||'[]'); const k=l.filter(x=>!(x.table===table&&x.id===id)); localStorage.setItem(key,JSON.stringify(k)); }catch(e){} }
+async function flushPendingDeletes(snap){
+  const captured=snap||scopeSnapshot();
+  if(!scopeIsCurrent(captured)) return;
   if(isLocalhostPreview()||!sbConfigured()||!currentUser().id) return;
-  let l; try{ l=JSON.parse(localStorage.getItem(PDEL_KEY)||'[]'); }catch{ return; }
+  let l; try{ l=JSON.parse(localStorage.getItem(captured.key+'_pendingdel')||'[]'); }catch{ return; }
   if(!Array.isArray(l)||!l.length) return; const keep=[];
   for(const it of l){
+    if(!scopeIsCurrent(captured)) return;
     if(!it||!TABLES.includes(it.table)||!isValidStoredId(it.id)){ quarantineRows('pending-delete','trades',[it]); continue; }
-    try{ await sbSyncRow(it.table,{...(it.data||{}),id:it.id,_updatedAt:it.expectedUpdatedAt},true); }
-    catch(e){ if(e.code==='STALE_WRITE') _recordConflict(it.table,it.id,e.serverRow,e.message,'delete',it.data); keep.push(it); }
+    try{ await sbSyncRow(it.table,{...(it.data||{}),id:it.id,_updatedAt:it.expectedUpdatedAt},true,captured); }
+    catch(e){ if(e.code==='STALE_WRITE'&&scopeIsCurrent(captured)) _recordConflict(it.table,it.id,e.serverRow,e.message,'delete',it.data,captured); if(scopeIsCurrent(captured)) keep.push(it); }
   }
-  try{ localStorage.setItem(PDEL_KEY,JSON.stringify(keep)); }catch{}
+  if(scopeIsCurrent(captured)) try{ localStorage.setItem(captured.key+'_pendingdel',JSON.stringify(keep)); }catch{}
 }
-let _saveTimer=null;
 function saveData(){
-  try{ localStorage.setItem(APP.storageKey,JSON.stringify(DB)); }
+  if(isHostedMode()&&!currentUser().id) return;
+  const captured=scopeSnapshot();
+  try{ localStorage.setItem(STORAGE_KEY,JSON.stringify(DB)); }
   catch(e){ toast('Local storage is full. Changes will only reach the cloud. Avoid refreshing until synced.',true); }
-  clearTimeout(_saveTimer); _saveTimer=setTimeout(_flushDirty,1000);
+  clearTimeout(_saveTimer); _saveTimer=setTimeout(()=>{ if(scopeIsCurrent(captured)) _flushDirty(captured); },1000);
 }
-function _acceptServerRevision(t,id,uploadedRevision,serverRow){
+function _acceptServerRevision(t,id,uploadedRevision,serverRow,snap){
+  if(snap&&!scopeIsCurrent(snap)) return false;
   const i=DB[t]&&DB[t].findIndex(x=>x.id===id); if(i<0) return false;
   if(!serverRow||!serverRow._updatedAt) return false;
   DB[t][i]={...DB[t][i],_updatedAt:serverRow._updatedAt};
-  try{ localStorage.setItem(APP.storageKey,JSON.stringify(DB)); }
+  try{ localStorage.setItem(STORAGE_KEY,JSON.stringify(DB)); }
   catch(e){ toast('Could not save the server revision on this device. The trade will stay queued for safety.',true); return false; }
   if(rowRevision(t,id)!==uploadedRevision) return false;
   _dirty[t].delete(id); return true;
@@ -505,14 +757,16 @@ function _acceptServerRevision(t,id,uploadedRevision,serverRow){
 /* A row deleted (in another tab/device) while our upsert was in flight was
    re-created by that upsert. Re-issue the delete; sbDelete write-aheads the
    pending-delete queue, so it survives even a mid-request tab close. */
-async function _reapDeletedDuringFlush(t,rows,serverRows){
+async function _reapDeletedDuringFlush(t,rows,serverRows,snap){
   for(let i=0;i<rows.length;i++){
+    if(snap&&!scopeIsCurrent(snap)) return;
     const row=rows[i], serverRow=serverRows[i];
     const still=DB[t]&&DB[t].some(x=>x.id===row.id);
-    if(!still) await sbDelete(t,row.id,serverRow&&serverRow._updatedAt,serverRow).catch(()=>{});
+    if(!still) await sbDelete(t,row.id,serverRow&&serverRow._updatedAt,serverRow,snap).catch(()=>{});
   }
 }
-function _recordConflict(table,id,serverRow,message,operation,localRow){
+function _recordConflict(table,id,serverRow,message,operation,localRow,snap){
+  if(snap&&!scopeIsCurrent(snap)) return;
   try{
     const parsed=JSON.parse(localStorage.getItem(CONFLICT_KEY)||'[]'), l=Array.isArray(parsed)?parsed:[];
     const op=operation||'upsert';
@@ -522,13 +776,18 @@ function _recordConflict(table,id,serverRow,message,operation,localRow){
   }catch(e){}
 }
 let _flushPromise=null, _flushQueued=false;
-function _flushDirty(){
+function _flushDirty(snap){
+  const captured=snap||scopeSnapshot();
+  if(!scopeIsCurrent(captured)) return Promise.resolve();
   if(_flushPromise){ _flushQueued=true; return _flushPromise; }
-  const run=(async()=>{ do{ _flushQueued=false; await _flushDirtyOnce(); }while(_flushQueued); })();
+  const run=(async()=>{ do{ _flushQueued=false; await _flushDirtyOnce(captured); }while(_flushQueued&&scopeIsCurrent(captured)); })();
   _flushPromise=run.finally(()=>{ _flushPromise=null; });
   return _flushPromise;
 }
-async function _flushDirtyOnce(){
+async function _flushDirtyOnce(captured){
+  const snap=captured||scopeSnapshot();
+  if(!scopeIsCurrent(snap)) return;
+  _syncAbortController=new AbortController();
   if(isLocalhostPreview()||!sbConfigured()||!currentUser().id) return;
   const jobs=[];
   for(const t of TABLES){
@@ -540,19 +799,26 @@ async function _flushDirtyOnce(){
   for(const {t,rows} of jobs){
     for(const item of rows){
       try{
-        const echoed=await sbBatchUpsert(t,[item.row]);
-        _acceptServerRevision(t,item.row.id,item.revision,echoed[0]);
-        await _reapDeletedDuringFlush(t,[item.row],echoed);
+        const previousDispatchScope=sbSyncRow.__kjrScope;
+        sbSyncRow.__kjrScope=snap;
+        let echoed;
+        try{ echoed=await sbBatchUpsert(t,[item.row],snap); }
+        finally{ if(sbSyncRow.__kjrScope===snap) sbSyncRow.__kjrScope=previousDispatchScope; }
+        if(!scopeIsCurrent(snap)) return;
+        _acceptServerRevision(t,item.row.id,item.revision,echoed[0],snap);
+        await _reapDeletedDuringFlush(t,[item.row],echoed,snap);
       }catch(e){
+        if(!scopeIsCurrent(snap)) return;
         err=true; setSync('error',e.message); poisoned.push({table:t,id:item.row.id,error:e.message});
-        if(e.code==='STALE_WRITE') _recordConflict(t,item.row.id,e.serverRow,e.message);
+        if(e.code==='STALE_WRITE') _recordConflict(t,item.row.id,e.serverRow,e.message,undefined,undefined,snap);
       }
     }
   }
+  if(!scopeIsCurrent(snap)) return;
   _persistDirty();
   if(poisoned.length){ console.error('Sync: poisoned row(s), left dirty for retry:',poisoned); toast(poisoned.length+' trade'+(poisoned.length===1?'':'s')+' failed to sync and will keep retrying. Check console for details.',true); }
   else if(!err) setSync('ok');
-  flushPendingDeletes().catch(()=>{});
+  flushPendingDeletes(snap).catch(()=>{});
 }
 function mergeTable(cloudRows,localRows,dirtySet){
   if(!cloudRows.length) return localRows.slice();
@@ -562,14 +828,17 @@ function mergeTable(cloudRows,localRows,dirtySet){
   return [...byId.values()];
 }
 async function loadData(){
-  let local=null; try{ local=JSON.parse(localStorage.getItem(APP.storageKey)||'null'); }catch(e){}
+  if(isHostedMode()&&!currentUser().id) return;
+  const loadScope=scopeSnapshot();
+  let local=null; try{ local=JSON.parse(localStorage.getItem(loadScope.key)||'null'); }catch(e){}
   if(local) TABLES.forEach(t=>{ const checked=splitValidRows(local[t]); DB[t]=checked.valid; quarantineRows('local',t,checked.rejected); });
   if(isLocalhostPreview()){ setSync('preview'); _cloudReachable=true; return; }
   if(!sbConfigured()){ setSync('idle'); _cloudReachable=true; return; }
   if(!currentUser().id){ setSync('idle'); _cloudReachable=true; return; }
   let cloud={}; _cloudReachable=true;
-  try{ const res=await Promise.all(TABLES.map(t=>sbFetchAll(t))); TABLES.forEach((t,i)=>cloud[t]=res[i]); }
-  catch(e){ _cloudReachable=false; setSync('error',e.message); return; }
+  try{ const res=await Promise.all(TABLES.map(t=>sbFetchAll(t))); if(!scopeIsCurrent(loadScope)) return; TABLES.forEach((t,i)=>cloud[t]=res[i]); }
+  catch(e){ if(!scopeIsCurrent(loadScope)) return; _cloudReachable=false; setSync('error',e.message); return; }
+  if(!scopeIsCurrent(loadScope)) return;
   TABLES.forEach(t=>{ DB[t]=mergeTable(cloud[t]||[],DB[t]||[],_dirty[t]); });
   // Rows the user deleted but whose cloud delete has not confirmed (queued in
   // PDEL_KEY) must not resurrect from the cloud merge, even when no local
@@ -579,7 +848,8 @@ async function loadData(){
     const del=new Set(pdel.map(d=>d.table+'|'+d.id));
     TABLES.forEach(t=>{ DB[t]=(DB[t]||[]).filter(r=>!del.has(t+'|'+r.id)); });
   }
-  try{ localStorage.setItem(APP.storageKey,JSON.stringify(DB)); }catch(e){}
+  if(!scopeIsCurrent(loadScope)) return;
+  try{ localStorage.setItem(loadScope.key,JSON.stringify(DB)); }catch(e){}
   setSync('ok');
 }
 
@@ -614,7 +884,6 @@ function renameTag(cat,oldT,newT){
   changed.forEach(id=>markDirty('trades',id));
   saveData();
 }
-const TAG_UNDO_KEY = APP.storageKey + '_tagundo';
 function deleteTag(cat,tg){
   const lo=tg.toLowerCase();
   const affected=DB.trades.filter(t=>tradeTags(t,cat).some(x=>x.toLowerCase()===lo));
@@ -682,8 +951,9 @@ function computeStats(trades){
 function upsertTrade(tr){ assertStoredId(tr&&tr.id); const i=DB.trades.findIndex(t=>t.id===tr.id); if(i>=0) DB.trades[i]=tr; else DB.trades.push(tr); markDirty('trades',tr.id); saveData(); renderApp(); }
 function deleteTrade(id){
   assertStoredId(id); const row=DB.trades.find(t=>t.id===id); if(!row) return;
+  const snap=scopeSnapshot();
   DB.trades=DB.trades.filter(t=>t.id!==id); _dirty.trades.delete(id); _persistDirty(); saveData(); renderApp();
-  sbDelete('trades',id,row._updatedAt,row).then(ok=>{ if(!ok) flushPendingDeletes().catch(()=>{}); });
+  sbDelete('trades',id,row._updatedAt,row,snap).then(ok=>{ if(!ok&&scopeIsCurrent(snap)) flushPendingDeletes(snap).catch(()=>{}); });
 }
 
 /* ============================================================================
@@ -710,10 +980,12 @@ function visibleTrades(){
 function applyFilter(){ _filter.q=document.getElementById('search').value; _filter.status=document.getElementById('status-filter').value; _page=1; renderApp(); }
 function sortBy(k){ if(_sort.key===k) _sort.dir*=-1; else { _sort.key=k; _sort.dir=1; } _page=1; renderApp(); }
 function goPage(p){ _page=p; renderTable(visibleTrades()); }
-function showView(v){
-  if(v==='simulator' && !requireEntitlement('simulator','The simulator')) return;
-  if(v==='reports' && !requireEntitlement('advanced_analytics','Reports')) return;
-  if(v==='coach' && !requireEntitlement('ai_coach','The AI coach')) return;
+async function showView(v){
+  const snap=scopeSnapshot();
+  if(v==='simulator' && !await authoriseFeature('simulator','The simulator')) return;
+  if(v==='reports' && !await authoriseFeature('advanced_analytics','Reports')) return;
+  if(v==='coach' && !await authoriseFeature('ai_coach','The AI coach')) return;
+  if(!scopeIsCurrent(snap)) return;
   _view=v; document.querySelectorAll('#subnav .seg button').forEach(b=>b.classList.toggle('active',b.dataset.v===v)); renderApp();
 }
 
@@ -721,9 +993,199 @@ function showView(v){
    RENDER
    ========================================================================== */
 function show(id,cond){ const el=document.getElementById(id); if(el) el.classList.toggle('hidden',!cond); }
+function accountStatusLabel(){
+  if(isLocalOwner()) return 'Local device';
+  if(isHostedBroken()) return 'Auth unavailable';
+  if(currentUser().id) return currentUser().email||'Signed in';
+  return 'Sign in';
+}
+function updateAccountUI(){
+  const btn=document.getElementById('account-btn');
+  if(btn){ btn.textContent=accountStatusLabel(); btn.title=accountStatusLabel(); }
+  const title=document.getElementById('auth-required-title'), copy=document.getElementById('auth-required-copy');
+  if(title&&copy){
+    if(isHostedBroken()){
+      title.textContent='Hosted Auth is unavailable';
+      copy.textContent='Online accounts are unavailable in this preview. Local owner data is not loaded in this mode. Try again later.';
+    }else{
+      title.textContent='Sign in to continue';
+      copy.textContent='This hosted journal needs an authenticated account before it can load data.';
+    }
+  }
+}
+function accountPlanText(){
+  const cap=_accountState.trade_cap==null?'unlimited':String(_accountState.trade_cap);
+  return (_accountState.plan||'free')+' plan, '+String(_accountState.trade_count||0)+' / '+cap+' trades';
+}
+function authErrorText(e){ return e&&e.message ? e.message : 'The Auth request failed'; }
+function accountModalHtml(mode){
+  if(isLocalOwner()) return '<div class="modal-body"><div class="warn">Local device mode is active. Trades stay in this browser and billing is unavailable.</div><p class="muted">The local owner journal is kept separate from any future hosted account.</p></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="openSettings();">Settings</button></div>';
+  if(isHostedBroken()) return '<div class="modal-body"><div class="warn">Online accounts are unavailable in this preview.</div><p class="muted">Try again later. Local owner data is not loaded in this mode.</p></div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div>';
+  if(!currentUser().id){
+    const authMode=mode==='signup'?'signup':mode==='signin'?'signin':'default';
+    const authButtons=authMode==='signup'
+      ? '<button class="btn btn-primary" onclick="submitAuthAction(\'register\')">Register</button><button class="btn" onclick="openAccountSettings(\'signin\')">Sign in</button>'
+      : authMode==='signin'
+        ? '<button class="btn" onclick="openAccountSettings(\'signup\')">Create account</button><button class="btn btn-primary" onclick="submitAuthAction(\'sign-in\')">Sign in</button>'
+        : '<button class="btn" onclick="submitAuthAction(\'register\')">Register</button><button class="btn btn-primary" onclick="submitAuthAction(\'sign-in\')">Sign in</button>';
+    return '<div class="modal-body">'
+    +'<div class="field"><label for="auth-email">Email</label><input id="auth-email" type="email" autocomplete="email" maxlength="320"></div>'
+    +'<div class="field"><label for="auth-password">Password</label><input id="auth-password" type="password" autocomplete="current-password" maxlength="256"></div>'
+    +'<div class="err" id="auth-error" aria-live="polite"></div>'
+    +(FOREX_CONFIG.authProviders||[]).map(p=>'<button class="btn" type="button" onclick="signInProviderAction(\''+escapeHtml(p)+'\')">Continue with '+escapeHtml(p)+'</button>').join('')
+    +'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Cancel</button><span style="display:flex;gap:8px">'+authButtons+'</span></div>';
+  }
+  const billingConfigured=_billingState.configured===true;
+  const billingAvailable=_billingState.available===true&&_billingState.billing_enabled===true;
+  const checkoutReady=billingAvailable&&_billingState.checkout_available===true;
+  const portalReady=billingAvailable&&_billingState.portal_enabled===true;
+  const historyReady=billingAvailable&&_billingState.history_enabled===true;
+  const cancelReady=billingAvailable&&_billingState.cancel_enabled===true;
+  const billingMessage=!billingConfigured
+    ? 'Billing is not available in this preview.'
+    : !_billingState.available
+      ? 'Billing is temporarily unavailable. Try again later.'
+      : !_billingState.billing_enabled
+        ? 'Billing is not available for this account yet.'
+        : '';
+  return '<div class="modal-body"><div class="field"><label>Account</label><div class="muted account-email">'+escapeHtml(currentUser().email||'Signed in')+'</div></div>'
+    +'<div class="field"><label>Plan</label><div class="muted">'+escapeHtml(accountPlanText())+( _accountStateError?' · '+escapeHtml(_accountStateError):'')+'</div></div>'
+    +(billingMessage?'<div class="warn">'+escapeHtml(billingMessage)+'</div>':'')
+    +'<div class="billing-error" id="billing-error" role="alert" aria-live="polite">'+escapeHtml(_billingError)+'</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" '+(checkoutReady?'':'disabled')+' onclick="billingAction(\'checkout\')">Upgrade</button><button class="btn" '+(portalReady?'':'disabled')+' onclick="billingAction(\'manage\')">Manage billing</button><button class="btn" '+(historyReady?'':'disabled')+' onclick="billingAction(\'history\')">Billing history</button><button class="btn btn-danger" '+(cancelReady?'':'disabled')+' onclick="billingAction(\'cancel\')">Cancel plan</button></div>'
+    +'<p class="muted legal-links"><a href="./welcome.html">Welcome</a> · <a href="./terms.html">Terms</a> · <a href="./privacy.html">Privacy</a> · <a href="./refunds.html">Refunds</a></p>'
+    +'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-danger" onclick="signOutAction()">Sign out</button></div>';
+}
+function openAccountSettings(mode){
+  const title=currentUser().id?'Account':mode==='signup'?'Create account':mode==='signin'?'Sign in':'Account';
+  setBillingError('');
+  document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><h3>'+title+'</h3><button class="icon-btn" aria-label="Close '+title.toLowerCase()+'" onclick="closeModal()">✕</button></div>'+accountModalHtml(mode)+'</div></div>';
+  wireModal(title);
+}
+async function refreshAuthData(){
+  if(!FOREX_AUTH) throw new Error('Auth configuration module is unavailable');
+  const run=++_authRun;
+  try{
+    const user=await FOREX_AUTH.bootstrap();
+    if(run!==_authRun) throw new Error('Auth session changed');
+    applyAuthUser(user);
+    if(isHostedMode()&&!user.id){ resetRuntimeState(); renderApp(); return user; }
+    const snap=scopeSnapshot();
+    _syncAbortController=new AbortController();
+    await loadAccountState(snap);
+    if(run!==_authRun||!scopeIsCurrent(snap)) return currentUser();
+    await loadBillingState(snap);
+    if(run!==_authRun||!scopeIsCurrent(snap)) return currentUser();
+    await loadData();
+    if(run!==_authRun||!scopeIsCurrent(snap)) return currentUser();
+    if(scopeIsCurrent(snap)) flushPendingDeletes(snap).catch(()=>{});
+    renderApp();
+    return user;
+  }catch(e){
+    if(run===_authRun&&isHostedMode()){
+      applyAuthUser({id:null,email:null,local:false,hosted:true,authenticated:false,scope:'hosted-anonymous'});
+      resetRuntimeState();
+      updateAccountUI(); renderApp();
+    }
+    throw e;
+  }
+}
+function scheduleAuthReload(){
+  if(_authReloadPromise){ _authReloadQueued=true; return; }
+  _authReloadPromise=Promise.resolve().then(()=>refreshAuthData()).catch(e=>{ _cloudReachable=false; if(isHostedMode()&&!currentUser().id) resetRuntimeState(); updateAccountUI(); renderApp(); }).finally(()=>{
+    _authReloadPromise=null;
+    if(_authReloadQueued){ _authReloadQueued=false; scheduleAuthReload(); }
+  });
+}
+function bindAuthEvents(){
+  if(!FOREX_AUTH||_authUnsubscribe) return;
+  _authUnsubscribe=FOREX_AUTH.onAuthStateChange(evt=>{
+    if(!evt||!['SIGNED_IN','SIGNED_OUT','TOKEN_REFRESHED','USER_UPDATED','AUTH_ERROR'].includes(evt.event)) return;
+    // Clear the previous account before any asynchronous revalidation. The
+    // SDK callback must return first, so it never waits on network work.
+    _authRun++;
+    if(isHostedMode()){
+      applyAuthUser(evt.user||{id:null,email:null,local:false,hosted:true,authenticated:false,scope:'hosted-anonymous'});
+      renderApp();
+    }
+    if(!_authActionInFlight) Promise.resolve().then(scheduleAuthReload);
+  });
+}
+async function submitAuthAction(action){
+  const err=document.getElementById('auth-error'); if(err) err.textContent='';
+  _authActionInFlight++;
+  try{
+    const email=document.getElementById('auth-email').value.trim(), password=document.getElementById('auth-password').value;
+    if(!email||!password) throw new Error('Email and password are required');
+    const result=action==='register' ? await FOREX_AUTH.registerEmail(email,password) : await FOREX_AUTH.signInEmail(email,password);
+    if(action==='register'&&result&&result.pendingConfirmation){ if(err) err.textContent='Check your email to confirm your account, then sign in.'; return; }
+    await refreshAuthData(); closeModal(); toast(action==='register'?'Account created':'Signed in');
+  }catch(e){ if(err) err.textContent=authErrorText(e); }
+  finally{ _authActionInFlight--; }
+}
+async function signInProviderAction(provider){
+  _authActionInFlight++;
+  try{ await FOREX_AUTH.signInProvider(provider); }catch(e){ const err=document.getElementById('auth-error'); if(err) err.textContent=authErrorText(e); }
+  finally{ _authActionInFlight--; }
+}
+async function signOutAction(){
+  _authActionInFlight++;
+  try{ await FOREX_AUTH.signOut(); await refreshAuthData(); closeModal(); toast('Signed out'); }
+  catch(e){ const err=document.getElementById('auth-error'); if(err) err.textContent=authErrorText(e); }
+  finally{ _authActionInFlight--; }
+}
+async function billingAction(kind){
+  if(kind==='portal') kind='manage';
+  const portalAction=kind==='manage'||kind==='history'||kind==='cancel';
+  if(kind!=='checkout'&&!portalAction) return;
+  setBillingError('');
+  if(!isHostedAuthenticated()||!FOREX_CONFIG.workerUrl){ setBillingError('Billing is not available in this preview.'); toast('Billing is not available in this preview.',true); return; }
+  if(!_billingState.available||!_billingState.billing_enabled){ setBillingError('Billing is temporarily unavailable. Try again.'); toast('Billing is temporarily unavailable. Try again.',true); return; }
+  if(kind==='checkout'&&!_billingState.checkout_available){ setBillingError('Upgrades are not available right now.'); toast('Upgrades are not available right now.',true); return; }
+  if(kind!=='checkout'&&!_billingState.portal_enabled){ setBillingError('Billing management is not available right now.'); toast('Billing management is not available right now.',true); return; }
+  if(kind==='history'&&!_billingState.history_enabled){ setBillingError('Billing history is not available right now.'); toast('Billing history is not available right now.',true); return; }
+  if(kind==='cancel'&&!_billingState.cancel_enabled){ setBillingError('Plan cancellation is not available right now.'); toast('Plan cancellation is not available right now.',true); return; }
+  const snap=scopeSnapshot();
+  try{
+    let operationId='';
+    if(kind==='checkout'){
+      if(_checkoutOperation&&scopeIsCurrent(_checkoutOperation.scope)&&_checkoutOperation.userId===snap.userId) operationId=_checkoutOperation.operationId;
+      if(!operationId){
+        if(!globalThis.crypto||typeof globalThis.crypto.randomUUID!=='function') throw Object.assign(new Error('Billing is unavailable'),{code:'billing_unavailable'});
+        operationId=globalThis.crypto.randomUUID();
+        _checkoutOperation={scope:snap,userId:snap.userId,operationId};
+      }
+    }
+    const body=kind==='checkout'?{operation_id:operationId}:kind==='manage'?{}:{action:kind};
+    const result=await billingRequest(kind==='checkout'?'/checkout':'/portal','POST',body,snap);
+    if(!scopeIsCurrent(result.snapshot)) return;
+    if(!result.response.ok) throw billingFailure(result,'Billing request failed');
+    const value=result.payload&&result.payload[kind==='checkout'?'checkout_url':'portal_url'];
+    const url=safeBillingUrl(value,kind);
+    if(!url) throw Object.assign(new Error('Billing request returned an invalid link'),{code:'billing_invalid_url'});
+    if(!scopeIsCurrent(result.snapshot)) return;
+    if(kind==='checkout') _checkoutOperation=null;
+    setBillingError('');
+    window.location.assign(url);
+  }catch(e){
+    if(e&&e.code==='billing-session-changed') return;
+    if(e&&e.code==='checkout_expired'){ _checkoutOperation=null; setBillingError('That checkout session expired. Try again.'); toast('That checkout session expired. Try again.',true); return; }
+    if(e&&e.code==='billing_invalid_url'){ setBillingError('Billing is temporarily unavailable. Try again.'); toast('Billing is temporarily unavailable. Try again.',true); return; }
+    if(e&&e.code==='billing_unavailable'){ setBillingError('Billing is temporarily unavailable. Try again.'); toast('Billing is temporarily unavailable. Try again.',true); return; }
+    if(e&&e.code==='already_pro'){ setBillingError('Your account already has the Pro plan.'); toast('Your account already has the Pro plan.',true); return; }
+    setBillingError('Billing is temporarily unavailable. Try again.');
+    toast('Billing is temporarily unavailable. Try again.',true);
+  }
+}
 function renderApp(){
   document.getElementById('loading').classList.add('hidden');
-  show('error', !_cloudReachable);
+  updateAccountUI();
+  const authBlocked=isHostedMode()&&!currentUser().id;
+  show('error', !_cloudReachable&&!authBlocked);
+  show('auth-required', authBlocked);
+  if(authBlocked){
+    show('subnav', false); show('empty',false); show('dash-wrap',false); show('table-card',false); show('view-simulator',false); show('view-reports',false); show('view-coach',false); return;
+  }
   show('subnav', true);
   const total=DB.trades.length, jr=_view==='journal';
   show('empty', total===0 && jr);
@@ -864,10 +1326,10 @@ function field(k,label,req,inputHtml){
 }
 function frow(a,b){ return '<div class="frow">'+a+b+'</div>'; }
 function tagField(t,catKey,label){ const cur=t?tradeTags(t,catKey).join(', '):''; const opts=allTags(catKey).map(o=>'<option value="'+escapeHtml(o.tag)+'">').join(''); return field(catKey,label,false,'<input id="f-'+catKey+'" list="dl-'+catKey+'" value="'+escapeHtml(cur)+'" placeholder="comma separated"><datalist id="dl-'+catKey+'">'+opts+'</datalist>'); }
-function openTradeModal(id){
-  // Phase 2 gate: while owner this no-ops; once plans are wired, free users
-  // hitting the cap get an upgrade toast instead of an entry point that errors later.
-  if(!requireEntitlement('unlimited_trades','Logging trades')) return;
+async function openTradeModal(id){
+  const snap=scopeSnapshot();
+  if(!id && !await canCreateTrade()) return;
+  if(!scopeIsCurrent(snap)) return;
   if(id&&!isValidStoredId(id)){ toast('Could not open a trade with an invalid ID.',true); return; }
   const t=id?DB.trades.find(x=>x.id===id):null; const v=k=>(t&&t[k]!=null&&t[k]!=='')?String(t[k]):'';
   document.getElementById('modal-root').innerHTML=
@@ -904,6 +1366,7 @@ let _modalKeyTrap=null;
 function wireModal(label){
   const root=document.getElementById('modal-root'), m=root&&root.querySelector('.modal');
   if(m&&label) m.setAttribute('aria-label',label);
+  const previousFocus=document.activeElement;
   if(_modalKeyTrap&&root) root.removeEventListener('keydown',_modalKeyTrap);
   _modalKeyTrap=function(e){
     if(e.key==='Escape'){ e.preventDefault(); closeModal(); return; }
@@ -914,10 +1377,17 @@ function wireModal(label){
     if(e.shiftKey){ if(document.activeElement===first){ e.preventDefault(); last.focus(); } }
     else if(document.activeElement===last){ e.preventDefault(); first.focus(); }
   };
+  _modalKeyTrap.__previousFocus=previousFocus;
   root.addEventListener('keydown',_modalKeyTrap);
+  const focusable=m&&Array.from(m.querySelectorAll('input:not([disabled]),select:not([disabled]),textarea:not([disabled]),button:not([disabled])')).find(el=>el.offsetParent!==null);
+  if(focusable&&typeof focusable.focus==='function') focusable.focus();
+  else if(m){ m.setAttribute('tabindex','-1'); m.focus(); }
 }
-function closeModal(){ const root=document.getElementById('modal-root'); if(_modalKeyTrap&&root){ root.removeEventListener('keydown',_modalKeyTrap); _modalKeyTrap=null; } if(root) root.innerHTML=''; }
-function saveTradeModal(id){
+function closeModal(){ const root=document.getElementById('modal-root'), previous=_modalKeyTrap&&_modalKeyTrap.__previousFocus; if(_modalKeyTrap&&root){ root.removeEventListener('keydown',_modalKeyTrap); _modalKeyTrap=null; } if(root) root.innerHTML=''; if(previous&&typeof previous.focus==='function'&&previous.isConnected!==false) previous.focus(); }
+async function saveTradeModal(id){
+  const snap=scopeSnapshot();
+  if(!id && !await canCreateTrade()) return;
+  if(!scopeIsCurrent(snap)) return;
   const g=k=>document.getElementById('f-'+k);
   const setErr=(k,m)=>{ const e=document.getElementById('e-'+k); if(e) e.textContent=m||''; const f=g(k); if(f){ f.classList.toggle('invalid',!!m); f.setAttribute('aria-invalid',m?'true':'false'); } return !m; };
   let ok=true;
@@ -953,7 +1423,6 @@ function confirmDeleteTrade(id){
    Loaded lazily from CDN on click only, never on modal open. Read-only over
    trade data, no candle data is persisted anywhere.
    ========================================================================== */
-const CHART_PROXY_KEY = APP.storageKey + '_chartProxy';
 const CHART_PROXY_DEFAULT = 'https://corsproxy.io/?url={url}';
 function getChartProxy(){ const v=(localStorage.getItem(CHART_PROXY_KEY)||'').trim(); return v||CHART_PROXY_DEFAULT; }
 function resolveProxyUrl(target){ const tmpl=getChartProxy(), enc=encodeURIComponent(target); return tmpl.includes('{url}') ? tmpl.replace('{url}',enc) : tmpl+enc; }
@@ -1035,20 +1504,25 @@ function wireChartLoadButton(id){
 }
 async function loadTradeChart(id){
   if(!isValidStoredId(id)) return;
-  if(!requireEntitlement('chart_markers','Chart markers')) return;
+  const snap=scopeSnapshot();
+  if(!await authoriseFeature('chart_markers','Chart markers')) return;
+  if(!scopeIsCurrent(snap)) return;
   const t=DB.trades.find(x=>x.id===id), wrap=document.getElementById('trade-chart-wrap');
   if(!t||!wrap) return;
   wrap.innerHTML='<p class="muted">Loading chart…</p>';
   try{
     await loadLightweightCharts();
+    if(!scopeIsCurrent(snap)) return;
     const d=deriveTrade(t);
     const fromSec=Math.floor(new Date(t.entryAt).getTime()/1000)-45*86400;
     const nowSec=Math.floor(Date.now()/1000);
     const exitSec=t.exitAt?Math.floor(new Date(t.exitAt).getTime()/1000):nowSec;
     const toSec=Math.min(nowSec, exitSec+15*86400);
     const bars=await fetchCandles(t.symbol,fromSec,toSec);
+    if(!scopeIsCurrent(snap)) return;
     renderTradeChart(wrap,t,d,bars);
   }catch(err){
+    if(!scopeIsCurrent(snap)) return;
     if(_tradeChart){ try{ _tradeChart.remove(); }catch(e){} _tradeChart=null; }
     wrap.innerHTML=chartErrorHtml(t,err); wireChartLoadButton(t.id);
   }
@@ -1153,7 +1627,7 @@ function svgDrawdown(equity){
    Single-user: the key lives in localStorage. Phase 2 MUST move this behind the
    Cloudflare Worker so the key never ships to the client.
    ========================================================================== */
-function getKey(){ return localStorage.getItem(APP.storageKey+'_anthropicKey')||''; }
+function getKey(){ return isLocalOwner() ? (localStorage.getItem(ANTHROPIC_KEY)||'') : ''; }
 function coachStatsText(){
   const s=computeStats(DB.trades);
   const top=(map,asc,n)=>[...map.entries()].sort((a,b)=>asc?a[1].net-b[1].net:b[1].net-a[1].net).slice(0,n).map(([k,v])=>k+' '+money(v.net,true)+' ('+v.n+')').join(', ')||'none';
@@ -1173,13 +1647,17 @@ function coachStatsText(){
 }
 function renderCoachIdle(){
   const body=document.getElementById('coach-body');
+  if(!isLocalOwner()){ body.innerHTML='<div class="warn">AI coaching is not available for online accounts yet.</div>'; return; }
   if(!DB.trades.length){ body.innerHTML='<p class="muted">Log some trades first, then come back for feedback.</p>'; return; }
   if(!getKey()){ body.innerHTML='<div class="warn">Add your Anthropic API key in Settings (the ⚙ button) to use the coach. The key is stored only on this device.</div>'; return; }
   if(!body.dataset.done) body.innerHTML='<p class="muted">Click "Analyse my trades" for plain-English feedback on your stats, your biggest leak, and one thing to focus on.</p>';
 }
 async function runCoach(){
   const body=document.getElementById('coach-body'), btn=document.getElementById('coach-run'), key=getKey();
-  if(!requireEntitlement('ai_coach','The AI coach')) return;
+  const snap=scopeSnapshot();
+  if(!isLocalOwner()){ body.innerHTML='<div class="warn">AI coaching is not available for online accounts yet.</div>'; return; }
+  if(!await authoriseFeature('ai_coach','The AI coach')) return;
+  if(!scopeIsCurrent(snap)) return;
   if(!key){ body.innerHTML='<div class="warn">Add your Anthropic API key in Settings (⚙) first.</div>'; return; }
   if(!computeStats(DB.trades).n){ body.innerHTML='<p class="muted">No closed trades to analyse yet.</p>'; return; }
   btn.disabled=true; body.innerHTML='<p class="muted">Analysing your trades…</p>';
@@ -1191,22 +1669,25 @@ async function runCoach(){
         messages:[{ role:'user', content:'Here are my trading stats:\n\n'+coachStatsText() }] }) });
     if(!r.ok){ throw new Error('API '+r.status+': '+(await r.text()).slice(0,200)); }
     const data=await r.json();
+    if(!scopeIsCurrent(snap)) return;
     const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim()||'(no response)';
     body.innerHTML='<div class="coach-out">'+escapeHtml(text)+'</div>'; body.dataset.done='1';
-  }catch(err){ body.innerHTML='<div class="warn">Could not reach the coach. '+escapeHtml(err.message)+'</div>'; }
-  finally{ btn.disabled=false; }
+  }catch(err){ if(scopeIsCurrent(snap)) body.innerHTML='<div class="warn">Could not reach the coach. '+escapeHtml(err.message)+'</div>'; }
+  finally{ if(scopeIsCurrent(snap)) btn.disabled=false; }
 }
 
 /* ============================================================================
    SETTINGS + CSV IMPORT
    ========================================================================== */
 function openSettings(){
+  const coachSettings=isLocalOwner()
+    ? field('akey','Anthropic API key (for the AI coach)',false,'<input id="f-akey" type="password" value="'+escapeHtml(getKey())+'" placeholder="sk-ant-...">')+'<div class="warn">Stored only in this browser. Online AI coaching is not available yet.</div>'
+    : '<div class="warn">AI coaching is not available for online accounts yet. No local owner API key is read in this account.</div>';
   document.getElementById('modal-root').innerHTML=
     '<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog" aria-modal="true">'
     +'<div class="modal-head"><h3>Settings</h3><button class="icon-btn" aria-label="Close settings" onclick="closeModal()">✕</button></div>'
     +'<div class="modal-body">'
-    + field('akey','Anthropic API key (for the AI coach)',false,'<input id="f-akey" type="password" value="'+escapeHtml(getKey())+'" placeholder="sk-ant-...">')
-    + '<div class="warn">Stored only in this browser. Fine for personal use. Before any multi-user launch this must move behind the Worker proxy so the key never reaches the client.</div>'
+    + coachSettings
     + '<div class="field"><label for="f-csv">Import trades from CSV</label><input id="f-csv" type="file" accept=".csv,text/csv" aria-describedby="csv-help e-csv" aria-invalid="false"><div class="muted" id="csv-help">Auto-maps columns named like symbol, side, qty, entry date, entry price, exit date, exit price, fees, stop. Adds to existing trades.</div><div class="err" id="e-csv" aria-live="polite"></div></div>'
     + '<div class="field"><label for="f-chartproxy">Chart data CORS proxy</label><input id="f-chartproxy" type="text" aria-describedby="chartproxy-help" value="'+escapeHtml(localStorage.getItem(CHART_PROXY_KEY)||'')+'" placeholder="'+escapeHtml(CHART_PROXY_DEFAULT)+'"><div class="muted" id="chartproxy-help">{url} is replaced with the encoded Yahoo URL. The default is a public proxy and can be flaky. A personal Cloudflare Worker URL can go here later.</div></div>'
     +'</div>'
@@ -1215,7 +1696,7 @@ function openSettings(){
   wireModal('Settings');
 }
 function saveSettings(){
-  const k=document.getElementById('f-akey').value.trim(); if(k) localStorage.setItem(APP.storageKey+'_anthropicKey',k); else localStorage.removeItem(APP.storageKey+'_anthropicKey');
+  const keyEl=document.getElementById('f-akey'), k=keyEl?keyEl.value.trim():''; if(isLocalOwner()){ if(k) localStorage.setItem(ANTHROPIC_KEY,k); else localStorage.removeItem(ANTHROPIC_KEY); }
   const cpEl=document.getElementById('f-chartproxy');
   if(cpEl){ const cp=cpEl.value.trim(); if(cp && cp!==CHART_PROXY_DEFAULT) localStorage.setItem(CHART_PROXY_KEY,cp); else localStorage.removeItem(CHART_PROXY_KEY); }
   closeModal(); toast('Settings saved'); if(_view==='coach') renderCoachIdle();
@@ -1242,13 +1723,16 @@ function parseCSV(text){
   return rows.filter(r=>r.some(x=>String(x).trim()!==''));
 }
 function upsertTradeSilent(tr){ assertStoredId(tr&&tr.id); DB.trades.push(tr); markDirty('trades',tr.id); }
-function importCSV(){
+async function importCSV(){
   const inp=document.getElementById('f-csv'), errEl=document.getElementById('e-csv');
-  if(!requireEntitlement('csv_import','CSV import')) return;
+  const importScope=scopeSnapshot();
+  if(!isLocalOwner()&&!await authoriseFeature('csv_import','CSV import')) return;
+  if(!scopeIsCurrent(importScope)){ errEl.textContent='Account changed. Choose the CSV again.'; return; }
   const file=inp.files&&inp.files[0]; if(!file){ errEl.textContent='Choose a CSV file first'; return; }
   const reader=new FileReader();
-  reader.onload=()=>{
+  reader.onload=async()=>{
     try{
+      if(!scopeIsCurrent(importScope)){ errEl.textContent='Account changed. Choose the CSV again.'; return; }
       const rows=parseCSV(String(reader.result)); if(rows.length<2){ errEl.textContent='No data rows found'; return; }
       const head=rows[0].map(h=>h.trim().toLowerCase());
       const find=(...alts)=>{ for(const a of alts){ const i=head.findIndex(h=>h.includes(a)); if(i>=0) return i; } return -1; };
@@ -1257,7 +1741,7 @@ function importCSV(){
         exitAt:find('exit date','exit time','exitdate','closed','close date'), exitPrice:find('exit price','exitprice','exit'),
         fees:find('fee','commission'), stop:find('stop') };
       if(ix.symbol<0||ix.qty<0||ix.entryPrice<0){ errEl.textContent='Need at least symbol, quantity and entry price columns'; return; }
-      const now=new Date().toISOString(); let ok=0, skip=0;
+      const now=new Date().toISOString(); let ok=0, skip=0, imported=[];
       for(let r=1;r<rows.length;r++){ const c=rows[r];
         const sym=(c[ix.symbol]||'').trim().toUpperCase(), qty=Number(c[ix.qty]), ep=Number(c[ix.entryPrice]);
         if(!sym||!(qty>0)||!(ep>0)){ skip++; continue; }
@@ -1270,12 +1754,25 @@ function importCSV(){
           const xAt=parseImportDate(xAtRaw);
           if(xAt){ if(xAt<eAt){ skip++; continue; } exitAt=xAt.toISOString(); exitPrice=Number(xpRaw); }
         }
-        upsertTradeSilent({ id:uid(), symbol:sym, side, quantity:qty, entryAt:eAt.toISOString(), entryPrice:ep,
+        const trade={ id:uid(), symbol:sym, side, quantity:qty, entryAt:eAt.toISOString(), entryPrice:ep,
           exitAt, exitPrice,
           stopPrice:(ix.stop>=0&&Number(c[ix.stop])>0)?Number(c[ix.stop]):'', fees:(ix.fees>=0&&!isNaN(Number(c[ix.fees]))&&c[ix.fees]!=='')?Number(c[ix.fees]):0,
-          notes:'', setupTags:[],mistakeTags:[],emotionTags:[],marketTags:[], contractMultiplier:1, createdAt:now, updatedAt:now });
+          notes:'', setupTags:[],mistakeTags:[],emotionTags:[],marketTags:[], contractMultiplier:1, createdAt:now, updatedAt:now };
+        if(isLocalOwner()) upsertTradeSilent(trade); else imported.push(trade);
         ok++;
       }
+      if(!isLocalOwner()){
+        if(!imported.length){ errEl.textContent='No valid trades to import'; return; }
+        const p_rows=imported.map(row=>({id:row.id,data:row}));
+        const result=await sbRpc('import_trades',{p_rows},importScope);
+        if(!scopeIsCurrent(importScope)){ errEl.textContent='Account changed. Import was stopped.'; return; }
+        if(!result||result.allowed===false||result.ok===false){ errEl.textContent=(result&&result.reason)||'Import was denied'; return; }
+        const importedCount=Number(result.imported), skippedCount=Number(result.skipped_existing);
+        if(!Number.isInteger(importedCount)||importedCount<0||!Number.isInteger(skippedCount)||skippedCount<0){ errEl.textContent='Import returned an invalid result'; return; }
+        ok=importedCount; skip=skippedCount;
+        await loadAccountState(importScope); await loadData();
+      }
+      if(!scopeIsCurrent(importScope)) return;
       saveData(); renderApp(); closeModal(); toast('Imported '+ok+' trade'+(ok===1?'':'s')+(skip?(', skipped '+skip):''));
     }catch(e){ errEl.textContent='Could not parse: '+e.message; }
   };
@@ -1286,15 +1783,33 @@ function importCSV(){
    THEME / TOAST / BOOT
    ========================================================================== */
 function applyTheme(t){ document.documentElement.classList.toggle('light',t==='light'); document.querySelector('meta[name=theme-color]').setAttribute('content',t==='light'?'#ffffff':'#0f0f0f'); }
-function toggleTheme(){ const next=document.documentElement.classList.contains('light')?'dark':'light'; localStorage.setItem(APP.storageKey+'_theme',next); applyTheme(next); }
+function toggleTheme(){ const next=document.documentElement.classList.contains('light')?'dark':'light'; localStorage.setItem(THEME_KEY,next); applyTheme(next); }
 (function initTheme(){ /* single source of truth is lib/theme-init.js (head, pre-paint FOUC guard), just sync the meta theme-color to whatever class it already applied */ applyTheme(document.documentElement.classList.contains('light')?'light':'dark'); })();
 function toast(msg,isErr){ const el=document.createElement('div'); el.className='toast'+(isErr?' err':''); el.textContent=msg; document.getElementById('toasts').appendChild(el); setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),300); },isErr?5000:2500); }
-async function boot(){ document.getElementById('error').classList.add('hidden'); document.getElementById('loading').classList.remove('hidden'); await loadData(); renderApp(); }
-function init(){ document.getElementById('app-name').textContent='Kujira'; document.getElementById('ver').textContent=APP.version; _loadDirty(); boot(); }
+async function boot(){
+  document.getElementById('error').classList.add('hidden'); document.getElementById('loading').classList.remove('hidden');
+  try{
+    await refreshAuthData();
+    _cloudReachable=true;
+    if(location.hash==='#account') openAccountSettings();
+    else if(location.hash==='#signup') openAccountSettings('signup');
+  }catch(e){
+    _cloudReachable=false;
+    if(isHostedMode()){
+      applyAuthUser({id:null,email:null,local:false,hosted:true,authenticated:false,scope:'hosted-anonymous'});
+      resetRuntimeState();
+    }
+    updateAccountUI(); renderApp();
+    if(location.hash==='#account') openAccountSettings();
+    else if(location.hash==='#signup') openAccountSettings('signup');
+  }
+}
+window.addEventListener('hashchange',()=>{ if(location.hash==='#account') openAccountSettings(); else if(location.hash==='#signup') openAccountSettings('signup'); });
+function init(){ document.getElementById('app-name').textContent='Kujira'; document.getElementById('ver').textContent=APP.version; bindAuthEvents(); boot(); }
 init();
 /* Belt-and-braces retry for queued deletes: covers the case where a delete fails and no further dirty write ever fires _flushDirty. No-op locally (guarded inside flushPendingDeletes). */
 setInterval(()=>{ flushPendingDeletes().catch(()=>{}); }, 60000);
-if ('serviceWorker' in navigator && location.protocol!=='file:'){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+if ('serviceWorker' in navigator && location.protocol!=='file:'){ navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).catch(()=>{}); }
 </script>
 </body>
 </html>

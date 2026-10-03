@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f0f0f">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://api.anthropic.com https://corsproxy.io; base-uri 'none'; object-src 'none'; frame-ancestors 'none';">
+<title>Plans and pricing | Kujira Forex</title>
+<script src="lib/theme-init.js?v=1.0"></script>
+<script src="config.js?v=1.0"></script>
+<script src="public-config.js?v=0.14"></script>
+<script src="lib/public.js?v=0.14"></script>
+<link rel="stylesheet" href="lib/public.css?v=0.14">
+</head>
+<body>
+<header class="public-topbar">
+  <a class="brand" href="./welcome.html" aria-label="Kujira Forex home">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="public-logo-gradient" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset=".5" stop-color="#a78bfa"/><stop offset="1" stop-color="#f472b6"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#public-logo-gradient)"/><path d="M9 18c3 3 11 3 14 0" stroke="#04201c" stroke-width="2.2" fill="none" stroke-linecap="round"/><circle cx="12" cy="13" r="1.5" fill="#04201c"/></svg>
+    <span class="brand-name">Kujira Forex</span>
+  </a>
+  <nav class="public-nav" aria-label="Primary">
+    <a href="./welcome.html">Welcome</a>
+    <a href="./pricing.html" aria-current="page">Plans</a>
+    <a class="button button-primary nav-primary" href="./index.html?v=0.14">Open local journal</a>
+  </nav>
+  <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle colour theme" title="Toggle colour theme">◐</button>
+</header>
+
+<main class="public-main" data-public-pricing>
+  <section class="pricing-hero" aria-labelledby="pricing-title">
+    <div>
+      <span class="status-pill" data-public-status>Private preview</span>
+      <div class="eyebrow pricing-eyebrow">Plans and access</div>
+      <h1 id="pricing-title">A plan for the way you keep a journal.</h1>
+      <p class="pricing-copy" data-pricing-copy>Use the local journal on this device today. Online accounts and paid plans remain unavailable in this preview.</p>
+      <div class="hero-actions">
+        <a class="button button-primary" data-signup-link href="./index.html?v=0.14#signup">View account options</a>
+        <a class="button" data-signin-link href="./index.html?v=0.14#account">Sign in</a>
+      </div>
+    </div>
+    <aside class="pricing-callout" aria-label="Preview availability">
+      <div class="eyebrow">Current availability</div>
+      <strong data-pricing-state>Pricing: To be announced</strong>
+      <p data-preview-copy>No account or payment is submitted from this page. Checkout will remain closed until commercial and legal review is complete.</p>
+    </aside>
+  </section>
+
+  <section class="section" aria-labelledby="plan-list-title">
+    <div class="section-head">
+      <div class="eyebrow">Access options</div>
+      <h2 id="plan-list-title">Clear status for every plan</h2>
+      <p data-plan-list-copy>These descriptions separate what is usable locally from what is planned for a hosted release.</p>
+    </div>
+    <div class="pricing-grid">
+      <article class="pricing-card" data-local-plan>
+        <div class="plan-kicker" data-local-kicker>Available now</div>
+        <h3>Local journal</h3>
+        <div class="price-display">On this device</div>
+        <p data-local-copy>Record and review trades in the local preview without an account or payment step.</p>
+        <ul class="plan-list"><li>Local-first journal</li><li>Review views and notes</li><li data-local-access>No account required for this preview</li></ul>
+        <a class="button button-primary" data-local-cta href="./index.html?v=0.14">Open local journal</a>
+      </article>
+      <article class="pricing-card">
+        <div class="plan-kicker" data-free-kicker>Planned</div>
+        <h3>Free account</h3>
+        <div class="price-display" data-free-price>When online accounts open</div>
+        <p data-free-copy>Up to 50 saved trades when online accounts become available.</p>
+        <ul class="plan-list"><li>Up to 50 saved trades</li><li>Open and closed trades count towards the limit</li><li data-free-availability>Availability to be announced</li></ul>
+        <a class="button" data-signup-link data-free-cta href="./index.html?v=0.14#signup">View account options</a>
+      </article>
+      <article class="pricing-card featured">
+        <div class="plan-kicker" data-pro-kicker>Planned</div>
+        <h3>Pro</h3>
+        <div class="price-display" data-pro-price-monthly>To be announced</div>
+        <p data-pro-copy>Pro is planned. Checkout is unavailable in this preview.</p>
+        <div class="price-alt"><span data-pro-price-annual>To be announced</span></div>
+        <ul class="plan-list" data-pro-features></ul>
+        <a class="button button-muted" data-checkout-link data-checkout-state aria-disabled="true" href="./index.html?v=0.14#signup">Checkout unavailable</a>
+      </article>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="signup-title">
+    <div class="entry-card">
+      <div><div class="eyebrow">Online accounts</div><h2 id="signup-title" data-entry-title>Online accounts are planned</h2><p data-entry-copy>The local preview opens the account entry point without sending a sign-up request.</p></div>
+      <div class="entry-actions"><a class="button button-primary" data-signup-link href="./index.html?v=0.14#signup">View account options</a><a class="button" data-signin-link href="./index.html?v=0.14#account">Sign in</a></div>
+    </div>
+  </section>
+</main>
+
+<footer class="public-footer">
+  <span data-public-footer>© Kujira Forex · Private preview</span>
+  <nav class="footer-links" aria-label="Footer"><a href="./terms.html">Terms</a><a href="./privacy.html">Privacy</a><a href="./refunds.html">Refunds</a></nav>
+</footer>
+
+<script>
+(function(){
+  var key='kjr_journal_v1_theme';
+  var button=document.getElementById('theme-toggle');
+  function sync(){
+    var light=document.documentElement.classList.contains('light');
+    button.setAttribute('aria-pressed',String(light));
+    document.querySelector('meta[name="theme-color"]').setAttribute('content',light?'#f0f2f5':'#0f0f0f');
+  }
+  button.addEventListener('click',function(){
+    var light=!document.documentElement.classList.contains('light');
+    document.documentElement.classList.toggle('light',light);
+    try{localStorage.setItem(key,light?'light':'dark');}catch(e){}
+    sync();
+  });
+  sync();
+}());
+</script>
+</body>
+</html>
