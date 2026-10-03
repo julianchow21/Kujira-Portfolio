@@ -24,7 +24,7 @@
   const NOTE_SCHEMA_VERSION = 1;
   const SOURCE_SCHEMA = 'kujira-portfolio';
   const SOURCE_SCHEMA_VERSION = 3;
-  const APP_VERSION = 'v2.66';
+  const APP_VERSION = 'v2.67';
   const MAX_IMPORT_BYTES = 1024 * 1024;
   const HASH_RE = /^[a-f0-9]{64}$/;
   const ID_RE = /^[A-Za-z0-9_-]{1,80}$/;

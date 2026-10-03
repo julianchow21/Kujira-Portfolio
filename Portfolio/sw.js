@@ -8,19 +8,19 @@
    index.html is network-first (self-healing) but the rest are cache-first and
    will be served stale forever otherwise. */
 
-const CACHE_NAME = 'kjr-portfolio-v2.66';
+const CACHE_NAME = 'kjr-portfolio-v2.67';
 const CHART_JS_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
 
 const CORE_ASSETS = [
   './index.html',
   './Worker/theme-init.js',
-  './Worker/app.js?v=2.66',
-  './Worker/kjr-core.js?v=2.66',
-  './Worker/kjr-sortable.js?v=2.66',
-  './Worker/kjr-vault.js?v=2.66',
-  './Worker/kjr-migration.js?v=2.66',
-  './Worker/supabase.js?v=2.66',
-  './Worker/kjr-nas.js?v=2.66',
+  './Worker/app.js?v=2.67',
+  './Worker/kjr-core.js?v=2.67',
+  './Worker/kjr-sortable.js?v=2.67',
+  './Worker/kjr-vault.js?v=2.67',
+  './Worker/kjr-migration.js?v=2.67',
+  './Worker/supabase.js?v=2.67',
+  './Worker/kjr-nas.js?v=2.67',
   './Worker/manifest.webmanifest',
   './Worker/whale-icon.png',
   CHART_JS_URL,
@@ -78,15 +78,28 @@ self.addEventListener('fetch', (e) => {
   // App HTML: network-first so updates land immediately; fall back to cache offline.
   if (req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html')) {
     e.respondWith((async () => {
+      const appRootPath = new URL('./', self.location.href).pathname;
+      const appIndexPath = new URL('./index.html', self.location.href).pathname;
+      const isMainAppDocument = url.pathname === appRootPath || url.pathname === appIndexPath;
       try {
         const fresh = await fetch(req);
-        const c = await caches.open(CACHE_NAME);
-        c.put('./index.html', fresh.clone());
+        if (fresh && fresh.ok) {
+          try {
+            const c = await caches.open(CACHE_NAME);
+            await c.put(req, fresh.clone());
+          } catch (_) {}
+        }
         return fresh;
       } catch {
-        return (await caches.match('./index.html')) ||
-          new Response('Offline — open the app while connected to cache it first.',
-            { status: 503, headers: { 'Content-Type': 'text/plain' } });
+        const cached = await caches.match(req);
+        if (cached) return cached;
+        if (isMainAppDocument) {
+          return (await caches.match('./index.html')) ||
+            new Response('Offline — open the app while connected to cache it first.',
+              { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+        }
+        return new Response('Offline — this document is not cached yet. Open it while connected to cache it first.',
+          { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
       }
     })());
     return;
