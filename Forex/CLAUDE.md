@@ -4,7 +4,7 @@ Multi-tenant SaaS trading journal (TraderSync-style). Phase 1 is single-user (Ju
 
 ## Architecture
 
-Single-file SPA, all CSS/JS/HTML in `index.html`. No framework, no bundler. Built on the hardened web-app-starter: localStorage-first Supabase sync, preview guard, dirty-row tracking, light/dark theme, designed empty/error states, version badge. Shared engines vendored in `lib/` (`kjr-format.js`, `kjr-calendar.js`), configured not forked.
+Single-file SPA, all CSS/JS/HTML in `index.html`. No framework, no bundler. Built on App Starter: localStorage-first Supabase sync, preview guard, dirty-row tracking, light/dark theme, designed empty/error states, version badge. Shared engines vendored in `lib/` (`kjr-format.js`, `kjr-calendar.js`), configured not forked.
 
 ### Scale-ready seams (local owner or configured hosted account)
 
@@ -51,4 +51,4 @@ Static, GitHub Pages from the Kujira/Portfolio repo at `/Forex/`. Phase 2 adds a
 
 ## Build status
 
-Phase 1 (single-user) is implemented, QA-verified and shipped as v0.13 on 29/08/2026. Phase 2 (multi-user authentication, cloud cutover and billing) remains deliberately disabled. Milestones M5 to M10 are tracked in `~/Claude Projects/Claude/tasks/todo.md`.
+Phase 1 (single-user) is implemented, QA-verified and shipped as v0.13 on 29/08/2026. Phase 2 (multi-user authentication, cloud cutover and billing) remains deliberately disabled. Milestones M5 to M10 are tracked in `~/.assistant-control/tasks/todo.md`.

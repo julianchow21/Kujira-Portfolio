@@ -124,7 +124,7 @@ const OVERSOLD_EPSILON = 1e-6;
 /* ─── CPF contribution engine (2026) ───────────────────────────────────
    Rates are CPF Board figures. OW (Ordinary Wage) monthly ceiling S$8,000.
    Senior bands (55+) reflect the scheduled increases; verify before relying.
-   Auto-CPF allocation is only generated for ages <=55 (SA still open). */
+   Auto-CPF allocation stops at 55 because RA/FRS routing is not modelled. */
 const CPF_OW_CEILING_2026 = 8000;
 
 /* Singapore resident income-tax brackets (YA2025 = same as YA2024+).
@@ -178,36 +178,57 @@ function cpfContribRatesForAge(age){
   return { employer:7.5, employee:5.0 };
 }
 
-/* OA/SA/MA as % of wage, under 55 (2026 allocation). Returns null for 55+
-   so callers know to skip auto-CPF rather than guess the OA/MA/RA split. */
+/* OA/SA/MA ratios of the actual CPF contribution, not percentages of wages.
+   CPF Board 2026 allocation table:
+   https://www.cpf.gov.sg/content/dam/web/employer/employer-obligations/documents/CPFAllocationRatesfromJanuary2026.pdf
+   Returns null at 55+ so callers skip automation rather than guess RA/OA. */
 function cpfAllocationForAge(age){
-  if (age == null || age <= 35) return { OA:23.0, SA:6.0,  MA:8.0  };
-  if (age <= 45)                return { OA:21.0, SA:7.0,  MA:9.0  };
-  if (age <= 50)                return { OA:19.0, SA:8.0,  MA:10.0 };
-  if (age <= 55)                return { OA:15.0, SA:11.5, MA:10.5 };
-  return null; // 55+ not automated
+  if (age == null || age <= 35) return { OA:0.6217, SA:0.1621, MA:0.2162 };
+  if (age <= 45)                return { OA:0.5677, SA:0.1891, MA:0.2432 };
+  if (age <= 50)                return { OA:0.5136, SA:0.2162, MA:0.2702 };
+  if (age < 55)                 return { OA:0.4055, SA:0.3108, MA:0.2837 };
+  return null; // SA closure at 55 requires RA/FRS information not held here
 }
 
 const _round2 = n => Math.round((Number(n) || 0) * 100) / 100;
 
-/* Pure CPF calc. Given gross monthly SGD and age, returns the split.
-   alloc is null (and byAccount empty) for ages above 55. */
-function computeCpfContribution(grossMonthly, age){
-  const gross = Number(grossMonthly) || 0;
+/* Pure CPF calc for full-rate citizens / third-year PRs, in SGD (2026).
+   awSubject is any Additional Wages payable in this month, already capped by
+   the caller at the remaining annual AW ceiling ($102,000 minus annual OW).
+   OW and AW are combined BEFORE rounding. Two-argument calls remain OW-only.
+   alloc is null (and byAccount empty) from age 55.
+   https://www.cpf.gov.sg/content/dam/web/employer/employer-obligations/documents/CPFcontributionratesfrom1Jan2026.pdf */
+function computeCpfContribution(grossMonthly, age, awSubject = 0){
+  const money = n => Number.isFinite(Number(n)) ? Math.max(0, _round2(n)) : 0;
+  const gross = money(grossMonthly);
+  const aw    = money(awSubject);
   const wage  = Math.min(gross, CPF_OW_CEILING_2026);
   const rates = cpfContribRatesForAge(age);
-  const employerCPF = _round2(rates.employer / 100 * wage);
-  const employeeCPF = _round2(rates.employee / 100 * wage);
-  const total       = _round2(employerCPF + employeeCPF);
-  const net         = _round2(gross - employeeCPF);
+  // Integer cents and basis points keep exact-dollar / 50-cent boundaries
+  // from being rounded down by floating-point percentage multiplication.
+  const wageCents = Math.round(wage * 100) + Math.round(aw * 100);
+  const employerBps = Math.round(rates.employer * 100);
+  const employeeBps = Math.round(rates.employee * 100);
+  let employeeNumerator = 0;
+  let totalNumerator = 0;
+  if (wageCents > 5000){
+    if (wageCents > 75000) employeeNumerator = employeeBps * wageCents;
+    else if (wageCents > 50000) employeeNumerator = 3 * employeeBps * (wageCents - 50000);
+    totalNumerator = employerBps * wageCents + employeeNumerator;
+  }
+  const employeeCPF = Math.floor(employeeNumerator / 1000000);
+  const total       = Math.floor((totalNumerator + 500000) / 1000000);
+  const employerCPF = total - employeeCPF;
+  const net         = _round2(gross + aw - employeeCPF);
 
   const alloc = cpfAllocationForAge(age);
   let byAccount = {};
   if (alloc){
-    byAccount = { OA: _round2(alloc.OA/100*wage), SA: _round2(alloc.SA/100*wage), MA: _round2(alloc.MA/100*wage) };
-    // Absorb rounding remainder into OA so the split equals total.
-    const splitSum = _round2(byAccount.OA + byAccount.SA + byAccount.MA);
-    byAccount.OA = _round2(byAccount.OA + (total - splitSum));
+    // Allocate MA, then SA, then the remainder to OA, using the published
+    // four-decimal ratios. Convert ratios to integers for exact cent ties.
+    const maCents = Math.round(total * Math.round(alloc.MA * 10000) / 100);
+    const saCents = Math.round(total * Math.round(alloc.SA * 10000) / 100);
+    byAccount = { OA: (total * 100 - maCents - saCents) / 100, SA: saCents / 100, MA: maCents / 100 };
   }
   return { wage, employerCPF, employeeCPF, total, net, byAccount, allocated: !!alloc };
 }
@@ -312,13 +333,13 @@ function kjrProjectCpf(params){
     yearAcc.MA = _round2(yearAcc.MA + poolMA * e60);
 
     // Contributions (stop once computeCpfContribution reports no allocation,
-    // i.e. age > 55): join the principal this month, earning from next month.
+    // i.e. age >= 55): join the principal this month, earning from next month.
     if (grossMonthly > 0){
       const c = computeCpfContribution(grossMonthly, age);
       if (c.allocated && c.byAccount){
-        bal.OA += c.byAccount.OA || 0;
-        bal.SA += c.byAccount.SA || 0;
-        bal.MA += c.byAccount.MA || 0;
+        bal.OA = _round2(bal.OA + (c.byAccount.OA || 0));
+        bal.SA = _round2(bal.SA + (c.byAccount.SA || 0));
+        bal.MA = _round2(bal.MA + (c.byAccount.MA || 0));
       }
     }
 
@@ -328,7 +349,7 @@ function kjrProjectCpf(params){
       yearAcc = { OA: 0, SA: 0, MA: 0 };
     }
 
-    series.push(bal.OA + bal.SA + bal.MA);
+    series.push(_round2(bal.OA + bal.SA + bal.MA));
   }
   return { series };
 }

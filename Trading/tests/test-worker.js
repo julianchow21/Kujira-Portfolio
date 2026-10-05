@@ -300,24 +300,35 @@ test('etDateKey - matches the frontend format (YYYY-MM-DD, America/New_York)', (
 });
 
 /* ====================== isMarketWindow ====================== */
-test('isMarketWindow - true inside the 09:25-16:05 ET scheduled-check window (boundaries inclusive)', () => {
-  sandbox.__setNow__(Date.UTC(2026, 6, 15, 13, 25, 0)); // 09:25 ET
+test('isMarketWindow - true inside the 09:30-16:00 ET regular session (open inclusive, close exclusive)', () => {
+  sandbox.__setNow__(Date.UTC(2026, 6, 15, 13, 30, 0)); // 09:30 ET
   assert.strictEqual(sandbox.isMarketWindow(), true);
   sandbox.__clearNow__();
-  sandbox.__setNow__(Date.UTC(2026, 6, 15, 20, 5, 0)); // 16:05 ET
+  sandbox.__setNow__(Date.UTC(2026, 6, 15, 19, 59, 0)); // 15:59 ET
   assert.strictEqual(sandbox.isMarketWindow(), true);
   sandbox.__clearNow__();
 });
 test('isMarketWindow - false one minute outside either boundary', () => {
-  sandbox.__setNow__(Date.UTC(2026, 6, 15, 13, 24, 0)); // 09:24 ET
+  sandbox.__setNow__(Date.UTC(2026, 6, 15, 13, 29, 0)); // 09:29 ET
   assert.strictEqual(sandbox.isMarketWindow(), false);
   sandbox.__clearNow__();
-  sandbox.__setNow__(Date.UTC(2026, 6, 15, 20, 6, 0)); // 16:06 ET
+  sandbox.__setNow__(Date.UTC(2026, 6, 15, 20, 0, 0)); // 16:00 ET
   assert.strictEqual(sandbox.isMarketWindow(), false);
   sandbox.__clearNow__();
 });
 test('isMarketWindow - false on a weekend regardless of time of day', () => {
   sandbox.__setNow__(Date.UTC(2026, 6, 18, 16, 0, 0)); // Sat 18 Jul 2026, 12:00 EDT
+  assert.strictEqual(sandbox.isMarketWindow(), false);
+  sandbox.__clearNow__();
+});
+test('isMarketWindow - half-day close and Juneteenth are closed', () => {
+  sandbox.__setNow__(Date.UTC(2026, 10, 27, 17, 59, 0)); // 12:59 ET, half-day
+  assert.strictEqual(sandbox.isMarketWindow(), true);
+  sandbox.__clearNow__();
+  sandbox.__setNow__(Date.UTC(2026, 10, 27, 18, 0, 0)); // 13:00 ET, half-day close
+  assert.strictEqual(sandbox.isMarketWindow(), false);
+  sandbox.__clearNow__();
+  sandbox.__setNow__(Date.UTC(2026, 5, 19, 15, 0, 0)); // Juneteenth 11:00 ET
   assert.strictEqual(sandbox.isMarketWindow(), false);
   sandbox.__clearNow__();
 });
@@ -408,6 +419,40 @@ testAsync('alert GET - authenticated response omits the stored Telegram chatId',
   assert.strictEqual(Object.prototype.hasOwnProperty.call(body, 'chatId'), false);
 });
 
+testAsync('alert POST - full runtime state is stored and an explicit disable is acknowledged', async () => {
+  const kv = makeKv();
+  const env = { ALERTS_SECRET: 'correct secret', MU_ALERTS: kv };
+  const state = triggeredAlert();
+  state.enabled = false; state.armed = false; state.prevCond = true; state.lastFiredAt = 1234;
+  const post = await worker.fetch(alertRequest('/alerts', 'correct secret', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol: 'MU', enabled: true, chatId: '123', alerts: [state] }),
+  }), env);
+  assert.strictEqual(post.status, 200);
+  const postBody = await post.json();
+  assert.deepStrictEqual(postBody, { ok: true, count: 1, enabled: true });
+  const firstRevision = JSON.parse(kv.store.get('alerts:MU')).revision;
+  const secondPost = await worker.fetch(alertRequest('/alerts', 'correct secret', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol: 'MU', enabled: true, chatId: '123', alerts: [state] }),
+  }), env);
+  assert.strictEqual(secondPost.status, 200);
+  assert.notStrictEqual(JSON.parse(kv.store.get('alerts:MU')).revision, firstRevision,
+    'same-millisecond POSTs need distinct runtime-state revisions');
+  const get = await worker.fetch(alertRequest('/alerts?symbol=MU', 'correct secret'), env);
+  const getBody = await get.json();
+  assert.strictEqual(getBody.alerts[0].armed, false);
+  assert.strictEqual(getBody.alerts[0].prevCond, true);
+  const disable = await worker.fetch(alertRequest('/alerts', 'correct secret', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol: 'MU', enabled: false, chatId: '123', alerts: [] }),
+  }), env);
+  assert.strictEqual(disable.status, 200);
+  assert.deepStrictEqual(await disable.json(), { ok: true, count: 0, enabled: false });
+  const disabledGet = await worker.fetch(alertRequest('/alerts?symbol=MU', 'correct secret'), env);
+  assert.strictEqual((await disabledGet.json()).enabled, false);
+});
+
 testAsync('Telegram test - success requires an accepted response body and does not return chatId', async () => {
   const kv = makeKv({ 'alerts:MU': makeAlertState([]) });
   const env = { ALERTS_SECRET: 'correct secret', TELEGRAM_TOKEN: 'telegram token', MU_ALERTS: kv };
@@ -448,11 +493,11 @@ testAsync('scheduled alerts - network failure leaves a one-shot armed for retry 
     throw new Error('simulated Telegram network failure');
   };
   await worker.scheduled({}, env, {});
-  const stored = JSON.parse(kv.store.get('alerts:MU'));
-  assert.strictEqual(stored.alerts[0].enabled, true, 'one-shot must remain enabled');
-  assert.strictEqual(stored.alerts[0].armed, true, 'failed delivery must retry on the next cron');
-  assert.strictEqual(stored.alerts[0].lastFiredAt, null, 'failed delivery must not consume cooldown state');
-  assert.strictEqual(stored.alerts[1].armed, true, 'unrelated safe re-arm state should still persist');
+  const stored = JSON.parse(kv.store.get('alertstate:MU'));
+  assert.strictEqual(stored.states.one.enabled, true, 'one-shot must remain enabled');
+  assert.strictEqual(stored.states.one.armed, true, 'failed delivery must retry on the next cron');
+  assert.strictEqual(stored.states.one.lastFiredAt, null, 'failed delivery must not consume cooldown state');
+  assert.strictEqual(stored.states.two.armed, true, 'unrelated safe re-arm state should still persist');
 });
 
 testAsync('scheduled alerts - accepted delivery commits one-shot, armed and last-fired state', async () => {
@@ -465,11 +510,76 @@ testAsync('scheduled alerts - accepted delivery commits one-shot, armed and last
     return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
   };
   await worker.scheduled({}, env, {});
-  const stored = JSON.parse(kv.store.get('alerts:MU'));
+  const stored = JSON.parse(kv.store.get('alertstate:MU'));
   assert.strictEqual(telegramCalls, 1);
-  assert.strictEqual(stored.alerts[0].enabled, false);
-  assert.strictEqual(stored.alerts[0].armed, false);
-  assert.strictEqual(stored.alerts[0].lastFiredAt, FIXED_NOW);
+  assert.strictEqual(stored.states.one.enabled, false);
+  assert.strictEqual(stored.states.one.armed, false);
+  assert.strictEqual(stored.states.one.lastFiredAt, FIXED_NOW);
+});
+
+testAsync('scheduled alerts - paginates keys and isolates one KV read failure', async () => {
+  const first = makeAlertState([triggeredAlert()]);
+  first.symbol = 'MU';
+  const second = makeAlertState([triggeredAlert()]);
+  second.symbol = 'AAPL';
+  const kv = makeKv({ 'alerts:MU': first, 'alerts:AAPL': second });
+  const originalList = kv.list;
+  const originalGet = kv.get;
+  let page = 0;
+  kv.list = async ({ cursor }) => {
+    page++;
+    if (!cursor) return { keys: [{ name: 'alerts:MU' }], list_complete: false, cursor: 'page-2' };
+    return { keys: [{ name: 'alerts:AAPL' }], list_complete: true };
+  };
+  kv.get = async (key, options) => {
+    if (key === 'alerts:AAPL') throw new Error('simulated per-key KV read failure');
+    return originalGet(key, options);
+  };
+  const env = { TELEGRAM_TOKEN: 'telegram token', MU_ALERTS: kv };
+  fullSandbox.fetch = async url => {
+    if (String(url).startsWith('https://query1.finance.yahoo.com/')) return yahooResponse();
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+  };
+  await worker.scheduled({}, env, {});
+  assert.strictEqual(page, 2, 'scheduled must request the second KV list page');
+  assert.ok(kv.store.has('alertstate:MU'), 'a healthy key should still be evaluated');
+  assert.ok(!kv.store.has('alertstate:AAPL'), 'a failed key must not abort or write partial state');
+});
+
+testAsync('scheduled alerts - provider HTTP failure is isolated without writing runtime state', async () => {
+  const kv = makeKv({ 'alerts:MU': makeAlertState([triggeredAlert()]) });
+  const env = { TELEGRAM_TOKEN: 'telegram token', MU_ALERTS: kv };
+  fullSandbox.fetch = async url => {
+    if (String(url).startsWith('https://query1.finance.yahoo.com/')) return new Response('{}', { status: 503 });
+    throw new Error('Telegram must not be called after provider failure');
+  };
+  await worker.scheduled({}, env, {});
+  assert.ok(!kv.store.has('alertstate:MU'));
+});
+
+testAsync('scheduled alerts - revision recheck drops stale state after a dashboard POST', async () => {
+  const oldData = makeAlertState([triggeredAlert()]);
+  oldData.updatedAt = 123;
+  const newData = makeAlertState([{ ...triggeredAlert(), id: 'new', value: 999 }]);
+  newData.updatedAt = 999;
+  newData.chatId = 'new-destination';
+  const kv = makeKv({ 'alerts:MU': oldData });
+  const originalGet = kv.get;
+  let configReads = 0;
+  kv.get = async (key, options) => {
+    if (key === 'alerts:MU') {
+      configReads++;
+      return configReads === 1 ? oldData : newData;
+    }
+    return originalGet(key, options);
+  };
+  const env = { TELEGRAM_TOKEN: 'telegram token', MU_ALERTS: kv };
+  fullSandbox.fetch = async url => {
+    if (String(url).startsWith('https://query1.finance.yahoo.com/')) return yahooResponse();
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+  };
+  await worker.scheduled({}, env, {});
+  assert.ok(!kv.store.has('alertstate:MU'), 'stale cron state must be discarded after revision change');
 });
 
 async function finish() {

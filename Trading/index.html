@@ -748,9 +748,70 @@ let priceLines = [];     // active chart price lines for key levels
 
 function loadJSON(k, fb){ try{ const v=JSON.parse(localStorage.getItem(k)); return v==null?fb:v; }catch(e){ return fb; } }
 function saveJSON(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
-function loadCfg(){ return Object.assign({}, DEFAULT_CFG, loadJSON(LS.cfg, {})); }
+function finiteSetting(v, fallback, min, max){
+  const n=typeof v==="number"?v:Number(v);
+  if(!Number.isFinite(n)) return fallback;
+  return Math.max(min,Math.min(max,n));
+}
+function cleanTicker(v){ return typeof v==="string"&&/^[A-Z.\-]{1,12}$/.test(v)?v:""; }
+function loadCfg(){
+  const raw=loadJSON(LS.cfg,{});
+  const src=raw&&typeof raw==="object"&&!Array.isArray(raw)?raw:{};
+  const c=Object.assign({},DEFAULT_CFG,src);
+  c.proxyMode=["public","worker","appsscript","direct"].includes(src.proxyMode)?src.proxyMode:DEFAULT_CFG.proxyMode;
+  c.proxyUrl=typeof src.proxyUrl==="string"?src.proxyUrl.slice(0,500):"";
+  c.refreshSec=Math.round(finiteSetting(src.refreshSec,DEFAULT_CFG.refreshSec,5,300));
+  ["extended","sound","notify","tgEnabled","gridOn"].forEach(k=>{
+    c[k]=Object.prototype.hasOwnProperty.call(src,k)?src[k]===true:DEFAULT_CFG[k];
+  });
+  c.tgChatId=typeof src.tgChatId==="string"?src.tgChatId.slice(0,100):"";
+  c.alertsSecret=typeof src.alertsSecret==="string"?src.alertsSecret.slice(0,500):"";
+  const recovery=src.tgDisableRecovery&&typeof src.tgDisableRecovery==="object"&&!Array.isArray(src.tgDisableRecovery)?src.tgDisableRecovery:null;
+  delete c.tgDisableRecovery;
+  if(recovery&&recovery.proxyMode==="worker"&&typeof recovery.proxyUrl==="string"&&typeof recovery.tgChatId==="string"&&typeof recovery.alertsSecret==="string"){
+    c.tgDisableRecovery={proxyMode:"worker",proxyUrl:recovery.proxyUrl.slice(0,500),tgEnabled:true,tgChatId:recovery.tgChatId.slice(0,100),alertsSecret:recovery.alertsSecret.slice(0,500)};
+  }
+  const watch=Array.isArray(src.watchlist)?src.watchlist.map(cleanTicker).filter(Boolean):[];
+  c.watchlist=[...new Set(watch)].slice(0,10);
+  if(!c.watchlist.length) c.watchlist=DEFAULT_CFG.watchlist.slice();
+  c.defaultSymbol=cleanTicker(src.defaultSymbol);
+  const overlayDefaults=DEFAULT_CFG.overlays;
+  c.overlays=Object.assign({},overlayDefaults,src.overlays&&typeof src.overlays==="object"&&!Array.isArray(src.overlays)?src.overlays:{});
+  Object.keys(overlayDefaults).forEach(k=>{ c.overlays[k]=c.overlays[k]===true; });
+  c.pinnedOverlays=Array.isArray(src.pinnedOverlays)?[...new Set(src.pinnedOverlays.filter(k=>typeof k==="string"&&Object.prototype.hasOwnProperty.call(overlayDefaults,k)))]:DEFAULT_CFG.pinnedOverlays.slice();
+  c.customLevels=Array.isArray(src.customLevels)?src.customLevels.filter(l=>l&&typeof l==="object"&&typeof l.id==="string"&&Number.isFinite(Number(l.px))&&Number(l.px)>0).slice(0,100).map(l=>({id:l.id.slice(0,80),px:Number(l.px),label:typeof l.label==="string"?l.label.slice(0,80):""})):[];
+  c.levelLines=Object.assign({},DEFAULT_CFG.levelLines,src.levelLines&&typeof src.levelLines==="object"&&!Array.isArray(src.levelLines)?src.levelLines:{});
+  Object.keys(DEFAULT_CFG.levelLines).forEach(k=>{ c.levelLines[k]=c.levelLines[k]===true; });
+  c.tickerMeta=src.tickerMeta&&typeof src.tickerMeta==="object"&&!Array.isArray(src.tickerMeta)?src.tickerMeta:{};
+  c.chartStyle=src.chartStyle==="candles"?"candles":"area";
+  const calc=src.calc&&typeof src.calc==="object"&&!Array.isArray(src.calc)?src.calc:{};
+  c.calc={
+    acct:Number.isFinite(Number(calc.acct))&&Number(calc.acct)>0?Number(calc.acct):null,
+    risk:Number.isFinite(Number(calc.risk))&&Number(calc.risk)>0&&Number(calc.risk)<=100?Number(calc.risk):null,
+    entry:Number.isFinite(Number(calc.entry))&&Number(calc.entry)>0?Number(calc.entry):null,
+    stop:Number.isFinite(Number(calc.stop))&&Number(calc.stop)>0?Number(calc.stop):null,
+    fx:Number.isFinite(Number(calc.fx))&&Number(calc.fx)>0?Number(calc.fx):1.35,
+  };
+  return c;
+}
 function saveCfg(){ saveJSON(LS.cfg, cfg); }
-function loadAlerts(){ const a=loadJSON(LS.alerts, []); return Array.isArray(a)?a:[]; }
+function loadAlerts(){
+  const a=loadJSON(LS.alerts,[]);
+  if(!Array.isArray(a)) return [];
+  const types=new Set(["price_above","price_below","rsi_above","rsi_below","price_vwap_above","price_vwap_below","ema_bull","ema_bear"]);
+  const needsValue=new Set(["price_above","price_below","rsi_above","rsi_below"]);
+  return a.filter(x=>x&&typeof x==="object"&&types.has(x.type)).slice(0,100).map((x,i)=>({
+    id:typeof x.id==="string"&&x.id?x.id.slice(0,100):"a"+i,
+    type:x.type,
+    value:x.value==null?null:(Number.isFinite(Number(x.value))?Number(x.value):null),
+    enabled:x.enabled!==false,
+    armed:x.armed!==false,
+    oneShot:x.oneShot===true,
+    cooldownMs:Number.isFinite(Number(x.cooldownMs))&&Number(x.cooldownMs)>=0?Math.min(Number(x.cooldownMs),30*86400000):0,
+    prevCond:x.prevCond==null?null:!!x.prevCond,
+    lastFiredAt:Number.isFinite(Number(x.lastFiredAt))&&Number(x.lastFiredAt)>=0?Number(x.lastFiredAt):null,
+  })).filter(x=>!needsValue.has(x.type)||Number.isFinite(x.value));
+}
 function saveAlerts(){ saveJSON(LS.alerts, alerts); }
 
 /* ====================== Helpers ====================== */
@@ -812,25 +873,32 @@ function marketStateFromClock(){
    the plain PRE/POST. Normalise once so the ext-hours line, the pill and the
    refresh scheduler all agree instead of each special-casing the long forms. */
 function normMarketState(ms){ if(ms==="PREPRE") return "PRE"; if(ms==="POSTPOST") return "POST"; return ms; }
-function etOffsetMin(){ // minutes ET is offset from UTC (negative west)
-  const now=new Date();
-  const et=new Date(now.toLocaleString("en-US",{timeZone:"America/New_York"}));
-  const utc=new Date(now.toLocaleString("en-US",{timeZone:"UTC"}));
-  return Math.round((et-utc)/60000);
+function etOffsetMinAt(ms){ // minutes ET is offset from UTC (negative west)
+  const d=new Date(ms);
+  const opts={timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false};
+  const parse=parts=>{ const m={}; parts.forEach(p=>m[p.type]=p.value); let h=parseInt(m.hour,10); if(h===24) h=0; return Date.UTC(+m.year,+m.month-1,+m.day,h,+m.minute,+m.second); };
+  const etWall=parse(new Intl.DateTimeFormat("en-US",opts).formatToParts(d));
+  const utcWall=parse(new Intl.DateTimeFormat("en-US",Object.assign({},opts,{timeZone:"UTC"})).formatToParts(d));
+  return Math.round((etWall-utcWall)/60000);
 }
+function etOffsetMin(){ return etOffsetMinAt(Date.now()); }
 function nextOpenMs(){
-  const off=etOffsetMin();
-  const now=new Date();
-  // current ET wall date
-  const etStr=now.toLocaleString("en-US",{timeZone:"America/New_York"});
-  const et=new Date(etStr);
+  const nowMs=Date.now();
+  const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(nowMs));
+  const map={}; parts.forEach(p=>map[p.type]=p.value);
+  const et= new Date(Date.UTC(+map.year,+map.month-1,+map.day));
   for(let i=0;i<8;i++){
-    const d=new Date(et); d.setDate(et.getDate()+i);
-    const wd=d.getDay();
+    const d=new Date(et); d.setUTCDate(et.getUTCDate()+i);
+    const wd=d.getUTCDay();
     if(wd===0||wd===6) continue;
-    // 09:30 ET that day → epoch ms
-    const ms=Date.UTC(d.getFullYear(),d.getMonth(),d.getDate(),9,30,0) - off*60000;
-    if(ms>Date.now()) return ms;
+    const key=d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0");
+    if(isHoliday(key)) continue;
+    // Resolve the offset for the candidate date; using today's offset skips the
+    // DST transition when the app is closed over a spring/fall weekend.
+    const wall=Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),9,30,0);
+    const off=etOffsetMinAt(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),14,30,0));
+    const ms=wall-off*60000;
+    if(ms>nowMs) return ms;
   }
   return null;
 }
@@ -841,7 +909,7 @@ function isRegularSession(sec){
   if(wd===0||wd===6) return false;
   let hh=parseInt(map.hour,10); if(hh===24) hh=0;
   const mod=hh*60+parseInt(map.minute,10);
-  return mod>=570 && mod<960;
+  return mod>=570 && mod<regularCloseMin(etDateKey(sec)) && !isHoliday(etDateKey(sec));
 }
 
 /* ====================== Data layer ====================== */
@@ -1005,18 +1073,23 @@ function vwapSeries(bars){ // anchored to each regular session; resets at every 
 function lastNonNull(arr){ for(let i=arr.length-1;i>=0;i--) if(arr[i]!=null) return arr[i]; return null; }
 function vwapBandsData(bars){
   const vwap=[],up1=[],dn1=[],up2=[],dn2=[];
-  let cumPV=0,cumV=0,cumPV2=0,curDay=null;
+  let mean=0,cumV=0,m2=0,curDay=null;
   for(let i=0;i<bars.length;i++){
     const b=bars[i];
     if(!isRegularSession(b.time)){vwap.push(null);up1.push(null);dn1.push(null);up2.push(null);dn2.push(null);continue;}
     const day=etDateKey(b.time);
-    if(day!==curDay){cumPV=0;cumV=0;cumPV2=0;curDay=day;}
+    if(day!==curDay){mean=0;cumV=0;m2=0;curDay=day;}
     const tp=(b.high+b.low+b.close)/3;
     const v=b.volume||0;
-    cumPV+=tp*v; cumV+=v;
-    const vw=cumV>0?cumPV/cumV:b.close;
-    cumPV2+=(tp-vw)*(tp-vw)*v;
-    const sd=cumV>0?Math.sqrt(cumPV2/cumV):0;
+    if(v>0){
+      const total=cumV+v;
+      const delta=tp-mean;
+      mean += (v/total)*delta;
+      m2 += v*delta*(tp-mean);
+      cumV=total;
+    }
+    const vw=cumV>0?mean:b.close;
+    const sd=cumV>0?Math.sqrt(Math.max(0,m2/cumV)):0;
     vwap.push(vw); up1.push(vw+sd); dn1.push(vw-sd); up2.push(vw+2*sd); dn2.push(vw-2*sd);
   }
   return {vwap,up1,dn1,up2,dn2};
@@ -1399,7 +1472,9 @@ function renderIndicators(d){
 function setChip(id,[txt,cls]){ const e=document.getElementById(id); if(!e) return; e.textContent=txt; e.className="chip"+(cls?(" "+cls):""); }
 
 function renderMarketPill(d){
-  const ms=normMarketState((d&&d.marketState)||marketStateFromClock());
+  // The local ET clock is authoritative. A cached Yahoo marketState can be
+  // stale across a close, holiday, or half-day and must not override it.
+  const ms=normMarketState(marketStateFromClock());
   const pill=$("#mktPill"), txt=$("#mktTxt");
   let cls="closed", label="Closed";
   if(ms==="REGULAR"){
@@ -1490,7 +1565,7 @@ function evaluateAlerts(snap){
       } else if(!cond && !a.armed){ a.armed=true; changed=true; }
     }
   });
-  if(changed){ saveAlerts(); renderAlerts(); }
+  if(changed){ saveAlerts(); renderAlerts(); autoSyncAlerts(); }
 }
 function fireAlert(a, snap){
   const msg=alertDesc(a);
@@ -1526,26 +1601,109 @@ function toast(msg, px, undoFn){
   setTimeout(()=>{ el.style.transition="opacity .3s"; el.style.opacity="0"; setTimeout(()=>el.remove(),300); }, 5000);
 }
 let _tgSyncDebounce=null;
-function autoSyncAlerts(){
-  if(!cfg.tgEnabled||!cfg.tgChatId||cfg.proxyMode!=="worker"||!cfg.proxyUrl||!cfg.alertsSecret) return;
+let _tgRemoteGeneration=0;
+let _tgRemoteQueue=Promise.resolve();
+function cancelPendingAlertSync(){
+  _tgRemoteGeneration++;
   clearTimeout(_tgSyncDebounce);
-  _tgSyncDebounce=setTimeout(async()=>{
-    if(isLocalhostPreview()){ renderAlertBarTgChip("preview"); return; }
-    renderAlertBarTgChip("syncing");
-    const workerUrl=(cfg.proxyUrl||"").replace(/\/$/,"");
-    // Send the full arming state, not just the config. The Worker used to
-    // hard-reset armed/prevCond/lastFiredAt on every sync, which re-armed an
-    // already-tripped alert and re-fired it on the next cron tick (duplicates).
-    const payload={ symbol:SYMBOL, chatId:cfg.tgChatId, alerts:alerts.filter(a=>a.enabled).map(a=>({id:a.id,type:a.type,value:a.value,oneShot:!!a.oneShot,cooldownMs:a.cooldownMs||0,enabled:true,armed:!!a.armed,prevCond:a.prevCond,lastFiredAt:a.lastFiredAt||null})) };
-    try{
-      const r=await fetch(workerUrl+"/alerts",{method:"POST",headers:{"Content-Type":"application/json","X-Alerts-Secret":cfg.alertsSecret||""},body:JSON.stringify(payload)});
-      if(r.ok){ cfg.tgLastSync=Date.now(); saveCfg(); renderAlertBarTgChip("ok"); }
-      else renderAlertBarTgChip("fail");
-    }catch(e){ renderAlertBarTgChip("fail"); }
+  _tgSyncDebounce=null;
+  return _tgRemoteGeneration;
+}
+function queueRemoteMutation(work){
+  _tgRemoteQueue=_tgRemoteQueue.catch(()=>{}).then(work);
+  return _tgRemoteQueue;
+}
+function autoSyncAlerts(){
+  // Cancel a pending enabled:true callback even when the current settings are
+  // already disabled. Otherwise a push-off can be followed by an old timer.
+  clearTimeout(_tgSyncDebounce);
+  _tgSyncDebounce=null;
+  const generation=_tgRemoteGeneration;
+  if(!remoteConfigCanWrite(remoteConfigSnapshot())) return;
+  _tgSyncDebounce=setTimeout(()=>{
+    _tgSyncDebounce=null;
+    queueRemoteMutation(async()=>{
+      if(generation!==_tgRemoteGeneration||!remoteConfigCanWrite(remoteConfigSnapshot())) return;
+      if(isLocalhostPreview()){ renderAlertBarTgChip("preview"); return; }
+      renderAlertBarTgChip("syncing");
+      const workerUrl=(cfg.proxyUrl||"").replace(/\/$/,"");
+      // Send the full arming state, including disabled one-shots, so a local
+      // state transition cannot be undone by the next Worker tick.
+      const payload={ symbol:SYMBOL, enabled:true, chatId:cfg.tgChatId, alerts:alerts.map(a=>({id:a.id,type:a.type,value:a.value,oneShot:!!a.oneShot,cooldownMs:a.cooldownMs||0,enabled:a.enabled!==false,armed:!!a.armed,prevCond:a.prevCond,lastFiredAt:a.lastFiredAt||null})) };
+      try{
+        const r=await fetch(workerUrl+"/alerts",{method:"POST",headers:{"Content-Type":"application/json","X-Alerts-Secret":cfg.alertsSecret||""},body:JSON.stringify(payload)});
+        if(r.ok&&generation===_tgRemoteGeneration){ cfg.tgLastSync=Date.now(); saveCfg(); renderAlertBarTgChip("ok"); }
+        else if(generation===_tgRemoteGeneration) renderAlertBarTgChip("fail");
+      }catch(e){ if(generation===_tgRemoteGeneration) renderAlertBarTgChip("fail"); }
+    });
   },1500);
+}
+function remoteConfigSnapshot(){
+  return { proxyMode:cfg.proxyMode, proxyUrl:cfg.proxyUrl||"", tgEnabled:!!cfg.tgEnabled,
+    tgChatId:cfg.tgChatId||"", alertsSecret:cfg.alertsSecret||"" };
+}
+function remoteConfigCanWrite(c){
+  return !!(c&&c.tgEnabled&&c.tgChatId&&c.proxyMode==="worker"&&c.proxyUrl&&c.alertsSecret);
+}
+async function disableRemoteAlerts(previous){
+  if(!previous||previous.proxyMode!=="worker") return {ok:true,skipped:true};
+  if(!previous.proxyUrl||!previous.alertsSecret||!previous.tgChatId) return {ok:false,error:new Error("previous Worker endpoint or secret is incomplete")};
+  if(isLocalhostPreview()) return {ok:true,skipped:true,preview:true};
+  const workerUrl=previous.proxyUrl.replace(/\/$/,"");
+  try{
+    const r=await fetch(workerUrl+"/alerts",{method:"POST",headers:{"Content-Type":"application/json","X-Alerts-Secret":previous.alertsSecret},body:JSON.stringify({symbol:SYMBOL,enabled:false,chatId:previous.tgChatId,alerts:[]})});
+    let body=null; try{ body=await r.json(); }catch(e){}
+    if(!r.ok||!body||body.ok!==true||body.enabled!==false) throw new Error("Worker did not acknowledge disable");
+    return {ok:true};
+  }catch(e){ return {ok:false,error:e}; }
+}
+async function handleRemoteSettingsChange(previous){
+  const current=remoteConfigSnapshot();
+  const endpointChanged=previous.proxyMode!==current.proxyMode||previous.proxyUrl!==current.proxyUrl||previous.tgChatId!==current.tgChatId||previous.alertsSecret!==current.alertsSecret;
+  const remoteNeedsDisable=(previous.tgEnabled&&previous.proxyMode==="worker"&&endpointChanged)||(previous.tgEnabled&&!current.tgEnabled);
+  if(remoteNeedsDisable){
+    const generation=cancelPendingAlertSync();
+    cfg.tgDisablePending=true; cfg.tgDisableFailed=false; saveCfg(); renderAlertBarTgChip("disable-pending");
+    const result=await queueRemoteMutation(()=>disableRemoteAlerts(previous));
+    if(generation!==_tgRemoteGeneration) return result;
+    cfg.tgDisablePending=false; cfg.tgDisableFailed=!result.ok;
+    if(result.ok) delete cfg.tgDisableRecovery;
+    else cfg.tgDisableRecovery=previous;
+    saveCfg();
+    renderAlertBarTgChip(result.ok?"disabled":"disable-fail");
+    if(result.ok&&remoteConfigCanWrite(current)) autoSyncAlerts();
+    return result;
+  }
+  // A previous disable may have failed after the user turned push off. Clear
+  // that old endpoint before enabling a new destination, or the old Worker
+  // could remain armed while the dashboard points elsewhere.
+  if(cfg.tgDisableRecovery&&remoteConfigCanWrite(current)){
+    const retry=await retryRemoteDisable();
+    if(!retry.ok) return retry;
+  }
+  if(remoteConfigCanWrite(current)) autoSyncAlerts();
+  return {ok:true,skipped:true};
+}
+async function retryRemoteDisable(){
+  const previous=cfg.tgDisableRecovery;
+  if(!previous) return {ok:true,skipped:true};
+  const generation=cancelPendingAlertSync();
+  cfg.tgDisablePending=true; cfg.tgDisableFailed=false; saveCfg(); renderAlertBarTgChip("disable-pending");
+  const result=await queueRemoteMutation(()=>disableRemoteAlerts(previous));
+  if(generation!==_tgRemoteGeneration) return result;
+  cfg.tgDisablePending=false; cfg.tgDisableFailed=!result.ok;
+  if(result.ok) delete cfg.tgDisableRecovery;
+  else cfg.tgDisableRecovery=previous;
+  saveCfg(); renderAlertBarTgChip(result.ok?"disabled":"disable-fail");
+  return result;
 }
 function renderAlertBarTgChip(state){
   const btn=document.getElementById("abarTg"); if(!btn) return;
+  if(state==="disable-pending"){ btn.className="abar-tg"; btn.textContent="TG disabling…"; return; }
+  if(state==="disable-fail"){ btn.className="abar-tg warn"; btn.textContent="TG disable failed"; return; }
+  if(state==="disabled"){ btn.className="abar-tg ok"; btn.textContent="TG off ✓"; return; }
+  if(cfg.tgDisablePending){ btn.className="abar-tg"; btn.textContent="TG disabling…"; return; }
+  if(cfg.tgDisableFailed){ btn.className="abar-tg warn"; btn.textContent="TG disable failed"; return; }
   if(!cfg.tgEnabled){ btn.className="abar-tg"; btn.textContent="TG off"; return; }
   if(state==="syncing"){ btn.className="abar-tg"; btn.textContent="TG syncing…"; return; }
   if(state==="fail"){ btn.className="abar-tg warn"; btn.textContent="TG sync failed"; return; }
@@ -1843,11 +2001,12 @@ function renderLevels(core){
 /* ====================== Position calculator ====================== */
 function calcSave(){
   cfg.calc=cfg.calc||{};
-  cfg.calc.acct  = parseFloat($("#calcAcct").value)||null;
-  cfg.calc.risk  = parseFloat($("#calcRisk").value)||null;
-  cfg.calc.entry = parseFloat($("#calcEntry").value)||null;
-  cfg.calc.stop  = parseFloat($("#calcStop").value)||null;
-  cfg.calc.fx    = parseFloat($("#calcFx").value)||1.35;
+  const positive=id=>{ const n=Number.parseFloat($("#"+id).value); return Number.isFinite(n)&&n>0?n:null; };
+  cfg.calc.acct=positive("calcAcct");
+  cfg.calc.risk=Math.min(100,positive("calcRisk")||0)||null;
+  cfg.calc.entry=positive("calcEntry");
+  cfg.calc.stop=positive("calcStop");
+  cfg.calc.fx=positive("calcFx")||1.35;
   saveCfg();
   renderCalc();
 }
@@ -1862,9 +2021,9 @@ function calcLoad(){
 function renderCalc(){
   const acct=parseFloat($("#calcAcct").value), risk=parseFloat($("#calcRisk").value);
   const entry=parseFloat($("#calcEntry").value), stop=parseFloat($("#calcStop").value);
-  const fx=parseFloat($("#calcFx").value)||1.35;
+  const fx=parseFloat($("#calcFx").value);
   const out=$("#calcOut");
-  if(!acct||!risk||!entry||!stop||entry===stop){ out.style.display="none"; return; }
+  if(!Number.isFinite(acct)||acct<=0||!Number.isFinite(risk)||risk<=0||risk>100||!Number.isFinite(entry)||entry<=0||!Number.isFinite(stop)||stop<=0||entry===stop||!Number.isFinite(fx)||fx<=0){ out.style.display="none"; return; }
   const riskSgd=acct*(risk/100);
   const riskUsd=riskSgd/fx;
   const perShare=Math.abs(entry-stop);
@@ -2008,6 +2167,7 @@ function proxyLabelShort(){
 async function testConnection(){
   const out=$("#testOut"); out.className="testout"; out.style.display="none";
   // apply pending field values for the test
+  const remotePrev=remoteConfigSnapshot();
   const prev={mode:cfg.proxyMode,url:cfg.proxyUrl};
   cfg.proxyMode=$("#proxyMode").value; cfg.proxyUrl=$("#proxyUrl").value.trim();
   out.textContent="Testing…"; out.className="testout ok"; out.style.display="block";
@@ -2017,6 +2177,7 @@ async function testConnection(){
     out.className="testout ok";
     out.textContent="Connected. "+(m.symbol||SYMBOL)+" "+fmtPx(m.regularMarketPrice)+" via "+proxyLabelShort()+".";
     saveCfg(); // persist the tested-and-approved values so they survive a reload
+    handleRemoteSettingsChange(remotePrev);
   }else{
     out.className="testout err";
     out.textContent="Failed: "+res.error;
@@ -2166,8 +2327,29 @@ function switchTicker(sym){
 
 /* ====================== Telegram sync ====================== */
 async function syncAlertsToWorker(){
+  const previous=remoteConfigSnapshot();
   saveSettingsFromDrawer();
   const out=$("#tgSyncOut");
+  const changedRemote=previous.tgEnabled&&(previous.proxyMode!==cfg.proxyMode||previous.proxyUrl!==cfg.proxyUrl||previous.tgChatId!==cfg.tgChatId||previous.alertsSecret!==cfg.alertsSecret||!cfg.tgEnabled);
+  if(changedRemote){
+    const disabled=await handleRemoteSettingsChange(previous);
+    if(!disabled.ok){ out.className="testout err"; out.textContent="Could not confirm disable on the previous Worker; fix the connection or retry before syncing."; out.style.display="block"; return; }
+  }
+  if(!cfg.tgEnabled){
+    let acknowledged=changedRemote;
+    if(cfg.tgDisableRecovery){
+      const retry=await retryRemoteDisable();
+      if(!retry.ok){ out.className="testout err"; out.textContent="Could not confirm disable on the previous Worker; retry when it is reachable."; out.style.display="block"; return; }
+      acknowledged=true;
+    }
+    out.className="testout "+(acknowledged?"ok":"");
+    out.textContent=acknowledged?"Push alerts are off; Worker disable acknowledged.":"Push alerts are off; no Worker sync sent.";
+    out.style.display="block"; return;
+  }
+  if(cfg.tgDisableRecovery){
+    const retry=await retryRemoteDisable();
+    if(!retry.ok){ out.className="testout err"; out.textContent="Could not confirm disable on the previous Worker; retry when it is reachable."; out.style.display="block"; return; }
+  }
   const workerUrl=(cfg.proxyUrl||"").replace(/\/$/,"");
   if(!workerUrl||cfg.proxyMode!=="worker"){
     out.className="testout err"; out.textContent="Set proxy mode to Cloudflare Worker and paste the Worker URL first."; out.style.display="block"; return;
@@ -2179,13 +2361,19 @@ async function syncAlertsToWorker(){
     out.className="testout err"; out.textContent="Enter the alerts secret first (must match the Worker's ALERTS_SECRET)."; out.style.display="block"; return;
   }
   out.className="testout ok"; out.textContent="Syncing…"; out.style.display="block";
-  const payload={ symbol:SYMBOL, chatId:cfg.tgChatId,
-    alerts:alerts.filter(a=>a.enabled).map(a=>({ id:a.id, type:a.type, value:a.value, oneShot:!!a.oneShot, cooldownMs:a.cooldownMs||0 })) };
+  const payload={ symbol:SYMBOL, enabled:true, chatId:cfg.tgChatId,
+    alerts:alerts.map(a=>({ id:a.id, type:a.type, value:a.value, oneShot:!!a.oneShot, cooldownMs:a.cooldownMs||0, enabled:a.enabled!==false, armed:!!a.armed, prevCond:a.prevCond, lastFiredAt:a.lastFiredAt||null })) };
+  const generation=_tgRemoteGeneration;
   try{
-    const r=await fetch(workerUrl+"/alerts",{ method:"POST", headers:{"Content-Type":"application/json","X-Alerts-Secret":cfg.alertsSecret||""}, body:JSON.stringify(payload) });
-    if(r.ok){ out.className="testout ok"; out.textContent="Synced "+payload.alerts.length+" alert(s) to Worker."; }
-    else if(r.status===401){ out.className="testout err"; out.textContent="Worker rejected the alerts secret (HTTP 401). Check it matches ALERTS_SECRET."; }
-    else { out.className="testout err"; out.textContent="Worker returned HTTP "+r.status+"."; }
+    const r=await queueRemoteMutation(async()=>{
+      if(generation!==_tgRemoteGeneration||!remoteConfigCanWrite(remoteConfigSnapshot())) throw new Error("alert settings changed while syncing");
+      return fetch(workerUrl+"/alerts",{ method:"POST", headers:{"Content-Type":"application/json","X-Alerts-Secret":cfg.alertsSecret||""}, body:JSON.stringify(payload) });
+    });
+    if(r&&r.ok&&generation===_tgRemoteGeneration){ out.className="testout ok"; out.textContent="Synced "+payload.alerts.length+" alert(s) to Worker."; cfg.tgLastSync=Date.now(); saveCfg(); }
+    else if(r&&r.ok){ out.className="testout err"; out.textContent="Sync superseded by newer alert settings."; }
+    else if(r){
+      out.className="testout err"; out.textContent=r.status===401?"Worker rejected the alerts secret (HTTP 401). Check it matches ALERTS_SECRET.":"Worker returned HTTP "+r.status+".";
+    }
   }catch(e){ out.className="testout err"; out.textContent="Sync failed: "+(e.message||e); }
 }
 
@@ -2269,7 +2457,12 @@ function wire(){
     if(tg){ const a=alerts.find(x=>x.id===tg.dataset.tgl); if(a){ a.enabled=tg.checked; a.armed=true; if(a.enabled) a.prevCond=null; saveAlerts(); renderAlerts(); autoSyncAlerts(); } }
   });
   const _abarTgBtn=document.getElementById("abarTg");
-  if(_abarTgBtn) _abarTgBtn.addEventListener("click",e=>{ e.stopPropagation(); if(document.getElementById("abarTg").classList.contains("warn")) autoSyncAlerts(); else openDrawer(); });
+  if(_abarTgBtn) _abarTgBtn.addEventListener("click",e=>{
+    e.stopPropagation();
+    if(cfg.tgDisableRecovery) retryRemoteDisable();
+    else if(document.getElementById("abarTg").classList.contains("warn")) autoSyncAlerts();
+    else openDrawer();
+  });
   $("#alLogClear").addEventListener("click",()=>{ alertLog=[]; saveJSON(LS.log,alertLog); renderLog(); });
   $("#notifyBtn").addEventListener("click",async()=>{
     if(!("Notification" in window)){ $("#notifyBtn").textContent="Not supported"; return; }
@@ -2296,9 +2489,20 @@ function wire(){
   $("#proxyMode").addEventListener("change",updateProxyFld);
   $("#testBtn").addEventListener("click",testConnection);
   ["proxyMode","proxyUrl","refreshSec","extToggle","soundToggle"].forEach(id=>{
-    $("#"+id).addEventListener("change",()=>{ saveSettingsFromDrawer(); scheduleNext(); if(id==="extToggle"||id==="proxyMode"||id==="proxyUrl") refresh(true); });
+    $("#"+id).addEventListener("change",()=>{
+      const previous=remoteConfigSnapshot();
+      saveSettingsFromDrawer(); scheduleNext();
+      handleRemoteSettingsChange(previous);
+      if(id==="extToggle"||id==="proxyMode"||id==="proxyUrl") refresh(true);
+    });
   });
-  ["tgToggle","tgChatId","alertsSecret"].forEach(id=>{ $("#"+id).addEventListener("change",saveSettingsFromDrawer); });
+  ["tgToggle","tgChatId","alertsSecret"].forEach(id=>{
+    $("#"+id).addEventListener("change",()=>{
+      const previous=remoteConfigSnapshot();
+      saveSettingsFromDrawer();
+      handleRemoteSettingsChange(previous);
+    });
+  });
   $("#tgSyncBtn").addEventListener("click",syncAlertsToWorker);
 
   // visibility: pause when hidden, refresh immediately when shown

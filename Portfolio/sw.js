@@ -8,19 +8,20 @@
    index.html is network-first (self-healing) but the rest are cache-first and
    will be served stale forever otherwise. */
 
-const CACHE_NAME = 'kjr-portfolio-v2.67';
+const CACHE_NAME = 'kjr-portfolio-v2.68';
+const CACHE_PREFIX = 'kjr-portfolio-';
 const CHART_JS_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
 
 const CORE_ASSETS = [
   './index.html',
   './Worker/theme-init.js',
-  './Worker/app.js?v=2.67',
-  './Worker/kjr-core.js?v=2.67',
-  './Worker/kjr-sortable.js?v=2.67',
-  './Worker/kjr-vault.js?v=2.67',
-  './Worker/kjr-migration.js?v=2.67',
-  './Worker/supabase.js?v=2.67',
-  './Worker/kjr-nas.js?v=2.67',
+  './Worker/app.js?v=2.68',
+  './Worker/kjr-core.js?v=2.68',
+  './Worker/kjr-sortable.js?v=2.68',
+  './Worker/kjr-vault.js?v=2.68',
+  './Worker/kjr-migration.js?v=2.68',
+  './Worker/supabase.js?v=2.68',
+  './Worker/kjr-nas.js?v=2.68',
   './Worker/manifest.webmanifest',
   './Worker/whale-icon.png',
   CHART_JS_URL,
@@ -38,7 +39,10 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
+    // CacheStorage is shared by the origin, including the Forex and Trading apps.
+    // Retire only Portfolio caches so activating this worker preserves sibling shells.
+    await Promise.all(keys.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME)
+      .map((k) => caches.delete(k)));
     await self.clients.claim();
   })());
 });

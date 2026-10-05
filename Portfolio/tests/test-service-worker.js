@@ -1,4 +1,4 @@
-/* Focused service-worker tests for request-specific HTML navigation caches. */
+/* Focused service-worker tests for cache ownership and HTML navigation caches. */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
 const BASE = 'https://app.test/Portfolio/';
+const CURRENT_CACHE = SOURCE.match(/const CACHE_NAME = '([^']+)'/)[1];
 
 class NavigationRequest {
   constructor(url) {
@@ -22,6 +23,9 @@ function createHarness(options = {}) {
   let fetchImpl = () => Promise.reject(new Error('network unavailable'));
   const putControl = options.putControl || null;
   const putError = options.putError || null;
+  const cacheNames = new Set(options.cacheNames || [CURRENT_CACHE]);
+  const deletedCaches = [];
+  let clientsClaimed = false;
 
   function keyFor(request) {
     const value = typeof request === 'string' ? request : request.url;
@@ -47,13 +51,16 @@ function createHarness(options = {}) {
   const caches = {
     open() { return Promise.resolve(cache); },
     match(request) { return cache.match(request); },
-    keys() { return Promise.resolve(['kjr-portfolio-v2.67']); },
-    delete() { return Promise.resolve(true); }
+    keys() { return Promise.resolve([...cacheNames]); },
+    delete(name) {
+      deletedCaches.push(name);
+      return Promise.resolve(cacheNames.delete(name));
+    }
   };
 
   const self = {
     location: { href: BASE + 'sw.js', origin: new URL(BASE).origin },
-    clients: { claim() { return Promise.resolve(); } },
+    clients: { claim() { clientsClaimed = true; return Promise.resolve(); } },
     skipWaiting() { return Promise.resolve(); },
     addEventListener(type, handler) { listeners.set(type, handler); }
   };
@@ -73,6 +80,14 @@ function createHarness(options = {}) {
   vm.runInContext(SOURCE, context, { filename: 'sw.js' });
 
   return {
+    async activate() {
+      let activation;
+      listeners.get('activate')({ waitUntil(promise) { activation = promise; } });
+      await activation;
+    },
+    cacheNames() { return [...cacheNames]; },
+    deletedCaches() { return [...deletedCaches]; },
+    clientsClaimed() { return clientsClaimed; },
     queue(responseOrError) {
       fetchImpl = () => responseOrError instanceof Error
         ? Promise.reject(responseOrError)
@@ -113,6 +128,29 @@ async function run() {
       failed++;
     }
   }
+
+  await test('activation deletes only old Portfolio caches and preserves sibling app caches', async () => {
+    const preserved = [CURRENT_CACHE, 'kjr-forex-v0.13', 'kjr-trading-v1', 'unrelated-cache', 'kjr-portfolios-v1'];
+    const retired = ['kjr-portfolio-v2.65', 'kjr-portfolio-v2.67'];
+    const harness = createHarness({ cacheNames: [...preserved, ...retired] });
+
+    await harness.activate();
+
+    assert.deepEqual(harness.deletedCaches().sort(), retired.sort());
+    assert.deepEqual(harness.cacheNames().sort(), preserved.sort());
+    assert.equal(harness.clientsClaimed(), true);
+  });
+
+  await test('activation with no old Portfolio cache leaves all origin caches intact', async () => {
+    const preserved = [CURRENT_CACHE, 'kjr-forex-v0.13', 'site-assets'];
+    const harness = createHarness({ cacheNames: preserved });
+
+    await harness.activate();
+
+    assert.deepEqual(harness.deletedCaches(), []);
+    assert.deepEqual(harness.cacheNames(), preserved);
+    assert.equal(harness.clientsClaimed(), true);
+  });
 
   await test('main and pilot online visits keep request-specific cached documents', async () => {
     const harness = createHarness();

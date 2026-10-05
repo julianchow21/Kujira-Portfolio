@@ -182,6 +182,7 @@
     let unlocked = false;
     let dirty = false;
     let persistPromise = null;
+    let lifecyclePromise = null;
     let lastError = null;
 
     function isSensitiveKey(name) {
@@ -190,8 +191,21 @@
 
     function isEnabled() { return storage.getItem(envelopeKey) != null; }
     function isUnlocked() { return isEnabled() && unlocked && !!key; }
-    function hasPendingWrite() { return dirty || !!persistPromise; }
+    function isBusy() { return !!lifecyclePromise; }
+    function hasPendingWrite() { return dirty || !!persistPromise || isBusy(); }
     function getLastError() { return lastError; }
+
+    function assertIdle() {
+      if (isBusy()) throw new VaultError('busy', 'Device encryption is changing. Wait for it to finish, then save again.');
+    }
+
+    // Lock before yielding to Web Crypto. Never acknowledge a synchronous
+    // write to a snapshot which a lifecycle transition is about to replace.
+    function transition(operation) {
+      if (isBusy()) return Promise.reject(new VaultError('busy', 'Another device encryption change is still running.'));
+      lifecyclePromise = Promise.resolve().then(operation).finally(() => { lifecyclePromise = null; });
+      return lifecyclePromise;
+    }
 
     function collectPlaintextEntries() {
       const out = {};
@@ -244,38 +258,80 @@
       return persistPromise;
     }
 
-    async function flush() {
+    async function flushPending() {
       if (dirty && !persistPromise) schedulePersist();
       if (persistPromise) await persistPromise;
       if (lastError) throw lastError;
       return true;
     }
 
-    async function enable(passphrase) {
+    async function flush() {
+      if (lifecyclePromise) await lifecyclePromise;
+      return flushPending();
+    }
+
+    function enable(passphrase) { return transition(async function () {
       if (isEnabled()) throw new VaultError('already-enabled', 'Device encryption is already enabled.');
       if (typeof passphrase !== 'string' || passphrase.length < 12 || passphrase.length > MAX_PASSPHRASE_LENGTH) {
         throw new VaultError('weak-passphrase', 'Use a passphrase between 12 and 256 characters.');
       }
-      const plaintext = collectPlaintextEntries();
       const nextSalt = cryptoApi.getRandomValues(new Uint8Array(16));
       const nextKey = await deriveKey(cryptoApi, passphrase, nextSalt, iterations);
+      if (isEnabled()) throw new VaultError('concurrent-change', 'Device encryption changed in another tab. Reload before retrying.');
+      const plaintext = collectPlaintextEntries();
       const previousEnvelope = storage.getItem(envelopeKey);
       const raw = await encryptEntries(cryptoApi, nextKey, nextSalt, iterations, plaintext);
+      // Another tab can still be in plaintext mode during derivation. Never
+      // publish a stale snapshot or restore it over that tab's newer save.
+      if (storage.getItem(envelopeKey) !== previousEnvelope || !sameEntries(plaintext, collectPlaintextEntries())) {
+        throw new VaultError('concurrent-change', 'Protected data changed in another tab. Retry enabling encryption after saving there.');
+      }
+      let verifiedCopy = false;
+      let cleanupStarted = false;
       try {
         storage.setItem(envelopeKey, raw);
         const verified = await decryptEntries(cryptoApi, nextKey, storage.getItem(envelopeKey));
         if (!sameEntries(plaintext, verified)) {
           throw new VaultError('verification-failed', 'The encrypted migration copy did not verify.');
         }
+        verifiedCopy = true;
+        if (!sameEntries(plaintext, collectPlaintextEntries())) {
+          throw new VaultError('concurrent-change', 'Protected data changed in another tab. Retry enabling encryption after saving there.');
+        }
+        cleanupStarted = true;
         removePlaintextEntries();
         const leaked = collectPlaintextEntries();
         if (Object.keys(leaked).length) {
           throw new VaultError('cleanup-failed', 'Plaintext data could not be removed after encryption.');
         }
       } catch (err) {
-        if (previousEnvelope == null) storage.removeItem(envelopeKey);
-        else storage.setItem(envelopeKey, previousEnvelope);
-        Object.keys(plaintext).forEach(name => storage.setItem(name, plaintext[name]));
+        let restored = true;
+        if (cleanupStarted) {
+          Object.keys(plaintext).forEach(name => {
+            try { storage.setItem(name, plaintext[name]); }
+            catch (_) { restored = false; }
+          });
+          try { if (!sameEntries(plaintext, collectPlaintextEntries())) restored = false; }
+          catch (_) { restored = false; }
+        }
+        // Keep the verified encrypted copy if plaintext recovery itself fails.
+        if (restored) {
+          try {
+            if (previousEnvelope == null) storage.removeItem(envelopeKey);
+            else storage.setItem(envelopeKey, previousEnvelope);
+            if (storage.getItem(envelopeKey) !== previousEnvelope) restored = false;
+          } catch (_) { restored = false; }
+        }
+        if (!restored) {
+          if (verifiedCopy) {
+            key = nextKey;
+            salt = nextSalt;
+            activeIterations = iterations;
+            entries = cloneEntries(plaintext);
+            unlocked = true;
+          }
+          throw new VaultError('cleanup-failed', 'Encryption migration cleanup was incomplete. A recovery copy was retained, but plaintext may remain. Keep this tab open and export a recovery copy before retrying.');
+        }
         throw err;
       }
       key = nextKey;
@@ -285,9 +341,10 @@
       unlocked = true;
       lastError = null;
       return true;
-    }
+    }); }
 
-    async function unlock(passphrase) {
+    function unlock(passphrase) { return transition(async function () {
+      if (unlocked) await flushPending();
       const raw = storage.getItem(envelopeKey);
       if (!raw) return false;
       const parsed = parseEnvelope(raw);
@@ -301,45 +358,84 @@
       lastError = null;
       removePlaintextEntries();
       return true;
-    }
+    }); }
 
-    async function disable() {
+    function disable() { return transition(async function () {
       if (!isUnlocked()) throw new VaultError('locked', 'Unlock the encrypted vault before disabling encryption.');
-      await flush();
+      await flushPending();
       const snapshot = cloneEntries(entries);
-      Object.keys(snapshot).forEach(name => storage.setItem(name, snapshot[name]));
-      for (const name of Object.keys(snapshot)) {
-        if (storage.getItem(name) !== snapshot[name]) {
-          throw new VaultError('verification-failed', 'Plaintext data did not verify while disabling encryption.');
+      const before = collectPlaintextEntries();
+      const encrypted = storage.getItem(envelopeKey);
+      try {
+        Object.keys(snapshot).forEach(name => storage.setItem(name, snapshot[name]));
+        for (const name of Object.keys(snapshot)) {
+          if (storage.getItem(name) !== snapshot[name]) {
+            throw new VaultError('verification-failed', 'Plaintext data did not verify while disabling encryption.');
+          }
         }
+        storage.removeItem(envelopeKey);
+        if (storage.getItem(envelopeKey) != null) {
+          throw new VaultError('cleanup-failed', 'The encrypted vault could not be removed.');
+        }
+      } catch (err) {
+        // localStorage has no transaction. Retain the encrypted copy before
+        // undoing all plaintext writes, including a write that threw afterwards.
+        let rollbackFailed = false;
+        let encryptedRestored = true;
+        try {
+          if (storage.getItem(envelopeKey) !== encrypted) storage.setItem(envelopeKey, encrypted);
+          if (storage.getItem(envelopeKey) !== encrypted) encryptedRestored = false;
+        } catch (_) { encryptedRestored = false; }
+        if (encryptedRestored) {
+          Object.keys(snapshot).forEach(name => {
+            try {
+              if (Object.prototype.hasOwnProperty.call(before, name)) storage.setItem(name, before[name]);
+              else storage.removeItem(name);
+            } catch (_) { rollbackFailed = true; }
+          });
+          try { if (!sameEntries(before, collectPlaintextEntries())) rollbackFailed = true; }
+          catch (_) { rollbackFailed = true; }
+        } else {
+          // Keep verified plaintext if the encrypted copy could not be restored.
+          rollbackFailed = true;
+        }
+        if (rollbackFailed) {
+          throw new VaultError('cleanup-failed', 'Disabling encryption failed and storage cleanup was incomplete. Some plaintext may remain. Keep this tab open and export a recovery copy before retrying.');
+        }
+        throw err;
       }
-      storage.removeItem(envelopeKey);
-      if (storage.getItem(envelopeKey) != null) {
-        throw new VaultError('cleanup-failed', 'The encrypted vault could not be removed.');
-      }
-      lock();
+      clearUnlockedState();
       return true;
-    }
+    }); }
 
-    async function changePassphrase(nextPassphrase) {
+    function changePassphrase(nextPassphrase) { return transition(async function () {
       if (!isUnlocked()) throw new VaultError('locked', 'Unlock the encrypted vault before changing its passphrase.');
       if (typeof nextPassphrase !== 'string' || nextPassphrase.length < 12 || nextPassphrase.length > MAX_PASSPHRASE_LENGTH) {
         throw new VaultError('weak-passphrase', 'Use a passphrase between 12 and 256 characters.');
       }
-      await flush();
+      await flushPending();
       const oldRaw = storage.getItem(envelopeKey);
       const nextSalt = cryptoApi.getRandomValues(new Uint8Array(16));
       const nextKey = await deriveKey(cryptoApi, nextPassphrase, nextSalt, iterations);
       const snapshot = cloneEntries(entries);
+      let nextRaw;
       try {
-        const nextRaw = await encryptEntries(cryptoApi, nextKey, nextSalt, iterations, snapshot);
+        nextRaw = await encryptEntries(cryptoApi, nextKey, nextSalt, iterations, snapshot);
+        if (storage.getItem(envelopeKey) !== oldRaw) {
+          throw new VaultError('concurrent-change', 'The encrypted data changed in another tab. Reload before changing the passphrase.');
+        }
         storage.setItem(envelopeKey, nextRaw);
         const verified = await decryptEntries(cryptoApi, nextKey, storage.getItem(envelopeKey));
         if (!sameEntries(snapshot, verified)) {
           throw new VaultError('verification-failed', 'The new encrypted vault did not verify.');
         }
+        if (storage.getItem(envelopeKey) !== nextRaw) {
+          throw new VaultError('concurrent-change', 'The encrypted data changed in another tab during passphrase verification. Reload before retrying.');
+        }
       } catch (err) {
-        storage.setItem(envelopeKey, oldRaw);
+        // Roll back only our own publication. Another tab's newer envelope
+        // must never be replaced with the pre-transition recovery snapshot.
+        if (nextRaw && storage.getItem(envelopeKey) === nextRaw) storage.setItem(envelopeKey, oldRaw);
         throw err;
       }
       key = nextKey;
@@ -347,9 +443,9 @@
       activeIterations = iterations;
       lastError = null;
       return true;
-    }
+    }); }
 
-    function lock() {
+    function clearUnlockedState() {
       key = null;
       salt = null;
       entries = {};
@@ -359,17 +455,26 @@
       lastError = null;
     }
 
-    async function applyExternalEnvelope(raw) {
+    function lock() {
+      assertIdle();
+      if (dirty || persistPromise || lastError) throw new VaultError('pending-write', 'Wait for the encrypted save to finish before locking.');
+      clearUnlockedState();
+    }
+
+    function applyExternalEnvelope(raw) { return transition(async function () {
       if (!isUnlocked()) throw new VaultError('locked', 'Unlock the encrypted vault before applying another tab\'s update.');
-      await flush();
+      await flushPending();
+      if (storage.getItem(envelopeKey) !== raw) throw new VaultError('concurrent-change', 'A newer encrypted save is available. Reload before applying another tab\'s update.');
       const parsed = parseEnvelope(raw);
       if (bytesToBase64(parsed.salt) !== bytesToBase64(salt) ||
           parsed.envelope.kdf.iterations !== activeIterations) {
         throw new VaultError('reunlock-required', 'The vault passphrase changed in another tab. Reload and unlock again.');
       }
-      entries = await decryptEntries(cryptoApi, key, raw);
+      const decrypted = await decryptEntries(cryptoApi, key, raw);
+      if (storage.getItem(envelopeKey) !== raw) throw new VaultError('concurrent-change', 'The encrypted data changed again. Reload before applying another tab\'s update.');
+      entries = decrypted;
       return cloneEntries(entries);
-    }
+    }); }
 
     function exportEnvelope() {
       const raw = storage.getItem(envelopeKey);
@@ -379,6 +484,8 @@
     }
 
     function replaceEnvelope(raw) {
+      assertIdle();
+      if (dirty || persistPromise) throw new VaultError('pending-write', 'Wait for the encrypted save to finish before restoring a vault.');
       parseEnvelope(raw);
       storage.setItem(envelopeKey, raw);
       if (storage.getItem(envelopeKey) !== raw) {
@@ -390,6 +497,8 @@
     }
 
     function resetEncryptedData() {
+      assertIdle();
+      if (dirty || persistPromise) throw new VaultError('pending-write', 'Wait for the encrypted save to finish before resetting a vault.');
       storage.removeItem(envelopeKey);
       removePlaintextEntries();
       lock();
@@ -404,6 +513,7 @@
       },
       setItem(name, value) {
         if (!isSensitiveKey(name)) { storage.setItem(name, value); return; }
+        assertIdle();
         if (!isEnabled()) { storage.setItem(name, value); return; }
         if (!isUnlocked()) throw new VaultError('locked', 'Protected browser data is locked.');
         entries[name] = String(value);
@@ -411,6 +521,7 @@
       },
       removeItem(name) {
         if (!isSensitiveKey(name)) { storage.removeItem(name); return; }
+        assertIdle();
         if (!isEnabled()) { storage.removeItem(name); return; }
         if (!isUnlocked()) throw new VaultError('locked', 'Protected browser data is locked.');
         delete entries[name];
@@ -424,6 +535,7 @@
       isSensitiveKey,
       isEnabled,
       isUnlocked,
+      isBusy,
       hasPendingWrite,
       getLastError,
       enable,

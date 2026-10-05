@@ -40,15 +40,34 @@ async function test(name, fn) {
   }
 }
 
-function manager(storage) {
+function manager(storage, cryptoApi = webcrypto) {
   return createManager({
     storage,
-    crypto: webcrypto,
+    crypto: cryptoApi,
     envelopeKey: 'vault',
     iterations: 600000,
     sensitiveKeys: ['db', 'url', 'prices'],
     sensitivePrefixes: ['RECOVERY_']
   });
+}
+
+function gatedCrypto(method) {
+  let release, reached, armed = false;
+  const waiting = new Promise(resolve => { release = resolve; });
+  const entered = new Promise(resolve => { reached = resolve; });
+  const cryptoApi = {
+    getRandomValues: value => webcrypto.getRandomValues(value),
+    subtle: new Proxy(webcrypto.subtle, {
+      get(target, name) {
+        if (typeof target[name] !== 'function') return target[name];
+        return async (...args) => {
+          if (armed && name === method) { armed = false; reached(); await waiting; }
+          return target[name](...args);
+        };
+      }
+    })
+  };
+  return { cryptoApi, arm() { armed = true; }, entered, release() { release(); } };
 }
 
 (async () => {
@@ -188,6 +207,183 @@ function manager(storage) {
     assert.strictEqual(vault.isUnlocked(), false);
     await vault.unlock(PASS_A);
     assert.strictEqual(vault.storage.getItem('db'), 'recover-me');
+  });
+
+  await test('enable rejects concurrent writes visibly and preserves an acknowledged retry after reload', async () => {
+    const storage = new FakeStorage({ db: 'before-enable' });
+    const gate = gatedCrypto('deriveKey'), vault = manager(storage, gate.cryptoApi);
+    gate.arm(); const enabling = vault.enable(PASS_A);
+    assert.strictEqual(vault.isBusy(), true);
+    assert.strictEqual(vault.hasPendingWrite(), true);
+    await gate.entered;
+    assert.throws(() => vault.storage.setItem('db', 'during-enable'), err => err.code === 'busy');
+    assert.throws(() => vault.storage.removeItem('db'), err => err.code === 'busy');
+    assert.throws(() => vault.lock(), err => err.code === 'busy');
+    await assert.rejects(vault.enable(PASS_B), err => err.code === 'busy');
+    let flushed = false;
+    const flushing = vault.flush().then(() => { flushed = true; });
+    await Promise.resolve(); assert.strictEqual(flushed, false);
+    gate.release(); await enabling; await flushing;
+    vault.storage.setItem('db', 'acknowledged-retry'); await vault.flush();
+    const reopened = manager(storage); await reopened.unlock(PASS_A);
+    assert.strictEqual(reopened.storage.getItem('db'), 'acknowledged-retry');
+    assert.strictEqual(storage.getItem('db'), null);
+    assert.strictEqual(vault.isBusy(), false);
+  });
+
+  await test('passphrase changes drain accepted writes and reject changes during derivation', async () => {
+    const storage = new FakeStorage({ db: 'before' });
+    const gate = gatedCrypto('deriveKey'), vault = manager(storage, gate.cryptoApi);
+    await vault.enable(PASS_A);
+    vault.storage.setItem('db', 'accepted-before-change');
+    gate.arm(); const changing = vault.changePassphrase(PASS_B); await gate.entered;
+    assert.throws(() => vault.storage.setItem('db', 'during-change'), err => err.code === 'busy');
+    gate.release(); await changing;
+    const reopened = manager(storage); await reopened.unlock(PASS_B);
+    assert.strictEqual(reopened.storage.getItem('db'), 'accepted-before-change');
+    reopened.lock(); await assert.rejects(reopened.unlock(PASS_A), err => err.code === 'unlock-failed');
+  });
+
+  await test('enable preserves an accepted write from another plaintext tab during encryption', async () => {
+    const storage = new FakeStorage({ db: 'before' });
+    const gate = gatedCrypto('encrypt'), vault = manager(storage, gate.cryptoApi), otherTab = manager(storage);
+    gate.arm(); const enabling = vault.enable(PASS_A); await gate.entered;
+    otherTab.storage.setItem('db', 'accepted-in-other-tab');
+    gate.release(); await assert.rejects(enabling, err => err.code === 'concurrent-change');
+    assert.strictEqual(storage.getItem('db'), 'accepted-in-other-tab');
+    assert.strictEqual(storage.getItem('vault'), null);
+    assert.strictEqual(vault.isBusy(), false);
+  });
+
+  await test('passphrase derivation preserves another tab\'s accepted encrypted update', async () => {
+    const storage = new FakeStorage({ db: 'before' });
+    const gate = gatedCrypto('deriveKey'), vault = manager(storage, gate.cryptoApi);
+    await vault.enable(PASS_A);
+    const otherTab = manager(storage); await otherTab.unlock(PASS_A);
+    gate.arm(); const changing = vault.changePassphrase(PASS_B); await gate.entered;
+    otherTab.storage.setItem('db', 'accepted-in-other-tab'); await otherTab.flush();
+    const external = storage.getItem('vault');
+    gate.release(); await assert.rejects(changing, err => err.code === 'concurrent-change');
+    assert.strictEqual(storage.getItem('vault'), external);
+    const reopened = manager(storage); await reopened.unlock(PASS_A);
+    assert.strictEqual(reopened.storage.getItem('db'), 'accepted-in-other-tab');
+    assert.strictEqual(vault.isBusy(), false);
+  });
+
+  await test('passphrase verification failure never rolls back over a third-party envelope', async () => {
+    const storage = new FakeStorage({ db: 'before' });
+    const gate = gatedCrypto('decrypt'), vault = manager(storage, gate.cryptoApi);
+    await vault.enable(PASS_A);
+    const otherTab = manager(storage); await otherTab.unlock(PASS_A);
+    gate.arm(); const changing = vault.changePassphrase(PASS_B); await gate.entered;
+    otherTab.storage.setItem('db', 'accepted-during-verification'); await otherTab.flush();
+    const external = storage.getItem('vault');
+    gate.release(); await assert.rejects(changing, err => err.code === 'concurrent-change');
+    assert.strictEqual(storage.getItem('vault'), external);
+    const reopened = manager(storage); await reopened.unlock(PASS_A);
+    assert.strictEqual(reopened.storage.getItem('db'), 'accepted-during-verification');
+    assert.strictEqual(vault.isBusy(), false);
+  });
+
+  await test('enable retains encrypted recovery if plaintext cleanup and rollback both fail', async () => {
+    const storage = new FakeStorage({ db: 'synthetic-db', prices: 'synthetic-prices' });
+    const vault = manager(storage), remove = storage.removeItem.bind(storage), set = storage.setItem.bind(storage);
+    storage.removeItem = name => { if (name === 'prices') throw new Error('cleanup failure'); remove(name); };
+    storage.setItem = (name, value) => { if (name === 'db') throw new Error('rollback quota failure'); set(name, value); };
+    await assert.rejects(vault.enable(PASS_A), err => err.code === 'cleanup-failed');
+    assert.strictEqual(vault.isEnabled(), true); assert.strictEqual(vault.isUnlocked(), true);
+    assert.strictEqual(vault.storage.getItem('db'), 'synthetic-db');
+    storage.removeItem = remove;
+    const reopened = manager(storage); await reopened.unlock(PASS_A);
+    assert.strictEqual(reopened.storage.getItem('db'), 'synthetic-db');
+    assert.strictEqual(reopened.storage.getItem('prices'), 'synthetic-prices');
+  });
+
+  await test('disable drains accepted writes while blocking new writes and lifecycle operations', async () => {
+    const storage = new FakeStorage({ db: 'before' });
+    const gate = gatedCrypto('encrypt'), vault = manager(storage, gate.cryptoApi);
+    await vault.enable(PASS_A);
+    gate.arm(); vault.storage.setItem('db', 'accepted-before-disable'); await gate.entered;
+    const disabling = vault.disable();
+    assert.throws(() => vault.storage.setItem('db', 'during-disable'), err => err.code === 'busy');
+    assert.throws(() => vault.resetEncryptedData(), err => err.code === 'busy');
+    gate.release(); await disabling;
+    assert.strictEqual(storage.getItem('db'), 'accepted-before-disable');
+    assert.strictEqual(vault.isEnabled(), false);
+  });
+
+  await test('failed disable rolls back each partial plaintext write and retains encrypted recovery', async () => {
+    for (const failAt of [1, 2, 3]) {
+      const storage = new FakeStorage({ db: 'synthetic-db', prices: 'synthetic-prices', url: 'synthetic-url' });
+      const vault = manager(storage); await vault.enable(PASS_A);
+      const encrypted = storage.getItem('vault'), set = storage.setItem.bind(storage); let writes = 0;
+      storage.setItem = (name, value) => {
+        if (name !== 'vault' && ++writes === failAt) throw new Error('synthetic quota failure');
+        return set(name, value);
+      };
+      await assert.rejects(vault.disable(), /synthetic quota failure/);
+      assert.strictEqual(vault.isEnabled(), true); assert.strictEqual(vault.isBusy(), false);
+      assert.strictEqual(storage.getItem('vault'), encrypted);
+      for (const name of ['db', 'prices', 'url']) assert.strictEqual(storage.getItem(name), null);
+      const reopened = manager(storage); await reopened.unlock(PASS_A);
+      assert.strictEqual(reopened.storage.getItem('db'), 'synthetic-db');
+    }
+  });
+
+  await test('failed disable reports remaining plaintext when rollback removal is refused', async () => {
+    const storage = new FakeStorage({ db: 'synthetic-db', prices: 'synthetic-prices' });
+    const vault = manager(storage); await vault.enable(PASS_A);
+    const set = storage.setItem.bind(storage), remove = storage.removeItem.bind(storage);
+    storage.setItem = (name, value) => { if (name === 'prices') throw new Error('quota failure'); set(name, value); };
+    storage.removeItem = name => { if (name !== 'db') remove(name); };
+    await assert.rejects(vault.disable(), err => err.code === 'cleanup-failed' && /plaintext may remain/.test(err.message));
+    assert.strictEqual(vault.isEnabled(), true);
+    assert.strictEqual(storage.getItem('db'), 'synthetic-db');
+    assert.strictEqual(vault.storage.getItem('prices'), 'synthetic-prices');
+  });
+
+  await test('failed envelope removal rolls plaintext back and leaves the encrypted vault usable', async () => {
+    const storage = new FakeStorage({ db: 'synthetic-db' }), vault = manager(storage);
+    await vault.enable(PASS_A);
+    const remove = storage.removeItem.bind(storage); storage.removeItem = name => { if (name !== 'vault') remove(name); };
+    await assert.rejects(vault.disable(), err => err.code === 'cleanup-failed');
+    assert.strictEqual(storage.getItem('db'), null);
+    assert.strictEqual(vault.storage.getItem('db'), 'synthetic-db');
+    assert.strictEqual(vault.isBusy(), false);
+  });
+
+  await test('disable retains plaintext if envelope removal applied but encrypted rollback also fails', async () => {
+    const storage = new FakeStorage({ db: 'synthetic-db', prices: 'synthetic-prices' }), vault = manager(storage);
+    await vault.enable(PASS_A);
+    const remove = storage.removeItem.bind(storage);
+    storage.removeItem = name => { remove(name); if (name === 'vault') throw new Error('removal interrupted'); };
+    storage.failEnvelopeWrites = true;
+    await assert.rejects(vault.disable(), err => err.code === 'cleanup-failed');
+    assert.strictEqual(storage.getItem('db'), 'synthetic-db');
+    assert.strictEqual(storage.getItem('prices'), 'synthetic-prices');
+    assert.strictEqual(vault.isBusy(), false);
+  });
+
+  await test('repeated unlock drains an accepted encrypted write before reading its snapshot', async () => {
+    const storage = new FakeStorage({ db: 'before' });
+    const gate = gatedCrypto('encrypt'), vault = manager(storage, gate.cryptoApi);
+    await vault.enable(PASS_A);
+    gate.arm(); vault.storage.setItem('db', 'accepted'); await gate.entered;
+    const unlocking = vault.unlock(PASS_A);
+    assert.throws(() => vault.lock(), err => err.code === 'busy');
+    gate.release(); await unlocking;
+    assert.strictEqual(vault.storage.getItem('db'), 'accepted');
+  });
+
+  await test('stale external envelopes cannot replace a newly acknowledged local write', async () => {
+    const storage = new FakeStorage({ db: 'before' }), vault = manager(storage);
+    await vault.enable(PASS_A);
+    const stale = storage.getItem('vault');
+    vault.storage.setItem('db', 'accepted-new-local');
+    await assert.rejects(vault.applyExternalEnvelope(stale), err => err.code === 'concurrent-change');
+    assert.strictEqual(vault.storage.getItem('db'), 'accepted-new-local');
+    const reopened = manager(storage); await reopened.unlock(PASS_A);
+    assert.strictEqual(reopened.storage.getItem('db'), 'accepted-new-local');
   });
 
   await test('browser boot loads the vault module before app code and unlocks before reading local data', async () => {

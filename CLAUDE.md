@@ -2,7 +2,7 @@
 
 Monorepo of 3 static SPAs hosted on GitHub Pages. No framework, no bundler, no build step. Open any `.html` directly or serve from repo root.
 
-> Master rules also apply from `~/Claude Projects/Claude/CLAUDE.md` (Julian's identity, formatting, workflow, skills, GitHub push, file naming, folder cleanliness, version badge, UI quality standard). That file loads separately and is not duplicated here. This file covers repo-specific architecture, commands, constraints, and gotchas no agent could infer from filenames alone.
+> Master rules also apply from `~/.assistant-control/AGENTS.md` (Julian's identity, formatting, workflow, skills, GitHub push, file naming, folder cleanliness, version badge, UI quality standard). That file loads separately and is not duplicated here. This file covers repo-specific architecture, commands, constraints, and gotchas no agent could infer from filenames alone.
 
 ## Commands
 
@@ -125,7 +125,7 @@ These extend or override the master `CLAUDE.md` rules for this repo.
 
 ## Files you should know about
 
-- **Feature backlog:** `~/Claude Projects/Claude/tasks/todo.md` (external path, **never** in a local file)
+- **Feature backlog:** `~/.assistant-control/tasks/todo.md` (private ignored path, **never** in a local file)
 - Each app's `CLAUDE.md` (architecture, tabs, data layer, gotchas, design tokens)
 - `Portfolio/Docs/QA SOP.md` (QA runbook, seed data instructions, invariants)
 - `SECURITY.md` (threat model, audit checklist; run before each release)

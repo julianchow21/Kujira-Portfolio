@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.67';
-const APP_DISPLAY_VERSION = 'v2.67 (03 Oct)';
+const APP_VERSION = 'v2.68';
+const APP_DISPLAY_VERSION = 'v2.68 (04 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -113,9 +113,10 @@ const PAYLOAD_WARN_AT  = Math.round(PAYLOAD_HARD_CAP * 0.8);
 const AUTO_REFRESH_INTERVAL_MS = 60 * 1000;
 const LK_AUTO_REFRESH = 'kjr-pf-auto-refresh-v1';   // user can disable in Settings
 
-/* CPF default rates (% p.a.) — Board rates as of 2026 */
+/* CPF default rates (% p.a.) for Oct-Dec 2026. Future projection rates are
+   editable assumptions. Previously saved user rates are preserved. */
 const CPF_DEFAULTS = {
-  OA: 2.5, SA: 4.08, MA: 4.08, RA: 4.08,
+  OA: 2.5, SA: 4.0, MA: 4.0, RA: 4.0,
   extraFirst60k: 1.0,       // +1% on first S$60k of combined balances
   extraFirst30kAge55: 1.0   // additional +1% on first S$30k from age 55
 };
@@ -196,8 +197,8 @@ function generateAutoSalaryEntries(){
 /* ─── Auto-CPF contribution entries ────────────────────────────────────
    For each salary payday, one cpfHistory contribution per account (OA/SA/MA)
    that receives a share. Idempotent: keyed by (auto:'cpf', period, account).
-   Only runs for ages ≤55 (SA still open); skips 55+ until the OA/MA/RA split
-   is automated. Respects manualOverride on individual rows. */
+   Only runs below age 55. At 55+, RA/FRS routing is not automated.
+   Existing entries and manual overrides are preserved. */
 function generateAutoCpfEntries(){
   const { sal, months } = _salaryPayMonths();
   if (!sal) return { changed:0, skippedSenior:false };
@@ -427,6 +428,7 @@ function generateAutoSalaryCashEntries(){
   const today = _isoDateSG(new Date()); // QA low-priority: align with the rest of the app's SG-local convention
   let changed = 0;
   const keepKeys = {};   // period|role rows we (re)created this run
+  const keepExpenses = {};
   const processed = {};
 
   const upsertCash = (ym, role, fields) => {
@@ -463,6 +465,7 @@ function generateAutoSalaryCashEntries(){
 
     // Discretionary expense (keeps the savings rate honest) — both modes.
     if (disc > 0){
+      keepExpenses[ym] = true;
       const prev = expByKey[ym];
       if (!(prev && prev.manualOverride)){
         const fields = { date:payday, amount:disc, currency:acctCcy, category:'Discretionary', subcategory:'',
@@ -480,6 +483,10 @@ function generateAutoSalaryCashEntries(){
   DB.cashTxns = DB.cashTxns.filter(e =>
     !(e.auto === 'salaryCash' && processed[e.period] && !e.manualOverride && !keepKeys[e.period + '|' + e.role]));
   changed += (before - DB.cashTxns.length);
+  const expensesBefore = DB.expenses.length;
+  DB.expenses = DB.expenses.filter(e =>
+    !(e.auto === 'salaryCash' && processed[e.period] && !e.manualOverride && !keepExpenses[e.period]));
+  changed += (expensesBefore - DB.expenses.length);
 
   return changed;
 }
@@ -499,7 +506,7 @@ function runSalaryEngine(opts){
   }
   if (cpf.skippedSenior && opts.notify && !_seniorCpfNoticeShown){
     _seniorCpfNoticeShown = true;
-    showToast('Salary income generated. Auto-CPF skipped for age 55+ (OA/MA/RA split not automated yet).', 'info');
+    showToast('Salary income generated. Auto-CPF skipped for age 55+ because RA/FRS routing is not automated. Existing entries are kept, add contributions from your CPF statement.', 'info');
   }
   return { incomeChanged, cpfChanged: cpf.changed };
 }
@@ -1502,7 +1509,7 @@ function _hasCloudDirty(){
 }
 function _stripBackupMetadata(value){
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  const { _backup, ...canonical } = value;
+  const { _backup, _savedAt, lastSeenRemoteAt, ...canonical } = value;
   return canonical;
 }
 function localPersistPayload(){
@@ -1935,6 +1942,14 @@ function _scheduleCloudAfterLocalSave(revision){
   return true;
 }
 function saveData(){
+  if (_vaultManager && typeof _vaultManager.isBusy === 'function' && _vaultManager.isBusy()) {
+    ++_localSaveRevision;
+    _markLocalUnsaved();
+    if (_syncTimer) { clearTimeout(_syncTimer); _syncTimer = null; }
+    setSyncStatus('failed', 'Encryption is changing. Keep this tab open and save again when it finishes.');
+    showToast('Encryption is changing. Your edit is still in this tab, save again when it finishes.', 'error');
+    return false;
+  }
   if (isNasMode()) {
     const saved = saveLocal();
     if (!saved || typeof saved.then !== 'function') return saved;
@@ -2294,7 +2309,13 @@ function setLastPull(stamp, source){
 function _isCanonicalServerTimestamp(value){
   return typeof value === 'string'
     && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
-    && !Number.isNaN(Date.parse(value));
+    && !Number.isNaN(Date.parse(value))
+    && new Date(value).toISOString() === value;
+}
+function _validWriteAck(data){
+  return !!data && typeof data === 'object' && !Array.isArray(data)
+    && data.ok === true && !data.error && !data.conflict
+    && _isCanonicalServerTimestamp(data.savedAt);
 }
 function _setConfirmedCloudTimestamp(value){
   if (!_isCanonicalServerTimestamp(value)) return false;
@@ -2331,14 +2352,8 @@ function _displaySyncTimestamp(value){
   } catch (_) { return ''; }
 }
 
-/* In single-user BYOB mode, every "conflict" is benign — there's no second
-   user to actually diverge from. The mismatch is clock drift, Sheets
-   cell-format round-trip, or a race between an auto-refresh tick and a
-   user edit. We auto-recover every time, with one retry on transient
-   network errors (Apps Script's redirect chain to googleusercontent.com
-   occasionally returns 404+HTML, especially from file:// origins).
-   The legacy modal is hidden behind an opt-in setting for power users who
-   actually sync from multiple devices. */
+/* Identical cloud data may be retried against its observed server revision.
+   A concurrent edit still conflicts, even when one person owns both tabs. */
 let _conflictResolvingNow = false;  // prevents recursive recovery loops
 let _resyncToastShown = false;      // toast suggestion shown once per session
 
@@ -2349,7 +2364,7 @@ async function safeJson(resp){
   const status = resp.status;
   const text = await resp.text();
   try {
-    return { ok: true, status, data: JSON.parse(text), text };
+    return { ok: resp.ok !== false && status >= 200 && status < 300, status, data: JSON.parse(text), text };
   } catch (_) {
     return { ok: false, status, data: null, text };
   }
@@ -2454,12 +2469,17 @@ async function pushToRemote(opts){
     if (!parsed.ok) {
       // Apps Script returned HTML (404 from googleusercontent redirect, login
       // page, error page, etc.). Don't crash — log and set failed status.
-      console.warn('[sync] non-JSON push response, status', parsed.status, 'body starts:', parsed.text.slice(0, 100));
-      _recordSyncFailure('write', 'non_json', { status: parsed.status });
-      setSyncStatus('failed', 'Backend returned non-JSON (status ' + parsed.status + ')');
+      console.warn('[sync] unsuccessful push response, status', parsed.status);
+      _recordSyncFailure('write', parsed.data ? 'backend_error' : 'non_json', { status: parsed.status });
+      setSyncStatus('failed', 'Cloud save was not confirmed (status ' + parsed.status + ')');
       return false;
     }
     const data = parsed.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      _recordSyncFailure('write', 'backend_error');
+      setSyncStatus('failed', 'Cloud save returned an invalid acknowledgement. Local changes are still waiting to sync.');
+      return false;
+    }
     if (_rejectLossyAck(data)) return false;
     if (data.error) {
       // A backend may reject the payload because of its deployed field and
@@ -2476,26 +2496,19 @@ async function pushToRemote(opts){
     }
     if (data.conflict) {
       console.info('[sync] conflict — source:', lastPullSource(), 'strict:', strictConflictsEnabled());
-      // Single-user mode default: silently force-push to recover. The
-      // mismatch is almost certainly clock drift / Sheets cell-format quirk
-      // / race condition — never a real divergence on a personal sheet.
-      // Power users can flip "Strict sync conflicts" on in Settings to
-      // restore the modal for multi-device usage.
+      // Strict mode always asks. Default mode can reconcile identical data,
+      // but never bypasses the revision guard on its recovery write.
       if (strictConflictsEnabled()) {
         showConflictModal({ remoteAt: data.remoteAt, lastSeenRemoteAt: data.lastSeenRemoteAt, stashedBody: body });
         return false;
       }
-      // Before force-pushing, verify the remote actually holds the same data.
-      // A conflict is usually just clock drift or a Sheets cell-format quirk,
-      // but on real two-device use it can be a genuine divergence, another
-      // device's edits that a blind force-push would silently discard. Read
-      // the remote back and only auto-recover when the data itself matches;
-      // otherwise fall through to the same modal strict mode uses.
+      // Read and compare the remote before retrying an identical snapshot.
       let remoteSnapshot;
       try {
         const checkResp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
         const checkParsed = await safeJson(checkResp);
-        if (!checkParsed.ok || !checkParsed.data || checkParsed.data.error) throw new Error('unreadable remote');
+        if (!checkParsed.ok || !checkParsed.data || checkParsed.data.error
+            || !_isCanonicalServerTimestamp(checkParsed.data._savedAt)) throw new Error('unreadable remote');
         remoteSnapshot = checkParsed.data;
       } catch (checkErr) {
         // Can't verify, don't force-push blind.
@@ -2508,31 +2521,33 @@ async function pushToRemote(opts){
         showConflictModal({ remoteAt: data.remoteAt, lastSeenRemoteAt: data.lastSeenRemoteAt, stashedBody: body });
         return false;
       }
-      // Effectively identical data, safe to auto-recover with one retry. The
-      // first attempt sometimes 404s on
-      // Apps Script's redirect target (file:// origin + googleusercontent
-      // redirect chain). 500 ms backoff usually clears it.
+      // Retry only against the revision belonging to the compared snapshot.
+      // A write arriving after that GET must be preserved by a new conflict.
       const recover = async () => {
         const obj = JSON.parse(body);
-        delete obj.lastSeenRemoteAt;
+        obj.lastSeenRemoteAt = remoteSnapshot._savedAt;
         const r = await fetch(url, {
           method:'POST', mode:'cors', redirect:'follow',
           headers:{ 'Content-Type':'text/plain;charset=utf-8' },
-          body: JSON.stringify(obj)
+          body: JSON.stringify(obj), signal: pushSignal
         });
         return safeJson(r);
       };
       _conflictResolvingNow = true;
       try {
         let r = await recover();
-        if (!r.ok || (r.data && (r.data.error || r.data.conflict))) {
-          console.warn('[sync] auto-recovery attempt 1 failed, retrying in 500ms', r);
+        if (!r.ok && !(r.data && r.data.conflict)) {
+          console.warn('[sync] auto-recovery attempt 1 failed, retrying in 500ms, status', r.status);
           await new Promise(res => setTimeout(res, 500));
           r = await recover();
         }
-        if (r.ok && !_rejectLossyAck(r.data) && !r.data.error && !r.data.conflict) {
+        if (r.ok && r.data && r.data.conflict) {
+          showConflictModal({ remoteAt:r.data.remoteAt, lastSeenRemoteAt:remoteSnapshot._savedAt, stashedBody:body });
+          return false;
+        }
+        if (r.ok && !_rejectLossyAck(r.data) && _validWriteAck(r.data)) {
           const serverStamp2 = r.data.savedAt;
-          const stamp2 = serverStamp2 || new Date().toISOString();
+          const stamp2 = serverStamp2;
           localStorage.setItem(LK_SYNC_TS, stamp2);
           setLastPull(stamp2, 'server');
           _setConfirmedCloudTimestamp(serverStamp2);
@@ -2549,7 +2564,7 @@ async function pushToRemote(opts){
           completedOk = true;
           return true;
         }
-        console.warn('[sync] auto-recovery exhausted retries', r);
+        console.warn('[sync] auto-recovery exhausted retries, status', r.status);
         _recordSyncFailure('write', 'write_failed');
         setSyncStatus('failed', 'Auto-recovery failed, try Pull from cloud');
         showToast('Sync failed, Settings → Pull from cloud to recover', 'error');
@@ -2563,8 +2578,13 @@ async function pushToRemote(opts){
         _conflictResolvingNow = false;
       }
     }
+    if (!_validWriteAck(data)) {
+      _recordSyncFailure('write', 'unverified_timestamp');
+      setSyncStatus('failed', 'Cloud save did not include a valid acknowledgement and server revision. Local changes are still waiting to sync.');
+      return false;
+    }
     const serverStamp = data.savedAt;
-    const stamp = serverStamp || new Date().toISOString();
+    const stamp = serverStamp;
     localStorage.setItem(LK_SYNC_TS, stamp);
     setLastPull(stamp, 'server');  // push response gives us the real server stamp
     _setConfirmedCloudTimestamp(serverStamp);
@@ -2983,51 +3003,61 @@ function showConflictModal(opts){
   };
   document.getElementById('cf-force').onclick = async () => {
     wrap.remove();
-    const forceRevision = _localSaveRevision;
-    // Cancel any pending or in-flight push so force-push has the cloud to
-    // itself. Otherwise a debounced push from the auto-refresh tick could
-    // land right after, with the OLD stamp, and re-trigger the conflict.
-    if (_syncTimer) { clearTimeout(_syncTimer); _syncTimer = null; }
-    if (_activeSyncController) { try { _activeSyncController.abort(); } catch(_){} _activeSyncController = null; }
-    try {
-      const obj = JSON.parse(opts.stashedBody);
-      delete obj.lastSeenRemoteAt;
-      setSyncStatus('syncing');
-      const resp = await fetch(getSyncUrl(), {
-        method:'POST', mode:'cors', redirect:'follow',
-        headers:{ 'Content-Type':'text/plain;charset=utf-8' },
-        body: JSON.stringify(obj)
-    });
-    const parsed = await safeJson(resp);
-    if (!parsed.ok){
-      _recordSyncFailure('write', 'non_json', { status: parsed.status });
-      setSyncStatus('failed', 'Backend returned a non-JSON response');
-      showToast('Cloud returned a response the app could not read. Check the sync URL and latest Apps Script, then retry.', 'error');
-      return false;
-    }
-    const data = parsed.data;
-    if (_rejectLossyAck(data)) return false;
-    if (data.error) {
-      _recordSyncFailure('write', 'backend_error');
-      throw new Error('Backend rejected the cloud write');
-    }
-      const serverStamp = data.savedAt;
-      const stamp = serverStamp || new Date().toISOString();
-      localStorage.setItem(LK_SYNC_TS, stamp);
-      setLastPull(stamp, 'server');
-      _setConfirmedCloudTimestamp(serverStamp);
-      const pushedLatest = forceRevision === _localSaveRevision;
-      if (pushedLatest) _clearCloudDirty(forceRevision);
-      _clearSyncDiagnostic('write');
-      setSyncStatus(pushedLatest ? 'synced' : 'syncing', pushedLatest ? '' : 'Newer local changes are waiting to sync');
-      localStorage.removeItem(LK_LOSSY_SYNC_BLOCK);
-      showToast('Cloud overwritten with local version', 'success');
-    } catch (err) {
-      _recordSyncFailure('write', 'write_failed');
-      setSyncStatus('failed', err.message);
-    }
+    return overwriteRemoteWithLocal();
   };
 }
+
+/* Called only by the conflict modal's explicit overwrite action. Snapshot the
+   current local data at the click, not an earlier failed upload. */
+async function overwriteRemoteWithLocal(){
+  if (!legacyBackendAllowed() || isLocalPreview()) {
+    setSyncStatus('local', 'Cloud overwrite is disabled in this mode');
+    return false;
+  }
+  const url = getSyncUrl();
+  if (!url) { setSyncStatus('local'); return false; }
+  const forceRevision = _localSaveRevision;
+  if (_syncTimer) { clearTimeout(_syncTimer); _syncTimer = null; }
+  if (_activeSyncController) { try { _activeSyncController.abort(); } catch(_){} _activeSyncController = null; }
+  try {
+    const obj = syncPayload();
+    delete obj.lastSeenRemoteAt;
+    setSyncStatus('syncing');
+    const resp = await fetch(url, {
+      method:'POST', mode:'cors', redirect:'follow',
+      headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+      body:JSON.stringify(obj)
+    });
+    const parsed = await safeJson(resp);
+    if (!parsed.ok) {
+      _recordSyncFailure('write', parsed.data ? 'backend_error' : 'non_json', {status:parsed.status});
+      setSyncStatus('failed', 'Cloud overwrite was not confirmed. Local changes are still waiting to sync.');
+      return false;
+    }
+    if (_rejectLossyAck(parsed.data)) return false;
+    if (!_validWriteAck(parsed.data)) {
+      _recordSyncFailure('write', 'unverified_timestamp');
+      setSyncStatus('failed', 'Cloud overwrite did not include a valid acknowledgement and server revision. Local changes are still waiting to sync.');
+      return false;
+    }
+    const stamp = parsed.data.savedAt;
+    localStorage.setItem(LK_SYNC_TS, stamp);
+    setLastPull(stamp, 'server');
+    _setConfirmedCloudTimestamp(stamp);
+    const pushedLatest = forceRevision === _localSaveRevision;
+    if (pushedLatest) _clearCloudDirty(forceRevision);
+    _clearSyncDiagnostic('write');
+    setSyncStatus(pushedLatest ? 'synced' : 'syncing', pushedLatest ? '' : 'Newer local changes are waiting to sync');
+    localStorage.removeItem(LK_LOSSY_SYNC_BLOCK);
+    showToast('Cloud overwritten with local version', 'success');
+    return true;
+  } catch (err) {
+    _recordSyncFailure('write', 'write_failed');
+    setSyncStatus('failed', err.message);
+    return false;
+  }
+}
+
 
 /* ═══════════════════════════════════════════════════════════════════════
    SYNC PILL — visual state + durable details
@@ -4413,7 +4443,7 @@ async function disableVaultProtection(){
     updateVaultSettingsUI();
     showToast('Device encryption disabled. Browser data is now stored as plaintext.', 'success');
   } catch (err) {
-    showToast('Encryption stayed on: ' + (err && err.message ? err.message : err), 'error');
+    showToast('Could not finish disabling encryption: ' + (err && err.message ? err.message : err), 'error');
   }
 }
 
@@ -4704,14 +4734,15 @@ function estimateAnnualTax(){
   // Additional Wage leg (bonus): the AW subject to CPF is capped at the annual
   // AW ceiling of $102,000 minus the OW that attracted CPF this year, so a
   // bonus above that cap earns no further CPF relief. Both legs use the
-  // employee rate for the person's age band.
+  // contribution schedule for the person's age band. The annual bonus is
+  // modelled as one payout, so its month uses combined OW and AW rounding.
   const age          = _ageOnYear(new Date().getFullYear());
-  const rates        = cpfContribRatesForAge(age);
   const monthlyWage  = Math.min(gross, CPF_OW_CEILING_2026);
   const owForCpf     = monthlyWage * 12;
   const awCeiling    = Math.max(0, 102000 - owForCpf);
-  const awSubject    = Math.min(bonus, awCeiling);
-  const annualEmpCpf = (owForCpf + awSubject) * (rates.employee / 100);
+  const awSubject    = Math.max(0, Math.min(bonus, awCeiling));
+  const monthlyEmpCpf = computeCpfContribution(gross, age).employeeCPF;
+  const annualEmpCpf = monthlyEmpCpf * 11 + computeCpfContribution(gross, age, awSubject).employeeCPF;
 
   const reliefs         = Math.max(0, Number(tax.totalReliefs) || 0);
   const chargeableIncome = Math.max(0, annualGross - annualEmpCpf - reliefs);
@@ -5686,6 +5717,8 @@ function updateCcyToggleUI(){
    USD is always included (stocks/crypto lean on it even with no USD cash). */
 function _fxPairsInUse(){
   const ccys = new Set(['USD']);
+  (DB.stocks || []).concat(DB.watchlist || []).forEach(s => { const ccy = (s.currency || (s.market === 'SGX' ? 'SGD' : 'USD')).toUpperCase(); if (ccy !== 'SGD') ccys.add(ccy); });
+  (DB.crypto || []).forEach(c => { const ccy = (c.currency || 'USD').toUpperCase(); if (ccy !== 'SGD') ccys.add(ccy); });
   (DB.cash || []).forEach(c => { const ccy = (c.currency || 'SGD').toUpperCase(); if (ccy !== 'SGD') ccys.add(ccy); });
   (DB.expenses || []).forEach(x => { const ccy = (x.currency || 'SGD').toUpperCase(); if (ccy !== 'SGD') ccys.add(ccy); });
   return Array.from(ccys).map(c => c + 'SGD');
@@ -5834,14 +5867,14 @@ async function autoRefreshTick(){
       promises.push(refreshCryptoPrices().catch(err => console.warn('[auto] crypto', err.message)));
     }
     if (isStockMarketDaySGT()) {
-      if ((DB.stocks || []).length) {
+      if ((DB.stocks || []).length || (DB.watchlist || []).length) {
         promises.push(refreshStockPrices({ silent: true }).catch(err => console.warn('[auto] stocks', err.message)));
       }
-      // FX refresh only if we have any non-SGD position (cash, stocks priced USD, etc.)
-      const needFx = (DB.stocks || []).some(s => (s.currency || (s.market === 'US' ? 'USD' : 'SGD')) !== 'SGD')
-                  || (DB.cash   || []).some(c => (c.currency || 'SGD') !== 'SGD')
-                  || (DB.crypto || []).some(c => (c.currency || 'USD') !== 'SGD');
-      if (needFx && !DB.settings.fxOverrides.USDSGD) {
+      const overrides = DB.settings.fxOverrides || {};
+      const hasFxAssets = (DB.stocks || []).length || (DB.watchlist || []).length || (DB.crypto || []).length
+        || (DB.cash || []).concat(DB.expenses || []).some(row => (row.currency || 'SGD').toUpperCase() !== 'SGD');
+      const needFx = hasFxAssets && _fxPairsInUse().some(pair => !(Number(overrides[pair]) > 0));
+      if (needFx) {
         promises.push(refreshFx({ silent: true }).catch(err => console.warn('[auto] fx', err.message)));
       }
     }
@@ -6864,6 +6897,8 @@ async function entityModalSave(){
 
   item.updatedAt = new Date().toISOString();
   if (isNew) item.createdAt = item.updatedAt;
+  // Salary regeneration explicitly respects this ownership marker.
+  if (!isNew && item.auto === 'salary') item.manualOverride = true;
 
   // QA low-priority: pushUndo() used to fire at the top of this function,
   // before any validation, so a cancelled confirm() or a rejected save
@@ -6968,8 +7003,9 @@ async function entityModalDelete(){
 function deriveStockPosition(stockId){
   // Sort is stable: same-date trades resolve in ledger insertion order, which
   // becomes the avg-cost path for ties. A trade with no date sorts first.
+  const today = _isoDateSG(new Date());
   const txns = (DB.stockTxns || [])
-    .filter(t => t.stockId === stockId)
+    .filter(t => t.stockId === stockId && (!t.date || t.date <= today))
     .sort((a,b) => String(a.date||'').localeCompare(String(b.date||'')));
   if (!txns.length) return null;
   const stock = (DB.stocks || []).find(s => s.id === stockId) || {};
@@ -7183,6 +7219,25 @@ async function ibkrConfirmImport(){
     Array.from(overlay.querySelectorAll('input[data-ibkr-dup]:checked'))
       .map(el => Number(el.getAttribute('data-ibkr-dup')))
   );
+  // Prices and fees use the holding's cost currency. Do not relabel a
+  // broker fill merely because its symbol matches a holding with other units.
+  const newCurrencies = new Map();
+  for (let idx = 0; idx < matched.length; idx++) {
+    const t = matched[idx];
+    if (t.status === 'dup' && !forcedDupIdx.has(idx)) continue;
+    if (!['new', 'new-stock', 'dup'].includes(t.status)) continue;
+    const sourceCurrency = String(t.currency || (t.market === 'SGX' ? 'SGD' : 'USD')).toUpperCase();
+    const stock = (DB.stocks || []).find(s => s.id === t.stockId);
+    const costCurrency = stock
+      ? String(stock.currency || (stock.market === 'SGX' ? 'SGD' : 'USD')).toUpperCase()
+      : (newCurrencies.get(t.symbol) || sourceCurrency);
+    if (sourceCurrency !== costCurrency) {
+      _ibkrImportInFlight = false;
+      showToast('Import stopped: ' + t.symbol + ' trades are in ' + sourceCurrency + ', but the holding uses ' + costCurrency + '. Enter these trades manually using prices and fees converted to the holding currency. No trades were added.', 'error');
+      return false;
+    }
+    if (!stock) newCurrencies.set(t.symbol, sourceCurrency);
+  }
   overlay.classList.remove('open');
 
   // QA #Med-6: unlike insuranceImportConfirm (one pushUndo() before its batch
@@ -9791,7 +9846,8 @@ function setCoverageTarget(key,val){
    Falls back to all-time rows if nothing falls in the trailing 12mo window
    (e.g. a user who stopped logging), same as before. */
 function annualIncomeSGD(){
-  const inc=(DB.income||[]).filter(i=>i.date&&isFinite(Number(i.gross)));
+  const today = _isoDateSG(new Date());
+  const inc=(DB.income||[]).filter(i=>i.date && i.date <= today && isFinite(Number(i.gross)));
   if(!inc.length) return 0;
   const cutoff=new Date(); cutoff.setFullYear(cutoff.getFullYear()-1);
   const cutISO=_isoDateSG(cutoff);
@@ -9807,7 +9863,8 @@ function annualIncomeSGD(){
    currency (expenseAmountSgdOrNull returning null), so the assumptions card
    can flag it rather than silently understating spend. */
 function annualExpensesSGD(){
-  const all = (DB.expenses||[]).filter(x=>x.date);
+  const today = _isoDateSG(new Date());
+  const all = (DB.expenses||[]).filter(x=>x.date && x.date <= today);
   if (!all.length) return { annual:0, excluded:0 };
   const cutoff=new Date(); cutoff.setFullYear(cutoff.getFullYear()-1);
   const cutISO=_isoDateSG(cutoff);
@@ -9827,16 +9884,19 @@ function annualExpensesSGD(){
    or populated months). Negative is allowed and returned honestly (see
    Phase 6 methodology). */
 function derivedMonthlySavingsSGD(){
+  const today = _isoDateSG(new Date());
   const cutoff=new Date(); cutoff.setFullYear(cutoff.getFullYear()-1);
   const cutISO=_isoDateSG(cutoff);
-  let inc = (DB.income||[]).filter(i=>i.date);
-  let exp = (DB.expenses||[]).filter(x=>x.date);
+  let inc = (DB.income||[]).filter(i=>i.date && i.date <= today);
+  let exp = (DB.expenses||[]).filter(x=>x.date && x.date <= today);
   let incRows = inc.filter(i=>i.date>=cutISO);
   let expRows = exp.filter(x=>x.date>=cutISO);
   if (!incRows.length && !expRows.length){ incRows = inc; expRows = exp; }
   if (!incRows.length && !expRows.length) return 0;
   const totalInc = incRows.reduce((s,i)=>s+incomeNet(i),0);
-  const totalExp = expRows.reduce((s,x)=>{ const sgd=expenseAmountSgdOrNull(x); return sgd==null?s:s+sgd; },0);
+  const expenseValues = expRows.map(expenseAmountSgdOrNull);
+  if (expenseValues.some(value => value == null)) return null;
+  const totalExp = expenseValues.reduce((sum, value) => sum + value, 0);
   return (totalInc-totalExp) / 12;
 }
 
@@ -9847,8 +9907,8 @@ function derivedMonthlySavingsSGD(){
 function fireNumberSGD(){
   const target = DB.settings.fireTarget;
   if (target != null && isFinite(Number(target)) && Number(target) > 0) return Number(target);
-  const { annual } = annualExpensesSGD();
-  if (!(annual > 0)) return null;
+  const { annual, excluded } = annualExpensesSGD();
+  if (excluded || !(annual > 0)) return null;
   const mult = Number(DB.settings.fireMultiple) || 25;
   return annual * mult;
 }
@@ -10287,6 +10347,11 @@ function renderProjections(){
     el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">💱</div><div class="empty-title">Projection unavailable</div><div class="empty-sub">Set FX rates for ${liquidInfo.missingFxCount} liquid asset${liquidInfo.missingFxCount === 1 ? '' : 's'} in Settings. The projected starting balance would otherwise be incomplete.</div></div></div></div>`;
     return;
   }
+  if (expInfo.excluded || monthlySavings == null){
+    _clearProjectionChart();
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">💱</div><div class="empty-title">Projection unavailable</div><div class="empty-sub">Set FX rates for expenses in Settings. Spending and savings are incomplete, so a retirement verdict cannot be calculated yet.</div></div></div></div>`;
+    return;
+  }
   if (fireNumber == null){
     _clearProjectionChart();
     el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🎯</div><div class="empty-title">No FIRE number yet</div><div class="empty-sub">Log expenses on the P&amp;L tab (trailing 12 months is annualised x your FIRE multiple), or set a manual FIRE target in Settings.</div></div></div></div>`;
@@ -10461,7 +10526,8 @@ function transferInAmount(t){
 function deriveCashBalance(acct){
   let bal = Number(acct.amount) || 0;
   const asOf = acct.asOf || '';
-  const accrues = d => !asOf || String(d || '') > asOf;
+  const today = _isoDateSG(new Date());
+  const accrues = d => String(d || '') <= today && (!asOf || String(d || '') > asOf);
   (DB.cashTxns || []).forEach(t => {
     if (!accrues(t.date)) return;                          // already in the opening
     if (t.type === 'transfer'){
@@ -10662,8 +10728,10 @@ function cpfEffectiveBalances(){
   const b = DB.cpfBalances || {};
   const out = { OA:Number(b.OA)||0, SA:Number(b.SA)||0, MA:Number(b.MA)||0, RA:Number(b.RA)||0 };
   const anchor = _cpfAnchorDate();
+  const today = _isoDateSG(new Date());
   (DB.cpfHistory || []).forEach(h => {
     if (out[h.account] == null) return;
+    if (String(h.date || '') > today) return;
     if (anchor && String(h.date || '') <= anchor) return;   // already in the opening figure
     out[h.account] += Number(h.amount) || 0;
   });

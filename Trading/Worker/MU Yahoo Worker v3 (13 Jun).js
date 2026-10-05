@@ -172,8 +172,12 @@ async function fetchYahoo(symbol, interval, range, pre = false) {
     headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" },
     cf: { cacheTtl: 5, cacheEverything: true },
   });
+  if (!resp.ok) throw new Error("Yahoo chart HTTP " + resp.status);
   const data = await resp.json();
-  return data?.chart?.result?.[0] ?? null;
+  if (data?.chart?.error) throw new Error(data.chart.error.description || "Yahoo chart error");
+  const result = data?.chart?.result?.[0] ?? null;
+  if (!result) throw new Error("Yahoo chart returned no result");
+  return result;
 }
 
 function isRegularSession(unixSec) {
@@ -184,7 +188,10 @@ function isRegularSession(unixSec) {
   const h  = parseInt(parts.find(p => p.type === "hour").value);
   const mn = parseInt(parts.find(p => p.type === "minute").value);
   const total = h * 60 + mn;
-  return total >= 570 && total < 960;
+  const dateKey = etDateKey(unixSec);
+  if (NYSE_HOLIDAYS.has(dateKey)) return false;
+  const closeMin = NYSE_HALF_DAYS.has(dateKey) ? 780 : 960;
+  return total >= 570 && total < closeMin;
 }
 
 function etDateKey(unixSec) {
@@ -296,9 +303,8 @@ function isMarketWindow() {
   const parts = fmt.formatToParts(now);
   const dow  = parts.find(p => p.type === "weekday").value;
   if (dow === "Sat" || dow === "Sun") return false;
-  // NYSE holidays (and half-days, whose early close still counts as a session
-  // for our purposes — flat tape is the problem, not a short session): skip so
-  // alerts never fire on a dead market. Shared list in nyse-holidays.js.
+  // NYSE holidays and early closes come from the shared calendar so scheduled
+  // alert delivery follows the same regular-session boundaries as bar parsing.
   const dparts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
   const dmap = {}; dparts.forEach(p => { dmap[p.type] = p.value; });
   const dateKey = dmap.year + "-" + dmap.month + "-" + dmap.day;
@@ -306,7 +312,35 @@ function isMarketWindow() {
   const h  = parseInt(parts.find(p => p.type === "hour").value);
   const mn = parseInt(parts.find(p => p.type === "minute").value);
   const total = h * 60 + mn;
-  return total >= 565 && total <= 965;
+  const closeMin = NYSE_HALF_DAYS.has(dateKey) ? 780 : 960;
+  return total >= 570 && total < closeMin;
+}
+
+function applyRuntimeState(configAlerts, runtime, revision) {
+  const sourceRevision = runtime?.sourceRevision ?? runtime?.sourceUpdatedAt;
+  if (!runtime || sourceRevision !== revision || !runtime.states) return configAlerts;
+  return configAlerts.map(a => {
+    const s = runtime.states[a.id];
+    return s ? { ...a, enabled: s.enabled !== false, armed: !!s.armed,
+      prevCond: s.prevCond ?? null, lastFiredAt: s.lastFiredAt ?? null } : a;
+  });
+}
+
+function buildRuntimeState(alerts, revision, now) {
+  const states = {};
+  for (const a of alerts) {
+    if (!a?.id) continue;
+    states[a.id] = { enabled: a.enabled !== false, armed: !!a.armed,
+      prevCond: a.prevCond ?? null, lastFiredAt: a.lastFiredAt ?? null };
+  }
+  return { sourceRevision: revision, updatedAt: now, lastEvalAt: now, states };
+}
+
+function makeAlertRevision(updatedAt) {
+  let entropy = "";
+  try { entropy = globalThis.crypto?.randomUUID?.() || ""; } catch (e) {}
+  if (!entropy) entropy = Math.random().toString(36).slice(2);
+  return String(updatedAt) + ":" + entropy;
 }
 
 // ---- Main export ----
@@ -378,23 +412,26 @@ export default {
       let body;
       try { body = await request.json(); } catch (e) { return err(400, "bad JSON", origin); }
       const { symbol, chatId, alerts } = body || {};
+      const enabled = body?.enabled !== false;
       if (!symbol || !SYMBOL_RE.test(symbol.toUpperCase())) return err(400, "bad symbol", origin);
-      if (!chatId) return err(400, "chatId required", origin);
+      if (enabled && !chatId) return err(400, "chatId required", origin);
       if (!Array.isArray(alerts)) return err(400, "alerts must be array", origin);
       if (!env.MU_ALERTS) return err(503, "KV binding MU_ALERTS not configured", origin);
       const sym = symbol.toUpperCase();
+      const updatedAt = Date.now();
       const stored = {
-        chatId, symbol: sym,
+        enabled, chatId: chatId || "", symbol: sym,
         alerts: alerts.map(a => ({
           id: a.id, type: a.type, value: a.value,
           oneShot: !!a.oneShot, cooldownMs: a.cooldownMs || 0,
           enabled: a.enabled !== false, armed: !!a.armed,
           prevCond: a.prevCond ?? null, lastFiredAt: a.lastFiredAt ?? null,
         })),
-        updatedAt: Date.now(),
+        updatedAt,
+        revision: makeAlertRevision(updatedAt),
       };
       await env.MU_ALERTS.put("alerts:" + sym, JSON.stringify(stored));
-      return jsonResp({ ok: true, count: alerts.length }, 200, origin);
+      return jsonResp({ ok: true, count: alerts.length, enabled }, 200, origin);
     }
 
     // GET /alerts?symbol=X
@@ -406,11 +443,15 @@ export default {
       if (!SYMBOL_RE.test(sym)) return err(400, "bad symbol", origin);
       const data = await env.MU_ALERTS.get("alerts:" + sym, { type: "json" });
       if (!data) return jsonResp({ alerts: [] }, 200, origin);
+      let runtime = null;
+      try { runtime = await env.MU_ALERTS.get("alertstate:" + sym, { type: "json" }); } catch (e) {}
+      const revision = data.revision ?? data.updatedAt;
       return jsonResp({
         symbol: data.symbol,
-        alerts: Array.isArray(data.alerts) ? data.alerts : [],
+        enabled: data.enabled !== false,
+        alerts: applyRuntimeState(Array.isArray(data.alerts) ? data.alerts : [], runtime, revision),
         updatedAt: data.updatedAt ?? null,
-        lastEvalAt: data.lastEvalAt ?? null,
+        lastEvalAt: runtime?.lastEvalAt ?? data.lastEvalAt ?? null,
       }, 200, origin);
     }
 
@@ -449,15 +490,38 @@ export default {
     if (!env.MU_ALERTS || !env.TELEGRAM_TOKEN) return;
     if (!isMarketWindow()) return;
 
-    const list = await env.MU_ALERTS.list({ prefix: "alerts:" });
-    if (!list.keys.length) return;
+    const keys = [];
+    let cursor;
+    do {
+      let page;
+      try {
+        page = await env.MU_ALERTS.list(cursor ? { prefix: "alerts:", cursor } : { prefix: "alerts:" });
+      } catch (e) {
+        console.error("scheduled: alert key listing failed: " + String(e));
+        return;
+      }
+      if (Array.isArray(page?.keys)) keys.push(...page.keys);
+      cursor = page?.list_complete === false ? page.cursor : null;
+    } while (cursor);
+    if (!keys.length) return;
 
     const now   = Date.now();
     const token = env.TELEGRAM_TOKEN;
 
-    for (const key of list.keys) {
-      const data = await env.MU_ALERTS.get(key.name, { type: "json" });
-      if (!data?.alerts?.length || !data.chatId) continue;
+    for (const key of keys) {
+      let data;
+      try {
+        data = await env.MU_ALERTS.get(key.name, { type: "json" });
+      } catch (e) {
+        console.error("scheduled: KV read failed for " + key.name + ": " + String(e));
+        continue;
+      }
+      if (data?.enabled === false || !data?.alerts?.length || !data.chatId) continue;
+
+      let runtime = null;
+      try { runtime = await env.MU_ALERTS.get("alertstate:" + data.symbol, { type: "json" }); } catch (e) {}
+      const revision = data.revision ?? data.updatedAt;
+      const configuredAlerts = applyRuntimeState(data.alerts, runtime, revision);
 
       let result;
       try { result = await fetchYahoo(data.symbol, "1m", "1d", true); }
@@ -467,7 +531,7 @@ export default {
       if (!snap || snap.price == null) continue;
 
       let stateChanged = false;
-      const nextAlerts = data.alerts.map(a => ({ ...a }));
+      const nextAlerts = configuredAlerts.map(a => ({ ...a }));
       const deliveries = [];
 
       for (let i = 0; i < nextAlerts.length; i++) {
@@ -521,9 +585,24 @@ export default {
       }
 
       if (stateChanged) {
-        data.alerts = nextAlerts;
-        data.lastEvalAt = now;
-        await env.MU_ALERTS.put(key.name, JSON.stringify(data));
+        let latest;
+        try {
+          latest = await env.MU_ALERTS.get(key.name, { type: "json" });
+        } catch (e) {
+          console.error("scheduled: KV recheck failed for " + key.name + ": " + String(e));
+          continue;
+        }
+        // A dashboard POST is the configuration authority. If its revision
+        // changed during this tick, discard this stale evaluation; never write
+        // it back over the new destination or alert set.
+        const latestRevision = latest?.revision ?? latest?.updatedAt;
+        if (!latest || latest.enabled === false || !latest.chatId || latestRevision !== revision) continue;
+        try {
+          await env.MU_ALERTS.put("alertstate:" + data.symbol,
+            JSON.stringify(buildRuntimeState(nextAlerts, revision, now)));
+        } catch (e) {
+          console.error("scheduled: KV state write failed for " + key.name + ": " + String(e));
+        }
       }
     }
   },

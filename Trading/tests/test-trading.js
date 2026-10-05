@@ -72,10 +72,11 @@ const FN_NAMES = [
   'ema', 'rsi', 'macd', 'etDateKey', 'isRegularSession', 'vwapSeries', 'vwapBandsData',
   'lastNonNull', 'atrValue', 'isHoliday', 'isHalfDay', 'regularCloseMin',
   'nyseHolidaySet', 'nyseHalfDaySet',
-  'marketStateFromClock', 'etNow', 'etDateStr', 'parseResult',
+  'marketStateFromClock', 'etNow', 'etDateStr', 'etOffsetMinAt', 'nextOpenMs',
+  'finiteSetting', 'cleanTicker', 'loadJSON', 'loadCfg', 'loadAlerts', 'parseResult',
   'fmtPx', 'fmtNum', 'fmtPct', 'fmtVol', 'fmtCap', 'evalCond', 'alertDesc', 'esc',
 ];
-const CONST_NAMES = ['_NYSE_FALLBACK', 'ALERT_LABELS', 'ALERT_NEEDS_VAL', 'CROSS_TYPES'];
+const CONST_NAMES = ['_NYSE_FALLBACK', 'DEFAULT_CFG', 'ALERT_LABELS', 'ALERT_NEEDS_VAL', 'CROSS_TYPES'];
 
 // parseResult's company-name fallback chain ends in the module-level `SYMBOL`
 // const (the IIFE-derived default ticker), which is not itself an extraction
@@ -91,7 +92,11 @@ const NYSE_SRC = fs.readFileSync(path.join(__dirname, '..', 'Worker', 'nyse-holi
   .replace(/^\/\/.*$/gm, '');
 let extractedCode = NYSE_SRC
   + "\nvar window = { KjrNyse: { NYSE_HOLIDAYS: NYSE_HOLIDAYS, NYSE_HALF_DAYS: NYSE_HALF_DAYS } };\n"
-  + "var SYMBOL = 'MU';\n";
+  + "var SYMBOL = 'MU';\n"
+  + "var LS = { cfg: 'mu_cfg', alerts: 'mu_alerts' };\n"
+  + "var __cfgStore = null;\n"
+  + "var __alertsStore = null;\n"
+  + "var localStorage = { getItem: function(k){ return k === 'mu_alerts' ? __alertsStore : __cfgStore; } };\n";
 const missing = [];
 for (const n of FN_NAMES) {
   try { extractedCode += extractFunction(src, n) + '\n'; }
@@ -237,6 +242,25 @@ test('isRegularSession - weekend is never a regular session, even at 12:00 ET', 
   const satNoon = Date.UTC(2026, 6, 18, 16, 0, 0) / 1000; // Sat 18 Jul 2026, 12:00 EDT
   assert.strictEqual(sandbox.isRegularSession(satNoon), false);
 });
+test('isRegularSession - Juneteenth is closed and 2026 half-day closes at 13:00 ET', () => {
+  const juneteenth = Date.UTC(2026, 5, 19, 15, 0, 0) / 1000; // 11:00 EDT
+  const halfDayBeforeClose = Date.UTC(2026, 10, 27, 17, 59, 0) / 1000; // 12:59 EST
+  const halfDayClose = Date.UTC(2026, 10, 27, 18, 0, 0) / 1000; // 13:00 EST
+  assert.strictEqual(sandbox.isRegularSession(juneteenth), false);
+  assert.strictEqual(sandbox.isRegularSession(halfDayBeforeClose), true);
+  assert.strictEqual(sandbox.isRegularSession(halfDayClose), false);
+});
+
+test('nextOpenMs - skips the Juneteenth holiday and resolves the next weekday in ET', () => {
+  sandbox.__setNow__(Date.UTC(2026, 5, 19, 21, 0, 0)); // Fri 17:00 EDT
+  assert.strictEqual(sandbox.nextOpenMs(), Date.UTC(2026, 5, 22, 13, 30, 0)); // Mon 09:30 EDT
+  sandbox.__clearNow__();
+});
+test('nextOpenMs - recomputes the post-DST offset for a Monday open', () => {
+  sandbox.__setNow__(Date.UTC(2026, 10, 1, 18, 0, 0)); // Sun 13:00 EDT
+  assert.strictEqual(sandbox.nextOpenMs(), Date.UTC(2026, 10, 2, 14, 30, 0)); // Mon 09:30 EST
+  sandbox.__clearNow__();
+});
 
 /* ====================== vwapSeries / vwapBandsData ====================== */
 function mkBar(time, high, low, close, volume) { return { time, open: close, high, low, close, volume }; }
@@ -285,6 +309,18 @@ test('vwapBandsData - bands widen from the VWAP by the running population stdev'
   closeTo(up2[1] - vwap[1], sd1 * 2, 1e-9);
   closeTo(vwap[1] - dn1[1], sd1, 1e-9);
 });
+test('vwapBandsData - weighted running variance includes every prior bar', () => {
+  const t930 = Date.UTC(2026, 6, 15, 13, 30, 0) / 1000;
+  const bars = [
+    mkBar(t930, 100, 100, 100, 1),
+    mkBar(t930 + 60, 102, 102, 102, 2),
+    mkBar(t930 + 120, 104, 104, 104, 1),
+  ];
+  const { vwap, up1, dn1 } = sandbox.vwapBandsData(bars);
+  assert.strictEqual(vwap[2], 102);
+  closeTo(up1[2] - vwap[2], Math.sqrt(2), 1e-9);
+  closeTo(vwap[2] - dn1[2], Math.sqrt(2), 1e-9);
+});
 
 /* ====================== atrValue ====================== */
 test('atrValue - hand-computed true range including a gap-up bar', () => {
@@ -309,13 +345,77 @@ test('isHoliday - known 2026 NYSE holiday', () => {
   assert.strictEqual(sandbox.regularCloseMin('2026-01-01'), 960);
 });
 test('isHalfDay - known half day closes at 13:00 ET (780 min)', () => {
-  assert.strictEqual(sandbox.isHalfDay('2026-07-02'), true);
-  assert.strictEqual(sandbox.regularCloseMin('2026-07-02'), 780);
+  assert.strictEqual(sandbox.isHalfDay('2026-11-27'), true);
+  assert.strictEqual(sandbox.regularCloseMin('2026-11-27'), 780);
 });
 test('isHoliday / isHalfDay - a normal trading day is neither, closes at 16:00', () => {
   assert.strictEqual(sandbox.isHoliday('2026-07-15'), false);
   assert.strictEqual(sandbox.isHalfDay('2026-07-15'), false);
   assert.strictEqual(sandbox.regularCloseMin('2026-07-15'), 960);
+});
+test('settings sanitizers - reject invalid numeric and ticker values before persistence', () => {
+  assert.strictEqual(sandbox.finiteSetting('-4', 15, 5, 300), 5);
+  assert.strictEqual(sandbox.finiteSetting('not-a-number', 15, 5, 300), 15);
+  assert.strictEqual(sandbox.finiteSetting('999', 15, 5, 300), 300);
+  assert.strictEqual(sandbox.cleanTicker('MU'), 'MU');
+  assert.strictEqual(sandbox.cleanTicker('mu;DROP'), '');
+});
+test('loadCfg - malformed persisted collections and calculator values fall back safely', () => {
+  sandbox.__cfgStore = JSON.stringify({
+    refreshSec: 'bad', watchlist: { 0: 'AAPL' }, pinnedOverlays: 'vwap',
+    customLevels: { px: -10 }, calc: { acct: -1000, risk: -5, entry: -1, stop: -2, fx: 0 },
+  });
+  const c = sandbox.loadCfg();
+  assert.deepStrictEqual(toPlain(c.watchlist), ['MU']);
+  assert.deepStrictEqual(toPlain(c.pinnedOverlays), ['vwap', 'ema9', 'ema20']);
+  assert.deepStrictEqual(toPlain(c.customLevels), []);
+  assert.strictEqual(c.refreshSec, 15);
+  assert.strictEqual(c.calc.acct, null);
+  assert.strictEqual(c.calc.risk, null);
+  assert.strictEqual(c.calc.entry, null);
+  assert.strictEqual(c.calc.stop, null);
+  assert.strictEqual(c.calc.fx, 1.35);
+  sandbox.__cfgStore = null;
+});
+test('loadCfg - absent boolean settings preserve the current defaults', () => {
+  const previous = sandbox.DEFAULT_CFG.extended;
+  sandbox.DEFAULT_CFG.extended = true;
+  sandbox.__cfgStore = JSON.stringify({});
+  const c = sandbox.loadCfg();
+  assert.strictEqual(c.extended, true);
+  sandbox.DEFAULT_CFG.extended = previous;
+  sandbox.__cfgStore = null;
+});
+test('loadCfg - malformed remote-disable recovery details are discarded', () => {
+  sandbox.__cfgStore = JSON.stringify({ tgDisableRecovery: { proxyMode: 'worker', proxyUrl: 42 } });
+  const c = sandbox.loadCfg();
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(c, 'tgDisableRecovery'), false);
+  sandbox.__cfgStore = null;
+});
+test('alert sync contract - local state sends disabled alerts and remote disable requires acknowledgement', () => {
+  const autoSync = extractFunction(src, 'autoSyncAlerts');
+  const disable = extractFunction(src, 'disableRemoteAlerts');
+  const manual = extractFunction(src, 'syncAlertsToWorker');
+  assert.match(autoSync, /alerts\.map\(a=>/);
+  assert.ok(!autoSync.includes('alerts.filter(a=>a.enabled)'), 'sync must include one-shot disabled state');
+  assert.match(autoSync, /enabled:true/);
+  assert.match(disable, /enabled:false/);
+  assert.match(disable, /body\.ok!==true/);
+  assert.match(disable, /body\.enabled!==false/);
+  assert.match(manual, /if\(!cfg\.tgEnabled\)/);
+  assert.match(manual, /changedRemote/);
+  assert.match(manual, /retryRemoteDisable/);
+});
+test('loadAlerts - persisted level alert without a finite threshold is discarded', () => {
+  sandbox.__alertsStore = JSON.stringify([
+    { id: 'bad', type: 'price_above', value: 'not-a-number', enabled: true },
+    { id: 'good', type: 'ema_bull', enabled: true, armed: false },
+  ]);
+  const loaded = sandbox.loadAlerts();
+  assert.strictEqual(loaded.length, 1);
+  assert.strictEqual(loaded[0].id, 'good');
+  assert.strictEqual(loaded[0].armed, false);
+  sandbox.__alertsStore = null;
 });
 
 /* ====================== marketStateFromClock ====================== */

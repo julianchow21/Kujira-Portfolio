@@ -508,6 +508,106 @@ alter function public.authorise_feature(text) owner to postgres;
 revoke all on function public.authorise_feature(text) from public, anon, service_role;
 grant execute on function public.authorise_feature(text) to authenticated;
 
+-- TRADE PAYLOAD VALIDATION ---------------------------------------------------
+-- JSONB has no application-level domain checks. Keep trusted write RPCs
+-- finite and explicit so malformed browser/CSV payloads cannot become rows.
+create or replace function public.trade_data_is_valid(p_data jsonb)
+returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  v_entry timestamptz;
+  v_exit timestamptz;
+  v_created timestamptz;
+  v_updated timestamptz;
+  v_number numeric;
+begin
+  if p_data is null or pg_catalog.jsonb_typeof(p_data) <> 'object' then return false; end if;
+  if pg_catalog.jsonb_typeof(p_data->'symbol') is distinct from 'string'
+     or pg_catalog.length(pg_catalog.btrim(p_data->>'symbol')) = 0
+     or pg_catalog.length(p_data->>'symbol') > 64
+     or p_data->>'symbol' ~ '[[:cntrl:]]' then return false; end if;
+  if pg_catalog.jsonb_typeof(p_data->'side') is distinct from 'string'
+     or p_data->>'side' not in ('long', 'short') then return false; end if;
+  if pg_catalog.jsonb_typeof(p_data->'quantity') is distinct from 'number' then return false; end if;
+  begin
+    v_number := (p_data->>'quantity')::numeric;
+    if v_number <= 0 or v_number > 1e300 then return false; end if;
+  exception when others then return false; end;
+  if pg_catalog.jsonb_typeof(p_data->'entryPrice') is distinct from 'number' then return false; end if;
+  begin
+    v_number := (p_data->>'entryPrice')::numeric;
+    if v_number <= 0 or v_number > 1e300 then return false; end if;
+  exception when others then return false; end;
+  if pg_catalog.jsonb_typeof(p_data->'entryAt') is distinct from 'string'
+     or p_data->>'entryAt' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z$' then return false; end if;
+  begin v_entry := (p_data->>'entryAt')::timestamptz;
+  exception when others then return false; end;
+  if p_data ? 'exitAt' then
+    if pg_catalog.jsonb_typeof(p_data->'exitAt') is distinct from 'string' then return false; end if;
+    if p_data->>'exitAt' = '' then
+      if p_data ? 'exitPrice' and p_data->>'exitPrice' <> '' then return false; end if;
+    else
+      if p_data->>'exitAt' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z$' then return false; end if;
+      begin v_exit := (p_data->>'exitAt')::timestamptz;
+      exception when others then return false; end;
+      if v_exit < v_entry then return false; end if;
+      if pg_catalog.jsonb_typeof(p_data->'exitPrice') is distinct from 'number' then return false; end if;
+      begin
+        v_number := (p_data->>'exitPrice')::numeric;
+        if v_number <= 0 or v_number > 1e300 then return false; end if;
+      exception when others then return false; end;
+    end if;
+  elsif p_data ? 'exitPrice' and p_data->>'exitPrice' <> '' then return false;
+  end if;
+  if p_data ? 'stopPrice' then
+    if p_data->>'stopPrice' is distinct from '' then
+      if pg_catalog.jsonb_typeof(p_data->'stopPrice') is distinct from 'number' then return false; end if;
+      begin
+        v_number := (p_data->>'stopPrice')::numeric;
+        if v_number <= 0 or v_number > 1e300 then return false; end if;
+      exception when others then return false; end;
+    end if;
+  end if;
+  if p_data ? 'fees' then
+    if pg_catalog.jsonb_typeof(p_data->'fees') is distinct from 'number' then return false; end if;
+    begin
+      v_number := (p_data->>'fees')::numeric;
+      if v_number < 0 or v_number > 1e300 then return false; end if;
+    exception when others then return false; end;
+  end if;
+  if p_data ? 'contractMultiplier' then
+    if pg_catalog.jsonb_typeof(p_data->'contractMultiplier') is distinct from 'number' then return false; end if;
+    begin
+      v_number := (p_data->>'contractMultiplier')::numeric;
+      if v_number <= 0 or v_number > 1e300 then return false; end if;
+    exception when others then return false; end;
+  end if;
+  if p_data ? 'createdAt' then
+    if pg_catalog.jsonb_typeof(p_data->'createdAt') is distinct from 'string'
+       or p_data->>'createdAt' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z$' then return false; end if;
+    begin v_created := (p_data->>'createdAt')::timestamptz;
+    exception when others then return false; end;
+  end if;
+  if p_data ? 'updatedAt' then
+    if pg_catalog.jsonb_typeof(p_data->'updatedAt') is distinct from 'string'
+       or p_data->>'updatedAt' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z$' then return false; end if;
+    begin v_updated := (p_data->>'updatedAt')::timestamptz;
+    exception when others then return false; end;
+  end if;
+  if p_data ? 'notes' and pg_catalog.jsonb_typeof(p_data->'notes') is distinct from 'string' then return false; end if;
+  if p_data ? 'setupTags' and pg_catalog.jsonb_typeof(p_data->'setupTags') is distinct from 'array' then return false; end if;
+  if p_data ? 'mistakeTags' and pg_catalog.jsonb_typeof(p_data->'mistakeTags') is distinct from 'array' then return false; end if;
+  if p_data ? 'emotionTags' and pg_catalog.jsonb_typeof(p_data->'emotionTags') is distinct from 'array' then return false; end if;
+  if p_data ? 'marketTags' and pg_catalog.jsonb_typeof(p_data->'marketTags') is distinct from 'array' then return false; end if;
+  return true;
+end;
+$$;
+alter function public.trade_data_is_valid(jsonb) owner to postgres;
+revoke all on function public.trade_data_is_valid(jsonb) from public, anon, authenticated, service_role;
+
 -- HOSTED CSV IMPORT -----------------------------------------------------------
 -- The browser sends an array of {id, data} objects. Existing IDs are skipped,
 -- never overwritten or resurrected. Validation happens before the first write,
@@ -578,6 +678,9 @@ begin
     end if;
     if pg_catalog.octet_length(v_data::text) > 65536 then
       raise exception 'Import trade data exceeds bounds' using errcode = '22023';
+    end if;
+    if not public.trade_data_is_valid(v_data) then
+      raise exception 'Invalid trade data' using errcode = '22023';
     end if;
     if pg_catalog.array_position(v_seen_ids, v_id) is not null then
       raise exception 'Duplicate import trade ID' using errcode = '22023';
@@ -1412,6 +1515,9 @@ begin
        pg_catalog.jsonb_typeof(p_data) <> 'object'
        or pg_catalog.octet_length(p_data::text) > 65536
      ) then
+    raise exception 'Invalid trade data' using errcode = '22023';
+  end if;
+  if not p_delete and not public.trade_data_is_valid(p_data) then
     raise exception 'Invalid trade data' using errcode = '22023';
   end if;
 

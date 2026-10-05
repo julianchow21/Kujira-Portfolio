@@ -20,10 +20,12 @@ const SCHEMA_PATH = path.join(__dirname, '..', 'schema.sql');
 const CAL_PATH = path.join(__dirname, '..', 'lib', 'kjr-calendar.js');
 const FMT_PATH = path.join(__dirname, '..', 'lib', 'kjr-format.js');
 const WORKER_PATH = path.join(__dirname, '..', 'Worker', 'Stripe Webhook Worker v0 (1 Aug).js');
+const SW_PATH = path.join(__dirname, '..', 'sw.js');
 const indexSrc = fs.readFileSync(INDEX_PATH, 'utf8');
 const schemaSrc = fs.readFileSync(SCHEMA_PATH, 'utf8');
 const calSrc = fs.readFileSync(CAL_PATH, 'utf8');
 const workerSrc = fs.readFileSync(WORKER_PATH, 'utf8');
+const swSrc = fs.readFileSync(SW_PATH, 'utf8');
 
 /* ====================== Extraction helpers (see Trading/tests/test-trading.js for full notes) ====================== */
 
@@ -99,7 +101,7 @@ for (const n of CONST_NAMES) {
 const SYNC_FN_NAMES = ['isValidStoredId', 'splitValidRows', 'assertStoredId',
   'assertSyncTable', 'sbSyncRow', 'sbPageUrl', 'sbFetchAll', 'rowRevision',
   '_acceptServerRevision', '_flushDirty', '_queueDelete', '_unqueueDelete',
-  '_recordConflict', 'sbDelete', 'flushPendingDeletes'];
+  '_recordConflict', 'readSyncConflicts', '_hasOpenConflict', 'sbDelete', 'flushPendingDeletes'];
 let syncCode = [
   "var TABLES=['trades'];",
   'var STORED_ID_MAX=64, SB_PAGE_SIZE=1000;',
@@ -114,7 +116,7 @@ let syncCode = [
   'function scopeSnapshot(){return {scope:_activeScope,epoch:_scopeEpoch,authEpoch:_authEpoch,key:STORAGE_KEY,userId:currentUser().id||null};}',
   "function scopeIsCurrent(s){return !!s&&s.scope===_activeScope&&s.epoch===_scopeEpoch&&s.authEpoch===_authEpoch&&(s.userId||null)===(currentUser().id||null);}",
   'async function sbHeaders(){return SB_HDR;}',
-  'var _flushPromise=null, _flushQueued=false, flushCalls=0, flushGate=null;',
+  'var _flushPromise=null, _flushQueued=false, _flushScope=null, flushCalls=0, flushGate=null;',
   'async function _flushDirtyOnce(){ flushCalls++; if(flushGate) await flushGate; }',
   "function currentUser(){ return {id:'00000000-0000-0000-0000-000000000001'}; }",
   'function quarantineRows(source,table,rows){ quarantined.push({source,table,rows}); }',
@@ -684,9 +686,19 @@ test('stored trade IDs never enter inline JavaScript handlers', () => {
 });
 test('trade validation updates both visual and programme state', () => {
   assert.match(indexSrc, /f\.setAttribute\('aria-invalid',m\?'true':'false'\)/);
+  assert.match(indexSrc, /function finitePositive\(value\)/);
+  assert.match(indexSrc, /function validTradeSide\(side\)/);
+  assert.match(indexSrc, /function stableImportId\(seed,index\)/);
+  assert.match(indexSrc, /_updatedAt:\(prev&&prev\._updatedAt\)\|\|null/);
   assert.match(indexSrc, /aria-label="Close trade form"/);
   assert.match(indexSrc, /aria-label="Toggle colour theme"/);
   assert.match(indexSrc, /aria-label="Open settings"/);
+});
+test('hosted sync conflicts are durable, reviewable, and stop blind retries', () => {
+  assert.match(indexSrc, /function readSyncConflicts\(\)/);
+  assert.match(indexSrc, /function resolveSyncConflict\(index,choice\)/);
+  assert.match(indexSrc, /if\(_hasOpenConflict\(t,id,'upsert'\)\) continue/);
+  assert.match(indexSrc, /need conflict resolution in Settings/);
 });
 test('375px mobile rules shrink the topbar without removing app links or theme', () => {
   assert.match(indexSrc, /@media\(max-width:640px\)\{[\s\S]*?\.topbar\{gap:6px;/);
@@ -698,6 +710,8 @@ test('schema defines authenticated read-only tables, trusted CAS and durable tom
   assert.match(schemaSrc, /^commit;\s*$/m);
   assert.match(schemaSrc, /deleted_at\s+timestamptz/);
   assert.match(schemaSrc, /create or replace function public\.sync_trade/);
+  assert.match(schemaSrc, /create or replace function public\.trade_data_is_valid/);
+  assert.match(schemaSrc, /if not public\.trade_data_is_valid\(v_data\)/);
   assert.match(schemaSrc, /security definer/);
   assert.match(schemaSrc, /set search_path = ''/);
   assert.match(schemaSrc, /alter function public\.sync_trade[^\n]+owner to postgres/);
@@ -723,6 +737,7 @@ test('schema defines authenticated read-only tables, trusted CAS and durable tom
   assert.ok(syncTradeStart >= 0 && syncTradeEnd > syncTradeStart, 'sync_trade function section is present');
   const syncTradeSrc = schemaSrc.slice(syncTradeStart, syncTradeEnd);
   assert.match(syncTradeSrc, /on conflict \(user_id, id\) do nothing/);
+  assert.match(syncTradeSrc, /if not p_delete and not public\.trade_data_is_valid\(p_data\)/);
   assert.doesNotMatch(syncTradeSrc, /on conflict \(id\) do nothing/);
   assert.match(schemaSrc, /v_is_scoped_pk/);
   assert.doesNotMatch(schemaSrc, /drop constraint[^;]+cascade/i);
@@ -750,6 +765,11 @@ test('schema defines authenticated read-only tables, trusted CAS and durable tom
   assert.match(workerSrc, /payload\.length !== 1/);
   assert.doesNotMatch(workerSrc, /method:\s*['"]PATCH['"]/);
   assert.doesNotMatch(schemaSrc, /grant (?:all|insert|update|delete|truncate)[^\n]*profiles[^\n]*authenticated/i);
+});
+test('Forex service worker deletes only its own versioned caches', () => {
+  assert.match(swSrc, /const CACHE_PREFIX\s*=\s*['"]kjr-forex-['"]/);
+  assert.match(swSrc, /keys\.filter\(k\s*=>\s*k\.startsWith\(CACHE_PREFIX\)\s*&&\s*k\s*!==\s*CACHE\)/);
+  assert.doesNotMatch(swSrc, /keys\.filter\(k\s*=>\s*k\s*!==\s*CACHE\)/);
 });
 test('Stripe signature parser preserves timestamp text and rejects ambiguous or whitespace timestamps', () => {
   const timestamp = '001770000000';
@@ -1080,6 +1100,28 @@ async function runWorkerContractTests() {
 }
 
 async function runSyncContractTests() {
+  await testAsync('Forex service worker activate preserves sibling caches', async () => {
+    const deleted = [];
+    let activation;
+    const swSandbox = {
+      Promise,
+      self: {
+        listeners: {},
+        addEventListener(type, listener) { this.listeners[type] = listener; },
+        skipWaiting() {},
+        clients: { claim: () => Promise.resolve() },
+      },
+      caches: {
+        keys: async () => ['kjr-forex-v0.13', 'kjr-forex-v0.14', 'kjr-portfolio-v0.9', 'other-cache'],
+        delete: async (key) => { deleted.push(key); return true; },
+      },
+    };
+    vm.runInNewContext(swSrc, swSandbox, { filename: SW_PATH });
+    swSandbox.self.listeners.activate({ waitUntil(promise) { activation = promise; } });
+    await activation;
+    assert.deepStrictEqual(deleted, ['kjr-forex-v0.13']);
+  });
+
   await testAsync('sbSyncRow - stale server version is rejected and returned for recovery', async () => {
     syncSandbox.fetch = async () => ({ ok: true, json: async () => [{
       applied: false, row_id: 'trade_1', row_data: { symbol: 'EURUSD' },

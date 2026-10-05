@@ -216,7 +216,7 @@ test('source keeps hosted storage separate and fences stale requests', () => {
 });
 
 test('source keeps signed-out cloud reads disabled and preserves scoped queues', () => {
-  assert.match(indexSrc, /async function loadData\(\)\{[\s\S]*?if\(isHostedMode\(\)&&!currentUser\(\)\.id\) return;/);
+  assert.match(indexSrc, /async function loadData\(\)\{[\s\S]*?if\(isHostedMode\(\)&&!currentUser\(\)\.id\) return(?: null)?;/);
   assert.match(indexSrc, /captured\.key\+'_pendingdel'/);
   assert.match(indexSrc, /_queueDelete\(table,id,expectedUpdatedAt,data,snap\)/);
   assert.match(indexSrc, /_unqueueDelete\(table,id,snap\)/);

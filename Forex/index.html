@@ -705,6 +705,7 @@ async function sbDelete(table,id,expectedUpdatedAt,data,scope){
   // here would make an account switch lose a local delete intent.
   if(scope&&!scopeIsCurrent(snap)){ _queueDelete(table,id,expectedUpdatedAt,data,snap); return false; }
   if(!sbConfigured()||!currentUser().id) return true;
+  if(_hasOpenConflict(table,id,'delete')) return false;
   // Write-ahead: queue the delete BEFORE the request, so a page close while it
   // is in flight (or before it starts) still reaches the cloud via
   // flushPendingDeletes on next boot. Removed from the queue only on success.
@@ -732,6 +733,7 @@ async function flushPendingDeletes(snap){
   for(const it of l){
     if(!scopeIsCurrent(captured)) return;
     if(!it||!TABLES.includes(it.table)||!isValidStoredId(it.id)){ quarantineRows('pending-delete','trades',[it]); continue; }
+    if(_hasOpenConflict(it.table,it.id,'delete')){ keep.push(it); continue; }
     try{ await sbSyncRow(it.table,{...(it.data||{}),id:it.id,_updatedAt:it.expectedUpdatedAt},true,captured); }
     catch(e){ if(e.code==='STALE_WRITE'&&scopeIsCurrent(captured)) _recordConflict(it.table,it.id,e.serverRow,e.message,'delete',it.data,captured); if(scopeIsCurrent(captured)) keep.push(it); }
   }
@@ -775,14 +777,26 @@ function _recordConflict(table,id,serverRow,message,operation,localRow,snap){
     localStorage.setItem(CONFLICT_KEY,JSON.stringify(l.slice(-100)));
   }catch(e){}
 }
-let _flushPromise=null, _flushQueued=false;
+function readSyncConflicts(){
+  try{ const parsed=JSON.parse(localStorage.getItem(CONFLICT_KEY)||'[]'); return Array.isArray(parsed)?parsed.filter(x=>x&&TABLES.includes(x.table)&&isValidStoredId(x.id)):[]; }
+  catch(e){ return []; }
+}
+function writeSyncConflicts(list){ try{ localStorage.setItem(CONFLICT_KEY,JSON.stringify((Array.isArray(list)?list:[]).slice(-100))); }catch(e){} }
+function _hasOpenConflict(table,id,operation){ return readSyncConflicts().some(x=>x.table===table&&x.id===id&&x.operation===(operation||'upsert')); }
+let _flushPromise=null, _flushQueued=false, _flushScope=null;
 function _flushDirty(snap){
   const captured=snap||scopeSnapshot();
   if(!scopeIsCurrent(captured)) return Promise.resolve();
-  if(_flushPromise){ _flushQueued=true; return _flushPromise; }
+  const sameScope=_flushScope&&_flushScope.scope===captured.scope&&_flushScope.epoch===captured.epoch&&_flushScope.authEpoch===captured.authEpoch&&(_flushScope.userId||null)===(captured.userId||null);
+  if(_flushPromise&&sameScope){ _flushQueued=true; return _flushPromise; }
+  // Detach an older account's in-flight promise; its completion cannot clear
+  // this account's promise because the finally handler checks identity.
+  if(_flushPromise&&!sameScope){ _flushPromise=null; _flushQueued=false; _flushScope=null; }
   const run=(async()=>{ do{ _flushQueued=false; await _flushDirtyOnce(captured); }while(_flushQueued&&scopeIsCurrent(captured)); })();
-  _flushPromise=run.finally(()=>{ _flushPromise=null; });
-  return _flushPromise;
+  let completion;
+  completion=run.finally(()=>{ if(_flushPromise===completion){ _flushPromise=null; _flushQueued=false; _flushScope=null; } });
+  _flushScope=captured; _flushPromise=completion;
+  return completion;
 }
 async function _flushDirtyOnce(captured){
   const snap=captured||scopeSnapshot();
@@ -792,10 +806,10 @@ async function _flushDirtyOnce(captured){
   const jobs=[];
   for(const t of TABLES){
     const ids=[..._dirty[t]], rows=[];
-    for(const id of ids){ const row=DB[t].find(r=>r.id===id); if(row) rows.push({row:JSON.parse(JSON.stringify(row)),revision:rowRevision(t,id)}); }
+    for(const id of ids){ if(_hasOpenConflict(t,id,'upsert')) continue; const row=DB[t].find(r=>r.id===id); if(row) rows.push({row:JSON.parse(JSON.stringify(row)),revision:rowRevision(t,id)}); }
     if(rows.length) jobs.push({t,rows});
   }
-  if(!jobs.length) return; setSync('saving'); let err=false, poisoned=[];
+  if(!jobs.length){ if(readSyncConflicts().length||TABLES.some(t=>_dirty[t]&&_dirty[t].size)) setSync('error','Queued changes need another sync attempt or conflict resolution in Settings.'); return; } setSync('saving'); let err=false, poisoned=[];
   for(const {t,rows} of jobs){
     for(const item of rows){
       try{
@@ -810,14 +824,18 @@ async function _flushDirtyOnce(captured){
       }catch(e){
         if(!scopeIsCurrent(snap)) return;
         err=true; setSync('error',e.message); poisoned.push({table:t,id:item.row.id,error:e.message});
-        if(e.code==='STALE_WRITE') _recordConflict(t,item.row.id,e.serverRow,e.message,undefined,undefined,snap);
+        if(e.code==='STALE_WRITE') _recordConflict(t,item.row.id,e.serverRow,e.message,'upsert',item.row,snap);
       }
     }
   }
   if(!scopeIsCurrent(snap)) return;
   _persistDirty();
-  if(poisoned.length){ console.error('Sync: poisoned row(s), left dirty for retry:',poisoned); toast(poisoned.length+' trade'+(poisoned.length===1?'':'s')+' failed to sync and will keep retrying. Check console for details.',true); }
-  else if(!err) setSync('ok');
+  if(poisoned.length){ console.error('Sync: poisoned row(s), left dirty for retry:',poisoned); const conflicts=poisoned.filter(x=>x.error&&x.error.includes('newer cloud version')).length; toast(conflicts?conflicts+' trade'+(conflicts===1?'':'s')+' need conflict resolution in Settings.':poisoned.length+' trade'+(poisoned.length===1?'':'s')+' failed to sync and will keep retrying. Check console for details.',true); }
+  else if(!err){
+    const unresolved=readSyncConflicts().length, remainingDirty=TABLES.some(t=>_dirty[t]&&_dirty[t].size);
+    if(unresolved||remainingDirty) setSync('error',unresolved?'One or more trades need conflict resolution in Settings.':'Queued changes remain unsynced.');
+    else setSync('ok');
+  }
   flushPendingDeletes(snap).catch(()=>{});
 }
 function mergeTable(cloudRows,localRows,dirtySet){
@@ -828,17 +846,17 @@ function mergeTable(cloudRows,localRows,dirtySet){
   return [...byId.values()];
 }
 async function loadData(){
-  if(isHostedMode()&&!currentUser().id) return;
+  if(isHostedMode()&&!currentUser().id) return null;
   const loadScope=scopeSnapshot();
   let local=null; try{ local=JSON.parse(localStorage.getItem(loadScope.key)||'null'); }catch(e){}
   if(local) TABLES.forEach(t=>{ const checked=splitValidRows(local[t]); DB[t]=checked.valid; quarantineRows('local',t,checked.rejected); });
-  if(isLocalhostPreview()){ setSync('preview'); _cloudReachable=true; return; }
-  if(!sbConfigured()){ setSync('idle'); _cloudReachable=true; return; }
-  if(!currentUser().id){ setSync('idle'); _cloudReachable=true; return; }
+  if(isLocalhostPreview()){ setSync('preview'); _cloudReachable=true; return true; }
+  if(!sbConfigured()){ setSync('idle'); _cloudReachable=true; return true; }
+  if(!currentUser().id){ setSync('idle'); _cloudReachable=true; return true; }
   let cloud={}; _cloudReachable=true;
-  try{ const res=await Promise.all(TABLES.map(t=>sbFetchAll(t))); if(!scopeIsCurrent(loadScope)) return; TABLES.forEach((t,i)=>cloud[t]=res[i]); }
-  catch(e){ if(!scopeIsCurrent(loadScope)) return; _cloudReachable=false; setSync('error',e.message); return; }
-  if(!scopeIsCurrent(loadScope)) return;
+  try{ const res=await Promise.all(TABLES.map(t=>sbFetchAll(t))); if(!scopeIsCurrent(loadScope)) return null; TABLES.forEach((t,i)=>cloud[t]=res[i]); }
+  catch(e){ if(!scopeIsCurrent(loadScope)) return null; _cloudReachable=false; setSync('error',e.message); return false; }
+  if(!scopeIsCurrent(loadScope)) return null;
   TABLES.forEach(t=>{ DB[t]=mergeTable(cloud[t]||[],DB[t]||[],_dirty[t]); });
   // Rows the user deleted but whose cloud delete has not confirmed (queued in
   // PDEL_KEY) must not resurrect from the cloud merge, even when no local
@@ -848,9 +866,17 @@ async function loadData(){
     const del=new Set(pdel.map(d=>d.table+'|'+d.id));
     TABLES.forEach(t=>{ DB[t]=(DB[t]||[]).filter(r=>!del.has(t+'|'+r.id)); });
   }
-  if(!scopeIsCurrent(loadScope)) return;
+  if(!scopeIsCurrent(loadScope)) return null;
   try{ localStorage.setItem(loadScope.key,JSON.stringify(DB)); }catch(e){}
-  setSync('ok');
+  const dirtyCount=TABLES.reduce((n,t)=>n+(_dirty[t]?_dirty[t].size:0),0);
+  if(dirtyCount){
+    setSync('saving');
+    await _flushDirty(loadScope);
+    if(!scopeIsCurrent(loadScope)) return null;
+    const remaining=TABLES.reduce((n,t)=>n+(_dirty[t]?_dirty[t].size:0),0);
+    if(remaining){ setSync('error','Queued changes need another sync attempt or conflict resolution in Settings.'); return false; }
+  } else setSync('ok');
+  return true;
 }
 
 /* ============================================================================
@@ -1384,6 +1410,61 @@ function wireModal(label){
   else if(m){ m.setAttribute('tabindex','-1'); m.focus(); }
 }
 function closeModal(){ const root=document.getElementById('modal-root'), previous=_modalKeyTrap&&_modalKeyTrap.__previousFocus; if(_modalKeyTrap&&root){ root.removeEventListener('keydown',_modalKeyTrap); _modalKeyTrap=null; } if(root) root.innerHTML=''; if(previous&&typeof previous.focus==='function'&&previous.isConnected!==false) previous.focus(); }
+function openConflictManager(){
+  const conflicts=readSyncConflicts(), body=conflicts.length
+    ? conflicts.map((c,i)=>{
+        const local=c.local&&c.local.symbol?c.local.symbol:'local trade';
+        const server=c.server&&c.server.symbol?c.server.symbol:(c.server?'cloud version':'no cloud row');
+        return '<div class="field" style="border-bottom:1px solid var(--line);padding-bottom:12px"><strong>'+escapeHtml(c.id)+'</strong><div class="muted">'+escapeHtml(c.operation==='delete'?'Delete conflict':'Edit conflict')+' · local '+escapeHtml(local)+' · cloud '+escapeHtml(server)+'</div><div class="err" style="margin:6px 0">'+escapeHtml(c.message||'A newer cloud version exists.')+'</div><button class="btn btn-sm" onclick="resolveSyncConflict('+i+',\'cloud\')">Keep cloud</button> <button class="btn btn-sm btn-primary" onclick="resolveSyncConflict('+i+',\'local\')">Keep local</button></div>';
+      }).join('')
+    : '<p class="muted">No unresolved sync conflicts.</p>';
+  document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><h3>Sync conflicts</h3><button class="icon-btn" aria-label="Close conflicts" onclick="closeModal()">✕</button></div><div class="modal-body">'+body+'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button></div></div></div>';
+  wireModal('Sync conflicts');
+}
+function _dropSyncConflict(conflict){
+  const key=conflict&&conflict.table+'|'+conflict.id+'|'+conflict.operation;
+  writeSyncConflicts(readSyncConflicts().filter(c=>c.table+'|'+c.id+'|'+c.operation!==key));
+}
+async function resolveSyncConflict(index,choice){
+  const snap=scopeSnapshot(), conflicts=readSyncConflicts(), conflict=conflicts[index];
+  if(!conflict||!scopeIsCurrent(snap)||!['cloud','local'].includes(choice)) return;
+  const table=conflict.table, id=conflict.id, server=conflict.server||null;
+  if(choice==='cloud'){
+    if(!server||server._deletedAt){
+      DB[table]=(DB[table]||[]).filter(row=>row.id!==id); _dirty[table].delete(id); _rowRev[table].delete(id); _unqueueDelete(table,id,snap);
+    }else{
+      DB[table]=[...(DB[table]||[]).filter(row=>row.id!==id),{...server,id}]; _dirty[table].delete(id); _rowRev[table].delete(id);
+      if(conflict.operation==='delete') _unqueueDelete(table,id,snap);
+    }
+    _dropSyncConflict(conflict); _persistDirty();
+    try{ localStorage.setItem(STORAGE_KEY,JSON.stringify(DB)); }catch(e){}
+    if(scopeIsCurrent(snap)){ renderApp(); toast('Kept the cloud version'); }
+  }else if(conflict.operation==='delete'){
+    _dropSyncConflict(conflict);
+    _queueDelete(table,id,server&&server._updatedAt||null,conflict.local||null,snap);
+    await flushPendingDeletes(snap);
+    if(scopeIsCurrent(snap)){ renderApp(); toast('Retried the local delete'); }
+  }else{
+    const current=(DB[table]||[]).find(row=>row.id===id), row={...(current||conflict.local||{}),id,_updatedAt:server&&server._updatedAt||null,_deletedAt:null};
+    if(!row.id) return;
+    DB[table]=[...(DB[table]||[]).filter(item=>item.id!==id),row];
+    _dirty[table].add(id); _rowRev[table].set(id,rowRevision(table,id)+1); _dropSyncConflict(conflict); _persistDirty(); saveData();
+    await _flushDirty(snap);
+    if(scopeIsCurrent(snap)){ renderApp(); toast('Retried the local version'); }
+  }
+  if(scopeIsCurrent(snap)) openConflictManager();
+}
+function finitePositive(value){ return Number.isFinite(value)&&value>0; }
+function finiteNonNegative(value){ return Number.isFinite(value)&&value>=0; }
+function validTradeSymbol(symbol){ return typeof symbol==='string'&&symbol.length>0&&symbol.length<=64&&!/[\u0000-\u001f\u007f]/.test(symbol); }
+function validTradeSide(side){ return side==='long'||side==='short'; }
+function validInputDate(value){
+  if(typeof value!=='string'||value==='') return null;
+  const m=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(value);
+  if(!m) return null;
+  const ms=m[7]?+(m[7]+'00').slice(0,3):0;
+  return _localDate(+m[1],+m[2],+m[3],+m[4],+m[5],m[6]?+m[6]:0,ms);
+}
 async function saveTradeModal(id){
   const snap=scopeSnapshot();
   if(!id && !await canCreateTrade()) return;
@@ -1391,21 +1472,22 @@ async function saveTradeModal(id){
   const g=k=>document.getElementById('f-'+k);
   const setErr=(k,m)=>{ const e=document.getElementById('e-'+k); if(e) e.textContent=m||''; const f=g(k); if(f){ f.classList.toggle('invalid',!!m); f.setAttribute('aria-invalid',m?'true':'false'); } return !m; };
   let ok=true;
-  const symbol=g('symbol').value.trim().toUpperCase(); if(!setErr('symbol',symbol?'':'Required')) ok=false;
+  const symbol=g('symbol').value.trim().toUpperCase(); if(!setErr('symbol',validTradeSymbol(symbol)?'':'Required')) ok=false;
   const side=g('side').value;
-  const qtyRaw=g('quantity').value, qty=Number(qtyRaw); if(!setErr('quantity',(qtyRaw!==''&&qty>0)?'':'Must be greater than 0')) ok=false;
-  const entryV=g('entryAt').value; if(!setErr('entryAt',entryV?'':'Required')) ok=false;
-  const epRaw=g('entryPrice').value, entryPrice=Number(epRaw); if(!setErr('entryPrice',(epRaw!==''&&entryPrice>0)?'':'Must be greater than 0')) ok=false;
-  const exitV=g('exitAt').value, xpRaw=g('exitPrice').value, exitPrice=Number(xpRaw); let exErr='',xpErr='';
-  if(exitV||xpRaw!==''){ if(!exitV) exErr='Add exit date to close'; else if(entryV&&new Date(exitV)<new Date(entryV)) exErr='Exit must be after entry'; if(xpRaw==='') xpErr='Add exit price to close'; else if(!(exitPrice>0)) xpErr='Must be greater than 0'; }
+  if(!setErr('side',validTradeSide(side)?'':'Choose long or short')) ok=false;
+  const qtyRaw=g('quantity').value, qty=Number(qtyRaw); if(!setErr('quantity',(qtyRaw!==''&&finitePositive(qty))?'':'Must be greater than 0')) ok=false;
+  const entryV=g('entryAt').value, entryDate=validInputDate(entryV); if(!setErr('entryAt',entryDate?'':'Required')) ok=false;
+  const epRaw=g('entryPrice').value, entryPrice=Number(epRaw); if(!setErr('entryPrice',(epRaw!==''&&finitePositive(entryPrice))?'':'Must be greater than 0')) ok=false;
+  const exitV=g('exitAt').value, xpRaw=g('exitPrice').value, exitPrice=Number(xpRaw), exitDate=exitV?validInputDate(exitV):null; let exErr='',xpErr='';
+  if(exitV||xpRaw!==''){ if(!exitV||!exitDate) exErr='Add a valid exit date to close'; else if(entryDate&&exitDate.getTime()<entryDate.getTime()) exErr='Exit must be after entry'; if(xpRaw==='') xpErr='Add exit price to close'; else if(!finitePositive(exitPrice)) xpErr='Must be greater than 0'; }
   if(!setErr('exitAt',exErr)) ok=false; if(!setErr('exitPrice',xpErr)) ok=false;
-  const stopRaw=g('stopPrice').value, stop=Number(stopRaw); if(!setErr('stopPrice',(stopRaw!==''&&!(stop>0))?'Must be greater than 0':'')) ok=false;
-  const feesRaw=g('fees').value, fees=feesRaw===''?0:Number(feesRaw); if(!setErr('fees',(feesRaw!==''&&!(fees>=0))?'Cannot be negative':'')) ok=false;
+  const stopRaw=g('stopPrice').value, stop=Number(stopRaw); if(!setErr('stopPrice',(stopRaw!==''&&!finitePositive(stop))?'Must be greater than 0':'')) ok=false;
+  const feesRaw=g('fees').value, fees=feesRaw===''?0:Number(feesRaw); if(!setErr('fees',(feesRaw!==''&&!finiteNonNegative(fees))?'Must be a finite, non-negative number':'')) ok=false;
   if(!ok) return;
   if(id) assertStoredId(id);
   const prev=id?DB.trades.find(t=>t.id===id):null, now=new Date().toISOString();
-  const trade={ id:id||uid(), symbol, side, quantity:qty, entryAt:new Date(entryV).toISOString(), entryPrice,
-    exitAt:exitV?new Date(exitV).toISOString():'', exitPrice:(exitV&&xpRaw!=='')?exitPrice:'', stopPrice:stopRaw!==''?stop:'', fees,
+  const trade={ id:id||uid(), _updatedAt:(prev&&prev._updatedAt)||null, symbol, side, quantity:qty, entryAt:entryDate.toISOString(), entryPrice,
+    exitAt:exitV?exitDate.toISOString():'', exitPrice:(exitV&&xpRaw!=='')?exitPrice:'', stopPrice:stopRaw!==''?stop:'', fees,
     notes:g('notes').value.trim(), contractMultiplier:(prev&&prev.contractMultiplier)||1, createdAt:(prev&&prev.createdAt)||now, updatedAt:now };
   TAG_CATS.forEach(c=> trade[c.key]=parseTags(g(c.key).value));
   upsertTrade(trade); closeModal(); toast(id?'Trade updated':'Trade logged');
@@ -1683,10 +1765,13 @@ function openSettings(){
   const coachSettings=isLocalOwner()
     ? field('akey','Anthropic API key (for the AI coach)',false,'<input id="f-akey" type="password" value="'+escapeHtml(getKey())+'" placeholder="sk-ant-...">')+'<div class="warn">Stored only in this browser. Online AI coaching is not available yet.</div>'
     : '<div class="warn">AI coaching is not available for online accounts yet. No local owner API key is read in this account.</div>';
+  const conflictCount=readSyncConflicts().length;
+  const conflictSettings=conflictCount?'<div class="warn">'+conflictCount+' trade'+(conflictCount===1?'':'s')+' need a sync decision. <button class="btn btn-sm" type="button" onclick="openConflictManager()">Review sync conflicts</button></div>':'';
   document.getElementById('modal-root').innerHTML=
     '<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog" aria-modal="true">'
     +'<div class="modal-head"><h3>Settings</h3><button class="icon-btn" aria-label="Close settings" onclick="closeModal()">✕</button></div>'
     +'<div class="modal-body">'
+    + conflictSettings
     + coachSettings
     + '<div class="field"><label for="f-csv">Import trades from CSV</label><input id="f-csv" type="file" accept=".csv,text/csv" aria-describedby="csv-help e-csv" aria-invalid="false"><div class="muted" id="csv-help">Auto-maps columns named like symbol, side, qty, entry date, entry price, exit date, exit price, fees, stop. Adds to existing trades.</div><div class="err" id="e-csv" aria-live="polite"></div></div>'
     + '<div class="field"><label for="f-chartproxy">Chart data CORS proxy</label><input id="f-chartproxy" type="text" aria-describedby="chartproxy-help" value="'+escapeHtml(localStorage.getItem(CHART_PROXY_KEY)||'')+'" placeholder="'+escapeHtml(CHART_PROXY_DEFAULT)+'"><div class="muted" id="chartproxy-help">{url} is replaced with the encoded Yahoo URL. The default is a public proxy and can be flaky. A personal Cloudflare Worker URL can go here later.</div></div>'
@@ -1702,15 +1787,30 @@ function saveSettings(){
   closeModal(); toast('Settings saved'); if(_view==='coach') renderCoachIdle();
 }
 /* Explicit date parsing so CSV imports do not depend on the JS engine's
-   locale: ISO first, then DD/MM/YYYY (documented order), both with optional
-   time, else a plain Date parse. */
+   locale. Calendar components are checked before Date normalises them. */
+function _daysInMonth(year,month){ return new Date(year,month,0).getDate(); }
+function _localDate(year,month,day,hour,minute,second,millisecond){
+  if(month<1||month>12||day<1||day>_daysInMonth(year,month)||hour>23||minute>59||second>59) return null;
+  const d=new Date(0); d.setHours(hour,minute,second,millisecond); d.setFullYear(year,month-1,day);
+  return d.getFullYear()===year&&d.getMonth()===month-1&&d.getDate()===day&&d.getHours()===hour&&d.getMinutes()===minute&&d.getSeconds()===second?d:null;
+}
 function parseImportDate(s){
   s=String(s||'').trim(); if(!s) return null;
-  let m=/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{1,2}))?/.exec(s);
-  if(m){ const d=new Date(+m[1],+m[2]-1,+m[3],m[4]?+m[4]:0,m[5]?+m[5]:0); return isNaN(d)?null:d; }
-  m=/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:[T ](\d{1,2}):(\d{1,2}))?/.exec(s);
-  if(m){ const d=new Date(+m[3],+m[2]-1,+m[1],m[4]?+m[4]:0,m[5]?+m[5]:0); return isNaN(d)?null:d; }
-  const d=new Date(s); return isNaN(d)?null:d;
+  let m=/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2})?)?$/.exec(s);
+  if(m){
+    const year=+m[1],month=+m[2],day=+m[3],hour=m[4]?+m[4]:0,minute=m[5]?+m[5]:0,second=m[6]?+m[6]:0,millisecond=m[7]?+(m[7]+'00').slice(0,3):0,zone=m[8];
+    if(month<1||month>12||day<1||day>_daysInMonth(year,month)||hour>23||minute>59||second>59) return null;
+    if(zone){ if(zone!=='Z'&&(+zone.slice(1,3)>23||+zone.slice(4)>59)) return null; const d=new Date(s); return Number.isFinite(d.getTime())?d:null; }
+    return _localDate(year,month,day,hour,minute,second,millisecond);
+  }
+  m=/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/.exec(s);
+  if(m){ const millisecond=m[7]?+(m[7]+'00').slice(0,3):0; return _localDate(+m[3],+m[2],+m[1],m[4]?+m[4]:0,m[5]?+m[5]:0,m[6]?+m[6]:0,millisecond); }
+  const d=new Date(s); return Number.isFinite(d.getTime())?d:null;
+}
+function stableImportId(seed,index){
+  const text=String(seed)+'|'+index; let h1=2166136261>>>0, h2=374761393>>>0;
+  for(let i=0;i<text.length;i++){ const c=text.charCodeAt(i); h1=Math.imul(h1^c,16777619)>>>0; h2=Math.imul(h2^c,2246822519)>>>0; }
+  return 'csv_'+(h1>>>0).toString(36)+(h2>>>0).toString(36)+'_'+index.toString(36);
 }
 function parseCSV(text){
   const rows=[]; let i=0, field='', row=[], q=false;
@@ -1731,9 +1831,10 @@ async function importCSV(){
   const file=inp.files&&inp.files[0]; if(!file){ errEl.textContent='Choose a CSV file first'; return; }
   const reader=new FileReader();
   reader.onload=async()=>{
+    let hostedAttempted=false, hostedCommitted=false;
     try{
       if(!scopeIsCurrent(importScope)){ errEl.textContent='Account changed. Choose the CSV again.'; return; }
-      const rows=parseCSV(String(reader.result)); if(rows.length<2){ errEl.textContent='No data rows found'; return; }
+      const csvText=String(reader.result), rows=parseCSV(csvText); if(rows.length<2){ errEl.textContent='No data rows found'; return; }
       const head=rows[0].map(h=>h.trim().toLowerCase());
       const find=(...alts)=>{ for(const a of alts){ const i=head.findIndex(h=>h.includes(a)); if(i>=0) return i; } return -1; };
       const ix={ symbol:find('symbol','ticker'), side:find('side','direction'), qty:find('qty','quantity','shares','size'),
@@ -1744,19 +1845,25 @@ async function importCSV(){
       const now=new Date().toISOString(); let ok=0, skip=0, imported=[];
       for(let r=1;r<rows.length;r++){ const c=rows[r];
         const sym=(c[ix.symbol]||'').trim().toUpperCase(), qty=Number(c[ix.qty]), ep=Number(c[ix.entryPrice]);
-        if(!sym||!(qty>0)||!(ep>0)){ skip++; continue; }
+        if(!validTradeSymbol(sym)||!finitePositive(qty)||!finitePositive(ep)){ skip++; continue; }
         const eAtRaw=ix.entryAt>=0?c[ix.entryAt]:'', eAt=eAtRaw?parseImportDate(eAtRaw):new Date();
         if(!eAt){ skip++; continue; }
-        const sideRaw=(ix.side>=0?c[ix.side]:'').toLowerCase(), side=/short|sell/.test(sideRaw)?'short':'long';
+        const sideRaw=ix.side>=0?String(c[ix.side]||'').trim().toLowerCase():'', side=ix.side<0?'long':(sideRaw==='short'||sideRaw==='sell'?'short':(sideRaw==='long'||sideRaw==='buy'?'long':null));
+        if(!side){ skip++; continue; }
         const xAtRaw=ix.exitAt>=0?c[ix.exitAt]:'', xpRaw=ix.exitPrice>=0?c[ix.exitPrice]:'';
         let exitAt='', exitPrice='';
-        if(xAtRaw&&xpRaw!==''&&Number(xpRaw)>0){
-          const xAt=parseImportDate(xAtRaw);
-          if(xAt){ if(xAt<eAt){ skip++; continue; } exitAt=xAt.toISOString(); exitPrice=Number(xpRaw); }
+        if(!!String(xAtRaw||'').trim()!==!!String(xpRaw||'').trim()){ skip++; continue; }
+        if(String(xAtRaw||'').trim()||String(xpRaw||'').trim()){
+          const xAt=parseImportDate(xAtRaw), parsedExit=Number(xpRaw);
+          if(!xAt||!finitePositive(parsedExit)||xAt<eAt){ skip++; continue; }
+          exitAt=xAt.toISOString(); exitPrice=parsedExit;
         }
-        const trade={ id:uid(), symbol:sym, side, quantity:qty, entryAt:eAt.toISOString(), entryPrice:ep,
+        const stopRaw=ix.stop>=0?String(c[ix.stop]||'').trim():'', stop=stopRaw===''?'':Number(stopRaw);
+        const feesRaw=ix.fees>=0?String(c[ix.fees]||'').trim():'', fees=feesRaw===''?0:Number(feesRaw);
+        if((stopRaw!==''&&!finitePositive(stop))||(feesRaw!==''&&!finiteNonNegative(fees))){ skip++; continue; }
+        const trade={ id:isLocalOwner()?uid():stableImportId(csvText,r), symbol:sym, side, quantity:qty, entryAt:eAt.toISOString(), entryPrice:ep,
           exitAt, exitPrice,
-          stopPrice:(ix.stop>=0&&Number(c[ix.stop])>0)?Number(c[ix.stop]):'', fees:(ix.fees>=0&&!isNaN(Number(c[ix.fees]))&&c[ix.fees]!=='')?Number(c[ix.fees]):0,
+          stopPrice:stop, fees,
           notes:'', setupTags:[],mistakeTags:[],emotionTags:[],marketTags:[], contractMultiplier:1, createdAt:now, updatedAt:now };
         if(isLocalOwner()) upsertTradeSilent(trade); else imported.push(trade);
         ok++;
@@ -1764,17 +1871,24 @@ async function importCSV(){
       if(!isLocalOwner()){
         if(!imported.length){ errEl.textContent='No valid trades to import'; return; }
         const p_rows=imported.map(row=>({id:row.id,data:row}));
+        hostedAttempted=true;
         const result=await sbRpc('import_trades',{p_rows},importScope);
+        hostedCommitted=true;
         if(!scopeIsCurrent(importScope)){ errEl.textContent='Account changed. Import was stopped.'; return; }
         if(!result||result.allowed===false||result.ok===false){ errEl.textContent=(result&&result.reason)||'Import was denied'; return; }
         const importedCount=Number(result.imported), skippedCount=Number(result.skipped_existing);
         if(!Number.isInteger(importedCount)||importedCount<0||!Number.isInteger(skippedCount)||skippedCount<0){ errEl.textContent='Import returned an invalid result'; return; }
         ok=importedCount; skip=skippedCount;
-        await loadAccountState(importScope); await loadData();
+        await loadAccountState(importScope); const refreshed=await loadData();
+        if(refreshed===false) throw new Error('journal refresh failed after import');
       }
       if(!scopeIsCurrent(importScope)) return;
       saveData(); renderApp(); closeModal(); toast('Imported '+ok+' trade'+(ok===1?'':'s')+(skip?(', skipped '+skip):''));
-    }catch(e){ errEl.textContent='Could not parse: '+e.message; }
+    }catch(e){
+      if(hostedCommitted){ errEl.textContent='Import committed, but the journal could not refresh. Refresh before importing the file again.'; toast('Import committed. Refresh to view it.',true); }
+      else if(hostedAttempted){ errEl.textContent='Import may have committed, but the response was lost. Retrying this file is safe.'; toast('Import status uncertain. Stable row IDs make retry safe.',true); }
+      else errEl.textContent='Could not parse: '+e.message;
+    }
   };
   reader.readAsText(file);
 }

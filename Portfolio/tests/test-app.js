@@ -89,6 +89,7 @@ const FUNCTION_TARGETS = [
   '_syncDiagRecordSafe', '_readSyncDiagnostics', '_storeSyncDiagnostics',
   '_recordSyncFailure', '_clearSyncDiagnostic', '_syncDiagReason',
   '_lossyAckReason', '_rejectLossyAck', '_isCanonicalServerTimestamp',
+  '_validWriteAck', '_divergenceSnapshot', '_isMaterialDivergence', 'strictConflictsEnabled', 'lastPullSource', 'overwriteRemoteWithLocal',
   '_setConfirmedCloudTimestamp', '_confirmedCloudTimestamp', '_displaySyncTimestamp',
   '_markLocalUnsaved', '_clearLocalUnsaved', '_hasLocalUnsaved',
   '_markCloudDirty', '_clearCloudDirty', '_hasCloudDirty',
@@ -106,7 +107,11 @@ const FUNCTION_TARGETS = [
   'restoreFromTrash', 'runReconciliation',
   '_cancelSyncForReset', 'resetLocalConfirm', '_fxPairsInUse', 'refreshFx',
   '_pbDrawInto', '_pbDrawTimeSeries',
-  'pbPersistSaved', 'pbSaveChart', 'pbTogglePin', 'pbDeleteSaved', 'pbUndoDelete'
+  'pbPersistSaved', 'pbSaveChart', 'pbTogglePin', 'pbDeleteSaved', 'pbUndoDelete',
+  '_salaryPayMonths', 'generateAutoSalaryEntries', 'generateAutoSalaryCashEntries', 'generateAutoCpfEntries',
+  'deriveStockPosition', '_cpfAnchorDate', 'cpfEffectiveBalances',
+  'annualIncomeSGD', 'annualExpensesSGD', 'derivedMonthlySavingsSGD', 'fireNumberSGD',
+  'expenseAmountSgdOrNull', 'renderProjections', 'autoRefreshTick', 'ibkrConfirmImport', 'disableVaultProtection'
 ];
 const CONST_TARGETS = ['APP_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS'];
 
@@ -138,6 +143,7 @@ if (missingFns.length || missingConsts.length){
    PREMIUM_PER_YEAR) exactly as they do in the real file, and functions that
    call each other (cashPremiumPerYear -> annualPremium) resolve correctly. */
 const COMBINED_SRC = [
+  appSrc.match(/const _DIVERGENCE_TABLES = \[[\s\S]*?\];/)[0],
   ...CONST_TARGETS.map(n => extractedConsts[n]),
   ...FUNCTION_TARGETS.map(n => extractedFns[n])
 ].join('\n\n');
@@ -167,6 +173,11 @@ function freshSandbox(dbOverrides){
     }, dbOverrides || {}),
     // kjr-core globals estimateAnnualTax reads directly, exactly as app.js does.
     cpfContribRatesForAge: core.cpfContribRatesForAge,
+    computeCpfContribution: core.computeCpfContribution,
+    computeStockPosition: core.computeStockPosition,
+    _monthsBetween: core._monthsBetween,
+    getPayday: core.getPayday,
+    incomeNet: core.incomeNet,
     CPF_OW_CEILING_2026: core.CPF_OW_CEILING_2026,
     computeSgIncomeTax: core.computeSgIncomeTax,
     _round2: core._round2,
@@ -198,6 +209,8 @@ function freshSandbox(dbOverrides){
     _entityDeleteInFlight: false,
     _modalState: null,
     _fxInFlight: null,
+    _autoTickInFlight: false,
+    _ibkrImportInFlight: false,
     _pbSaveInFlight: false,
     _pbUndoChart: null,
     _pbUndoTimer: null,
@@ -254,7 +267,7 @@ function freshSandbox(dbOverrides){
     _pbConfirm: (_message, onYes) => { sandbox._pbConfirmPromise = Promise.resolve(onYes()); },
     _pbStockRows: () => [],
     _pbCurSym: () => 'S$',
-    _isoDateSG: date => new Date(date).toISOString().slice(0, 10),
+    _isoDateSG: core._isoDateSG,
     displayCcy: () => 'SGD',
     fetchStockHistory: async () => ({}),
     _pbMountChart: () => {},
@@ -1048,7 +1061,7 @@ async function runTests(){
           posts++;
           if (posts === 1) return {status:503,text:async () => JSON.stringify({error:'offline'})};
           remote = JSON.parse(request.body);
-          return {status:200,text:async () => JSON.stringify({savedAt:'server-2'})};
+          return {status:200,text:async () => JSON.stringify({ok:true,savedAt:'2026-10-03T00:00:02.000Z'})};
         }
         gets++;
         return {json:async () => Object.assign({}, remote, {_savedAt:'server-2'})};
@@ -1563,8 +1576,8 @@ async function runTests(){
     const posted = [];
     sb.fetch = async (_url, request) => {
       posted.push(JSON.parse(request.body));
-      if (posted.length === 1) return new Promise(resolve => { releaseOld = () => resolve({status:200,text:async()=>JSON.stringify({savedAt:'old-ack'})}); });
-      return {status:200,text:async()=>JSON.stringify({savedAt:'new-ack'})};
+      if (posted.length === 1) return new Promise(resolve => { releaseOld = () => resolve({status:200,text:async()=>JSON.stringify({ok:true,savedAt:'2026-10-03T00:00:01.000Z'})}); });
+      return {status:200,text:async()=>JSON.stringify({ok:true,savedAt:'2026-10-03T00:00:02.000Z'})};
     };
     const oldPush = sb.pushToRemote();
     while (!releaseOld) await Promise.resolve();
@@ -1854,6 +1867,260 @@ async function runTests(){
     assert.strictEqual(status.state, 'failed');
     assert.strictEqual(toast.kind, 'error');
     assert.strictEqual(toast.message.includes('reset') && toast.message.includes('could not be stored'), true);
+  });
+
+  test('cloud metadata is stripped and current CPF defaults preserve explicit saved overrides', () => {
+    const sb = freshSandbox();
+    Object.assign(sb, {defaultStockColumns:()=>[],defaultCols:()=>[],BOARD_COLUMNS:[],reconcileStockColumns:x=>x||[],reconcileCols:x=>x||[],_runMigrations:x=>x,_LIST_TABLES:[]});
+    vm.runInContext(appSrc.match(/const CPF_DEFAULTS = \{[\s\S]*?\n\};/)[0]+'\n'+extractFunction('freshDB')+'\n'+extractFunction('mergeDefaults'), sb);
+    assert.strictEqual(sb.freshDB().settings.cpfRates.SA, 4);
+    assert.strictEqual(sb.freshDB().settings.cpfRates.MA, 4);
+    assert.strictEqual(sb.freshDB().settings.cpfRates.RA, 4);
+    sb.DB = sb.mergeDefaults({_savedAt:'2026-10-03T00:00:00.000Z',lastSeenRemoteAt:'obsolete',cash:[{id:'cash',amount:7}],settings:{cpfRates:{SA:4.08,MA:3}}});
+    assert.strictEqual(sb.DB.settings.cpfRates.SA, 4.08);
+    assert.strictEqual(sb.DB.settings.cpfRates.MA, 3);
+    assert.strictEqual('_savedAt' in sb.DB, false);
+    sb.setLastPull('2026-10-03T00:00:01.000Z', 'server');
+    assert.strictEqual('lastSeenRemoteAt' in sb.localPersistPayload(), false);
+    assert.strictEqual('_savedAt' in sb.syncPayload(), false);
+    assert.strictEqual(sb.syncPayload().lastSeenRemoteAt, '2026-10-03T00:00:01.000Z');
+    assert.strictEqual(sb.syncPayload().cash[0].amount, 7);
+  });
+
+  await testAsync('ordinary and explicit overwrite writes reject HTTP failures and malformed acknowledgements', async () => {
+    const valid = {ok:true,savedAt:'2026-10-03T00:00:00.000Z'};
+    const cases = [[503,valid],[503,{message:'Unavailable'}],[200,{}],[200,null],[200,[]],
+      [200,{ok:false,savedAt:valid.savedAt}],[200,{ok:true,savedAt:'2026-02-31T00:00:00.000Z'}],[200,{savedAt:valid.savedAt}]];
+    for (const action of ['pushToRemote','overwriteRemoteWithLocal']) {
+      for (const [status, data] of cases) {
+        const sb = freshSandbox(); sb._markCloudDirty();
+        sb.fetch = async () => ({status,text:async()=>JSON.stringify(data)});
+        assert.strictEqual(await sb[action](), false, action+JSON.stringify({status,data}));
+        assert.strictEqual(sb._hasCloudDirty(), true);
+        assert.strictEqual(sb._confirmedCloudTimestamp(), '');
+      }
+      const sb = freshSandbox(); sb._markCloudDirty();
+      sb.fetch = async () => ({status:200,text:async()=>JSON.stringify(valid)});
+      assert.strictEqual(await sb[action](), true);
+      assert.strictEqual(sb._hasCloudDirty(), false);
+      assert.strictEqual(sb._confirmedCloudTimestamp(), valid.savedAt);
+    }
+  });
+
+  await testAsync('explicit overwrite uses edits present at the click and keeps newer in-flight edits dirty', async () => {
+    const sb = freshSandbox({cash:[{id:'cash',amount:1}],cpfHistory:[],income:[],expenses:[]});
+    vm.runInContext(extractFunction('showConflictModal'), sb);
+    const controls = {'cf-force':{},'cf-pull':{}};
+    const wrap = {remove(){},addEventListener(){},querySelector:()=>({focus(){}})};
+    sb.document = {getElementById:id=>controls[id]||null,createElement:()=>wrap,body:{appendChild(){}}};
+    sb.showConflictModal({stashedBody:JSON.stringify(sb.syncPayload())});
+    sb.DB.cash[0].amount = 42; sb._localSaveRevision = 2; sb._markCloudDirty();
+    let sent;
+    sb.fetch = async (_url, request) => {
+      sent = JSON.parse(request.body);
+      sb.DB.cash[0].amount = 43; sb._localSaveRevision = 3;
+      return {status:200,text:async()=>JSON.stringify({ok:true,savedAt:'2026-10-03T00:00:00.000Z'})};
+    };
+    assert.strictEqual(await controls['cf-force'].onclick(), true);
+    assert.strictEqual(sent.cash[0].amount, 42);
+    assert.strictEqual(sb._hasCloudDirty(), true);
+    sb.isLocalPreview = () => true;
+    sb.fetch = () => { throw new Error('Preview must not write'); };
+    assert.strictEqual(await sb.overwriteRemoteWithLocal(), false);
+    assert.strictEqual(sb._hasCloudDirty(), true);
+  });
+
+  await testAsync('identical-data conflict recovery preserves an intervening writer through conditional retry', async () => {
+    for (const interleave of [false, true]) {
+      const sb = freshSandbox({cash:[{id:'base',amount:1}]}); sb._markCloudDirty();
+      sb.setLastPull('2026-10-02T00:00:00.000Z', 'server');
+      let remote = JSON.parse(JSON.stringify(sb.syncPayload())), revision = '2026-10-03T00:00:00.000Z';
+      let writes = 0, conflicts = 0;
+      sb.showConflictModal = () => { conflicts++; };
+      sb.fetch = async (_url, request) => {
+        let result;
+        if (request.method === 'GET') {
+          result = {...remote,_savedAt:revision};
+          if (interleave) { remote = {...remote,cash:[...remote.cash,{id:'concurrent',amount:2}]}; revision = '2026-10-03T00:00:01.000Z'; }
+        } else {
+          writes++; const proposed = JSON.parse(request.body);
+          assert.ok(Object.hasOwn(proposed, 'lastSeenRemoteAt'));
+          if (writes === 2) assert.strictEqual(proposed.lastSeenRemoteAt, '2026-10-03T00:00:00.000Z');
+          if (proposed.lastSeenRemoteAt !== revision) result = {conflict:true,remoteAt:revision};
+          else { remote = proposed; revision = '2026-10-03T00:00:02.000Z'; result = {ok:true,savedAt:revision}; }
+        }
+        return {status:200,text:async()=>JSON.stringify(result)};
+      };
+      assert.strictEqual(await sb.pushToRemote(), !interleave);
+      assert.strictEqual(writes, 2); assert.strictEqual(sb._hasCloudDirty(), interleave);
+      assert.strictEqual(conflicts, interleave ? 1 : 0);
+      assert.strictEqual(remote.cash.some(row=>row.id==='concurrent'), interleave);
+    }
+  });
+
+  test('vault transition rejects saves without clearing the unsaved warning', () => {
+    const sb = freshSandbox(); let saves = 0, message = '';
+    sb._vaultManager = {isBusy:()=>true,isEnabled:()=>false};
+    sb.saveLocal = () => { saves++; return true; }; sb.showToast = value => { message = value; };
+    assert.strictEqual(sb.saveData(), false); assert.strictEqual(saves, 0);
+    assert.strictEqual(sb._hasLocalUnsaved(), true); assert.match(message, /save again/);
+  });
+
+  await testAsync('vault disable failure does not falsely claim that plaintext is protected', async () => {
+    const sb = freshSandbox(); let message = '';
+    sb._vaultManager = {isUnlocked:()=>true,disable:async()=>{throw Object.assign(new Error('Some plaintext may remain'),{code:'cleanup-failed'});}};
+    sb.showToast = value => { message = value; };
+    await sb.disableVaultProtection();
+    assert.match(message, /Could not finish disabling encryption/); assert.match(message, /Some plaintext may remain/);
+    assert.doesNotMatch(message, /Encryption stayed on/);
+  });
+
+  function salarySandbox(){
+    const sb = freshSandbox({settings:{birthYear:1996,salary:{grossMonthly:1000,startDate:'2026-09-01',endDate:'2026-09-30'},salaryAccountId:'cash_sgd',salaryCashEnabledAt:'2026-09-01',salarySavePct:50,fxRates:{},fxOverrides:{}},income:[],cash:[{id:'cash_sgd',currency:'SGD',amount:0}],cashTxns:[],expenses:[],cpfHistory:[]});
+    stubNow(sb, '2026-10-03T12:00:00+08:00'); let serial = 0; sb.uid = table => table + '_' + (++serial); return sb;
+  }
+
+  await testAsync('salary modal corrections survive salary regeneration', async () => {
+    const sb = salarySandbox(); sb.generateAutoSalaryEntries(); const original = sb.DB.income[0];
+    sb.GICS_SECTOR_OPTIONS = []; sb.SG_INSURERS = [];
+    const start = appSrc.indexOf('const ENTITY_SCHEMAS = '), end = appSrc.indexOf('/* Normalise one externally', start);
+    vm.runInContext(appSrc.slice(start,end).replace('const ENTITY_SCHEMAS =','ENTITY_SCHEMAS ='), sb);
+    const values = {...original,net:'777',notes:'Manual correction'};
+    sb._modalState = {table:'income',item:{...original},isNew:false};
+    sb.document = {getElementById:id=>id==='em-body'?{querySelector:selector=>({value:String(values[/data-fkey="([^"]+)"/.exec(selector)[1]]??'')})}:null};
+    sb.saveData = () => true;
+    assert.strictEqual(await sb.entityModalSave(), true); assert.strictEqual(sb.DB.income[0].manualOverride, true);
+    sb.generateAutoSalaryEntries(); assert.strictEqual(sb.DB.income[0].net, 777); assert.strictEqual(sb.DB.income[0].notes, 'Manual correction');
+  });
+
+  test('salary savings at 100% prune obsolete expenses while keeping manual overrides', () => {
+    for (const manual of [false,true]) {
+      const sb = salarySandbox(); sb.generateAutoSalaryCashEntries(); assert.strictEqual(sb.DB.expenses[0].amount, 400);
+      sb.DB.expenses[0].manualOverride = manual; sb.DB.settings.salarySavePct = 100; sb.generateAutoSalaryCashEntries();
+      assert.strictEqual(sb.DB.cashTxns[0].amount, 800); assert.strictEqual(sb.DB.expenses.length, manual ? 1 : 0);
+      sb.DB.settings.salarySavePct = 0; sb.generateAutoSalaryCashEntries();
+      assert.strictEqual(sb.DB.cashTxns.length, 0); assert.strictEqual(sb.DB.expenses[0].amount, manual ? 400 : 800);
+    }
+  });
+
+  test('age 55 CPF generation stops unsupported allocation and preserves previous rows', () => {
+    const sb = salarySandbox(); sb.DB.settings.birthYear = 1971;
+    sb.DB.cpfHistory = [{id:'manual',account:'RA',date:'2026-09-01',amount:7},{id:'existing',auto:'cpf',period:'2026-09',account:'OA',date:'2026-09-25',amount:8}];
+    const before = JSON.stringify(sb.DB.cpfHistory), result = sb.generateAutoCpfEntries();
+    assert.strictEqual(result.skippedSenior, true); assert.strictEqual(result.changed, 0);
+    assert.strictEqual(JSON.stringify(sb.DB.cpfHistory), before);
+  });
+
+  test('tax relief uses low-wage CPF and combines the annual bonus payout before rounding', () => {
+    const sb = freshSandbox({settings:{salary:{grossMonthly:600,annualBonus:300},tax:{},birthYear:1996}});
+    stubNow(sb, '2026-10-03T12:00:00+08:00'); assert.strictEqual(sb.estimateAnnualTax().annualEmpCpf, 840);
+    sb.DB.settings.salary = {grossMonthly:400,annualBonus:0}; assert.strictEqual(sb.estimateAnnualTax().annualEmpCpf, 0);
+  });
+
+  await testAsync('IBKR blocks currency mismatches before mutation and still imports matching currency', async () => {
+    for (const currency of ['USD','SGD']) {
+      const sb = freshSandbox({stocks:[{id:'stock',symbol:'SYN',market:'US',currency:'SGD',shares:0,avgCost:0}],stockTxns:[]});
+      const matched = [{stockId:'stock',symbol:'SYN',market:'US',currency,status:'new',date:'2026-09-01',side:'buy',shares:1,price:100,fees:0}];
+      const overlay = {dataset:{matched:JSON.stringify(matched)},querySelectorAll:()=>[],classList:{remove(){}}};
+      sb.document = {getElementById:()=>overlay}; sb.saveData = () => true;
+      let undo = 0, message = ''; sb.pushUndo = () => { undo++; }; sb.showToast = value => { message = value; };
+      assert.strictEqual(await sb.ibkrConfirmImport(), currency === 'SGD');
+      assert.strictEqual(sb.DB.stockTxns.length, currency === 'SGD' ? 1 : 0); assert.strictEqual(undo, currency === 'SGD' ? 1 : 0);
+      assert.strictEqual(sb._ibkrImportInFlight, false); if (currency === 'USD') assert.match(message, /USD.*SGD.*No trades were added/);
+    }
+    const sb = freshSandbox({stocks:[],stockTxns:[]});
+    const trades = ['USD','SGD'].map(currency=>({symbol:'SYN',market:'US',currency,status:'new-stock',date:'2026-09-01',side:'buy',shares:1,price:100,fees:0}));
+    sb.document = {getElementById:()=>({dataset:{matched:JSON.stringify(trades)},querySelectorAll:()=>[]})};
+    assert.strictEqual(await sb.ibkrConfirmImport(), false); assert.strictEqual(sb.DB.stocks.length, 0);
+  });
+
+  test('current totals stop at Singapore today across the UTC-to-SGT midnight boundary', () => {
+    const sb = freshSandbox({settings:{fxRates:{},fxOverrides:{}},cash:[{id:'cash',amount:100,currency:'SGD',asOf:'2026-01-01'}],
+      cashTxns:[{cashAccountId:'cash',type:'deposit',date:'2026-10-04',amount:20},{cashAccountId:'cash',type:'deposit',date:'2026-10-05',amount:50}],
+      stocks:[{id:'stock',shares:1,avgCost:100}],stockTxns:[{stockId:'stock',date:'2026-10-04',side:'buy',shares:1,price:100,fees:0},{stockId:'stock',cashAccountId:'cash',date:'2026-10-05',side:'buy',shares:1,price:100,fees:0}],
+      cpfBalances:{OA:100,anchorDate:'2026-01-01'},cpfHistory:[{account:'OA',date:'2026-10-04',amount:20},{account:'OA',date:'2026-10-05',amount:50}],
+      income:[{date:'2026-10-04',gross:400,net:400},{date:'2026-10-05',gross:1000,net:1000}],expenses:[{date:'2026-10-04',amount:50,currency:'SGD'},{date:'2026-10-05',amount:900,currency:'SGD'}]});
+    stubNow(sb, '2026-10-03T16:30:00.000Z');
+    assert.strictEqual(sb.deriveCashBalance(sb.DB.cash[0]), 120); assert.strictEqual(sb.deriveStockPosition('stock').shares, 2);
+    assert.strictEqual(sb.cpfEffectiveBalances().OA, 120); assert.strictEqual(sb.annualIncomeSGD(), 400);
+    assert.strictEqual(sb.annualExpensesSGD().annual, 50); assert.strictEqual(sb.derivedMonthlySavingsSGD(), 350 / 12);
+    sb.DB.income = sb.DB.income.filter(row=>row.date==='2026-10-05'); sb.DB.expenses = sb.DB.expenses.filter(row=>row.date==='2026-10-05');
+    assert.strictEqual(sb.annualIncomeSGD(), 0); assert.strictEqual(sb.annualExpensesSGD().annual, 0); assert.strictEqual(sb.derivedMonthlySavingsSGD(), 0);
+    sb.DB.stockTxns = sb.DB.stockTxns.filter(row=>row.date==='2026-10-05'); assert.strictEqual(sb.deriveStockPosition('stock'), null);
+  });
+
+  test('missing expense FX blocks FIRE verdicts even when the target is manual', () => {
+    for (const fireTarget of [null,100000]) {
+      const sb = freshSandbox({settings:{birthYear:1990,salary:{},fireTarget,fireMultiple:25,fxRates:{},fxOverrides:{}},expenses:[{date:'2026-10-01',amount:1,currency:'SGD'},{date:'2026-10-01',amount:1000,currency:'EUR'}],income:[{date:'2026-10-01',net:500,gross:500}]});
+      stubNow(sb, '2026-10-03T12:00:00+08:00'); if (fireTarget == null) assert.strictEqual(sb.fireNumberSGD(), null);
+      assert.strictEqual(sb.derivedMonthlySavingsSGD(), null); const root = {innerHTML:''};
+      sb.document = {getElementById:()=>root}; sb.setRenderCcy = () => {}; sb._liquidAssetValueInfo = () => ({total:100000,incomplete:false}); sb._clearProjectionChart = () => {};
+      sb.renderProjections(); assert.match(root.innerHTML, /Projection unavailable/); assert.match(root.innerHTML, /Set FX rates for expenses/); assert.doesNotMatch(root.innerHTML, /On track|reach it around/);
+    }
+  });
+
+  await testAsync('auto refresh includes watchlist-only quotes and each unpinned foreign currency', async () => {
+    const sb = freshSandbox({stocks:[],watchlist:[{symbol:'SYN',market:'US'}],cash:[],crypto:[],expenses:[],settings:{fxOverrides:{USDSGD:1.4},fxRates:{}}});
+    sb.document = {hidden:false}; sb.autoRefreshEnabled = () => true; sb.isStockMarketDaySGT = () => true;
+    let quotes = 0, fx = 0; sb.refreshStockPrices = async () => { quotes++; }; sb.refreshFx = async () => { fx++; };
+    await sb.autoRefreshTick(); assert.strictEqual(quotes, 1); assert.strictEqual(fx, 0);
+    sb.DB.watchlist = []; sb.DB.cash = [{currency:'EUR',amount:1}]; await sb.autoRefreshTick(); assert.strictEqual(fx, 1);
+    sb.DB.cash = []; sb.DB.expenses = [{currency:'JPY',amount:1}]; await sb.autoRefreshTick(); assert.strictEqual(fx, 2);
+    sb.DB.expenses = []; await sb.autoRefreshTick(); assert.strictEqual(fx, 2);
+  });
+
+  await testAsync('actual app and vault reject a save during enable, then retain the retried edit after reopen', async () => {
+    const {webcrypto} = require('node:crypto');
+    const {createManager} = require('../Worker/kjr-vault.js');
+    const sb = freshSandbox({cash:[{id:'synthetic',amount:1}],settings:{},_priceCache:{}});
+    const storage = sb.localStorage;
+    Object.defineProperty(storage, 'length', {get:()=>storage._data.size});
+    storage.key = index => Array.from(storage._data.keys())[index] ?? null;
+    const dbKey = 'kjr-pf-db-v1';
+    storage.setItem(dbKey, JSON.stringify(sb.DB));
+    let release, entered;
+    const gate = new Promise(resolve=>{release=resolve;});
+    const started = new Promise(resolve=>{entered=resolve;});
+    const delayedCrypto = {getRandomValues:array=>webcrypto.getRandomValues(array),subtle:{
+      importKey:(...args)=>webcrypto.subtle.importKey(...args),
+      deriveKey:async(...args)=>{entered();await gate;return webcrypto.subtle.deriveKey(...args);},
+      encrypt:(...args)=>webcrypto.subtle.encrypt(...args),decrypt:(...args)=>webcrypto.subtle.decrypt(...args)
+    }};
+    const options = {storage,crypto:delayedCrypto,envelopeKey:'synthetic-vault',sensitiveKeys:[dbKey,vm.runInContext('LK_PRICE_CACHE',sb)]};
+    const vault = createManager(options);
+    sb._vaultManager = vault; sb.protectedStorage = vault.storage; sb.getSyncUrl = () => '';
+    vm.runInContext(extractFunction('saveLocal')+'\n'+extractFunction('_readStoredLocalPayload'), sb);
+    const enabling = vault.enable('synthetic integration passphrase');
+    await started;
+    sb.DB.cash[0].amount = 42;
+    assert.strictEqual(await sb.saveData(), false);
+    assert.strictEqual(sb._hasLocalUnsaved(), true);
+    assert.strictEqual(JSON.parse(storage.getItem(dbKey)).cash[0].amount, 1);
+    release(); await enabling;
+    assert.strictEqual(sb._hasLocalUnsaved(), true);
+    assert.strictEqual(await sb.saveData(), true);
+    await vault.flush();
+    assert.strictEqual(sb._hasLocalUnsaved(), false);
+    assert.strictEqual(storage.getItem(dbKey), null);
+    vault.lock();
+    const reopened = createManager({...options,crypto:webcrypto});
+    await reopened.unlock('synthetic integration passphrase');
+    assert.strictEqual(JSON.parse(reopened.storage.getItem(dbKey)).cash[0].amount, 42);
+  });
+
+  await testAsync('older encrypted-save completion cannot clear an edit refused during a vault transition', async () => {
+    const sb = freshSandbox(); let busy = false, release;
+    const pending = new Promise(resolve=>{release=resolve;});
+    sb._vaultManager = {isBusy:()=>busy,isEnabled:()=>true,flush:()=>pending};
+    sb.getSyncUrl = () => '';
+    const first = sb.saveData();
+    busy = true;
+    const oldRevision = sb._localSaveRevision;
+    assert.strictEqual(sb.saveData(), false);
+    assert.strictEqual(sb._localSaveRevision, oldRevision + 1);
+    release();
+    assert.strictEqual(await first, false);
+    assert.strictEqual(sb._hasLocalUnsaved(), true);
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

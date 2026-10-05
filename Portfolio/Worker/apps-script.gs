@@ -33,14 +33,17 @@ const SHEET_NAME = 'Data';
 const CELL       = 'A1';
 const SCHEMA     = 'kujira-portfolio';
 
-/* Chunked storage (A2). A single sheet cell tops out at 50,000 chars, and
-   years of transactions/changelog will outgrow that. A1 holds either the
-   legacy raw JSON blob (old client compatibility) or a small chunk header
-   {chunked:true, parts:N}; when chunked, the real payload is split across
-   A2:A(N+1), CHUNK_SIZE chars per cell. C1 (the concurrency stamp) is
-   unaffected either way. doGet always reassembles and returns the full
-   payload, so an old client never has to know chunking exists. */
+/* A1 publishes a verified payload generation and its revision together.
+   Alternating managed D/E columns hold complete chunks, leaving the active
+   generation untouched during staging. C1 is only a human-readable mirror.
+   Legacy A1 JSON blobs and A2 chunks remain readable. New pointers deliberately
+   start with a non-JSON sentinel so older backend readers FAIL CLOSED rather
+   than returning stale A2 chunks after a backend rollback. Do not roll back to
+   old backend code after a v2 write, restore/export through this reader first.
+   No live migration occurs until this source is deployed and a save succeeds. */
 const CHUNK_SIZE = 49000;
+const PAYLOAD_HEADER_PREFIX = 'KJR-PAYLOAD-V2:';
+const PAYLOAD_SLOT_MARKER = 'Kujira payload storage v2 (managed)';
 
 const PRICE_CACHE_TTL_SEC = 300;
 
@@ -74,61 +77,90 @@ function json_(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-/* Read A1 and, if it is a chunk header, reassemble A2:A(N+1) into the full
-   JSON string. Returns the raw JSON text either way (never the header
-   itself). A1 empty/missing returns '{}' same as the pre-chunking behaviour. */
-function readPayloadRaw_(sh) {
-  const a1 = sh.getRange(CELL).getValue();
-  const a1Str = a1 ? a1.toString() : '{}';
-  let header;
-  try { header = JSON.parse(a1Str); } catch (_) { header = null; }
-  if (header && header.chunked === true && Number(header.parts) > 0) {
-    const parts = Number(header.parts);
-    const cells = sh.getRange(2, 1, parts, 1).getValues(); // A2:A(parts+1)
-    return cells.map(row => (row[0] != null ? row[0].toString() : '')).join('');
-  }
-  return a1Str;
+function normaliseRevision_(value) {
+  if (value == null || value === '') return '';
+  const text = String(value);
+  const milliseconds = Object.prototype.toString.call(value) === '[object Date]'
+    ? value.getTime() : Date.parse(text);
+  return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : text;
 }
 
-/* Write the JSON string, splitting across A2:A(N+1) when it would not fit
-   a single cell. Clears any stale chunk cells left over from a previous
-   write in the other mode (or a previous write with more chunks) so a
-   shrinking payload never leaves orphaned old chunks behind for the next
-   doGet to (harmlessly, but wastefully) carry around.
-   Sheets formula trap: a JSON chunk can start with '=' or '+' and would be
-   parsed as a formula if the cell is left in automatic format, same class
-   of bug the C1 timestamp already guards against. Every cell we write to
-   (header or chunk) is forced to plain-text format first. */
-function writePayloadRaw_(sh, jsonStr) {
-  // How many chunk cells (if any) did the previous write leave behind?
-  // Read the previous header before we overwrite A1.
-  const prevA1 = sh.getRange(CELL).getValue();
-  let prevParts = 0;
-  try {
-    const prevHeader = JSON.parse(prevA1 ? prevA1.toString() : '');
-    if (prevHeader && prevHeader.chunked === true && Number(prevHeader.parts) > 0) {
-      prevParts = Number(prevHeader.parts);
-    }
-  } catch (_) { /* legacy single-cell body, prevParts stays 0 */ }
-
-  if (jsonStr.length <= CHUNK_SIZE) {
-    // Legacy single-cell mode.
-    sh.getRange(CELL).setNumberFormat('@').setValue(jsonStr);
-    if (prevParts > 0) sh.getRange(2, 1, prevParts, 1).clearContent(); // mode switch: drop stale chunks
-    return;
+function parsePayloadHeader_(raw) {
+  const modern = raw.indexOf(PAYLOAD_HEADER_PREFIX) === 0;
+  let parsed;
+  try { parsed = JSON.parse(modern ? raw.slice(PAYLOAD_HEADER_PREFIX.length) : raw); }
+  catch (_) {
+    if (modern) throw new Error('Stored payload header is invalid');
+    return null;
   }
+  if (modern && (!parsed || parsed.storageVersion !== 2 || parsed.chunked !== true)) {
+    throw new Error('Stored payload header is invalid');
+  }
+  return parsed;
+}
 
+function readPayloadSnapshot_(sh) {
+  const value = sh.getRange(CELL).getValue();
+  const rawHeader = value ? String(value) : '{}';
+  const header = parsePayloadHeader_(rawHeader);
+  if (header && header.chunked === true) {
+    const parts = Number(header.parts);
+    const modern = header.storageVersion === 2;
+    const column = modern ? Number(header.column) : 1;
+    if (!Number.isInteger(parts) || parts < 1 || parts > 20 ||
+        (modern && column !== 4 && column !== 5)) {
+      throw new Error('Stored payload header is invalid');
+    }
+    const raw = sh.getRange(2, column, parts, 1).getValues()
+      .map(row => row[0] != null ? String(row[0]) : '').join('');
+    if (modern && (raw.length !== header.characters || typeof header.savedAt !== 'string' ||
+        !Number.isFinite(Date.parse(header.savedAt)) || normaliseRevision_(header.savedAt) !== header.savedAt)) {
+      throw new Error('Stored payload generation is incomplete');
+    }
+    return { raw: raw, savedAt: modern ? header.savedAt : normaliseRevision_(sh.getRange('C1').getValue()) };
+  }
+  return { raw: rawHeader, savedAt: normaliseRevision_(sh.getRange('C1').getValue()) };
+}
+
+function readPayloadRaw_(sh) {
+  return readPayloadSnapshot_(sh).raw;
+}
+
+function claimPayloadSlot_(sh, column) {
+  const marker = sh.getRange(1, column);
+  if (String(marker.getValue() || '') === PAYLOAD_SLOT_MARKER) return;
+  const rowCount = Math.max(1, sh.getLastRow());
+  if (sh.getRange(1, column, rowCount, 1).getValues().some(row => row[0] !== '' && row[0] != null)) {
+    throw new Error('Payload staging column contains unrecognised data. Move custom Data sheet columns D/E before retrying.');
+  }
+  marker.setNumberFormat('@').setValue(PAYLOAD_SLOT_MARKER);
+}
+
+/* Flush and verify the inactive slot before the single-cell publication.
+   Every chunk is plain text, including one starting with '='. Never clear
+   the active slot while staging or copy old data back into A2 for compatibility. */
+function writePayloadRaw_(sh, jsonStr, savedAt) {
+  const previous = parsePayloadHeader_(String(sh.getRange(CELL).getValue() || '{}'));
+  const column = previous && previous.storageVersion === 2 && previous.column === 4 ? 5 : 4;
+  claimPayloadSlot_(sh, column);
   const parts = [];
   for (let i = 0; i < jsonStr.length; i += CHUNK_SIZE) parts.push(jsonStr.slice(i, i + CHUNK_SIZE));
-
-  const header = JSON.stringify({ chunked: true, parts: parts.length });
+  const staged = sh.getRange(2, column, parts.length, 1);
+  staged.setNumberFormat('@');
+  staged.setValues(parts.map(part => [part]));
+  SpreadsheetApp.flush();
+  const verified = staged.getValues().map(row => row[0] != null ? String(row[0]) : '').join('');
+  if (verified !== jsonStr) throw new Error('Staged payload did not verify, previous data was retained');
+  JSON.parse(verified);
+  const header = PAYLOAD_HEADER_PREFIX + JSON.stringify({ chunked: true, storageVersion: 2, column: column,
+    parts: parts.length, characters: jsonStr.length, savedAt: savedAt });
   sh.getRange(CELL).setNumberFormat('@').setValue(header);
-  const chunkRange = sh.getRange(2, 1, parts.length, 1);
-  chunkRange.setNumberFormat('@');
-  chunkRange.setValues(parts.map(p => [p]));
-  if (prevParts > parts.length) {
-    sh.getRange(2 + parts.length, 1, prevParts - parts.length, 1).clearContent(); // shrank: drop the tail
-  }
+  SpreadsheetApp.flush();
+  if (String(sh.getRange(CELL).getValue()) !== header) throw new Error('Payload publication did not verify');
+  // The revision is already authoritative in A1. Mirror failure must not
+  // invalidate an otherwise committed save or weaken the next CAS check.
+  try { sh.getRange('C1').setValue(savedAt); }
+  catch (err) { Logger.log('Timestamp mirror refresh failed: ' + err.message); }
 }
 
 function doGet(e) {
@@ -141,31 +173,25 @@ function doGet(e) {
     if (action === 'fx')     return json_(fetchYahooFx_(e.parameter.pairs || ''));
     if (action === 'history') return json_(fetchYahooHistory_(e.parameter.symbols || '', e.parameter.range || '1y'));
 
-    const sh  = getSheet_();
-    // Always reassembled here, so a client (old or new) only ever sees the
-    // full payload, never a chunk header. That is what keeps old clients
-    // working unchanged after this backend starts chunking large payloads.
-    const payload = readPayloadRaw_(sh);
-    let parsed;
-    try { parsed = JSON.parse(payload); }
-    catch (_) {
-      // Corrupt stored payload (manual sheet edit, or a torn read while a
-      // chunked write is mid-flight). NEVER return a schema-stamped empty
-      // object here: a pulling client would accept it as valid and replace
-      // its local data with nothing. Failing loudly makes the client show
-      // "failed" and retry, which is the safe outcome.
-      return json_({ error: 'Stored payload unreadable, refusing to return empty data. Retry, and check the Data sheet if this persists.' });
+    const lock = LockService.getScriptLock();
+    try { lock.waitLock(10000); }
+    catch (_) { return json_({ error: 'Sheet busy, try again' }); }
+    try {
+      // The same lock also protects legacy payload/revision pairs.
+      const snapshot = readPayloadSnapshot_(getSheet_());
+      let parsed;
+      try { parsed = JSON.parse(snapshot.raw); }
+      catch (_) {
+        return json_({ error: 'Stored payload unreadable, refusing to return empty data. Retry, and check the Data sheet if this persists.' });
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return json_({ error: 'Stored payload is not an object, refusing to return empty data.' });
+      }
+      if (snapshot.savedAt) parsed._savedAt = snapshot.savedAt;
+      return json_(parsed);
+    } finally {
+      lock.releaseLock();
     }
-
-    // Attach the server's own timestamp so the client can use it as the
-    // optimistic-concurrency token. Without this, the client falls back to
-    // the blob's updatedAt, which it set itself, milliseconds before the
-    // save, and that never matches C1. Result: every reload + edit
-    // triggers a false-positive sync conflict.
-    const savedAt = sh.getRange('C1').getValue();
-    if (savedAt) parsed._savedAt = String(savedAt);
-
-    return json_(parsed);
   } catch (err) {
     return json_({ error: err.message });
   }
@@ -273,9 +299,9 @@ function doPost(e) {
       // but is indistinguishable here from a client that simply omitted the field
       // by mistake or bug. This is a deliberate soft spot, not a proven-safe one,
       // flagged rather than silently relied upon.
+      const currentRemoteAt = readPayloadSnapshot_(sh).savedAt;
       if (data.lastSeenRemoteAt) {
-        const currentRemoteAt = sh.getRange('C1').getValue();
-        if (currentRemoteAt && String(currentRemoteAt) !== data.lastSeenRemoteAt) {
+        if (currentRemoteAt && currentRemoteAt !== normaliseRevision_(data.lastSeenRemoteAt)) {
           return json_({
             conflict: true,
             remoteAt: String(currentRemoteAt),
@@ -304,9 +330,10 @@ function doPost(e) {
         });
       }
 
-      stamp = new Date().toISOString();
-      writePayloadRaw_(sh, JSON.stringify(clean));
-      sh.getRange('C1').setValue(stamp);
+      // Revisions advance even when two accepted saves share a millisecond.
+      const priorTime = Date.parse(currentRemoteAt);
+      stamp = new Date(Math.max(Date.now(), Number.isFinite(priorTime) ? priorTime + 1 : 0)).toISOString();
+      writePayloadRaw_(sh, JSON.stringify(clean), stamp);
     } finally {
       lock.releaseLock();
     }

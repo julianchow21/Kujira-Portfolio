@@ -106,15 +106,15 @@ function runTests() {
     // employee = 1000
     // total = 1850
     // net = 4000
-    // alloc: OA 23%, SA 6%, MA 8%
+    // Allocation uses the CPF Board's ratios of the rounded contribution.
     assert.strictEqual(res.wage, 5000);
     assert.strictEqual(res.employerCPF, 850);
     assert.strictEqual(res.employeeCPF, 1000);
     assert.strictEqual(res.total, 1850);
     assert.strictEqual(res.net, 4000);
-    assert.strictEqual(res.byAccount.OA, 1150); // 23% of 5000
-    assert.strictEqual(res.byAccount.SA, 300);  // 6% of 5000
-    assert.strictEqual(res.byAccount.MA, 400);  // 8% of 5000
+    assert.strictEqual(res.byAccount.OA, 1150.14);
+    assert.strictEqual(res.byAccount.SA, 299.89);
+    assert.strictEqual(res.byAccount.MA, 399.97);
   });
 
   test('computeCpfContribution - above ceiling (8000)', () => {
@@ -146,6 +146,87 @@ function runTests() {
     assert.strictEqual(res.allocated, false);
   });
 
+  // Expected amounts are the CPF Board 2026 Table 1 formulas, including the
+  // low-wage taper and whole-dollar contribution rounding, not flat rates.
+  test('computeCpfContribution - wage thresholds at $50, $500 and $750', () => {
+    const cases = [
+      [50, 0, 0], [50.01, 9, 0], [500, 85, 0], [500.01, 85, 0],
+      [501.66, 86, 0], [501.67, 86, 1], [600, 162, 60],
+      [749.99, 277, 149], [750, 278, 150], [750.01, 278, 150]
+    ];
+    for (const [gross, total, employee] of cases){
+      const c = core.computeCpfContribution(gross, 30);
+      assert.strictEqual(c.total, total, `total at ${gross}`);
+      assert.strictEqual(c.employeeCPF, employee, `employee at ${gross}`);
+      assert.strictEqual(c.employerCPF, total - employee, `employer at ${gross}`);
+      assert.strictEqual(c.net, core._round2(gross - employee));
+    }
+  });
+
+  test('computeCpfContribution - total rounds half up, employee always floors', () => {
+    const c = core.computeCpfContribution(1001, 30);
+    assert.deepStrictEqual([c.total, c.employeeCPF, c.employerCPF, c.net], [370, 200, 170, 801]);
+    const tie = core.computeCpfContribution(1350, 30);
+    assert.deepStrictEqual([tie.total, tie.employeeCPF, tie.employerCPF], [500, 270, 230]);
+    const cents = core.computeCpfContribution(1004.99, 30);
+    assert.deepStrictEqual([cents.total, cents.employeeCPF, cents.employerCPF], [372, 200, 172]);
+  });
+
+  test('computeCpfContribution - low-wage taper and rounding across every age band', () => {
+    const cases = [[55,162,60], [60,150,54], [65,113,37], [70,77,22], [71,60,15]];
+    for (const [age,total,employee] of cases){
+      const c = core.computeCpfContribution(600,age);
+      assert.strictEqual(c.total,total, `total for age ${age}`);
+      assert.strictEqual(c.employeeCPF,employee, `employee for age ${age}`);
+      assert.strictEqual(c.employerCPF,total-employee);
+    }
+    assert.strictEqual(core.computeCpfContribution(500,65).total,63);
+    assert.strictEqual(core.computeCpfContribution(750,65).employeeCPF,93);
+    assert.strictEqual(core.computeCpfContribution(750,65).total,188);
+  });
+
+  test('computeCpfContribution - OW ceiling does not cap Additional Wages', () => {
+    const capped = core.computeCpfContribution(10000,30,6000);
+    assert.strictEqual(capped.wage,8000);
+    assert.deepStrictEqual([capped.total,capped.employeeCPF,capped.net], [5180,2800,13200]);
+    const largerAw = core.computeCpfContribution(5000,30,10000);
+    assert.deepStrictEqual([largerAw.total,largerAw.employeeCPF], [5550,3000]);
+  });
+
+  test('computeCpfContribution - OW and AW share the monthly wage band and round once', () => {
+    const threshold = core.computeCpfContribution(500,30,250);
+    assert.deepStrictEqual([threshold.total,threshold.employeeCPF,threshold.net], [278,150,600]);
+    // 1,001 OW + 4 AW has 201 employee CPF, rounding the two separately loses $1.
+    const combined = core.computeCpfContribution(1001,30,4);
+    assert.deepStrictEqual([combined.total,combined.employeeCPF], [372,201]);
+    assert.strictEqual(core.computeCpfContribution(0,30,500).employeeCPF,0);
+  });
+
+  test('computeCpfContribution - low-wage allocations use actual CPF, never negative OA', () => {
+    const c = core.computeCpfContribution(500,30);
+    assert.deepStrictEqual(c.byAccount, { OA:52.84, SA:13.78, MA:18.38 });
+    // The allocation table's worked example for a $100 CPF contribution.
+    const example = core.computeCpfContribution(519.48,30);
+    assert.strictEqual(example.total,100);
+    assert.deepStrictEqual(example.byAccount,{OA:62.17,SA:16.21,MA:21.62});
+    for (const gross of [0,50,50.01,500,600,750,1001,4321.99]){
+      for (const age of [30,40,48,54]){
+        const result = core.computeCpfContribution(gross,age);
+        const accounts = Object.values(result.byAccount);
+        assert(accounts.every(amount=>amount>=0), `nonnegative allocation at ${gross}/${age}`);
+        assert.strictEqual(core._round2(accounts.reduce((sum,n)=>sum+n,0)),result.total);
+      }
+    }
+  });
+
+  test('computeCpfContribution - invalid and negative wages produce finite zero amounts', () => {
+    for (const invalid of [-1,NaN,Infinity,-Infinity,'invalid']){
+      const c = core.computeCpfContribution(invalid,30,invalid);
+      assert.deepStrictEqual([c.wage,c.total,c.employeeCPF,c.employerCPF,c.net],[0,0,0,0,0]);
+      assert.deepStrictEqual(c.byAccount,{OA:0,SA:0,MA:0});
+    }
+  });
+
   // 4b. Direct boundary tests for the CPF age seams via the exported pure
   // rate/allocation lookups, locking in each `<=` cutoff exactly at the
   // boundary age and the first age past it (35/45/50/55/60/65/70).
@@ -165,19 +246,20 @@ function runTests() {
     assert.deepStrictEqual(core.cpfContribRatesForAge(undefined), { employer:17.0, employee:20.0 });
   });
 
-  test('cpfAllocationForAge - boundary ages 35/36, 45/46, 50/51, 55/56', () => {
-    assert.deepStrictEqual(core.cpfAllocationForAge(35), { OA:23.0, SA:6.0,  MA:8.0  }); // <=35 band
-    assert.deepStrictEqual(core.cpfAllocationForAge(36), { OA:21.0, SA:7.0,  MA:9.0  }); // 35<age<=45
-    assert.deepStrictEqual(core.cpfAllocationForAge(45), { OA:21.0, SA:7.0,  MA:9.0  }); // <=45 band
-    assert.deepStrictEqual(core.cpfAllocationForAge(46), { OA:19.0, SA:8.0,  MA:10.0 }); // 45<age<=50
-    assert.deepStrictEqual(core.cpfAllocationForAge(50), { OA:19.0, SA:8.0,  MA:10.0 }); // <=50 band
-    assert.deepStrictEqual(core.cpfAllocationForAge(51), { OA:15.0, SA:11.5, MA:10.5 }); // 50<age<=55
-    assert.deepStrictEqual(core.cpfAllocationForAge(55), { OA:15.0, SA:11.5, MA:10.5 }); // <=55 band
+  test('cpfAllocationForAge - allocation ratios and conservative age 55 cutoff', () => {
+    assert.deepStrictEqual(core.cpfAllocationForAge(35), { OA:0.6217, SA:0.1621, MA:0.2162 }); // <=35 band
+    assert.deepStrictEqual(core.cpfAllocationForAge(36), { OA:0.5677, SA:0.1891, MA:0.2432 }); // 35<age<=45
+    assert.deepStrictEqual(core.cpfAllocationForAge(45), { OA:0.5677, SA:0.1891, MA:0.2432 }); // <=45 band
+    assert.deepStrictEqual(core.cpfAllocationForAge(46), { OA:0.5136, SA:0.2162, MA:0.2702 }); // 45<age<=50
+    assert.deepStrictEqual(core.cpfAllocationForAge(50), { OA:0.5136, SA:0.2162, MA:0.2702 }); // <=50 band
+    assert.deepStrictEqual(core.cpfAllocationForAge(51), { OA:0.4055, SA:0.3108, MA:0.2837 }); // 50<age<=55
+    assert.deepStrictEqual(core.cpfAllocationForAge(54), { OA:0.4055, SA:0.3108, MA:0.2837 });
+    assert.strictEqual(core.cpfAllocationForAge(55), null); // RA/FRS routing is not automated
     assert.strictEqual(core.cpfAllocationForAge(56), null); // >55, not automated
   });
 
   test('cpfAllocationForAge - null age treated as <=35 band, no allocation past 55', () => {
-    assert.deepStrictEqual(core.cpfAllocationForAge(null), { OA:23.0, SA:6.0, MA:8.0 });
+    assert.deepStrictEqual(core.cpfAllocationForAge(null), { OA:0.6217, SA:0.1621, MA:0.2162 });
     assert.strictEqual(core.cpfAllocationForAge(60), null);
   });
 
@@ -465,19 +547,19 @@ function runTests() {
     assert.strictEqual(c.series.length, 121);
     assert.strictEqual(c.series[0], 40000);
     assert.strictEqual(c.series[120] > c.series[0], true);
-    assert.strictEqual(c.series[60], 170712.91);
+    assert.strictEqual(c.series[60], 170712.39);
   });
 
-  test('kjrProjectCpf - contributions stop once age exceeds 55, interest keeps accruing', () => {
-    // currentAge 50, zero interest so growth is contributions only: age hits 56
-    // (cpfAllocationForAge stops allocating above 55) at month 73 = (56-50)*12+1.
+  test('kjrProjectCpf - contributions stop at 55 because RA/FRS routing is unavailable', () => {
+    // currentAge 50, zero interest so growth is contributions only: age hits 55
+    // at month 61 = (55-50)*12+1, when the allocation is no longer modelled.
     const c = core.kjrProjectCpf({
       balances: { OA:0, SA:0, MA:0 }, grossMonthly:5000, currentAge:50, months:90,
       rates: { OA:0, SA:0, MA:0, RA:0, extraFirst60k:0, extraFirst30kAge55:0 }
     });
-    assert.strictEqual(c.series[71] - c.series[70], 1850); // still contributing at age 55
-    assert.strictEqual(c.series[73] - c.series[72], 0);    // age 56, contributions stopped
-    assert.strictEqual(c.series[90] - c.series[73], 0);    // stays flat with zero interest
+    assert.strictEqual(core._round2(c.series[60] - c.series[59]), 1850); // still contributing at age 54
+    assert.strictEqual(c.series[61] - c.series[60], 0); // age 55, allocation stopped
+    assert.strictEqual(c.series[90] - c.series[61], 0); // stays flat with zero interest
   });
 
   test('kjrProjectCpf - zero grossMonthly means interest-only growth, series length matches months', () => {
@@ -776,11 +858,14 @@ function runTests() {
 
   // 25. Testing computeCpfContribution (age boundary, rounding absorption, null age)
   test('computeCpfContribution - exact age 55 vs 56 boundary rates', () => {
-    const at55 = core.computeCpfContribution(5000, 55); // <=55 band: 17%/20% + OA/SA/MA allocation
+    const at55 = core.computeCpfContribution(5000, 55); // Full deductions, unsupported RA/FRS allocation
     assert.strictEqual(at55.employerCPF, 850);
     assert.strictEqual(at55.employeeCPF, 1000);
-    assert.strictEqual(at55.allocated, true);
-    assert.deepStrictEqual(at55.byAccount, { OA: 750, SA: 575, MA: 525 });
+    assert.strictEqual(at55.allocated, false);
+    assert.deepStrictEqual(at55.byAccount, {});
+    const at54 = core.computeCpfContribution(5000, 54);
+    assert.strictEqual(at54.allocated, true);
+    assert.deepStrictEqual(at54.byAccount, { OA: 750.17, SA: 574.98, MA: 524.85 });
 
     const at56 = core.computeCpfContribution(5000, 56); // 55<age<=60 band: 16%/18%, no allocation
     assert.strictEqual(at56.employerCPF, 800);
@@ -800,7 +885,7 @@ function runTests() {
     assert.strictEqual(res.employerCPF, 1020); // 17% of 6000
     assert.strictEqual(res.employeeCPF, 1200); // 20% of 6000
     assert.strictEqual(res.allocated, true);
-    assert.deepStrictEqual(res.byAccount, { OA: 1380, SA: 360, MA: 480 });
+    assert.deepStrictEqual(res.byAccount, { OA: 1380.18, SA: 359.86, MA: 479.96 });
   });
 
   // 26. Testing kjrProjectCpf (extra pool cap, null-age contributions, zero months)
