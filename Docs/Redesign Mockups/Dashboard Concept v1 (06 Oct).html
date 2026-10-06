@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kujira Portfolio Redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap">
+<style>
+/* Layout: the live desktop mockup leads; the phone view sits beside the reasoning; a rollout table closes. Dark-first, Kujira teal kept for brand only. */
+:root{
+  color-scheme: dark;
+  --page:#070B13;
+  --app:#0A101B;
+  --side:#0C1320;
+  --surface:#101826;
+  --surface-2:#162033;
+  --line:rgba(148,163,184,.10);
+  --line-2:rgba(148,163,184,.20);
+  --text:#E8ECF4;
+  --text-2:#9BA5B9;
+  --text-3:#68728A;
+  --accent:#2DD4BF;
+  --accent-ink:#03201C;
+  --accent-soft:rgba(45,212,191,.12);
+  --gain:#43D193;
+  --loss:#F2707A;
+  --gain-soft:rgba(67,209,147,.12);
+  --loss-soft:rgba(242,112,122,.12);
+  --warn:#E9B65C;
+  --warn-soft:rgba(233,182,92,.12);
+  --c-stocks:#7398FF;
+  --c-cash:#A9B6CA;
+  --c-cpf:#AB8DFB;
+  --c-re:#E2B66D;
+  --c-crypto:#EF8768;
+  --shadow:0 30px 80px -30px rgba(0,0,0,.7);
+  --font:'Manrope',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;
+  --r:10px;
+  --r-lg:16px;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme: light;
+    --page:#E9E6DE; --app:#F6F4EE; --side:#EFECE4; --surface:#FFFFFF; --surface-2:#F2EFE7;
+    --line:rgba(58,50,36,.10); --line-2:rgba(58,50,36,.18);
+    --text:#1B1E23; --text-2:#5A6068; --text-3:#8C9198;
+    --accent:#0F6E56; --accent-ink:#FFFFFF; --accent-soft:rgba(15,110,86,.10);
+    --gain:#13845A; --loss:#C7404B; --gain-soft:rgba(19,132,90,.10); --loss-soft:rgba(199,64,75,.10);
+    --warn:#A46A0E; --warn-soft:rgba(164,106,14,.10);
+    --c-stocks:#3F62D4; --c-cash:#7A889B; --c-cpf:#7656D3; --c-re:#B5822E; --c-crypto:#CF5E3C;
+    --shadow:0 30px 70px -35px rgba(60,48,28,.35);
+  }
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --page:#E9E6DE; --app:#F6F4EE; --side:#EFECE4; --surface:#FFFFFF; --surface-2:#F2EFE7;
+  --line:rgba(58,50,36,.10); --line-2:rgba(58,50,36,.18);
+  --text:#1B1E23; --text-2:#5A6068; --text-3:#8C9198;
+  --accent:#0F6E56; --accent-ink:#FFFFFF; --accent-soft:rgba(15,110,86,.10);
+  --gain:#13845A; --loss:#C7404B; --gain-soft:rgba(19,132,90,.10); --loss-soft:rgba(199,64,75,.10);
+  --warn:#A46A0E; --warn-soft:rgba(164,106,14,.10);
+  --c-stocks:#3F62D4; --c-cash:#7A889B; --c-cpf:#7656D3; --c-re:#B5822E; --c-crypto:#CF5E3C;
+  --shadow:0 30px 70px -35px rgba(60,48,28,.35);
+}
+*{box-sizing:border-box}
+body{background:var(--page);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.page{max-width:1240px;margin:0 auto;padding-inline:clamp(16px,3vw,32px);padding-block:40px 72px;display:grid;gap:40px}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* Intro */
+.intro{display:grid;gap:10px;max-width:68ch}
+.eyebrow{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.intro h1{font-size:clamp(26px,4vw,38px);font-weight:700;letter-spacing:-.02em;line-height:1.15;margin:0;text-wrap:balance}
+.intro p{margin:0;color:var(--text-2);font-size:15px}
+.sample{font-size:12px;color:var(--text-3)}
+
+/* App mock */
+.stage{display:grid;gap:12px}
+.app{container-type:inline-size;position:relative;background:var(--app);border:1px solid var(--line-2);border-radius:18px;overflow:hidden;box-shadow:var(--shadow);display:grid;grid-template-columns:224px minmax(0,1fr);min-height:760px}
+.caption{font-size:12.5px;color:var(--text-3);margin:0;display:flex;gap:14px;flex-wrap:wrap}
+.caption b{color:var(--text-2);font-weight:600}
+
+.side{background:var(--side);border-right:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:18px}
+.ws{display:flex;align-items:center;gap:10px;padding:4px 8px}
+.ws-mark{width:30px;height:30px;border-radius:9px;background:var(--accent-soft);display:grid;place-items:center;color:var(--accent)}
+.ws-name{font-weight:700;font-size:14px;line-height:1.2}
+.ws-sub{font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:4px}
+.nav{display:grid;gap:2px}
+.nav-grp{font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);padding:12px 10px 6px}
+.nav a{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;color:var(--text-2);text-decoration:none;font-weight:500;font-size:13.5px;cursor:default}
+.nav a svg{width:16px;height:16px;flex:none;opacity:.8}
+.nav a:hover{background:var(--surface);color:var(--text)}
+.nav a.on{background:var(--surface-2);color:var(--text)}
+.nav a.on svg{color:var(--accent);opacity:1}
+.nav .count{margin-left:auto;font-size:11px;color:var(--text-3)}
+.side-foot{margin-top:auto;display:grid;gap:8px;padding:0 8px}
+.sync{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-3)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--gain);box-shadow:0 0 0 3px var(--gain-soft)}
+
+.main{position:relative;min-width:0;display:flex;flex-direction:column}
+.bar{display:flex;align-items:center;gap:12px;padding:16px 28px;border-bottom:1px solid var(--line)}
+.bar h2{margin:0;font-size:17px;font-weight:700;letter-spacing:-.01em}
+.bar .status{font-size:12px;color:var(--text-3)}
+.bar .grow{flex:1}
+.search{display:flex;align-items:center;gap:8px;min-width:220px;padding:7px 10px;border-radius:9px;border:1px solid var(--line-2);background:var(--surface);color:var(--text-3);font-size:12.5px;cursor:pointer}
+.search kbd{margin-left:auto;font:600 11px var(--font);padding:1px 6px;border-radius:5px;border:1px solid var(--line-2);color:var(--text-3)}
+.seg{display:inline-flex;padding:3px;border-radius:9px;background:var(--surface);border:1px solid var(--line)}
+.seg button{border:0;background:none;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;color:var(--text-3);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--surface-2);color:var(--text);box-shadow:0 1px 0 var(--line-2)}
+.icon-btn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;color:var(--text-2);cursor:pointer}
+.icon-btn:hover{color:var(--text);border-color:var(--line-2)}
+.icon-btn[aria-pressed="true"]{color:var(--accent);border-color:var(--accent)}
+.primary{border:0;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:12.5px;padding:8px 14px;border-radius:9px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+
+.content{padding:24px 28px 32px;display:grid;gap:20px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg)}
+.card-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:18px 20px 0}
+.card-h h3{margin:0;font-size:13.5px;font-weight:700}
+.card-h .meta{font-size:12px;color:var(--text-3)}
+.link{color:var(--accent);font-size:12px;font-weight:600;background:none;border:0;padding:0;cursor:pointer}
+
+/* Hero */
+.hero{padding:22px 24px 8px;display:grid;gap:8px}
+.hero-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.hero-label{display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:600;color:var(--text-2)}
+.toggle{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-2);background:none;border-radius:999px;padding:2px 9px 2px 4px;font-size:11.5px;font-weight:600;color:var(--text-3);cursor:pointer}
+.toggle i{width:22px;height:13px;border-radius:999px;background:var(--line-2);position:relative;transition:background .2s}
+.toggle i::after{content:"";position:absolute;top:2px;left:2px;width:9px;height:9px;border-radius:50%;background:var(--text-2);transition:transform .2s,background .2s}
+.toggle[aria-pressed="true"]{color:var(--text)}
+.toggle[aria-pressed="true"] i{background:var(--accent)}
+.toggle[aria-pressed="true"] i::after{transform:translateX(9px);background:var(--accent-ink)}
+.big{font-size:clamp(34px,6cqi,52px);font-weight:300;letter-spacing:-.035em;line-height:1.05;margin-top:6px;font-variant-numeric:tabular-nums}
+.big .cur{font-size:.45em;font-weight:500;color:var(--text-3);letter-spacing:0;margin-right:4px;vertical-align:.62em}
+.big .cents{color:var(--text-3)}
+.delta-row{display:flex;align-items:center;gap:10px;font-size:13px;margin-top:4px;min-height:24px}
+.pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-weight:700;font-size:12.5px;font-variant-numeric:tabular-nums}
+.pill.up{background:var(--gain-soft);color:var(--gain)}
+.pill.down{background:var(--loss-soft);color:var(--loss)}
+.when{color:var(--text-3);font-size:12.5px}
+.ranges{display:inline-flex;gap:2px;padding:3px;border-radius:10px;background:var(--app);border:1px solid var(--line)}
+.ranges button{border:0;background:none;padding:5px 11px;border-radius:7px;font-size:12px;font-weight:700;color:var(--text-3);cursor:pointer}
+.ranges button[aria-selected="true"]{background:var(--surface-2);color:var(--text)}
+.chart{position:relative;height:230px;margin:6px -4px 0;touch-action:pan-y}
+.chart svg{position:absolute;inset:0 0 26px 0;width:100%;height:calc(100% - 26px);overflow:visible}
+.grid-y{position:absolute;left:0;right:0;border-top:1px dashed var(--line);pointer-events:none}
+.grid-y span{position:absolute;right:4px;top:-17px;font-size:10.5px;color:var(--text-3);font-variant-numeric:tabular-nums}
+.ticks{position:absolute;left:0;right:0;bottom:0;height:20px;font-size:10.5px;color:var(--text-3)}
+.ticks span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.ticks span:first-child{transform:none}
+.ticks span:last-child{transform:translateX(-100%)}
+.scrub{position:absolute;inset:0 0 26px 0;cursor:crosshair}
+.cross{position:absolute;top:0;bottom:26px;width:1px;background:var(--line-2);pointer-events:none;opacity:0;transition:opacity .12s}
+.cdot{position:absolute;width:11px;height:11px;border-radius:50%;margin:-5.5px 0 0 -5.5px;background:var(--surface);border:2.5px solid currentColor;pointer-events:none}
+.cdot.end::after{content:"";position:absolute;inset:-7px;border-radius:50%;border:1px solid currentColor;opacity:.35;animation:pulse 2.4s ease-out infinite}
+@keyframes pulse{0%{transform:scale(.6);opacity:.5}100%{transform:scale(1.5);opacity:0}}
+
+/* Allocation */
+.grid2{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:20px}
+.alloc-body{padding:16px 20px 18px;display:grid;gap:14px}
+.stack{display:flex;height:10px;border-radius:999px;overflow:hidden;gap:2px}
+.stack span{display:block;height:100%}
+.arow{display:grid;grid-template-columns:minmax(96px,1.1fr) minmax(70px,1.4fr) auto 64px 84px;align-items:center;gap:14px;font-size:13px}
+.arow + .arow{border-top:1px solid var(--line);padding-top:12px}
+.aname{display:flex;align-items:center;gap:9px;font-weight:600}
+.swatch{width:9px;height:9px;border-radius:3px;flex:none}
+.track{position:relative;height:6px;border-radius:999px;background:var(--surface-2)}
+.track b{position:absolute;inset:0 auto 0 0;border-radius:999px}
+.track i{position:absolute;top:-4px;bottom:-4px;width:2px;border-radius:1px;background:var(--text-2)}
+.aval{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.apct{text-align:right;color:var(--text-2);font-variant-numeric:tabular-nums}
+.adrift{text-align:right;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--text-3)}
+.adrift.over,.adrift.under{color:var(--warn)}
+.insight{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border-radius:12px;background:var(--warn-soft);font-size:12.5px;color:var(--text)}
+.insight svg{flex:none;color:var(--warn);margin-top:2px}
+.insight p{margin:0}
+.insight .link{margin-top:4px;display:inline-block;color:var(--warn)}
+
+/* Health tiles */
+.health{display:grid;padding:6px 0}
+.tile{display:grid;grid-template-columns:52px minmax(0,1fr);gap:14px;align-items:center;padding:14px 20px}
+.tile + .tile{border-top:1px solid var(--line)}
+.tile h4{margin:0;font-size:12px;font-weight:600;color:var(--text-2)}
+.tile .v{font-size:20px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.tile .v small{font-size:12px;font-weight:600;color:var(--text-3);margin-left:4px;letter-spacing:0}
+.tile p{margin:0;font-size:12px;color:var(--text-3)}
+.ring{width:52px;height:52px}
+.ring circle{fill:none;stroke-width:5}
+.ring .bg{stroke:var(--surface-2)}
+.ring .fg{stroke-linecap:round;transform:rotate(-90deg);transform-origin:50% 50%}
+.minibars{display:flex;align-items:flex-end;gap:4px;height:40px;width:52px}
+.minibars span{flex:1;border-radius:3px 3px 1px 1px;background:var(--surface-2)}
+.minibars span:last-child{background:var(--gain)}
+
+/* Holdings */
+.hold{padding:8px 8px 10px}
+.hrow{display:grid;grid-template-columns:minmax(0,1.6fr) 1fr 1fr 1fr;gap:12px;align-items:center;padding:10px 12px;border-radius:10px;cursor:pointer;width:100%;border:0;background:none;text-align:left}
+.hrow:hover{background:var(--surface-2)}
+.hhead{cursor:default;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);padding-block:12px 6px}
+.hhead:hover{background:none}
+.hrow .r{text-align:right;font-variant-numeric:tabular-nums}
+.who{display:flex;align-items:center;gap:11px;min-width:0}
+.mono{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-weight:800;font-size:13px;flex:none}
+.who b{display:block;font-size:13.5px;font-weight:700}
+.who span{display:block;font-size:12px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chg{font-size:12.5px;font-weight:600}
+.chg.up{color:var(--gain)} .chg.down{color:var(--loss)}
+.sub2{display:block;font-size:11.5px;color:var(--text-3);font-weight:500}
+.flash-up{animation:fu 1.2s ease-out}
+.flash-down{animation:fd 1.2s ease-out}
+@keyframes fu{0%{background:var(--gain-soft)}100%{background:transparent}}
+@keyframes fd{0%{background:var(--loss-soft)}100%{background:transparent}}
+
+/* Today + upcoming */
+.list{padding:8px 20px 14px;display:grid}
+.li{display:flex;align-items:center;gap:12px;padding:10px 0;font-size:13px}
+.li + .li{border-top:1px solid var(--line)}
+.li .grow{flex:1;min-width:0}
+.li .t{font-weight:600}
+.li .s{font-size:12px;color:var(--text-3)}
+.date{width:40px;text-align:center;flex:none;line-height:1.1}
+.date b{display:block;font-size:15px}
+.date span{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}
+.sect{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);padding:14px 0 2px}
+
+/* Drawer */
+.scrim{position:absolute;inset:0;background:rgba(3,6,12,.45);opacity:0;pointer-events:none;transition:opacity .2s}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:min(400px,100%);background:var(--surface);border-left:1px solid var(--line-2);transform:translateX(102%);transition:transform .28s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;z-index:5}
+.open .scrim{opacity:1;pointer-events:auto}
+.open .drawer{transform:none}
+.dr-h{display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--line)}
+.dr-h .grow{flex:1;min-width:0}
+.dr-b{padding:18px 20px;display:grid;gap:18px;overflow:auto}
+.dr-price{font-size:30px;font-weight:300;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.dr-chart{height:110px;position:relative}
+.dr-chart svg{width:100%;height:100%;overflow:visible}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.stats div{background:var(--surface);padding:10px 12px}
+.stats dt{font-size:11.5px;color:var(--text-3)}
+.stats dd{margin:2px 0 0;font-weight:600;font-variant-numeric:tabular-nums}
+.dr-actions{display:flex;gap:8px}
+.ghost{border:1px solid var(--line-2);background:none;padding:8px 14px;border-radius:9px;font-weight:600;font-size:12.5px;cursor:pointer}
+
+/* Privacy */
+.m{transition:filter .25s ease}
+.private .m{filter:blur(7px);user-select:none}
+
+/* Responsive mock */
+@container (max-width: 980px){
+  .search{min-width:0}
+  .search .lbl{display:none}
+}
+@container (max-width: 860px){
+  .grid2{grid-template-columns:1fr}
+}
+@container (max-width: 640px){
+  .bar{padding:14px 16px;flex-wrap:wrap}
+  .bar .status{display:none}
+  .content{padding:16px}
+  .arow{grid-template-columns:minmax(0,1fr) auto 60px}
+  .arow .track,.arow .adrift{display:none}
+  .hrow{grid-template-columns:minmax(0,1.5fr) 1fr 1fr}
+  .hrow .col-day{display:none}
+  .chart{height:190px}
+}
+@media (max-width: 900px){ .side{display:none} .app{grid-template-columns:1fr;min-height:0} }
+
+/* Phone + notes */
+.split{display:grid;grid-template-columns:360px minmax(0,1fr);gap:48px;align-items:start}
+.phone{margin:0;position:sticky;top:24px;display:grid;gap:10px;justify-items:center}
+.device{width:340px;max-width:100%;border-radius:44px;padding:10px;background:#05080E;box-shadow:var(--shadow),inset 0 0 0 1.5px rgba(255,255,255,.08)}
+.screen{border-radius:34px;overflow:hidden;background:var(--app);height:700px;display:flex;flex-direction:column;position:relative}
+.ph-status{display:flex;justify-content:space-between;padding:12px 26px 4px;font-size:12px;font-weight:700}
+.ph-top{display:flex;align-items:center;gap:10px;padding:8px 18px 4px}
+.ph-top b{font-size:17px;flex:1}
+.ph-body{flex:1;overflow:hidden;padding:4px 18px 0;display:grid;gap:14px;align-content:start}
+.ph-big{font-size:36px;font-weight:300;letter-spacing:-.035em;line-height:1.05;font-variant-numeric:tabular-nums}
+.ph-big .cur{font-size:15px;font-weight:500;color:var(--text-3);vertical-align:15px;margin-right:3px;letter-spacing:0}
+.ph-chart{height:96px;margin:0 -18px}
+.ph-chart svg{width:100%;height:100%}
+.ph-ranges{display:flex;justify-content:space-between}
+.ph-ranges span{font-size:11.5px;font-weight:700;color:var(--text-3);padding:4px 10px;border-radius:7px}
+.ph-ranges span.on{background:var(--surface-2);color:var(--text)}
+.ph-legend{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:11.5px;color:var(--text-2);margin-top:10px}
+.ph-legend span{display:flex;align-items:center;gap:6px}
+.ph-legend b{margin-left:auto;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
+.ph-sec{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;font-weight:700}
+.ph-sec span{font-size:11.5px;color:var(--accent);font-weight:600}
+.ph-row{display:flex;align-items:center;gap:10px;padding:9px 0;font-size:12.5px}
+.ph-row + .ph-row{border-top:1px solid var(--line)}
+.ph-row .grow{flex:1;min-width:0}
+.ph-row .mono{width:30px;height:30px;font-size:12px}
+.ph-tabs{display:grid;grid-template-columns:repeat(5,1fr);padding:8px 8px 22px;border-top:1px solid var(--line);background:var(--side)}
+.ph-tabs span{display:grid;justify-items:center;gap:3px;font-size:10px;font-weight:600;color:var(--text-3)}
+.ph-tabs span.on{color:var(--accent)}
+.ph-tabs svg{width:20px;height:20px}
+.phone figcaption{font-size:12px;color:var(--text-3);text-align:center;max-width:32ch}
+
+.notes{display:grid;gap:34px}
+.group h3{margin:0 0 4px;font-size:18px;font-weight:700;letter-spacing:-.01em}
+.group > p{margin:0 0 12px;color:var(--text-3);font-size:13px}
+.change{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.change > div{background:var(--surface);padding:12px 14px;font-size:13px}
+.change .now{color:var(--text-2)}
+.change .k{display:block;font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);margin-bottom:3px}
+.change .next .k{color:var(--accent)}
+.change + .change{margin-top:8px}
+.bullets{margin:0;padding:0;list-style:none;display:grid;gap:10px}
+.bullets li{padding-left:18px;position:relative;font-size:13.5px;color:var(--text-2);max-width:70ch}
+.bullets li::before{content:"";position:absolute;left:2px;top:.62em;width:6px;height:6px;border-radius:2px;background:var(--accent)}
+.bullets li b{color:var(--text);font-weight:600}
+.bugs li::before{background:var(--warn)}
+
+.rollout h3{margin:0 0 4px;font-size:18px;font-weight:700}
+.rollout > p{margin:0 0 14px;color:var(--text-3);font-size:13px;max-width:70ch}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:13px}
+th,td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}
+tr:last-child td{border-bottom:0}
+td:first-child{font-weight:700;color:var(--text-3);width:40px;font-variant-numeric:tabular-nums}
+td .what{font-weight:600}
+td .why{color:var(--text-3);font-size:12.5px}
+td code{font-size:12px;padding:1px 5px;border-radius:5px;background:var(--surface-2)}
+.size{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--surface-2);color:var(--text-2)}
+
+@media (max-width: 980px){
+  .split{grid-template-columns:1fr}
+  .phone{position:static}
+}
+@media (max-width: 520px){
+  .change{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+<style>body{margin:0}</style>
+</head>
+<body>
+<main class="page">
+  <header class="intro">
+    <span class="eyebrow">Concept · 6 Oct 2026</span>
+    <h1>Kujira Portfolio, redesigned around one calm overview</h1>
+    <p>Same data and the same Kujira teal. Fewer boxes, one typeface, colour that carries meaning, and a dashboard that reads top to bottom: how much, where it sits, what needs attention, what moved.</p>
+    <span class="sample">Figures are a seeded test portfolio, not your real holdings.</span>
+  </header>
+
+  <section class="stage" aria-label="Desktop mockup">
+    <div class="app" id="app">
+      <aside class="side" aria-label="App navigation">
+        <div class="ws">
+          <div class="ws-mark" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14c2.5 3.5 6 5 10 5 4.2 0 7-2.4 8-6-1.6.8-3 .8-4 0 .5-2.2-.6-4.6-3-5.6"/><path d="M14 7.4C10.5 6 6 7.3 4.2 10.4"/><path d="M17.5 4.5c.6 1 .6 2 0 3"/><circle cx="8.5" cy="13" r=".6" fill="currentColor"/></svg>
+          </div>
+          <div>
+            <div class="ws-name">Kujira</div>
+            <div class="ws-sub">Portfolio <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg></div>
+          </div>
+        </div>
+        <nav class="nav">
+          <div class="nav-grp">Overview</div>
+          <a class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>Dashboard</a>
+          <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 20h18"/><path d="m4 16 5-5 4 3 7-8"/></svg>Projections</a>
+          <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4v16h16"/><rect x="8" y="11" width="3" height="6" rx="1"/><rect x="14" y="7" width="3" height="10" rx="1"/></svg>Explore</a>
+          <div class="nav-grp">Assets</div>
+          <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 17 6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>Stocks<span class="count">6</span></a>
+          <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M10 8h3.5a2 2 0 0 1 0 4H10h4a2 2 0 0 1 0 4h-4V8Z"/></svg>Crypto<span class="count">2</span></a>
+          <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg>Cash<span class="count">3</span></a>
+          <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 4 7v5c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V7l-8-4Z"/><path d="M9 12h6"/></svg>CPF</a>
+          <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 11 9-7 9 7"/><path d="M5 10v10h14V10"/></svg>Real estate</a>
+          <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>Insurance</a>
+          <div class="nav-grp">Money</div>
+          <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m21 16-4 4-4-4"/></svg>Income &amp; spending</a>
+          <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>Watchlist</a>
+        </nav>
+        <div class="side-foot">
+          <div class="nav" style="margin:0 -8px"><a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>Settings</a></div>
+          <div class="sync"><span class="dot"></span>Synced 2 min ago</div>
+        </div>
+      </aside>
+
+      <div class="main" id="main">
+        <header class="bar">
+          <div>
+            <h2>Dashboard</h2>
+            <div class="status">Tuesday 6 October · prices 31 s ago · books balanced</div>
+          </div>
+          <div class="grow"></div>
+          <button class="search" type="button" aria-label="Search or jump to"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="lbl">Search or jump to</span><kbd>⌘K</kbd></button>
+          <div class="seg" role="group" aria-label="Display currency">
+            <button type="button" id="ccy-sgd" aria-pressed="true">SGD</button>
+            <button type="button" id="ccy-usd" aria-pressed="false">USD</button>
+          </div>
+          <button class="icon-btn" id="eye" type="button" aria-pressed="false" aria-label="Hide balances" title="Hide balances">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+          <button class="primary" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M12 5v14M5 12h14"/></svg>Add</button>
+        </header>
+
+        <div class="content">
+          <section class="card hero" aria-label="Net worth">
+            <div class="hero-top">
+              <div>
+                <div class="hero-label">Net worth
+                  <button class="toggle" id="cpf" type="button" aria-pressed="false"><i></i>Include CPF</button>
+                </div>
+                <div class="big m" id="nw"></div>
+                <div class="delta-row"><span class="pill up" id="dpill"></span><span class="when" id="dwhen"></span></div>
+              </div>
+              <div class="ranges" role="tablist" aria-label="Chart range" id="ranges"></div>
+            </div>
+            <div class="chart" id="chart">
+              <svg viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true">
+                <defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity=".22"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>
+                <path id="area" fill="url(#fill)"/>
+                <path id="line" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+              </svg>
+              <div id="grid"></div>
+              <div class="ticks" id="ticks"></div>
+              <div class="cross" id="cross"></div>
+              <div class="cdot end" id="cdot"></div>
+              <div class="scrub" id="scrub"></div>
+            </div>
+          </section>
+
+          <div class="grid2">
+            <section class="card" aria-label="Allocation">
+              <div class="card-h"><h3>Where it sits</h3><span class="meta">Share incl. CPF · marker shows your target</span></div>
+              <div class="alloc-body">
+                <div class="stack" id="stack"></div>
+                <div id="arows"></div>
+                <div class="insight">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.5"/></svg>
+                  <div><p>Real estate carries 64% of your net worth, 54 points over target. New savings would close the gap fastest in Stocks, which sit 33 points under.</p><button class="link" type="button">Review targets</button></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="card" aria-label="Financial health">
+              <div class="card-h"><h3>Health</h3><span class="meta">Updated with each payday</span></div>
+              <div class="health" id="health"></div>
+            </section>
+          </div>
+
+          <div class="grid2">
+            <section class="card" aria-label="Holdings">
+              <div class="card-h"><h3>Holdings</h3><button class="link" type="button" id="refresh">Refresh prices</button></div>
+              <div class="hold" id="hold"></div>
+            </section>
+            <section class="card" aria-label="Today and upcoming">
+              <div class="card-h"><h3>Today</h3><span class="meta">Biggest moves in S$</span></div>
+              <div class="list" id="today"></div>
+            </section>
+          </div>
+        </div>
+
+        <div class="scrim" id="scrim"></div>
+        <aside class="drawer" id="drawer" aria-label="Holding detail" aria-hidden="true"></aside>
+      </div>
+    </div>
+    <p class="caption"><span><b>Drag</b> across the chart to scrub</span><span><b>Switch</b> range, currency or CPF</span><span><b>Eye icon</b> hides balances</span><span><b>Click</b> a holding for its detail panel</span><span><b>Refresh prices</b> to see changed rows flash</span></p>
+  </section>
+
+  <section class="split">
+    <figure class="phone">
+      <div class="device">
+        <div class="screen">
+          <div class="ph-status"><span>9:41</span><span>5G ▮▮▮</span></div>
+          <div class="ph-top">
+            <div class="ws-mark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 14c2.5 3.5 6 5 10 5 4.2 0 7-2.4 8-6-1.6.8-3 .8-4 0 .5-2.2-.6-4.6-3-5.6"/><path d="M14 7.4C10.5 6 6 7.3 4.2 10.4"/></svg></div>
+            <b>Overview</b>
+            <span class="icon-btn" aria-hidden="true" style="width:32px;height:32px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></span>
+          </div>
+          <div class="ph-body">
+            <div>
+              <div style="font-size:12px;font-weight:600;color:var(--text-2)">Net worth</div>
+              <div class="ph-big" id="ph-nw"></div>
+              <div class="delta-row" style="font-size:12px"><span class="pill up" id="ph-d"></span><span class="when">past month</span></div>
+            </div>
+            <div class="ph-chart" id="ph-chart"></div>
+            <div class="ph-ranges"><span class="on">1M</span><span>3M</span><span>YTD</span><span>1Y</span><span>All</span></div>
+            <div>
+              <div class="stack" id="ph-stack"></div>
+              <div class="ph-legend" id="ph-legend"></div>
+            </div>
+            <div>
+              <div class="ph-sec">Holdings <span>See all</span></div>
+              <div id="ph-hold"></div>
+            </div>
+          </div>
+          <nav class="ph-tabs" aria-hidden="true">
+            <span class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>Overview</span>
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 17 6-6 4 4 8-8"/></svg>Assets</span>
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m21 16-4 4-4-4"/></svg>Money</span>
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 20h18"/><path d="m4 16 5-5 4 3 7-8"/></svg>Plan</span>
+            <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>More</span>
+          </nav>
+        </div>
+      </div>
+      <figcaption>Phone: holdings become list rows, so value and return are visible without sideways scrolling.</figcaption>
+    </figure>
+
+    <div class="notes">
+      <div class="group">
+        <h3>Structure</h3>
+        <p>The biggest lift. Today every view competes for the same top bar and the dashboard repeats itself.</p>
+        <div class="change"><div class="now"><span class="k">Now</span>11 tabs, the app switcher, currency, sync pill and four icon buttons share one bar. At 1440px wide Insurance is cut to "I", and the overflow into More changes from tab to tab.</div><div class="next"><span class="k">Proposed</span>A left sidebar grouped as Overview, Assets and Money. The top bar keeps page-level controls only: search, currency, hide balances, Add.</div></div>
+        <div class="change"><div class="now"><span class="k">Now</span>Allocation appears four times on the dashboard: the asset cards, the stacked bar, the target bars and the doughnut. Five amber banners then restate the target bars.</div><div class="next"><span class="k">Proposed</span>One "Where it sits" card: a single split bar, one row per class with a target marker, and one plain-language insight.</div></div>
+        <div class="change"><div class="now"><span class="k">Now</span>The Chart Builder sits at the bottom of the dashboard. Holdings open an Edit modal.</div><div class="next"><span class="k">Proposed</span>Chart Builder moves to its own Explore page. A holding opens a side panel with price, position, dividends and trades, and Edit lives inside it.</div></div>
+      </div>
+
+      <div class="group">
+        <h3>Visual system</h3>
+        <p>Premium mostly comes from restraint and consistent numbers.</p>
+        <ul class="bullets">
+          <li><b>One typeface with tabular figures.</b> Lexend headings, system body text and SF Mono table numbers currently mix. Monospace digits make the tables read like a developer console. I used Manrope here. Google Fonts is already in your CSP, so the swap needs no CSP change.</li>
+          <li><b>Big numbers go light, not heavy.</b> The headline figure in weight 300 with a small, dim currency prefix looks like a private-banking statement. Weight 800 looks like a dashboard template.</li>
+          <li><b>Always show the currency.</b> Dashboard shows "$679,740" while Stocks shows "US$41,638", so you can't tell the base at a glance. Use S$ and US$ everywhere, styled smaller and dimmer than the digits.</li>
+          <li><b>Colour has jobs.</b> Teal is for brand and primary actions only. Gains and losses get their own green and red, and each asset class gets a distinct hue. Stocks and Crypto are both teal today, and gains use a stock Material green that clashes with the accent.</li>
+          <li><b>Fewer boxes and less decoration.</b> Drop the coloured rails on KPI cards, the background glow, emoji empty states (👀 📊 📅) and the per-row chips (US, SGX, Deposit, Contribution). Market goes as quiet text under the ticker. Your CSP blocks external logo images, so use locally generated monograms like the ones above.</li>
+          <li><b>One quiet status line.</b> Local only, Books balanced, CPF off and Prices 31s ago are four separate pills now. Merge them into the line under the page title, and move captions like "X: Asset Class · Y: Value · Top all · doughnut" and the FIFO footnote into info tooltips.</li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <h3>Interactions that feel premium</h3>
+        <p>Small, consistent motion and direct manipulation. All of these are in the mockup.</p>
+        <ul class="bullets">
+          <li><b>Scrub the chart</b> and the headline number, date and change follow your pointer, the way Robinhood and Apple Stocks do. The line takes the colour of the period's result.</li>
+          <li><b>Hide balances</b> with one tap. Amounts blur, percentages stay readable. Handy on the MRT or when screen sharing.</li>
+          <li><b>Prices that change flash</b> green or red for a moment on refresh, and headline figures roll to new values instead of jumping.</li>
+          <li><b>⌘K command bar</b> to jump to any page, add a trade or look up a ticker.</li>
+          <li><b>Skeleton placeholders</b> while prices load, and Undo on toasts instead of confirm dialogs.</li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <h3>Mobile</h3>
+        <ul class="bullets">
+          <li><b>Holdings as list rows</b> showing ticker, value and return. On a 375px phone the P&amp;L columns currently sit off-screen in a sideways-scrolling table.</li>
+          <li><b>Filters as one scrolling chip row</b> with actions behind a single Add button. The Stocks toolbar wraps to three rows of buttons today.</li>
+          <li><b>Bottom bar of five areas</b> (Overview, Assets, Money, Plan, More) matching the desktop sidebar groups, so both layouts share one mental map.</li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <h3>Bugs I noticed along the way</h3>
+        <ul class="bullets bugs">
+          <li>The Crypto card on the dashboard shows an empty teal square where its icon should be, in both themes.</li>
+          <li>At 375px wide, pages with the SGD/USD toggle lay out at 395px. The top bar actions overflow and the settings gear is clipped.</li>
+          <li>The net worth chart axis shows ISO dates (2025-11-01) and bare numbers (570,000) with no currency.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="rollout">
+    <h3>Order I'd ship it in</h3>
+    <p>The first three are mostly CSS and token changes, and give most of the visible lift. Later items change structure and need the usual QA pass on every tab.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Change</th><th>Size</th><th>Touches</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td><div class="what">One typeface, tabular figures, dim currency prefixes, light-weight headline numbers</div><div class="why">Replaces Lexend and the SF Mono <code>.num</code> rule</div></td><td><span class="size">S</span></td><td>index.html styles</td></tr>
+          <tr><td>2</td><td><div class="what">Colour roles: asset-class palette, gain and loss pair, teal for brand only. Remove glow, rails and emoji</div><div class="why">Fixes the Stocks and Crypto teal clash and the missing crypto icon</div></td><td><span class="size">S</span></td><td>Tokens, chart colours in app.js</td></tr>
+          <tr><td>3</td><td><div class="what">Status line, explicit S$ and US$, human dates on chart axes</div><div class="why">Removes four pills and the debug-style chart captions</div></td><td><span class="size">S</span></td><td>Top bar, chart options</td></tr>
+          <tr><td>4</td><td><div class="what">Dashboard restructure: hero chart, one allocation card, health tiles, holdings and today</div><div class="why">Chart Builder moves to an Explore page</div></td><td><span class="size">M</span></td><td>renderDashboard, Arrange presets</td></tr>
+          <tr><td>5</td><td><div class="what">Hero chart with ranges and scrubbing</div><div class="why">Built on the existing snapshots array</div></td><td><span class="size">M</span></td><td>Chart.js config or a small SVG renderer</td></tr>
+          <tr><td>6</td><td><div class="what">Sidebar navigation and compact header, mobile bottom bar regrouped</div><div class="why">Fixes nav truncation and the 375px overflow</div></td><td><span class="size">M</span></td><td>Nav markup, PHASE_2_TABS handling, Trading and Forex switcher</td></tr>
+          <tr><td>7</td><td><div class="what">Mobile list rows for holdings, chip filters</div><div class="why">Stocks, Crypto, Cash and CPF tables</div></td><td><span class="size">M</span></td><td>Table renderers, sortable columns</td></tr>
+          <tr><td>8</td><td><div class="what">Holding side panel, ⌘K, hide balances, price flash, skeletons, Undo toasts</div><div class="why">The polish layer</div></td><td><span class="size">L</span></td><td>app.js</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const FX = 1.35;
+  const state = { ccy: 'SGD', range: '1M', cpf: false, priv: false };
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const $ = id => document.getElementById(id);
+
+  /* Sample data: seeded test portfolio */
+  const CLASSES = [
+    { key: 're', name: 'Real estate', sgd: 500000, target: 10 },
+    { key: 'cpf', name: 'CPF', sgd: 101640, target: 30 },
+    { key: 'cash', name: 'Cash', sgd: 67708, target: 20 },
+    { key: 'stocks', name: 'Stocks', sgd: 56211, target: 40 },
+    { key: 'crypto', name: 'Crypto', sgd: 55820, target: 0 },
+  ];
+  const TOTAL = CLASSES.reduce((s, c) => s + c.sgd, 0);
+  const HOLD = [
+    { sym: 'BTC', name: 'Bitcoin', mkt: 'Crypto', cls: 'crypto', qty: 0.25, avg: 60000, px: 112600, ccy: 'USD', day: 1.80, div: 0 },
+    { sym: 'ETH', name: 'Ethereum', mkt: 'Crypto', cls: 'crypto', qty: 3, avg: 2400, px: 4400, ccy: 'USD', day: -0.90, div: 0 },
+    { sym: 'D05', name: 'DBS Group', mkt: 'SGX', cls: 'stocks', qty: 300, avg: 30, px: 52.40, ccy: 'SGD', day: 0.38, div: 2.2 },
+    { sym: 'MSFT', name: 'Microsoft', mkt: 'NASDAQ', cls: 'stocks', qty: 15, avg: 380, px: 512.80, ccy: 'USD', day: 0.42, div: 3.3 },
+    { sym: 'NVDA', name: 'NVIDIA', mkt: 'NASDAQ', cls: 'stocks', qty: 40, avg: 95, px: 186.50, ccy: 'USD', day: -2.11, div: 0.04 },
+    { sym: 'O39', name: 'OCBC', mkt: 'SGX', cls: 'stocks', qty: 500, avg: 12.5, px: 17.10, ccy: 'SGD', day: -0.29, div: 0.82 },
+    { sym: 'AAPL', name: 'Apple', mkt: 'NASDAQ', cls: 'stocks', qty: 20, avg: 150, px: 254.30, ccy: 'USD', day: 1.24, div: 1.0 },
+    { sym: 'C38U', name: 'CapitaLand Integrated Commercial Trust', mkt: 'SGX', cls: 'stocks', qty: 2000, avg: 2.05, px: 2.31, ccy: 'SGD', day: 0.87, div: 0.108 },
+  ];
+  const toSgd = (v, ccy) => ccy === 'USD' ? v * FX : v;
+  HOLD.forEach(h => { h.val = toSgd(h.qty * h.px, h.ccy); h.cost = toSgd(h.qty * h.avg, h.ccy); h.ret = (h.val / h.cost - 1) * 100; h.dayS = h.val - h.val / (1 + h.day / 100); });
+
+  /* Series: three years of daily values, deterministic */
+  function rng(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const N = 1096, END = new Date(2026, 9, 6);
+  const DATES = Array.from({ length: N }, (_, i) => { const d = new Date(END); d.setDate(d.getDate() - (N - 1 - i)); return d; });
+  function walk(seed, end, drift, vol) { const r = rng(seed), v = [1]; for (let i = 1; i < N; i++) v.push(v[i - 1] * (1 + drift + (r() - 0.5) * vol)); const k = end / v[N - 1]; return v.map(x => x * k); }
+  const liquid = walk(39, 179740, 0.0009, 0.022);
+  const prop = DATES.map(d => d < new Date(2025, 5, 1) ? 470000 : 500000);
+  const EX = liquid.map((v, i) => v + prop[i]);
+  const CPF = walk(5, 101640, 0.0005, 0.0012);
+  const series = () => state.cpf ? EX.map((v, i) => v + CPF[i]) : EX;
+
+  const RANGES = [['1M', 30], ['3M', 91], ['YTD', null], ['1Y', 365], ['All', N]];
+  function rangeLen(key) { if (key === 'YTD') { const jan = new Date(2026, 0, 1); return Math.round((END - jan) / 864e5) + 1; } return RANGES.find(r => r[0] === key)[1]; }
+  const WHEN = { '1M': 'past month', '3M': 'past 3 months', 'YTD': 'this year', '1Y': 'past year', 'All': 'since Oct 2023' };
+
+  /* Formatting */
+  const pre = () => state.ccy === 'SGD' ? 'S$' : 'US$';
+  const conv = sgd => state.ccy === 'SGD' ? sgd : sgd / FX;
+  const num = (v, dp = 0) => Math.abs(v).toLocaleString('en-SG', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  const money = (sgd, { dp = 0, sign = false } = {}) => { const v = conv(sgd); const s = v < 0 ? '−' : (sign ? '+' : ''); return `${s}${pre()}${num(v, dp)}`; };
+  const pct = (v, dp = 1) => `${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(dp)}%`;
+  const fmtDate = (d, withYear = true) => d.toLocaleDateString('en-SG', withYear ? { day: 'numeric', month: 'short', year: 'numeric' } : { day: 'numeric', month: 'short' });
+  const compact = sgd => { const v = conv(sgd); return pre() + (v >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : Math.round(v / 1e3) + 'k'); };
+  const color = k => `var(--c-${k})`;
+  const tint = k => `color-mix(in srgb, var(--c-${k}) 16%, transparent)`;
+
+  function bigHTML(sgd) { const v = conv(sgd); return `<span class="cur">${pre()}</span>${num(v)}`; }
+
+  /* Hero number roll */
+  let shown = null, rollId = 0;
+  function setHero(target, animate) {
+    const el = $('nw');
+    if (!animate || reduce || shown === null) { shown = target; el.innerHTML = bigHTML(target); return; }
+    const from = shown, t0 = performance.now(), id = ++rollId;
+    const step = t => { if (id !== rollId) return; const k = Math.min(1, (t - t0) / 450), e = 1 - Math.pow(1 - k, 3); shown = from + (target - from) * e; el.innerHTML = bigHTML(shown); if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }
+
+  /* Chart */
+  let view = null;
+  function drawChart() {
+    const all = series(), len = rangeLen(state.range);
+    const vals = all.slice(N - len), dates = DATES.slice(N - len);
+    let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.12 || 1; lo -= pad; hi += pad;
+    const X = i => i / (vals.length - 1) * 1000, Y = v => 300 - (v - lo) / (hi - lo) * 300;
+    let d = ''; vals.forEach((v, i) => { d += (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1); });
+    $('line').setAttribute('d', d);
+    $('area').setAttribute('d', d + `L1000 300L0 300Z`);
+    const up = vals[vals.length - 1] >= vals[0];
+    $('chart').style.color = up ? 'var(--gain)' : 'var(--loss)';
+    const grid = $('grid'); grid.innerHTML = '';
+    [0.2, 0.5, 0.8].forEach(f => { const v = hi - (hi - lo) * f; const g = document.createElement('div'); g.className = 'grid-y'; g.style.top = `calc(${f} * (100% - 26px))`; g.innerHTML = `<span class="m">${compact(v)}</span>`; grid.appendChild(g); });
+    const ticks = $('ticks'); ticks.innerHTML = '';
+    const span = len > 400; const n = 5;
+    for (let k = 0; k < n; k++) { const i = Math.round(k / (n - 1) * (vals.length - 1)); const s = document.createElement('span'); s.style.left = (i / (vals.length - 1) * 100) + '%'; const dt = dates[i]; s.textContent = len <= 100 ? fmtDate(dt, false) : dt.toLocaleDateString('en-SG', span ? { month: 'short', year: 'numeric' } : { month: 'short', year: '2-digit' }); ticks.appendChild(s); }
+    view = { vals, dates, lo, hi };
+    placeDot(vals.length - 1, true);
+    setDelta(vals.length - 1);
+  }
+  function placeDot(i, end) {
+    const { vals, lo, hi } = view; const dot = $('cdot');
+    dot.style.left = (i / (vals.length - 1) * 100) + '%';
+    dot.style.top = `calc(${(1 - (vals[i] - lo) / (hi - lo))} * (100% - 26px))`;
+    dot.classList.toggle('end', !!end);
+    $('cross').style.left = (i / (vals.length - 1) * 100) + '%';
+  }
+  function setDelta(i, scrubbing) {
+    const { vals, dates } = view; const diff = vals[i] - vals[0], p = diff / vals[0] * 100;
+    const pill = $('dpill'); pill.className = 'pill ' + (diff >= 0 ? 'up' : 'down');
+    pill.innerHTML = `${diff >= 0 ? '▲' : '▼'} <span class="m">${money(Math.abs(diff))}</span> · ${Math.abs(p).toFixed(1)}%`;
+    $('dwhen').textContent = scrubbing ? fmtDate(dates[i]) : WHEN[state.range];
+  }
+  const scrub = $('scrub');
+  function onMove(e) {
+    if (!view) return; const r = scrub.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); const i = Math.round(x * (view.vals.length - 1));
+    $('cross').style.opacity = 1; placeDot(i, false); setDelta(i, true); rollId++; shown = view.vals[i]; $('nw').innerHTML = bigHTML(view.vals[i]);
+  }
+  function onLeave() { if (!view) return; $('cross').style.opacity = 0; const last = view.vals.length - 1; placeDot(last, true); setDelta(last); shown = view.vals[last]; $('nw').innerHTML = bigHTML(view.vals[last]); }
+  scrub.addEventListener('pointermove', onMove);
+  scrub.addEventListener('pointerdown', e => { scrub.setPointerCapture(e.pointerId); onMove(e); });
+  scrub.addEventListener('pointerleave', onLeave);
+  scrub.addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') onLeave(); });
+
+  /* Ranges */
+  const rg = $('ranges');
+  RANGES.forEach(([k]) => { const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'tab'); b.textContent = k; b.setAttribute('aria-selected', k === state.range); b.onclick = () => { state.range = k; [...rg.children].forEach(c => c.setAttribute('aria-selected', c.textContent === k)); drawChart(); }; rg.appendChild(b); });
+
+  /* Allocation */
+  function drawAlloc() {
+    $('stack').innerHTML = CLASSES.map(c => `<span style="width:${c.sgd / TOTAL * 100}%;background:${color(c.key)}" title="${c.name}"></span>`).join('');
+    $('arows').innerHTML = CLASSES.map(c => {
+      const share = c.sgd / TOTAL * 100, drift = share - c.target, out = Math.abs(drift) > 5;
+      const label = Math.abs(drift) < 0.5 ? 'on target' : `${drift > 0 ? '+' : '−'}${Math.abs(drift).toFixed(0)} pts`;
+      return `<div class="arow"><div class="aname"><span class="swatch" style="background:${color(c.key)}"></span>${c.name}</div>
+        <div class="track" aria-hidden="true"><b style="width:${share}%;background:${color(c.key)}"></b><i style="left:calc(${c.target}% - 1px)"></i></div>
+        <div class="aval m">${money(c.sgd)}</div><div class="apct">${share.toFixed(1)}%</div>
+        <div class="adrift ${out ? (drift > 0 ? 'over' : 'under') : ''}">${label}<span class="sub2">target ${c.target}%</span></div></div>`;
+    }).join('');
+  }
+
+  /* Health */
+  function ring(p, col) { const r = 21, c = 2 * Math.PI * r; return `<svg class="ring" viewBox="0 0 52 52" aria-hidden="true"><circle class="bg" cx="26" cy="26" r="${r}"/><circle class="fg" cx="26" cy="26" r="${r}" stroke="${col}" stroke-dasharray="${c * Math.min(1, p)} ${c}"/></svg>`; }
+  function drawHealth() {
+    const sav = [44, 47, 50, 50, 50, 50];
+    $('health').innerHTML = `
+      <div class="tile">${ring(1, 'var(--gain)')}<div><h4>Emergency fund</h4><div class="v">2.3×<small>covered</small></div><p><span class="m">${money(67708)}</span> against a <span class="m">${money(30000)}</span> target</p></div></div>
+      <div class="tile"><div class="minibars" aria-hidden="true">${sav.map(s => `<span style="height:${s / 60 * 100}%"></span>`).join('')}</div><div><h4>Savings rate · September</h4><div class="v">50%<small>of take-home</small></div><p><span class="m">${money(3200)}</span> saved from <span class="m">${money(6400)}</span></p></div></div>
+      <div class="tile">${ring(0.25, 'var(--accent)')}<div><h4>Financial independence</h4><div class="v">25%<small>of FIRE number</small></div><p>On pace for 2039, age 44. CPF tracked separately.</p></div></div>`;
+  }
+
+  /* Holdings */
+  function mono(h) { return `<span class="mono" style="background:${tint(h.cls)};color:${color(h.cls)}">${h.sym === 'BTC' ? '₿' : h.sym === 'ETH' ? 'Ξ' : h.sym[0]}</span>`; }
+  function drawHold(flash) {
+    const rows = HOLD.map((h, idx) => `<button class="hrow${flash && flash[idx] ? ' flash-' + flash[idx] : ''}" type="button" data-i="${idx}">
+      <span class="who">${mono(h)}<span style="min-width:0"><b>${h.sym}</b><span>${h.name} · ${h.mkt}</span></span></span>
+      <span class="r"><span class="m" style="font-weight:600">${money(h.val)}</span><span class="sub2">${(h.val / TOTAL * 100).toFixed(1)}% of total</span></span>
+      <span class="r col-day"><span class="chg ${h.day >= 0 ? 'up' : 'down'}">${pct(h.day, 2)}</span><span class="sub2">today</span></span>
+      <span class="r"><span class="chg ${h.ret >= 0 ? 'up' : 'down'}">${pct(h.ret)}</span><span class="sub2 m">${money(h.val - h.cost, { sign: true })}</span></span></button>`).join('');
+    $('hold').innerHTML = `<div class="hrow hhead"><span>Asset</span><span class="r">Value</span><span class="r col-day">Day</span><span class="r">Return</span></div>` + rows;
+    $('hold').querySelectorAll('button.hrow').forEach(b => b.onclick = () => openDrawer(+b.dataset.i));
+  }
+  $('refresh').onclick = () => {
+    const r = rng(Date.now() % 100000); const flash = {};
+    HOLD.forEach((h, i) => { if (r() < 0.6) { const mv = (r() - 0.5) * 0.8; h.px *= 1 + mv / 100; h.day += mv; h.val = toSgd(h.qty * h.px, h.ccy); h.ret = (h.val / h.cost - 1) * 100; h.dayS = h.val - h.val / (1 + h.day / 100); flash[i] = mv >= 0 ? 'up' : 'down'; } });
+    drawHold(flash); drawToday();
+  };
+
+  /* Today + upcoming */
+  function drawToday() {
+    const movers = [...HOLD].sort((a, b) => Math.abs(b.dayS) - Math.abs(a.dayS)).slice(0, 4);
+    const cal = [['31', 'Oct', 'Salary to DBS Multiplier', 'Half of take-home, automatic', 3200], ['31', 'Oct', 'CPF contribution', 'OA, SA and MA from Acme Pte Ltd', 2960], ['Nov', 'est.', 'D05 dividend', '300 shares at S$0.55', 165]];
+    $('today').innerHTML = movers.map(h => `<div class="li">${mono(h)}<div class="grow"><div class="t">${h.sym}</div><div class="s">${h.name}</div></div><div style="text-align:right"><div class="chg ${h.dayS >= 0 ? 'up' : 'down'} m">${money(h.dayS, { sign: true })}</div><div class="s">${pct(h.day, 2)}</div></div></div>`).join('')
+      + `<div class="sect">Coming up</div>` + cal.map(c => `<div class="li"><div class="date"><b>${c[0]}</b><span>${c[1]}</span></div><div class="grow"><div class="t">${c[2]}</div><div class="s">${c[3]}</div></div><div class="chg up m">${money(c[4], { sign: true })}</div></div>`).join('');
+  }
+
+  /* Drawer */
+  const app = $('app'), drawer = $('drawer');
+  function openDrawer(i) {
+    const h = HOLD[i]; const r = rng(i * 97 + 3); let p = h.px * 0.82; const pts = [];
+    for (let k = 0; k < 90; k++) { p *= 1 + 0.0022 + (r() - 0.5) * 0.035; pts.push(p); }
+    const k = h.px / pts[pts.length - 1]; const v = pts.map(x => x * k); const lo = Math.min(...v), hi = Math.max(...v);
+    const d = v.map((y, j) => (j ? 'L' : 'M') + (j / 89 * 400).toFixed(1) + ' ' + (100 - (y - lo) / (hi - lo) * 100).toFixed(1)).join('');
+    const nat = h.ccy === 'USD' ? 'US$' : 'S$';
+    const divYr = toSgd(h.div * h.qty, h.ccy);
+    drawer.innerHTML = `<div class="dr-h">${mono(h)}<div class="grow"><b style="font-size:15px">${h.sym}</b><div class="s" style="font-size:12px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${h.name} · ${h.mkt}</div></div><button class="icon-btn" type="button" id="dr-x" aria-label="Close">✕</button></div>
+      <div class="dr-b">
+        <div><div class="dr-price">${nat}${h.px.toLocaleString('en-SG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div><div class="delta-row"><span class="pill ${h.day >= 0 ? 'up' : 'down'}">${h.day >= 0 ? '▲' : '▼'} ${Math.abs(h.day).toFixed(2)}%</span><span class="when">today · 3 month chart</span></div></div>
+        <div class="dr-chart" style="color:${v[89] >= v[0] ? 'var(--gain)' : 'var(--loss)'}"><svg viewBox="0 0 400 100" preserveAspectRatio="none" aria-hidden="true"><path d="${d}L400 100L0 100Z" fill="currentColor" opacity=".1"/><path d="${d}" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"/></svg></div>
+        <dl class="stats" style="margin:0">
+          <div><dt>Holding</dt><dd>${h.qty.toLocaleString('en-SG')} ${h.cls === 'crypto' ? h.sym : 'shares'}</dd></div>
+          <div><dt>Average cost</dt><dd class="m">${nat}${h.avg.toLocaleString('en-SG', { minimumFractionDigits: 2 })}</dd></div>
+          <div><dt>Market value</dt><dd class="m">${money(h.val)}</dd></div>
+          <div><dt>Unrealised</dt><dd class="chg ${h.ret >= 0 ? 'up' : 'down'}"><span class="m">${money(h.val - h.cost, { sign: true })}</span> · ${pct(h.ret)}</dd></div>
+          <div><dt>Dividends a year</dt><dd class="m">${divYr ? money(divYr) : 'None'}</dd></div>
+          <div><dt>Share of net worth</dt><dd>${(h.val / TOTAL * 100).toFixed(1)}%</dd></div>
+        </dl>
+        <div><div class="sect" style="padding-top:0">Trades</div><div class="li" style="padding-top:8px"><div class="grow"><div class="t">Bought ${h.qty.toLocaleString('en-SG')}</div><div class="s">12 Mar 2024 · at ${nat}${h.avg.toLocaleString('en-SG', { minimumFractionDigits: 2 })}</div></div><div class="m" style="font-weight:600">${money(h.cost)}</div></div></div>
+        <div class="dr-actions"><button class="primary" type="button">Record trade</button><button class="ghost" type="button">Edit holding</button></div>
+      </div>`;
+    app.classList.add('open'); drawer.setAttribute('aria-hidden', 'false');
+    $('dr-x').onclick = closeDrawer; $('dr-x').focus();
+  }
+  function closeDrawer() { app.classList.remove('open'); drawer.setAttribute('aria-hidden', 'true'); }
+  $('scrim').onclick = closeDrawer;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+
+  /* Phone */
+  function drawPhone() {
+    const vals = EX.slice(N - 30); const lo = Math.min(...vals), hi = Math.max(...vals);
+    const d = vals.map((v, i) => (i ? 'L' : 'M') + (i / 29 * 340).toFixed(1) + ' ' + (90 - (v - lo) / (hi - lo) * 80).toFixed(1)).join('');
+    $('ph-chart').innerHTML = `<svg viewBox="0 0 340 96" preserveAspectRatio="none" aria-hidden="true" style="color:var(--gain)"><path d="${d}L340 96L0 96Z" fill="currentColor" opacity=".12"/><path d="${d}" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+    $('ph-nw').innerHTML = `<span class="cur">S$</span>${num(EX[N - 1])}`;
+    const diff = vals[29] - vals[0];
+    $('ph-d').innerHTML = `${diff >= 0 ? '▲' : '▼'} S$${num(Math.abs(diff))} · ${Math.abs(diff / vals[0] * 100).toFixed(1)}%`;
+    $('ph-d').className = 'pill ' + (diff >= 0 ? 'up' : 'down');
+    $('ph-stack').innerHTML = $('stack').innerHTML;
+    $('ph-legend').innerHTML = CLASSES.slice(0, 4).map(c => `<span><i class="swatch" style="background:${color(c.key)}"></i>${c.name}<b>${(c.sgd / TOTAL * 100).toFixed(0)}%</b></span>`).join('');
+    $('ph-hold').innerHTML = HOLD.slice(0, 4).map(h => `<div class="ph-row">${mono(h)}<div class="grow"><b>${h.sym}</b><div style="font-size:11px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${h.name}</div></div><div style="text-align:right"><div style="font-weight:600" class="tnum">S$${num(h.val)}</div><div class="chg ${h.ret >= 0 ? 'up' : 'down'}" style="font-size:11.5px">${pct(h.ret)}</div></div></div>`).join('');
+  }
+
+  /* Controls */
+  function setCcy(c) { state.ccy = c; $('ccy-sgd').setAttribute('aria-pressed', c === 'SGD'); $('ccy-usd').setAttribute('aria-pressed', c === 'USD'); renderAll(true); }
+  $('ccy-sgd').onclick = () => setCcy('SGD');
+  $('ccy-usd').onclick = () => setCcy('USD');
+  $('cpf').onclick = () => { state.cpf = !state.cpf; $('cpf').setAttribute('aria-pressed', state.cpf); renderAll(true); };
+  $('eye').onclick = () => { state.priv = !state.priv; $('eye').setAttribute('aria-pressed', state.priv); $('eye').setAttribute('aria-label', state.priv ? 'Show balances' : 'Hide balances'); app.classList.toggle('private', state.priv); };
+
+  function renderAll(animate) {
+    const s = series(); setHero(s[N - 1], animate);
+    drawChart(); drawAlloc(); drawHealth(); drawHold(); drawToday();
+  }
+  renderAll(false);
+  drawPhone();
+})();
+</script>
+</body>
+</html>
