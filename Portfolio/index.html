@@ -85,6 +85,8 @@ html.dark{
   --tx:var(--text);--tx2:var(--text2);--tx3:var(--text3);
 }
 body{font-family:var(--font-display);background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;transition:background 0.2s,color 0.2s}
+/* Every figure lines up in columns. Form controls reset font-variant in the UA sheet, so restate it. */
+body,button,input,select,textarea{font-variant-numeric:tabular-nums}
 body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:radial-gradient(420px circle at 14% 2%,var(--glow1),transparent 60%),
              radial-gradient(460px circle at 92% 96%,var(--glow2),transparent 60%)}
@@ -108,7 +110,7 @@ a{color:var(--blue);text-decoration:none}
 .logo:hover,.logo:focus{text-decoration:none;outline:none}
 .logo-whale{height:44px;width:44px;flex-shrink:0;border-radius:8px;object-fit:cover}
 .logo-name{display:flex;flex-direction:column;line-height:1.1}
-.logo-name span:first-child{font-family:var(--font-display);font-size:14px;font-weight:800;letter-spacing:0.5px;background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.logo-name span:first-child{font-family:var(--font-display);font-size:14px;font-weight:800;letter-spacing:0.5px;color:var(--text)}
 .logo-name span:last-child{font-family:var(--font-display);font-size:12px;font-weight:400;letter-spacing:0.3px;text-transform:none;color:var(--text3);-webkit-text-fill-color:var(--text3);opacity:0.85;white-space:nowrap}
 .nav{display:flex;gap:2px;flex:1 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none;position:relative}
 .nav::-webkit-scrollbar{display:none}
@@ -228,7 +230,7 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
 .main{padding:24px;max-width:1400px;margin:0 auto;padding-bottom:80px}
 .page{display:none}.page.active{display:block}
 .page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
-.page-title{font-size:20px;font-weight:700;letter-spacing:-0.3px}
+.page-title{font-size:22px;line-height:28px;font-weight:700;letter-spacing:-0.01em}
 .page-sub{font-size:12px;color:var(--text3);margin-top:2px}
 
 /* CARDS, solid in-flow surfaces (glass reserved for topbar/modals/toasts/
@@ -243,14 +245,14 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
   .card-head select.fi-sm{flex:1 1 calc(50% - 4px);min-width:0}
   .card-head .freshness{flex-basis:100%;justify-content:center}
 }
-.card-head h3{font-family:var(--font-display);font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.card-head h3{font-family:var(--font-display);font-size:14px;line-height:20px;font-weight:700;display:flex;align-items:center;gap:8px}
 .card-body{padding:18px}
 
 /* METRICS */
 .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
 .metric{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:12px 14px;text-align:left}
 .metric-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px}
-.metric-value{font-family:var(--font-display);font-size:24px;font-weight:700;letter-spacing:-0.5px;font-variant-numeric:tabular-nums}
+.metric-value{font-family:var(--font-display);font-size:24px;line-height:28px;font-weight:600;letter-spacing:-0.01em;font-variant-numeric:tabular-nums}
 .metric-sub{font-size:12px;color:var(--text2);margin-top:3px;display:flex;align-items:center;justify-content:flex-start;gap:6px;flex-wrap:wrap}
 .pos{color:var(--green)}.neg{color:var(--red)}
 
@@ -268,7 +270,7 @@ th{text-align:left;padding:10px 12px;color:var(--text3);font-weight:500;font-siz
 td{padding:10px 12px;border-top:1px solid var(--bg4);vertical-align:middle;background:var(--surface-solid);transition:background 0.12s ease}
 tbody tr:first-child td{border-top:none}
 @media (hover:hover){tbody tr:hover td{background:color-mix(in srgb,var(--surface-solid) 93%,var(--text) 7%)}}
-.num{font-variant-numeric:tabular-nums;font-family:'SF Mono','Fira Code',monospace;font-size:12px;text-align:right}
+.num{font-variant-numeric:tabular-nums;font-size:13px;text-align:right}
 .num-cell{text-align:right}
 /* Sticky first column on horizontal scroll (excludes .holdings, which manages its
    own .sticky-col). Corner th sits above both the sticky header row (z 10) and the
@@ -401,7 +403,7 @@ textarea.fi{resize:vertical;min-height:70px}
 .h-summary-item.pos{border-left-color:var(--green)}
 .h-summary-item.neg{border-left-color:var(--red)}
 .h-summary-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;font-weight:600}
-.h-summary-value{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-0.3px}
+.h-summary-value{font-size:20px;line-height:28px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-0.01em}
 .h-summary-sub{font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums}
 
 /* COVERAGE ADEQUACY (Insurance tab), ported from the standalone module.
@@ -473,7 +475,10 @@ textarea.fi{resize:vertical;min-height:70px}
    right. */
 .dash-hero{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px 22px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
 .dash-hero-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
-.dash-hero-value{font-family:var(--font-display);font-size:36px;font-weight:600;letter-spacing:-0.01em;font-variant-numeric:tabular-nums;line-height:1.1}
+.dash-hero-value{font-family:var(--font-display);font-size:48px;font-weight:300;letter-spacing:-0.035em;font-variant-numeric:tabular-nums;line-height:1.08}
+/* Currency prefix: small, dim, lifted toward the cap height so the figure leads. */
+.dash-hero-ccy{font-size:0.45em;font-weight:500;color:var(--text3);letter-spacing:0;margin-right:4px;vertical-align:0.62em}
+@media (max-width:640px){.dash-hero-value{font-size:36px;line-height:1.11}}
 .dash-hero-sub{font-size:12px;color:var(--text2)}
 .dash-hero-chip{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:500;border-radius:999px;padding:2px 9px;margin-left:8px;vertical-align:middle;text-transform:none;letter-spacing:normal}
 .dash-hero-chip.pos{color:var(--green);background:var(--green-soft)}
@@ -529,7 +534,7 @@ textarea.fi{resize:vertical;min-height:70px}
 .bucket-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:6px}
 .bucket{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
 .bucket-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.4px;font-weight:600}
-.bucket-amt{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+.bucket-amt{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
 .bucket-sub{font-size:12px;color:var(--text2)}
 .hint-block{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
 .px-ext{font-size:12px;color:var(--text3);margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap}

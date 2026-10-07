@@ -2969,7 +2969,7 @@ function showConflictModal(opts){
       <div class="modal-head"><h3>⚠ Sync conflict</h3></div>
       <div class="modal-body">
         <div style="color:var(--text2);line-height:1.6">Someone (or another tab) updated the cloud sheet ${kjrEscape(remoteAgo)}. Your local edits haven't been saved yet.</div>
-        <div class="stat-box y" style="margin-top:14px;font-family:'SF Mono',monospace;font-size:12px;color:var(--text2);line-height:1.7">
+        <div class="stat-box y" style="margin-top:14px;font-size:12px;color:var(--text2);line-height:1.7">
           local: ${DB.stocks.length} stocks · ${DB.crypto.length} crypto · ${DB.cash.length} cash · ${DB.cpfHistory.length} CPF entries · ${DB.income.length} income · ${DB.expenses.length} expenses
         </div>
       </div>
@@ -4805,12 +4805,12 @@ function renderTaxEstimate(){
       </div>
       <div class="hint-block" style="border-left:2px solid var(--accent);padding-left:10px">
         <div class="hint" style="font-size:12px;margin-bottom:2px">Est. annual tax${est.isManual ? ' (manual override)' : ''}</div>
-        <div style="font-weight:700;font-size:16px">${fmt2(est.annualTax)}</div>
+        <div style="font-weight:600;font-size:16px">${fmt2(est.annualTax)}</div>
         <div class="hint">${est.effectiveRate.toFixed(2)}% effective rate${nr ? ' (non-resident, higher of 15% flat / graduated)' : ''}</div>
       </div>
       <div class="hint-block" style="border-left:2px solid var(--accent);padding-left:10px">
         <div class="hint" style="font-size:12px;margin-bottom:2px">Monthly provision</div>
-        <div style="font-weight:700;font-size:16px">${fmt2(est.monthlyProvision)}</div>
+        <div style="font-weight:600;font-size:16px">${fmt2(est.monthlyProvision)}</div>
         <div class="hint">Accrual. SG has no monthly PAYE.</div>
       </div>
     </div>
@@ -11490,6 +11490,15 @@ function toggleArrange(){
   _announceDashArrange(_dashArrange ? 'Arrange mode on. Use Move up or Move down to reorder dashboard cards.' : 'Arrange mode off.');
 }
 
+/* Hero figure markup: wraps the leading currency symbol of a fmt() string in
+   .dash-hero-ccy (small, dim) and leaves any sign full size. Text content is
+   unchanged, so copy, privacy blur and screen readers read the same figure. */
+function _heroMoneyHtml(s){
+  const m = /^([+\-−]?)([^\d]+)(\d.*)$/.exec(String(s));
+  if (!m) return kjrEscape(s);
+  return kjrEscape(m[1]) + '<span class="dash-hero-ccy">' + kjrEscape(m[2]) + '</span>' + kjrEscape(m[3]);
+}
+
 /* ─── Hero monthly-change chip + sparkline ──────────────────────────────
    Both read the same DB.snapshots series renderDashboard already uses (one
    row/day: {date, net, byClass}). Pure presentation, no new stored figures. */
@@ -11574,7 +11583,7 @@ function renderDashboard(){
     : (_dashShowCpf ? 'Net worth (with CPF)' : 'Net worth (ex-CPF)');
   const heroSecondary = _dashShowCpf
     ? `<div style="width:1px;height:48px;background:var(--border);align-self:center;flex-shrink:0"></div>
-    <div><div class="dash-hero-label">${valuation.incomplete ? 'Known ex-CPF subtotal' : 'Ex-CPF'}</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${fmt(netExCpf, {dp:0})}</div></div>`
+    <div><div class="dash-hero-label">${valuation.incomplete ? 'Known ex-CPF subtotal' : 'Ex-CPF'}</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${_heroMoneyHtml(fmt(netExCpf, {dp:0}))}</div></div>`
     : '';
   const fxExclusionNote = valuation.incomplete
     ? `<div class="dash-hero-label" style="margin-top:4px">Known subtotal excludes ${valuation.missingFxCount} asset${valuation.missingFxCount === 1 ? '' : 's'} with missing FX, refresh FX in Settings</div>`
@@ -11605,7 +11614,7 @@ function renderDashboard(){
   const subline = `CPF ${_dashShowCpf ? 'on' : 'off'} · <span id="dash-hero-sync">${kjrEscape(syncText)}</span>`;
 
   nwEl.innerHTML = `<div class="dash-hero">
-    <div><div class="dash-hero-label">${headline}${changeChip}</div><div class="dash-hero-value">${fmt(displayNet, {dp:0})}</div><div class="dash-hero-sub">${subline}</div>${marketEstimateNote}${fxExclusionNote}</div>
+    <div><div class="dash-hero-label">${headline}${changeChip}</div><div class="dash-hero-value">${_heroMoneyHtml(fmt(displayNet, {dp:0}))}</div><div class="dash-hero-sub">${subline}</div>${marketEstimateNote}${fxExclusionNote}</div>
     ${heroSecondary}
     ${spark}
     <button style="${spark ? '' : 'margin-left:auto;'}flex-shrink:0" class="btn btn-sm${_dashShowCpf ? ' btn-active' : ''}" data-click="toggleDashCpf" title="${_dashShowCpf ? 'Click to exclude CPF from net worth' : 'Click to include CPF in net worth'}">CPF ${_dashShowCpf ? 'on' : 'off'}</button>
@@ -11756,7 +11765,7 @@ function renderEmergencyFund(){
       <span class="hint">${cash < 0 ? 'negative balance, reconcile cash' : (done ? 'fully funded' : fmt(target - cash, {dp:0}) + ' to go')}</span>
     </div><div class="card-body">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
-        <span style="font-size:18px;font-weight:700;font-variant-numeric:tabular-nums">${fmt(cash, {dp:0})}</span>
+        <span style="font-size:18px;font-weight:600;font-variant-numeric:tabular-nums">${fmt(cash, {dp:0})}</span>
         <span class="hint">of ${fmt(target, {dp:0})} target · ${pct.toFixed(0)}%</span>
       </div>
       <div style="height:10px;background:var(--bg3);border-radius:6px;overflow:hidden">
