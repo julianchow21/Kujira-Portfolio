@@ -258,6 +258,18 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
   .card-head .freshness{flex-basis:100%;justify-content:center}
 }
 .card-head h3{font-family:var(--font-display);font-size:14px;line-height:20px;font-weight:700;display:flex;align-items:center;gap:8px}
+/* Info tip (_infoTip): an (i) button whose popover shows on hover, keyboard focus or a tap. */
+.info-tip{position:relative;display:inline-flex;align-items:center;vertical-align:middle}
+.info-tip-btn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:50%;background:none;color:var(--text3);cursor:help;transition:color 0.15s ease-out}
+.info-tip-btn svg{width:15px;height:15px}
+.info-tip-btn:hover,.info-tip-btn:focus-visible{color:var(--text)}
+.info-tip-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.info-pop{position:absolute;top:calc(100% + 6px);left:-8px;z-index:40;width:max-content;max-width:min(340px,80vw);display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:var(--radius);background:var(--bg3);border:1px solid var(--border2);box-shadow:var(--glass-shadow);font-size:12px;line-height:1.5;font-weight:400;color:var(--text2);text-transform:none;letter-spacing:normal;white-space:normal;opacity:0;visibility:hidden;pointer-events:none;transition:opacity 0.15s ease-out,visibility 0.15s}
+.info-tip:hover .info-pop,.info-tip:focus-within .info-pop,.info-tip.open .info-pop{opacity:1;visibility:visible;pointer-events:auto}
+.info-tip.dismissed .info-pop{opacity:0;visibility:hidden;pointer-events:none}
+.info-pop-sum{display:flex;flex-direction:column;gap:2px}
+.info-pop-sum:empty{display:none}
+@media (prefers-reduced-motion:reduce){.info-pop,.info-tip-btn{transition:none}}
 .card-body{padding:18px}
 
 /* METRICS */
@@ -449,7 +461,17 @@ textarea.fi{resize:vertical;min-height:70px}
 .alert-warn{background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);padding:8px 12px;border-radius:var(--radius);font-size:14px}
 .integrity-bar{margin-top:14px;border-radius:var(--radius-lg);padding:12px 16px;font-size:13px;border:1px solid var(--border)}
 .integrity-bar.bad{background:var(--amber-soft);border-color:var(--amber-border)}
-.integrity-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--green-border);background:var(--green-soft);color:var(--green);white-space:nowrap}
+/* Quiet status line under a page title (date · prices · books), replacing status pills. */
+.page-status{margin:2px 0 0;font-size:13px;line-height:18px;color:var(--text3)}
+/* Small on/off switch (Include CPF). Selected state takes the accent, per the colour roles. */
+.switch{display:inline-flex;align-items:center;gap:6px;margin-left:10px;padding:2px 0;border:0;background:none;cursor:pointer;font:inherit;font-size:12px;font-weight:600;color:var(--text3);text-transform:none;letter-spacing:normal;vertical-align:middle}
+.switch-track{position:relative;width:26px;height:15px;border-radius:999px;background:var(--bg4);transition:background 0.18s ease-out;flex-shrink:0}
+.switch-track::after{content:'';position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;background:var(--text2);transition:transform 0.18s ease-out,background 0.18s ease-out}
+.switch[aria-checked="true"]{color:var(--text2)}
+.switch[aria-checked="true"] .switch-track{background:var(--accent)}
+.switch[aria-checked="true"] .switch-track::after{transform:translateX(11px);background:var(--on-accent)}
+.switch:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){.switch-track,.switch-track::after{transition:none}}
 .integrity-title{font-weight:700;color:var(--amber);margin-bottom:6px}
 .integrity-list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
 .integrity-list li{color:var(--text2);line-height:1.5}
@@ -483,10 +505,11 @@ textarea.fi{resize:vertical;min-height:70px}
 .dash-hero{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px 22px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
 .dash-hero-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
 .dash-hero-value{font-family:var(--font-display);font-size:48px;font-weight:300;letter-spacing:-0.035em;font-variant-numeric:tabular-nums;line-height:1.08}
-/* Currency prefix: small, dim, lifted toward the cap height so the figure leads. */
-.dash-hero-ccy{font-size:0.45em;font-weight:500;color:var(--text3);letter-spacing:0;margin-right:4px;vertical-align:0.62em}
+/* Currency prefix on display and metric figures (wrapped by _moneyHtml): smaller and
+   dimmer so the digits lead. The hero lifts it toward the cap height. */
+.ccy{font-size:0.72em;font-weight:500;color:var(--text3);letter-spacing:0;margin-right:1px}
+.dash-hero-value .ccy{font-size:0.45em;margin-right:4px;vertical-align:0.62em}
 @media (max-width:640px){.dash-hero-value{font-size:36px;line-height:1.11}}
-.dash-hero-sub{font-size:12px;color:var(--text2)}
 .dash-hero-chip{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:500;border-radius:999px;padding:2px 9px;margin-left:8px;vertical-align:middle;text-transform:none;letter-spacing:normal}
 .dash-hero-chip.pos{color:var(--gain);background:var(--gain-soft)}
 .dash-hero-chip.neg{color:var(--loss);background:var(--loss-soft)}
@@ -751,6 +774,15 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 .dash-arranging #dash-stack > [data-wid] .btn{pointer-events:none;opacity:.4}
 .kjr-sortable-dragging{box-shadow:0 14px 40px rgba(0,0,0,.5);border-radius:12px;transform:scale(1.01)}
 .kjr-sortable-placeholder{background:color-mix(in srgb,var(--accent) 12%,transparent);border:2px dashed var(--accent);border-radius:12px}
+/* Below 400px the SGD/USD toggle, sync pill and icon group no longer fit beside
+   the logo on Stocks and Watchlist+ (the page laid out at 389px). Tighten the
+   spacing rather than shrink the 44px icon tap targets. */
+@media (max-width:400px){
+  .logo{margin-right:4px}
+  .topbar-actions{gap:4px}
+  .ccy-toggle button{padding:5px 6px}
+  .sync-pill{padding-inline:7px}
+}
 </style>
 </head>
 <body>
@@ -813,7 +845,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
   <!-- DASHBOARD -->
   <section class="page" id="page-dashboard">
-    <div class="page-head"><div><h2 class="page-title">Dashboard</h2></div><div style="display:flex;align-items:center;gap:10px"><button id="dash-arrange-btn" class="btn btn-sm btn-ghost" data-click="toggleArrange" aria-pressed="false" aria-describedby="dash-arrange-instructions" style="display:none">Arrange</button><div id="dash-integrity-pill"></div></div></div>
+    <div class="page-head"><div><h2 class="page-title">Dashboard</h2><p class="page-status" id="dash-status"></p></div><div style="display:flex;align-items:center;gap:10px"><button id="dash-arrange-btn" class="btn btn-sm btn-ghost" data-click="toggleArrange" aria-pressed="false" aria-describedby="dash-arrange-instructions" style="display:none">Arrange</button></div></div>
     <div id="dash-integrity"></div>
     <p id="dash-arrange-instructions" class="sr-only">Arrange mode provides a drag handle and Move up or Move down buttons for each dashboard card.</p>
     <div id="dash-arrange-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -1330,7 +1362,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
           <div class="form-group">
             <label class="lbl" for="cfg-tax-reliefs">Total reliefs (SGD)</label>
             <input type="number" step="1" min="0" id="cfg-tax-reliefs" class="fi" placeholder="1000" data-input="renderTaxEstimate">
-            <div class="hint">Earned income relief ($1,000 default). Add NSman, course fees, etc. Reliefs reduce chargeable income.</div>
+            <div class="hint">Earned income relief (S$1,000 default). Add NSman, course fees, etc. Reliefs reduce chargeable income.</div>
           </div>
           <div class="form-group full">
             <label class="lbl" for="cfg-tax-manual">Manual annual tax override (SGD, optional)</label>
@@ -1659,12 +1691,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.68"></script>
-<script src="Worker/kjr-sortable.js?v=2.68"></script>
-<script src="Worker/kjr-vault.js?v=2.68"></script>
-<script src="Worker/kjr-migration.js?v=2.68"></script>
-<script src="Worker/supabase.js?v=2.68"></script>
-<script src="Worker/kjr-nas.js?v=2.68"></script>
-<script src="Worker/app.js?v=2.68"></script>
+<script src="Worker/kjr-core.js?v=2.69"></script>
+<script src="Worker/kjr-sortable.js?v=2.69"></script>
+<script src="Worker/kjr-vault.js?v=2.69"></script>
+<script src="Worker/kjr-migration.js?v=2.69"></script>
+<script src="Worker/supabase.js?v=2.69"></script>
+<script src="Worker/kjr-nas.js?v=2.69"></script>
+<script src="Worker/app.js?v=2.69"></script>
 </body>
 </html>

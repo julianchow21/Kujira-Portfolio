@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.68';
-const APP_DISPLAY_VERSION = 'v2.68 (04 Oct)';
+const APP_VERSION = 'v2.69';
+const APP_DISPLAY_VERSION = 'v2.69 (07 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1007,11 +1007,14 @@ function fmt(n, opts){
     cur = displayCcy();
   }
   try {
-    const s = new Intl.NumberFormat('en-SG', {
+    let s = new Intl.NumberFormat('en-SG', {
       style: 'currency', currency: cur,
       minimumFractionDigits: opts.dp != null ? opts.dp : 2,
       maximumFractionDigits: opts.dp != null ? opts.dp : 2
     }).format(v);
+    // en-SG prints the home currency as a bare "$"; every other currency
+    // already carries its prefix (US$, HK$, A$). Say S$ so the base is never ambiguous.
+    if (cur === 'SGD') s = s.replace('$', 'S$');
     // opts.signed: prepend + on positive deltas so direction never relies on colour
     // alone (negatives already carry a minus). Used by change / P&L / realised cells.
     return (opts.signed && v > 0) ? '+' + s : s;
@@ -1051,7 +1054,7 @@ function fmtCompact(n){
   let v = Number(n);
   if (!isFinite(v) || v <= 0) return '—';
   v = toDisplay(v, 'SGD');
-  const cur = displayCcy() === 'USD' ? 'US$' : '$';
+  const cur = displayCcy() === 'USD' ? 'US$' : 'S$';
   if (v >= 1e12) return cur + (v/1e12).toFixed(2) + 'T';
   if (v >= 1e9)  return cur + (v/1e9).toFixed(2) + 'B';
   if (v >= 1e6)  return cur + (v/1e6).toFixed(1) + 'M';
@@ -3298,10 +3301,7 @@ function setSyncStatus(state, detail){
   const det = document.getElementById('sync-status-detail');
   const confirmedTs = !isNasMode() ? _confirmedCloudTimestamp() : '';
   if (det) det.textContent = visibleDetail || (ts && confirmedTs && ts === confirmedTs ? 'Last confirmed cloud contact ' + relTime(confirmedTs) : (ts ? 'Cloud contact not confirmed by server' : 'No confirmed cloud contact'));
-  // The pill keeps a compact text label on every width. The dashboard hero
-  // subline mirrors it while that page is rendered.
-  const heroSync = document.getElementById('dash-hero-sync');
-  if (heroSync) heroSync.textContent = text;
+  // The pill keeps a compact text label on every width.
   const details = document.getElementById('sync-details-modal');
   if (details && details.classList.contains('open')) renderSyncDetails();
 }
@@ -4706,7 +4706,7 @@ function renderBucketPreview(){
     const amt = takeHome * (Number(r.pct)||0) / 100;
     return `<div class="bucket">
       <div class="bucket-label">${kjrEscape(r.name||'(unnamed)')}</div>
-      <div class="bucket-amt">${fmt(amt,{dp:0})}</div>
+      <div class="bucket-amt">${_moneyHtml(fmt(amt,{dp:0}))}</div>
       <div class="bucket-sub">${(Number(r.pct)||0)}%${r.dest ? ' → ' + kjrEscape(r.dest) : ''}</div>
     </div>`;
   }).join('');
@@ -4788,7 +4788,7 @@ function renderTaxEstimate(){
     el.innerHTML = '<div class="hint">Set a gross monthly salary in the Salary card above to see an estimate.</div>';
     return;
   }
-  const fmt2 = n => n.toLocaleString('en-SG', { style:'currency', currency:'SGD', minimumFractionDigits:0, maximumFractionDigits:0 });
+  const fmt2 = n => fmt(n, { currency:'SGD', dp:0 });
   const nr = est.residency === 'non-resident';
   el.innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:10px">
@@ -7827,7 +7827,7 @@ function renderStocks(){
 
     bodyEl.innerHTML = `
       <div class="card">
-        <div class="card-head"><h3>Holdings</h3>${cardHeadRight}</div>
+        <div class="card-head"><h3>Holdings${_infoTip('stocks-cost-tip', 'How cost is calculated', 'Cost basis and average cost use the weighted-average method, not FIFO.')}</h3>${cardHeadRight}</div>
         <div class="tbl-wrap"><table class="holdings"><thead><tr>
         ${thSort('symbol', 'Symbol', ' tl sticky-col')}${headCells}<th></th>
       </tr></thead><tbody>
@@ -7851,7 +7851,6 @@ function renderStocks(){
           <span class="hint">Page ${_stocksPage + 1} of ${pageCount} · showing ${pageRows.length} of ${totalRows}</span>
           <button class="btn btn-sm" ${_stocksPage >= pageCount - 1 ? 'disabled' : ''} data-click="stocksNextPage">Next ›</button>
         </div>` : ''}
-        <div class="tbl-note hint">Cost basis and average cost use the weighted-average method, not FIFO.</div>
       </div>
     `;
   }
@@ -8005,6 +8004,19 @@ function _pbRangeCutoff(rangeKey){
   // convention, reuse it rather than a second UTC-based one.
   return _isoDateSG(d);
 }
+/* Vertical gradient under a line: the line colour at 25% alpha fading to
+   nothing at the axis. Scriptable, because the gradient needs the chart area. */
+function _pbAreaFill(col){
+  return ctx => {
+    const area = ctx.chart.chartArea;
+    if (!area) return 'transparent';
+    const g = ctx.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+    g.addColorStop(0, col + '40');
+    g.addColorStop(1, col + '00');
+    return g;
+  };
+}
+
 function _pbNetWorthSeries(cfg){
   const snaps = (DB.snapshots||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
   const cutoff = _pbRangeCutoff(cfg.range);
@@ -8012,8 +8024,7 @@ function _pbNetWorthSeries(cfg){
   const labels = rows.map(s => s.date);
   const cpfOf = s => (s.byClass && s.byClass.cpf) || 0;
   const netOf = s => _dashShowCpf ? s.net : (s.net - cpfOf(s));
-  const classMeta = { stocks:['Stocks',0], cash:['Cash',1], cpf:['CPF',2], realestate:['Real Estate',3], crypto:['Crypto',4], insurance:['Insurance',5] };
-  const dot = i => PB_PALETTE[i % PB_PALETTE.length];
+  const classMeta = { stocks:'Stocks', cash:'Cash', cpf:'CPF', realestate:'Real Estate', crypto:'Crypto', insurance:'Insurance' };
   // Class series take the class's own colour so each class matches the allocation bar and doughnut.
   const classColor = lab => _cssVar(assetClassColor(lab));
 
@@ -8021,7 +8032,7 @@ function _pbNetWorthSeries(cfg){
   if (cfg.seriesMode === 'split'){
     return { labels, stacked:true, datasets: Object.entries(classMeta)
       .filter(([k]) => k !== 'cpf' || _dashShowCpf)
-      .map(([k,[lab]]) => ({
+      .map(([k,lab]) => ({
         label:lab, data:rows.map(s=>toDisplay((s.byClass&&s.byClass[k])||0,'SGD')),
         borderColor:classColor(lab), backgroundColor:classColor(lab)+'44',
         fill:true, borderWidth:1.5, pointRadius:0, tension:0.25, stack:'nw'
@@ -8031,11 +8042,11 @@ function _pbNetWorthSeries(cfg){
   if (cfg.seriesMode === 'single'){
     const k = classMeta[cfg.seriesClass] ? cfg.seriesClass : 'cash';
     if (k === 'cpf' && !_dashShowCpf) return { labels:[], datasets:[], hidden:true };
-    const [lab] = classMeta[k];
+    const lab = classMeta[k];
     return { labels, stacked:false, datasets:[{
       label:lab, data:rows.map(s=>toDisplay((s.byClass&&s.byClass[k])||0,'SGD')),
       borderColor:classColor(lab), backgroundColor:'transparent',
-      fill:false, borderWidth:2, pointRadius:rows.length>30?0:2, tension:0.25
+      fill:false, borderWidth:2, pointRadius:0, pointHoverRadius:4, tension:0.25
     }]};
   }
   // With vs without CPF — two lines so the CPF contribution is the gap between.
@@ -8043,17 +8054,20 @@ function _pbNetWorthSeries(cfg){
     if (!_dashShowCpf) return { labels:[], datasets:[], hidden:true };
     return { labels, stacked:false, datasets:[
       { label:'With CPF', data:rows.map(s=>toDisplay(s.net,'SGD')),
-        borderColor:_cssVar('--accent'), backgroundColor:'transparent', fill:false, borderWidth:2, pointRadius:rows.length>30?0:2, tension:0.25 },
+        borderColor:classColor('CPF'), backgroundColor:'transparent', fill:false, borderWidth:2, pointRadius:0, pointHoverRadius:4, tension:0.25 },
       { label:'Ex-CPF', data:rows.map(s=>toDisplay(s.net - cpfOf(s),'SGD')),
-        borderColor:dot(1), backgroundColor:'transparent', fill:false, borderWidth:2, borderDash:[5,4], pointRadius:rows.length>30?0:2, tension:0.25 }
+        borderColor:_cssVar('--text2'), backgroundColor:'transparent', fill:false, borderWidth:2, borderDash:[5,4], pointRadius:0, pointHoverRadius:4, tension:0.25 }
     ]};
   }
-  // Total — single net worth line, follows the dashboard CPF toggle.
+  // Total — single net worth line, follows the dashboard CPF toggle. Line and
+  // gradient take the gain or loss colour of the visible period's result.
+  const totals = rows.map(s=>toDisplay(netOf(s),'SGD'));
+  const col = _cssVar(totals.length > 1 && totals[totals.length-1] < totals[0] ? '--loss' : '--gain');
   return { labels, stacked:false, datasets:[{
     label:_dashShowCpf?'Net worth':'Net worth (ex-CPF)',
-    data:rows.map(s=>toDisplay(netOf(s),'SGD')),
-    borderColor:_cssVar('--accent'), backgroundColor:'transparent',
-    fill:false, borderWidth:2, pointRadius:rows.length>30?0:2, tension:0.25
+    data:totals,
+    borderColor:col, backgroundColor:_pbAreaFill(col),
+    fill:'start', borderWidth:2, pointRadius:0, pointHoverRadius:4, tension:0.25
   }]};
 }
 
@@ -8077,8 +8091,8 @@ function _pbCpfSeries(cfg){
   }
   return { labels, stacked:false, datasets:[{
     label:'CPF', data:bals.map(b=>toDisplay((b.OA||0)+(b.SA||0)+(b.MA||0)+(b.RA||0),'SGD')),
-    borderColor:_cssVar('--accent'), backgroundColor:'transparent',
-    fill:false, borderWidth:2, pointRadius:months.length>30?0:3, tension:0.25
+    borderColor:_cssVar('--c-cpf'), backgroundColor:'transparent',
+    fill:false, borderWidth:2, pointRadius:0, pointHoverRadius:4, tension:0.25
   }]};
 }
 
@@ -8700,6 +8714,20 @@ async function _pbDrawTimeSeries(host, cfg, showEmpty, showChart){
 }
 
 /* ── Internal time-series draw (net worth from snapshots, CPF reconstructed) ── */
+/* Human dates for the internal series charts. Labels arrive as YYYY-MM-DD
+   (net-worth snapshots) or YYYY-MM (CPF month-ends). style: 'short' gives
+   "6 Oct", 'month' gives "Nov 2025", 'full' gives "6 Oct 2025" (a month
+   label always reads as "Nov 2025"). A fixed month list keeps "Sep" the
+   same in every browser, where locale data varies between Sep and Sept. */
+const PB_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function _pbHumanDate(label, style){
+  const m = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(String(label));
+  if (!m) return String(label);
+  const mon = PB_MONTHS[+m[2] - 1];
+  if (!m[3] || style === 'month') return mon + ' ' + m[1];
+  return style === 'full' ? `${+m[3]} ${mon} ${m[1]}` : `${+m[3]} ${mon}`;
+}
+
 function _pbDrawInternalSeries(host, cfg, showEmpty, showChart){
   const src = pbSource(cfg);
   const ser = src.series ? src.series(cfg) : { labels:[], datasets:[] };
@@ -8716,6 +8744,10 @@ function _pbDrawInternalSeries(host, cfg, showEmpty, showChart){
   }
   showChart();
   const axisColor = _cssVar('--text3'), gridColor = _cssVar('--border');
+  // Spans over ~3 months label ticks by month ("Nov 2025"), shorter ones by day ("6 Oct").
+  const toDay = l => Date.parse(String(l).length === 7 ? l + '-01' : l);
+  const longSpan = !((toDay(ser.labels[ser.labels.length - 1]) - toDay(ser.labels[0])) / 864e5 <= 92);
+  const tickStyle = longSpan ? 'month' : 'short';
   _pbMountChart(host.canvasId, {
     type: 'line', data: { labels: ser.labels, datasets: ser.datasets },
     options: {
@@ -8723,11 +8755,21 @@ function _pbDrawInternalSeries(host, cfg, showEmpty, showChart){
       interaction:{ mode:'index', intersect:false },
       plugins:{
         legend:{ display: ser.stacked || ser.datasets.length > 1, position:'bottom', labels:{ color:_cssVar('--text2'), font:{size:11}, boxWidth:12, padding:12 } },
-        tooltip:{ callbacks:{ label: c => ' ' + c.dataset.label + ': ' + _privacyMaskLabel(fmt(c.parsed.y, { noConvert:true, dp:0 })) } }
+        tooltip:{ callbacks:{
+          title: items => items.length ? _pbHumanDate(items[0].label, 'full') : '',
+          label: c => ' ' + c.dataset.label + ': ' + _privacyMaskLabel(fmt(c.parsed.y, { noConvert:true, dp:0 }))
+        } }
       },
       scales:{
-        x:{ stacked:ser.stacked, ticks:{ color:axisColor, font:{size:10}, maxTicksLimit:6 }, grid:{ display:false } },
-        y:{ stacked:ser.stacked, ticks:{ color:axisColor, font:{size:10} }, grid:{ color:gridColor } }
+        x:{ stacked:ser.stacked, grid:{ display:false },
+            ticks:{ color:axisColor, font:{size:10}, maxTicksLimit:6, maxRotation:0,
+                    // Skip a tick that would repeat the previous one's month label.
+                    callback(value, i, ticks){
+                      const text = _pbHumanDate(this.getLabelForValue(value), tickStyle);
+                      return i > 0 && _pbHumanDate(this.getLabelForValue(ticks[i - 1].value), tickStyle) === text ? '' : text;
+                    } } },
+        y:{ stacked:ser.stacked, grid:{ color:gridColor },
+            ticks:{ color:axisColor, font:{size:10}, maxTicksLimit:6, callback: v => kjrFmtAxis(v, { unit:'money' }, _pbCurSym()) } }
       }
     }
   });
@@ -8885,22 +8927,21 @@ function _pbRenderOneSaved(cfg){
     : cfg.mode === 'timeseries'
     ? `Price history · ${PB_PERIOD_LABELS[cfg.range]} · ${cfg.tsValue==='positionValue'?'Position value':'Close price'}`
     : `X: ${cfg.xFields.map(k=>flds[k]?.label||k).join(' · ')} · Y: ${cfg.yFields.map(k=>flds[k]?.label||k).join(' · ')} · Top ${cfg.topN} · ${cfg.chartType}`;
+  // The builder caption and the draw summary live in an info tip, not as
+  // small print under the title; _pbDrawInto still fills #pb-sc-summary-*.
   wrap.innerHTML = `
-    <div class="card-head" style="flex-direction:column;align-items:flex-start;gap:4px">
-      <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
-        <h3 style="font-size:14px">${kjrEscape(cfg.title)}</h3>
-        <div style="display:flex;gap:6px;align-items:center">
-          <button class="btn btn-sm btn-ghost" data-click="pbTogglePin" data-a0="${cfg.id}">${cfg.pinned ? 'Pinned' : 'Pin'}</button>
-          <button class="btn btn-sm btn-ghost" data-click="pbRefreshSaved" data-a0="${cfg.id}">↻</button>
-          ${cfg.pinned?'':`<button class="btn btn-sm btn-ghost" data-click="pbDeleteSaved" data-a0="${cfg.id}" title="Delete">×</button>`}
-        </div>
+    <div class="card-head">
+      <h3>${kjrEscape(cfg.title)}${_infoTip('pb-sc-tip-' + cfg.id, 'About this chart',
+        `<span>${kjrEscape(meta)}</span><span id="pb-sc-summary-${cfg.id}" class="info-pop-sum"></span>`)}</h3>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn btn-sm btn-ghost" data-click="pbTogglePin" data-a0="${cfg.id}">${cfg.pinned ? 'Pinned' : 'Pin'}</button>
+        <button class="btn btn-sm btn-ghost" data-click="pbRefreshSaved" data-a0="${cfg.id}">↻</button>
+        ${cfg.pinned?'':`<button class="btn btn-sm btn-ghost" data-click="pbDeleteSaved" data-a0="${cfg.id}" title="Delete">×</button>`}
       </div>
-      <div style="font-size:12px;color:var(--text3)">${meta}</div>
     </div>
     <div class="card-body" style="padding:12px 18px">
       <div id="pb-sc-empty-${cfg.id}" class="empty" style="display:none;padding:30px 10px"></div>
       <div id="pb-sc-wrap-${cfg.id}" style="height:260px"><canvas id="pb-sc-canvas-${cfg.id}"></canvas></div>
-      <div id="pb-sc-summary-${cfg.id}" style="font-size:12px;color:var(--text3);margin-top:8px;display:flex;gap:14px;flex-wrap:wrap"></div>
     </div>`;
   stack.appendChild(wrap);
   const host = { canvasId:'pb-sc-canvas-'+cfg.id, wrapEl: wrap.querySelector('#pb-sc-wrap-'+cfg.id),
@@ -10258,7 +10299,6 @@ function _renderInsPremiumChart(series){
     const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
     months.push(d.toLocaleDateString('en-SG',{month:'short',year:'2-digit'}));
   }
-  const dc = displayCcy();
   const values = series.map(v => +toDisplay(v, 'SGD').toFixed(2));
   const axisColor = _cssVar('--text3'), gridColor = _cssVar('--border');
   const old = _pbCharts['ins-prem-canvas']; if (old){ try{ old.destroy(); }catch(e){} }
@@ -10273,7 +10313,7 @@ function _renderInsPremiumChart(series){
       },
       scales:{
         x:{ ticks:{ color:axisColor, font:{size:10} }, grid:{ display:false } },
-        y:{ ticks:{ color:axisColor, font:{size:10}, callback: v => dc + ' ' + Number(v).toLocaleString('en-SG') }, grid:{ color:gridColor } }
+        y:{ ticks:{ color:axisColor, font:{size:10}, callback: v => kjrFmtAxis(v, { unit:'money' }, _pbCurSym()) }, grid:{ color:gridColor } }
       }
     }
   });
@@ -10407,9 +10447,9 @@ function renderProjections(){
 
   const fireCard = `<div class="card"><div class="card-head"><h3>FIRE progress</h3></div><div class="card-body">
     <div class="metrics">
-      <div class="metric"><div class="metric-label">FIRE number</div><div class="metric-value">${fmt(fireNumber,{dp:0})}</div></div>
-      <div class="metric"><div class="metric-label">Liquid now</div><div class="metric-value">${fmt(liquidNow,{dp:0})}</div></div>
-      <div class="metric"><div class="metric-label">CPF (separate track)</div><div class="metric-value">${fmt(cpfNow.OA+cpfNow.SA+cpfNow.MA+cpfNow.RA,{dp:0})}</div></div>
+      <div class="metric"><div class="metric-label">FIRE number</div><div class="metric-value">${_moneyHtml(fmt(fireNumber,{dp:0}))}</div></div>
+      <div class="metric"><div class="metric-label">Liquid now</div><div class="metric-value">${_moneyHtml(fmt(liquidNow,{dp:0}))}</div></div>
+      <div class="metric"><div class="metric-label">CPF (separate track)</div><div class="metric-value">${_moneyHtml(fmt(cpfNow.OA+cpfNow.SA+cpfNow.MA+cpfNow.RA,{dp:0}))}</div></div>
     </div>
     <div class="cov-bar" style="width:100%;height:10px;margin:12px 0 6px"><span style="width:${progressPct}%"></span></div>
     <p class="hint">${progressPct}% of FIRE number, liquid assets only (stocks + cash + crypto). ${verdict} ${retireVerdict}</p>
@@ -10450,7 +10490,6 @@ function _renderProjectionChart(liquidSeries, cpfSeries, fireNumber){
   const nowYear = new Date().getFullYear();
   const n = liquidSeries.length;
   const labels = liquidSeries.map((_,m) => (m % 60 === 0) ? String(nowYear + m/12) : '');
-  const dc = displayCcy();
   const liq = liquidSeries.map(v => +toDisplay(v, 'SGD').toFixed(2));
   const cpf = (cpfSeries||[]).map(v => +toDisplay(v, 'SGD').toFixed(2));
   const fireLine = new Array(n).fill(fireNumber > 0 ? +toDisplay(fireNumber, 'SGD').toFixed(2) : null);
@@ -10473,7 +10512,7 @@ function _renderProjectionChart(liquidSeries, cpfSeries, fireNumber){
       },
       scales:{
         x:{ ticks:{ color:axisColor, font:{size:10}, autoSkip:false, maxRotation:0 }, grid:{ display:false } },
-        y:{ ticks:{ color:axisColor, font:{size:10}, callback: v => dc + ' ' + Number(v).toLocaleString('en-SG') }, grid:{ color:gridColor } }
+        y:{ ticks:{ color:axisColor, font:{size:10}, callback: v => kjrFmtAxis(v, { unit:'money' }, _pbCurSym()) }, grid:{ color:gridColor } }
       }
     }
   });
@@ -10840,11 +10879,11 @@ function renderCpf(){
   // metrics, history subtotals below); fmt()'s default is 2dp, which made
   // these the one place still showing cents ($92,760.00 vs $92,760 elsewhere).
   balsEl.innerHTML = `<div class="metrics">
-    <div class="metric"><div class="metric-label">Total CPF</div><div class="metric-value">${fmt(total,{dp:0})}</div><div class="metric-sub${accrued > 0.5 ? ' pos' : ''}">${kjrEscape(subLine)}</div></div>
-    <div class="metric"><div class="metric-label">OA · ${DB.settings.cpfRates.OA}%</div><div class="metric-value">${fmt(eff.OA||0,{dp:0})}</div></div>
-    <div class="metric"><div class="metric-label">SA · ${DB.settings.cpfRates.SA}%</div><div class="metric-value">${fmt(eff.SA||0,{dp:0})}</div></div>
-    <div class="metric"><div class="metric-label">MA · ${DB.settings.cpfRates.MA}%</div><div class="metric-value">${fmt(eff.MA||0,{dp:0})}</div></div>
-    <div class="metric"><div class="metric-label">RA · ${DB.settings.cpfRates.RA}%</div><div class="metric-value">${fmt(eff.RA||0,{dp:0})}</div></div>
+    <div class="metric"><div class="metric-label">Total CPF</div><div class="metric-value">${_moneyHtml(fmt(total,{dp:0}))}</div><div class="metric-sub${accrued > 0.5 ? ' pos' : ''}">${kjrEscape(subLine)}</div></div>
+    <div class="metric"><div class="metric-label">OA · ${DB.settings.cpfRates.OA}%</div><div class="metric-value">${_moneyHtml(fmt(eff.OA||0,{dp:0}))}</div></div>
+    <div class="metric"><div class="metric-label">SA · ${DB.settings.cpfRates.SA}%</div><div class="metric-value">${_moneyHtml(fmt(eff.SA||0,{dp:0}))}</div></div>
+    <div class="metric"><div class="metric-label">MA · ${DB.settings.cpfRates.MA}%</div><div class="metric-value">${_moneyHtml(fmt(eff.MA||0,{dp:0}))}</div></div>
+    <div class="metric"><div class="metric-label">RA · ${DB.settings.cpfRates.RA}%</div><div class="metric-value">${_moneyHtml(fmt(eff.RA||0,{dp:0}))}</div></div>
   </div>`;
 
   if (metaEl) metaEl.textContent = anchor ? 'Statement figure as of ' + fmtDateSG(anchor) : 'Not set yet';
@@ -10888,11 +10927,11 @@ function renderCpf(){
   histEl.innerHTML = `
     <div class="h-summary" style="margin-bottom:14px">
       <div class="h-summary-item accent"><div class="h-summary-label">Entries</div><div class="h-summary-value">${filtered.length}</div></div>
-      <div class="h-summary-item ${subTotal >= 0 ? 'pos':'neg'}"><div class="h-summary-label">Filtered net</div><div class="h-summary-value">${fmt(subTotal,{dp:0})}</div></div>
-      <div class="h-summary-item"><div class="h-summary-label">OA</div><div class="h-summary-value">${fmt(subBy.OA,{dp:0})}</div></div>
-      <div class="h-summary-item"><div class="h-summary-label">SA</div><div class="h-summary-value">${fmt(subBy.SA,{dp:0})}</div></div>
-      <div class="h-summary-item"><div class="h-summary-label">MA</div><div class="h-summary-value">${fmt(subBy.MA,{dp:0})}</div></div>
-      <div class="h-summary-item"><div class="h-summary-label">RA</div><div class="h-summary-value">${fmt(subBy.RA,{dp:0})}</div></div>
+      <div class="h-summary-item ${subTotal >= 0 ? 'pos':'neg'}"><div class="h-summary-label">Filtered net</div><div class="h-summary-value">${_moneyHtml(fmt(subTotal,{dp:0}))}</div></div>
+      <div class="h-summary-item"><div class="h-summary-label">OA</div><div class="h-summary-value">${_moneyHtml(fmt(subBy.OA,{dp:0}))}</div></div>
+      <div class="h-summary-item"><div class="h-summary-label">SA</div><div class="h-summary-value">${_moneyHtml(fmt(subBy.SA,{dp:0}))}</div></div>
+      <div class="h-summary-item"><div class="h-summary-label">MA</div><div class="h-summary-value">${_moneyHtml(fmt(subBy.MA,{dp:0}))}</div></div>
+      <div class="h-summary-item"><div class="h-summary-label">RA</div><div class="h-summary-value">${_moneyHtml(fmt(subBy.RA,{dp:0}))}</div></div>
     </div>
     <div class="tbl-wrap"><table class="holdings"><thead><tr>
       <th class="tl">Date</th><th class="tl">Type</th><th class="tl">Account</th><th>Amount</th><th class="tl">Source</th><th class="tl">Notes</th><th></th>
@@ -11495,13 +11534,37 @@ function toggleArrange(){
   _announceDashArrange(_dashArrange ? 'Arrange mode on. Use Move up or Move down to reorder dashboard cards.' : 'Arrange mode off.');
 }
 
-/* Hero figure markup: wraps the leading currency symbol of a fmt() string in
-   .dash-hero-ccy (small, dim) and leaves any sign full size. Text content is
-   unchanged, so copy, privacy blur and screen readers read the same figure. */
-function _heroMoneyHtml(s){
-  const m = /^([+\-−]?)([^\d]+)(\d.*)$/.exec(String(s));
-  if (!m) return kjrEscape(s);
-  return kjrEscape(m[1]) + '<span class="dash-hero-ccy">' + kjrEscape(m[2]) + '</span>' + kjrEscape(m[3]);
+/* Display-figure markup: wraps the currency prefix of a plain amount
+   ("S$621,435", "-US$1,204", "+S$3,200") in .ccy so headline and metric
+   figures show it smaller and dimmer, sign left full size. Text content is
+   unchanged, so copy, privacy blur and screen readers read the same figure.
+   Takes HTML-safe text (fmt() output or markup a caller already built) and
+   returns it untouched unless the whole value is one plain amount, so counts,
+   percentages, '—' and FX-missing markup pass straight through. */
+function _moneyHtml(s){
+  const str = String(s);
+  const m = /^([+\-−]?)([A-Z]{0,3}\$|[A-Z]{0,2}[€£¥]|[A-Z]{3} )(\d[\d,]*(?:\.\d+)?[kMBT]?)$/.exec(str);
+  if (!m) return str;
+  return m[1] + '<span class="ccy">' + m[2] + '</span>' + m[3];
+}
+
+/* Dashboard status line under the page title: today's date, the age of the
+   oldest live price among holdings, and the reconciliation result. Replaces
+   the separate status pills; plain text, so callers set it via textContent. */
+function _dashStatusLine(rec){
+  const parts = [new Date().toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long' })];
+  let oldest = null;
+  for (const table of ['stocks', 'crypto']){
+    for (const it of DB[table] || []){
+      const px = priceFor(table, it);
+      const t = px && px.fetchedAt ? new Date(px.fetchedAt).getTime() : NaN;
+      if (isFinite(t) && (oldest == null || t < oldest)) oldest = t;
+    }
+  }
+  if (oldest != null) parts.push('prices ' + relTime(new Date(oldest)));
+  const n = (rec.issues || []).length;
+  parts.push(rec.ok ? 'books balanced' : n + ' thing' + (n === 1 ? '' : 's') + ' to check');
+  return parts.join(' · ');
 }
 
 /* ─── Hero monthly-change chip + sparkline ──────────────────────────────
@@ -11582,13 +11645,13 @@ function renderDashboard(){
   const displayClasses = allocation.items.map(c => ({ key:c.cls, val:c.val, color:assetClassColor(c.cls) }));
   const displayNet = allocation.total;
 
-  // Net worth hero — secondary (ex-CPF) only shown when CPF is on
-  const headline = valuation.incomplete
-    ? `Known net worth (${_dashShowCpf ? 'with CPF' : 'ex-CPF'}, incomplete)`
-    : (_dashShowCpf ? 'Net worth (with CPF)' : 'Net worth (ex-CPF)');
+  // Net worth hero — secondary (ex-CPF) only shown when CPF is on. The
+  // Include CPF switch beside the label carries the with/without state.
+  const headline = valuation.incomplete ? 'Known net worth (incomplete)' : 'Net worth';
+  const cpfSwitch = `<button type="button" class="switch" role="switch" aria-checked="${_dashShowCpf}" data-click="toggleDashCpf"><span class="switch-track" aria-hidden="true"></span>Include CPF</button>`;
   const heroSecondary = _dashShowCpf
     ? `<div style="width:1px;height:48px;background:var(--border);align-self:center;flex-shrink:0"></div>
-    <div><div class="dash-hero-label">${valuation.incomplete ? 'Known ex-CPF subtotal' : 'Ex-CPF'}</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${_heroMoneyHtml(fmt(netExCpf, {dp:0}))}</div></div>`
+    <div><div class="dash-hero-label">${valuation.incomplete ? 'Known ex-CPF subtotal' : 'Ex-CPF'}</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${_moneyHtml(fmt(netExCpf, {dp:0}))}</div></div>`
     : '';
   const fxExclusionNote = valuation.incomplete
     ? `<div class="dash-hero-label" style="margin-top:4px">Known subtotal excludes ${valuation.missingFxCount} asset${valuation.missingFxCount === 1 ? '' : 's'} with missing FX, refresh FX in Settings</div>`
@@ -11610,32 +11673,23 @@ function renderDashboard(){
     : '';
   const spark = valuation.incomplete ? '' : _heroSparkline(snaps, netOf);
 
-  // Subline: current CPF-toggle wording plus the sync status (kept in step by
-  // setSyncStatus, which also writes #dash-hero-sync directly on every sync
-  // event; this initial value covers the render that creates the element).
-  const syncText = document.getElementById('sync-pill-label')
-    ? document.getElementById('sync-pill-label').textContent
-    : 'Local only';
-  const subline = `CPF ${_dashShowCpf ? 'on' : 'off'} · <span id="dash-hero-sync">${kjrEscape(syncText)}</span>`;
-
   nwEl.innerHTML = `<div class="dash-hero">
-    <div><div class="dash-hero-label">${headline}${changeChip}</div><div class="dash-hero-value">${_heroMoneyHtml(fmt(displayNet, {dp:0}))}</div><div class="dash-hero-sub">${subline}</div>${marketEstimateNote}${fxExclusionNote}</div>
+    <div><div class="dash-hero-label">${headline}${cpfSwitch}${changeChip}</div><div class="dash-hero-value">${_moneyHtml(fmt(displayNet, {dp:0}))}</div>${marketEstimateNote}${fxExclusionNote}</div>
     ${heroSecondary}
     ${spark}
-    <button style="${spark ? '' : 'margin-left:auto;'}flex-shrink:0" class="btn btn-sm${_dashShowCpf ? ' btn-active' : ''}" data-click="toggleDashCpf" title="${_dashShowCpf ? 'Click to exclude CPF from net worth' : 'Click to include CPF in net worth'}">CPF ${_dashShowCpf ? 'on' : 'off'}</button>
   </div>`;
 
-  // Data integrity / reconciliation — ok state is a pill in the page-head,
-  // bad state is a full bar below the hero (needs room for the issues list).
-  const intPill = document.getElementById('dash-integrity-pill');
-  const intEl   = document.getElementById('dash-integrity');
+  // Data integrity / reconciliation — the ok state is a phrase in the status
+  // line under the page title, the bad state adds a full bar below the hero
+  // (needs room for the issues list).
+  const intEl = document.getElementById('dash-integrity');
   const rec = runReconciliation();
+  const statusEl = document.getElementById('dash-status');
+  if (statusEl) statusEl.textContent = _dashStatusLine(rec);
   if (rec.ok){
-    if (intPill) intPill.innerHTML = `<span class="integrity-pill">✓ Books balanced</span>`;
-    if (intEl)   intEl.innerHTML   = '';
+    if (intEl) intEl.innerHTML = '';
   } else {
-    if (intPill) intPill.innerHTML = '';
-    if (intEl)   intEl.innerHTML   = `<div class="integrity-bar bad">
+    if (intEl) intEl.innerHTML = `<div class="integrity-bar bad">
       <div class="integrity-title">⚠ ${rec.issues.length} thing${rec.issues.length > 1 ? 's' : ''} to check</div>
       <ul class="integrity-list">${rec.issues.map(i =>
         `<li class="${i.level}">${kjrEscape(i.msg)}${i.fixFn
@@ -11672,7 +11726,7 @@ function renderDashboard(){
           : kjrEscape(c.key) + ' · ' + (c.val < 0 ? 'signed balance' : (valuation.incomplete ? 'known value' : 'value'));
         return `<div class="dash-class-card">
           <div class="dash-class-icon" style="background:var(${c.color}-soft,var(${c.color}));color:var(${c.color})">${CLASS_ICON[c.key] || ''}</div>
-          <div class="dash-class-value metric-value">${fmt(c.val,{dp:0})}</div>
+          <div class="dash-class-value metric-value">${_moneyHtml(fmt(c.val,{dp:0}))}</div>
           <div class="dash-class-label">${label}</div>
         </div>`;
       }).join('');
@@ -11874,12 +11928,21 @@ function renderTopMovers(){
     </div><div class="card-body"><div class="movers-grid">${cells}</div></div></div>`;
 }
 
+const INFO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>';
+/* Info tip: an (i) button whose popover shows on hover, keyboard focus or a
+   tap (toggleInfoTip), for secondary detail such as builder captions and
+   method footnotes that would otherwise sit as small print. id must be
+   unique on the page; contentHtml must already be escaped. */
+function _infoTip(id, label, contentHtml){
+  return `<span class="info-tip"><button type="button" class="info-tip-btn" data-click="toggleInfoTip" aria-label="${kjrEscape(label)}" aria-describedby="${id}">${INFO_ICON}</button><span class="info-pop" role="tooltip" id="${id}">${contentHtml}</span></span>`;
+}
+
 function renderSummary(items){
   return `<div class="h-summary">${
     items.map(it => `
       <div class="h-summary-item ${it.accent || ''}">
         <div class="h-summary-label">${kjrEscape(it.label)}</div>
-        ${it.value ? `<div class="h-summary-value">${it.value}</div>` : ''}
+        ${it.value ? `<div class="h-summary-value">${_moneyHtml(it.value)}</div>` : ''}
         ${it.sub ? `<div class="h-summary-sub">${it.sub}</div>` : ''}
       </div>`).join('')
   }</div>`;
@@ -11988,6 +12051,25 @@ function installEventDelegation(){
     if (!ENTITY_SCHEMAS[table]) return;
     if (!kjrSafeId(id)) { showToast('Invalid entry id', 'error'); return; }
     openEntityModal(table, id);
+  });
+  // Info tips: Escape hides a shown tip without moving focus; it can show
+  // again once the pointer or focus leaves. A tap elsewhere closes a tapped-open tip.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    document.querySelectorAll('.info-tip').forEach(t => {
+      if (t.classList.contains('open') || t.matches(':hover, :focus-within')){ t.classList.remove('open'); t.classList.add('dismissed'); }
+    });
+  });
+  document.addEventListener('focusout', (e) => {
+    const tip = e.target.closest && e.target.closest('.info-tip');
+    if (tip && !tip.contains(e.relatedTarget)) tip.classList.remove('dismissed', 'open');
+  });
+  document.addEventListener('mouseout', (e) => {
+    const tip = e.target.closest && e.target.closest('.info-tip');
+    if (tip && !tip.contains(e.relatedTarget)) tip.classList.remove('dismissed');
+  });
+  document.addEventListener('click', (e) => {
+    document.querySelectorAll('.info-tip.open').forEach(t => { if (!t.contains(e.target)) t.classList.remove('open'); });
   });
   // More sheet (mobile): Escape closes it, matching the entity/columns modals.
   document.addEventListener('keydown', (e) => {
@@ -12126,6 +12208,7 @@ function installEventDelegation(){
     ledgerViewByStock:   () => { _ledgerView = 'by-stock'; renderStockTxns(); },
     // dashboard
     toggleDashCpf:       () => { _dashShowCpf = !_dashShowCpf; renderDashboard(); },
+    toggleInfoTip:       (el) => { const tip = el.closest('.info-tip'); if (!tip) return; tip.classList.remove('dismissed'); tip.classList.toggle('open'); },
     toggleArrange:       () => toggleArrange(),
     moveDashWidget:     (el) => { const [id, direction] = A(el); moveDashWidget(id, Number(direction)); },
     // columns manager
