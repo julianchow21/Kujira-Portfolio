@@ -2054,7 +2054,7 @@ async function runTests(){
       const sb = freshSandbox({settings:{birthYear:1990,salary:{},fireTarget,fireMultiple:25,fxRates:{},fxOverrides:{}},expenses:[{date:'2026-10-01',amount:1,currency:'SGD'},{date:'2026-10-01',amount:1000,currency:'EUR'}],income:[{date:'2026-10-01',net:500,gross:500}]});
       stubNow(sb, '2026-10-03T12:00:00+08:00'); if (fireTarget == null) assert.strictEqual(sb.fireNumberSGD(), null);
       assert.strictEqual(sb.derivedMonthlySavingsSGD(), null); const root = {innerHTML:''};
-      sb.document = {getElementById:()=>root}; sb.setRenderCcy = () => {}; sb._liquidAssetValueInfo = () => ({total:100000,incomplete:false}); sb._clearProjectionChart = () => {};
+      sb.document = {getElementById:()=>root}; sb.setRenderCcy = () => {}; sb._liquidAssetValueInfo = () => ({total:100000,incomplete:false}); sb._clearProjectionChart = () => {}; sb._emptyIcon = () => '';
       sb.renderProjections(); assert.match(root.innerHTML, /Projection unavailable/); assert.match(root.innerHTML, /Set FX rates for expenses/); assert.doesNotMatch(root.innerHTML, /On track|reach it around/);
     }
   });

@@ -49,7 +49,20 @@
   --border:#E5E1D8;--border2:#D6D1C4;
   --text:#1f1d1a;--text2:#6b665e;--text3:#7b766c;
   --red:#b13838;--red2:#8f2c2c;--red-soft:#f7e6e6;--red-border:#e6c5c5;
-  --green:#2f7d4f;--green-soft:#e6f1ea;--green-border:#bedcc9;
+  /* Gain/loss carry P&L and change colouring. Light values are the redesign's
+     #13845A/#C7404B darkened ~10% so text clears 4.5:1 on --bg and on its own
+     soft pill. --green follows --gain so success states share the one green. */
+  --gain:#117550;--loss:#B93641;--gain-soft:rgba(17,117,80,0.10);--loss-soft:rgba(185,54,65,0.10);
+  --green:var(--gain);--green-soft:#e6f1ea;--green-border:#bedcc9;
+  /* Asset-class roles: one colour per class across cards, bars and charts.
+     Soft tints resolve per theme because they reference the class token. */
+  --c-stocks:#3F62D4;--c-cash:#7A889B;--c-cpf:#7656D3;--c-re:#B5822E;--c-crypto:#CF5E3C;--c-insurance:#A8508E;
+  --c-stocks-soft:color-mix(in srgb,var(--c-stocks) 16%,transparent);
+  --c-cash-soft:color-mix(in srgb,var(--c-cash) 16%,transparent);
+  --c-cpf-soft:color-mix(in srgb,var(--c-cpf) 16%,transparent);
+  --c-re-soft:color-mix(in srgb,var(--c-re) 16%,transparent);
+  --c-crypto-soft:color-mix(in srgb,var(--c-crypto) 16%,transparent);
+  --c-insurance-soft:color-mix(in srgb,var(--c-insurance) 16%,transparent);
   --blue:#3a5e8c;--blue-soft:#e4ebf4;--blue-border:#c2d3e6;
   --amber:#9a6a14;--amber-soft:#f8efd6;--amber-border:#e7d3a0;
   --purple:#7a4fa3;
@@ -61,7 +74,7 @@
   --glass-blur:12px;--glass-shadow:0 6px 18px rgba(60,50,40,0.10);
   --shadow-card:0 1px 3px rgba(60,50,40,0.07);
   --surface-solid:#ffffff;
-  --glow1:rgba(15,110,86,0.06);--glow2:rgba(240,195,109,0.07);
+  --glow1:transparent;--glow2:transparent;
   --font-display:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,system-ui,sans-serif;
   --tx:var(--text);--tx2:var(--text2);--tx3:var(--text3);
 }
@@ -70,7 +83,9 @@ html.dark{
   --border:rgba(148,163,184,0.14);--border2:rgba(148,163,184,0.22);
   --text:#E8ECF4;--text2:#9AA4BA;--text3:#7C87A0;
   --red:#e24b4a;--red2:#c03333;--red-soft:#2a1a1e;--red-border:#3a2530;
-  --green:#4CAF50;--green-soft:#152a20;--green-border:#243a2e;
+  --gain:#43D193;--loss:#F2707A;--gain-soft:rgba(67,209,147,0.12);--loss-soft:rgba(242,112,122,0.12);
+  --green-soft:#152a20;--green-border:#243a2e;
+  --c-stocks:#7398FF;--c-cash:#A9B6CA;--c-cpf:#AB8DFB;--c-re:#E2B66D;--c-crypto:#EF8768;--c-insurance:#D98BC2;
   --blue:#4a9eff;--blue-soft:#101f33;--blue-border:#1a2f43;
   --amber:#F0C36D;--amber-soft:#2a2213;--amber-border:#3a3220;
   --purple:#a78bfa;
@@ -81,15 +96,12 @@ html.dark{
   --glass-blur:14px;--glass-shadow:0 8px 22px rgba(0,0,0,0.35);
   --shadow-card:0 1px 3px rgba(0,0,0,0.25);
   --surface-solid:rgba(17,26,46,0.94);
-  --glow1:rgba(45,212,191,0.16);--glow2:rgba(240,195,109,0.10);
+  --glow1:transparent;--glow2:transparent;
   --tx:var(--text);--tx2:var(--text2);--tx3:var(--text3);
 }
 body{font-family:var(--font-display);background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;transition:background 0.2s,color 0.2s}
 /* Every figure lines up in columns. Form controls reset font-variant in the UA sheet, so restate it. */
 body,button,input,select,textarea{font-variant-numeric:tabular-nums}
-body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;
-  background:radial-gradient(420px circle at 14% 2%,var(--glow1),transparent 60%),
-             radial-gradient(460px circle at 92% 96%,var(--glow2),transparent 60%)}
 a{color:var(--blue);text-decoration:none}
 @media (hover:hover){a:hover{text-decoration:underline}}
 
@@ -254,14 +266,10 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
 .metric-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px}
 .metric-value{font-family:var(--font-display);font-size:24px;line-height:28px;font-weight:600;letter-spacing:-0.01em;font-variant-numeric:tabular-nums}
 .metric-sub{font-size:12px;color:var(--text2);margin-top:3px;display:flex;align-items:center;justify-content:flex-start;gap:6px;flex-wrap:wrap}
-.pos{color:var(--green)}.neg{color:var(--red)}
+.pos{color:var(--gain)}.neg{color:var(--loss)}
 
 /* STAT BOX (alt to metric) */
 .stat-box{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
-.stat-box.g{border-left:3px solid var(--green)}
-.stat-box.y{border-left:3px solid var(--amber)}
-.stat-box.r{border-left:3px solid var(--red)}
-.stat-box.b{border-left:3px solid var(--blue)}
 
 /* TABLES */
 .tbl-wrap{overflow-x:auto}
@@ -308,7 +316,8 @@ textarea.fi{resize:vertical;min-height:70px}
 
 /* EMPTY STATE */
 .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:64px 20px;text-align:center;color:var(--text3)}
-.empty-icon{width:48px;height:48px;border-radius:12px;background:var(--bg3);display:flex;align-items:center;justify-content:center;margin-bottom:14px;font-size:22px}
+.empty-icon{width:48px;height:48px;border-radius:12px;background:var(--bg3);display:flex;align-items:center;justify-content:center;margin-bottom:14px;color:var(--text3)}
+.empty-icon svg{width:22px;height:22px}
 .empty-title{font-size:14px;font-weight:600;color:var(--text2);margin-bottom:4px}
 .empty-sub{font-size:12px;max-width:340px;line-height:1.6}
 
@@ -398,10 +407,7 @@ textarea.fi{resize:vertical;min-height:70px}
 
 /* SUMMARY ROW (above table) */
 .h-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:14px;padding:14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card)}
-.h-summary-item{display:flex;flex-direction:column;gap:3px;padding:4px 10px;border-left:3px solid var(--border2)}
-.h-summary-item.accent{border-left-color:var(--accent)}
-.h-summary-item.pos{border-left-color:var(--green)}
-.h-summary-item.neg{border-left-color:var(--red)}
+.h-summary-item{display:flex;flex-direction:column;gap:3px;padding:4px 10px}
 .h-summary-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;font-weight:600}
 .h-summary-value{font-size:20px;line-height:28px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-0.01em}
 .h-summary-sub{font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums}
@@ -431,11 +437,12 @@ textarea.fi{resize:vertical;min-height:70px}
 
 /* MARKET / ACCOUNT TAG */
 .tag{display:inline-flex;align-items:center;padding:1px 5px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2)}
-.tag.sgx{color:var(--blue);border-color:var(--blue-border);background:var(--blue-soft)}
-.tag.us{color:var(--accent);border-color:var(--accent-border);background:var(--accent-soft)}
-.tag.crypto{color:var(--amber);border-color:var(--amber-border);background:var(--amber-soft)}
-.tag.pos{color:var(--green);border-color:var(--green-border);background:var(--green-soft)}
-.tag.neg{color:var(--red);border-color:var(--red-border);background:var(--red-soft)}
+/* Market is context, not status: quiet text rather than a coloured chip. */
+.tag.sgx,.tag.us{color:var(--text3);border-color:transparent;background:none;padding-inline:0;font-weight:600}
+.tag.pos{color:var(--gain);border-color:transparent;background:var(--gain-soft)}
+.tag.neg{color:var(--loss);border-color:transparent;background:var(--loss-soft)}
+/* Movement kind (Deposit, Contribution, Transfer): plain text, the signed amount carries direction. */
+.txn-kind{color:var(--text2)}
 .tag.warn{color:var(--amber);border-color:var(--amber-border);background:var(--amber-soft)}
 .tag.muted{color:var(--tx3);border-color:var(--border);background:transparent}
 .warn-row td{background:color-mix(in srgb,var(--amber-soft) 30%,transparent)}
@@ -481,8 +488,8 @@ textarea.fi{resize:vertical;min-height:70px}
 @media (max-width:640px){.dash-hero-value{font-size:36px;line-height:1.11}}
 .dash-hero-sub{font-size:12px;color:var(--text2)}
 .dash-hero-chip{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:500;border-radius:999px;padding:2px 9px;margin-left:8px;vertical-align:middle;text-transform:none;letter-spacing:normal}
-.dash-hero-chip.pos{color:var(--green);background:var(--green-soft)}
-.dash-hero-chip.neg{color:var(--red);background:var(--red-soft)}
+.dash-hero-chip.pos{color:var(--gain);background:var(--gain-soft)}
+.dash-hero-chip.neg{color:var(--loss);background:var(--loss-soft)}
 .dash-hero-spark{flex-shrink:0;margin-left:auto}
 /* Asset-class cards (one per class, above the allocation bar) */
 .dash-class-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
@@ -640,8 +647,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 /* PRICE CHIP, small inline market price + change */
 .px-chip{display:inline-flex;align-items:baseline;gap:4px;font-variant-numeric:tabular-nums}
 .px-chip .px-chg{font-size:12px}
-.px-chip.up .px-chg{color:var(--green)}
-.px-chip.dn .px-chg{color:var(--red)}
+.px-chip.up .px-chg{color:var(--gain)}
+.px-chip.dn .px-chg{color:var(--loss)}
 
 /* MOBILE BOTTOM TABS */
 .bottom-tab-bar{display:none}

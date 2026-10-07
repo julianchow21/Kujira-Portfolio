@@ -543,6 +543,12 @@ function _phase2LabelFor(key){
   return tab ? tab.label : key;
 }
 
+/* Empty states reuse a tab's own line icon (stroke follows currentColor) rather than an emoji. */
+function _emptyIcon(key){
+  const tab = TABS.find(t => t.key === key);
+  return tab ? tab.icon : '';
+}
+
 function ensurePhase2Card(section, key){
   if (section.querySelector('.phase2-card')) return;
   const label = _phase2LabelFor(key);
@@ -554,7 +560,7 @@ function ensurePhase2Card(section, key){
     + '<div class="page-sub">Parked while Phase 1 ships.</div>'
     + '</div></div>'
     + '<div class="card"><div class="card-body"><div class="empty">'
-    + '<div class="empty-icon">🚧</div>'
+    + '<div class="empty-icon">' + _emptyIcon(key) + '</div>'
     + '<div class="empty-title">Coming in Phase 2</div>'
     + '<div class="empty-sub">Phase 1 focus is Stocks, Real Estate, Cash, CPF, P&amp;L, and Settings. The ' + kjrEscape(label) + ' code is preserved underneath and will return in Phase 2.</div>'
     + '</div></div></div>';
@@ -4803,12 +4809,12 @@ function renderTaxEstimate(){
         <div class="hint" style="font-size:12px;margin-bottom:2px">Chargeable income</div>
         <div style="font-weight:600">${fmt2(est.chargeableIncome)}</div>
       </div>
-      <div class="hint-block" style="border-left:2px solid var(--accent);padding-left:10px">
+      <div class="hint-block">
         <div class="hint" style="font-size:12px;margin-bottom:2px">Est. annual tax${est.isManual ? ' (manual override)' : ''}</div>
         <div style="font-weight:600;font-size:16px">${fmt2(est.annualTax)}</div>
         <div class="hint">${est.effectiveRate.toFixed(2)}% effective rate${nr ? ' (non-resident, higher of 15% flat / graduated)' : ''}</div>
       </div>
-      <div class="hint-block" style="border-left:2px solid var(--accent);padding-left:10px">
+      <div class="hint-block">
         <div class="hint" style="font-size:12px;margin-bottom:2px">Monthly provision</div>
         <div style="font-weight:600;font-size:16px">${fmt2(est.monthlyProvision)}</div>
         <div class="hint">Accrual. SG has no monthly PAYE.</div>
@@ -7645,7 +7651,7 @@ function renderStocks(){
     sumEl.innerHTML = '';
     bodyEl.innerHTML = `<div class="card">
       <div class="card-head"><h3>Holdings</h3><button class="btn btn-primary btn-sm" data-click="openEntity" data-a0="stocks">＋ Add stock</button></div>
-      <div class="card-body"><div class="empty"><div class="empty-icon">📈</div><div class="empty-title">No stocks yet</div><div class="empty-sub">Click <b>Add stock</b> to record your first position. SGX tickers are auto-suffixed with .SI for Yahoo Finance.</div><button class="btn btn-primary" data-click="openEntity" data-a0="stocks" style="margin-top:14px">＋ Add stock</button></div></div></div>`;
+      <div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('stocks')}</div><div class="empty-title">No stocks yet</div><div class="empty-sub">Click <b>Add stock</b> to record your first position. SGX tickers are auto-suffixed with .SI for Yahoo Finance.</div><button class="btn btn-primary" data-click="openEntity" data-a0="stocks" style="margin-top:14px">＋ Add stock</button></div></div></div>`;
     _lastStockRows = [];
     _stockChartRows = [];
     renderWatchlist(); // the watchlist stands on its own, even with no holdings
@@ -7879,14 +7885,17 @@ const PB_PALETTE = ['#a78bfa','#2dd4bf','#f59e0b','#f87171','#60a5fa','#34d399',
    coloured slices by position in a sorted-by-value list (PB_PALETTE[i]),
    which drifted from the bar's fixed per-class colour whenever the largest
    asset class changed. CSS var names (not literal hex) so both themes stay
-   on-brand and AA-contrast against --bg2, same tokens already used elsewhere. */
+   on-brand. Since the redesign (v2.69) each class has its own role token
+   (--c-*, with a --c-*-soft tint) instead of borrowing accent/status
+   colours, which had Stocks and Crypto both teal. Keep the --c-* values as
+   6-digit hex: chart code appends a 2-digit alpha to _cssVar() results. */
 const ASSET_CLASS_COLORS = {
-  Stocks:       '--accent',
-  Cash:         '--blue',
-  CPF:          '--green',
-  'Real Estate':'--amber',
-  Crypto:       '--accent2',
-  Insurance:    '--purple'
+  Stocks:       '--c-stocks',
+  Cash:         '--c-cash',
+  CPF:          '--c-cpf',
+  'Real Estate':'--c-re',
+  Crypto:       '--c-crypto',
+  Insurance:    '--c-insurance'
 };
 function assetClassColor(cls){ return ASSET_CLASS_COLORS[cls] || '--text3'; }
 
@@ -7901,7 +7910,9 @@ function assetClassColor(cls){ return ASSET_CLASS_COLORS[cls] || '--text3'; }
    from all twelve and from each other. Olive-green/red reads as
    income/expense semantically (matches the P&L KPI strip's pos/neg colour
    language) without reusing --green (CPF) or --red directly, both of which
-   sit inside the danger zone against other classes/palette members. */
+   sit inside the danger zone against other classes/palette members.
+   Re-verified against the v2.69 --c-* class tokens: income's nearest is
+   light --c-re at 93, expense's nearest is light --c-crypto at 62. */
 const PB_FIELD_COLOR_OVERRIDE = { 'cashflow:income': '#65a30d', 'cashflow:expense': '#dc2626' };
 /* D1: these four were device-local localStorage keys (pre-v2.37). They now
    live in DB.settings so they ride sync, export and import like everything
@@ -8003,14 +8014,16 @@ function _pbNetWorthSeries(cfg){
   const netOf = s => _dashShowCpf ? s.net : (s.net - cpfOf(s));
   const classMeta = { stocks:['Stocks',0], cash:['Cash',1], cpf:['CPF',2], realestate:['Real Estate',3], crypto:['Crypto',4], insurance:['Insurance',5] };
   const dot = i => PB_PALETTE[i % PB_PALETTE.length];
+  // Class series take the class's own colour so each class matches the allocation bar and doughnut.
+  const classColor = lab => _cssVar(assetClassColor(lab));
 
   // By class — stacked area of every class (CPF band only when CPF is on).
   if (cfg.seriesMode === 'split'){
     return { labels, stacked:true, datasets: Object.entries(classMeta)
       .filter(([k]) => k !== 'cpf' || _dashShowCpf)
-      .map(([k,[lab,i]]) => ({
+      .map(([k,[lab]]) => ({
         label:lab, data:rows.map(s=>toDisplay((s.byClass&&s.byClass[k])||0,'SGD')),
-        borderColor:dot(i), backgroundColor:dot(i)+'44',
+        borderColor:classColor(lab), backgroundColor:classColor(lab)+'44',
         fill:true, borderWidth:1.5, pointRadius:0, tension:0.25, stack:'nw'
       }))};
   }
@@ -8018,10 +8031,10 @@ function _pbNetWorthSeries(cfg){
   if (cfg.seriesMode === 'single'){
     const k = classMeta[cfg.seriesClass] ? cfg.seriesClass : 'cash';
     if (k === 'cpf' && !_dashShowCpf) return { labels:[], datasets:[], hidden:true };
-    const [lab,i] = classMeta[k];
+    const [lab] = classMeta[k];
     return { labels, stacked:false, datasets:[{
       label:lab, data:rows.map(s=>toDisplay((s.byClass&&s.byClass[k])||0,'SGD')),
-      borderColor:dot(i), backgroundColor:'transparent',
+      borderColor:classColor(lab), backgroundColor:'transparent',
       fill:false, borderWidth:2, pointRadius:rows.length>30?0:2, tension:0.25
     }]};
   }
@@ -9186,7 +9199,7 @@ function renderWatchlist(){
       </div>`;
 
   if (!list.length){
-    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">👀</div><div class="empty-title">Nothing on watch</div><div class="empty-sub">Track tickers you are waiting to buy. Set a target price and the row flags when the market gets there. Watchlist symbols refresh together with your holdings.</div><button class="btn btn-primary" data-click="openEntity" data-a0="watchlist" style="margin-top:14px">＋ Add ticker</button></div></div></div>`;
+    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('board')}</div><div class="empty-title">Nothing on watch</div><div class="empty-sub">Track tickers you are waiting to buy. Set a target price and the row flags when the market gets there. Watchlist symbols refresh together with your holdings.</div><button class="btn btn-primary" data-click="openEntity" data-a0="watchlist" style="margin-top:14px">＋ Add ticker</button></div></div></div>`;
     return;
   }
 
@@ -9296,7 +9309,7 @@ function renderBoard(){
   const list = DB.watchlist || [];
 
   if (!list.length){
-    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">📊</div><div class="empty-title">No tickers yet</div><div class="empty-sub">This board mirrors your Watchlist. Add tickers on the Stocks tab (under Watchlist), then shape the columns here with ⚙ Columns. Symbols refresh together with your holdings.</div></div></div></div>`;
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('board')}</div><div class="empty-title">No tickers yet</div><div class="empty-sub">This board mirrors your Watchlist. Add tickers on the Stocks tab (under Watchlist), then shape the columns here with ⚙ Columns. Symbols refresh together with your holdings.</div></div></div></div>`;
     return;
   }
 
@@ -9508,7 +9521,7 @@ function renderDividendTimeline(rows){
       return;
     }
     el.innerHTML = `<div class="card"><div class="card-head"><h3>Upcoming dividends <span class="badge badge-muted">next 90 days</span></h3></div>
-      <div class="card-body"><div class="empty"><div class="empty-icon">📅</div>
+      <div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('cashflow')}</div>
       <div class="empty-title">No ex-dates set</div>
       <div class="empty-sub">Set an ex-date on any holding to track upcoming payments.</div>
       </div></div></div>`;
@@ -9518,7 +9531,7 @@ function renderDividendTimeline(rows){
   if (!upcoming.length){
     // Ex-dates exist but none in window
     el.innerHTML = `<div class="card"><div class="card-head"><h3>Upcoming dividends <span class="badge badge-muted">next 90 days</span></h3></div>
-      <div class="card-body"><div class="empty"><div class="empty-icon">📅</div>
+      <div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('cashflow')}</div>
       <div class="empty-title">No payments due in the next 90 days</div>
       <div class="empty-sub">Update ex-dates after each declaration to keep this current.</div>
       </div></div></div>`;
@@ -9583,7 +9596,7 @@ function renderStockTxns(){
     </div>`;
 
   if (!txns.length){
-    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">🧾</div><div class="empty-title">No trades logged</div><div class="empty-sub">Log buys and sells here and the position above will track shares, average cost, and realised P&amp;L automatically. Without trades, the position uses the figures you typed in.</div></div></div></div>`;
+    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('stocks')}</div><div class="empty-title">No trades logged</div><div class="empty-sub">Log buys and sells here and the position above will track shares, average cost, and realised P&amp;L automatically. Without trades, the position uses the figures you typed in.</div></div></div></div>`;
     return;
   }
 
@@ -9657,7 +9670,7 @@ function renderCrypto(){
 
   if (!list.length){
     sumEl.innerHTML = '';
-    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">₿</div><div class="empty-title">No coins yet</div><div class="empty-sub">Click <b>Add coin</b> and enter a common ticker like BTC, ETH, SOL. Custom coins can use the CoinGecko id override.</div><button class="btn btn-primary" data-click="openEntity" data-a0="crypto" style="margin-top:14px">＋ Add coin</button></div></div></div>`;
+    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('crypto')}</div><div class="empty-title">No coins yet</div><div class="empty-sub">Click <b>Add coin</b> and enter a common ticker like BTC, ETH, SOL. Custom coins can use the CoinGecko id override.</div><button class="btn btn-primary" data-click="openEntity" data-a0="crypto" style="margin-top:14px">＋ Add coin</button></div></div></div>`;
     if (fresh) fresh.textContent = 'No prices yet';
     return;
   }
@@ -9718,7 +9731,7 @@ function renderCrypto(){
           ? `${fmt(r.priceSgd)}${r.stale ? ' <span class="hint">(stale)</span>' : ''}`
           : '<span class="price-stale">—</span>';
         return `<tr>
-          <td class="tl cell-sym"><span class="tag crypto">${kjrEscape(r.c.symbol)}</span></td>
+          <td class="tl cell-sym">${kjrEscape(r.c.symbol)}</td>
           <td class="tl muted">${kjrEscape(r.cid || '—')}</td>
           <td class="num">${r.c.amount || 0}</td>
           <td class="num">${r.c.avgCost ? fmtSgdOrNative(r.c.avgCost, r.ccy) : '—'}</td>
@@ -9775,7 +9788,7 @@ function renderRealestate(){
 
   if (!list.length){
     sumEl.innerHTML = '';
-    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🏠</div><div class="empty-title">No properties yet</div><div class="empty-sub">Click <b>Add property</b> to record a current estimated value. Mortgage and rental cashflow come later.</div><button class="btn btn-primary" data-click="openEntity" data-a0="realestate" style="margin-top:14px">＋ Add property</button></div></div></div>`;
+    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('realestate')}</div><div class="empty-title">No properties yet</div><div class="empty-sub">Click <b>Add property</b> to record a current estimated value. Mortgage and rental cashflow come later.</div><button class="btn btn-primary" data-click="openEntity" data-a0="realestate" style="margin-top:14px">＋ Add property</button></div></div></div>`;
     return;
   }
 
@@ -10013,7 +10026,7 @@ function renderInsurance(){
     </div>
   </div>`;
   if (!list.length){
-    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">🛡</div><div class="empty-title">No policies yet</div><div class="empty-sub">Track life, health, and general policies. Premiums, renewal dates, and any cash value feed the summary and the adequacy check.</div></div></div></div>` + renderCoverageAdequacy();
+    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('insurance')}</div><div class="empty-title">No policies yet</div><div class="empty-sub">Track life, health, and general policies. Premiums, renewal dates, and any cash value feed the summary and the adequacy check.</div></div></div></div>` + renderCoverageAdequacy();
     return;
   }
   const active = list.filter(p => p.status === 'Active');
@@ -10269,7 +10282,7 @@ function _renderInsPremiumChart(series){
 function renderCoverageAdequacy(){
   const a = coverageAdequacy();
   if (a.annual <= 0 && !_selfPolicies().length){
-    return `<div class="card"><div class="card-head"><h3>Protection adequacy</h3></div><div class="card-body"><div class="empty"><div class="empty-icon">🧭</div><div class="empty-title">Add income and policies to see your gaps</div><div class="empty-sub">Targets are based on your annual income. Log income on the P&amp;L tab and add your policies.</div></div></div></div>`;
+    return `<div class="card"><div class="card-head"><h3>Protection adequacy</h3></div><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('insurance')}</div><div class="empty-title">Add income and policies to see your gaps</div><div class="empty-sub">Targets are based on your annual income. Log income on the P&amp;L tab and add your policies.</div></div></div></div>`;
   }
   const t = coverageTargets();
   const cur = r => r.unit==='bool' ? (r.current?'Yes':'No') : fmt(r.current,{dp:0}) + (r.unit==='mo'?'/mo':'');
@@ -10339,22 +10352,22 @@ function renderProjections(){
 
   if (!birthYear){
     _clearProjectionChart();
-    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🎂</div><div class="empty-title">Set your birth year to see projections</div><div class="empty-sub">Age drives the CPF contribution/interest schedule and the retirement verdict. Add it in Settings.</div></div></div></div>`;
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('projections')}</div><div class="empty-title">Set your birth year to see projections</div><div class="empty-sub">Age drives the CPF contribution/interest schedule and the retirement verdict. Add it in Settings.</div></div></div></div>`;
     return;
   }
   if (liquidInfo.incomplete){
     _clearProjectionChart();
-    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">💱</div><div class="empty-title">Projection unavailable</div><div class="empty-sub">Set FX rates for ${liquidInfo.missingFxCount} liquid asset${liquidInfo.missingFxCount === 1 ? '' : 's'} in Settings. The projected starting balance would otherwise be incomplete.</div></div></div></div>`;
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('projections')}</div><div class="empty-title">Projection unavailable</div><div class="empty-sub">Set FX rates for ${liquidInfo.missingFxCount} liquid asset${liquidInfo.missingFxCount === 1 ? '' : 's'} in Settings. The projected starting balance would otherwise be incomplete.</div></div></div></div>`;
     return;
   }
   if (expInfo.excluded || monthlySavings == null){
     _clearProjectionChart();
-    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">💱</div><div class="empty-title">Projection unavailable</div><div class="empty-sub">Set FX rates for expenses in Settings. Spending and savings are incomplete, so a retirement verdict cannot be calculated yet.</div></div></div></div>`;
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('projections')}</div><div class="empty-title">Projection unavailable</div><div class="empty-sub">Set FX rates for expenses in Settings. Spending and savings are incomplete, so a retirement verdict cannot be calculated yet.</div></div></div></div>`;
     return;
   }
   if (fireNumber == null){
     _clearProjectionChart();
-    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">🎯</div><div class="empty-title">No FIRE number yet</div><div class="empty-sub">Log expenses on the P&amp;L tab (trailing 12 months is annualised x your FIRE multiple), or set a manual FIRE target in Settings.</div></div></div></div>`;
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('projections')}</div><div class="empty-title">No FIRE number yet</div><div class="empty-sub">Log expenses on the P&amp;L tab (trailing 12 months is annualised x your FIRE multiple), or set a manual FIRE target in Settings.</div></div></div></div>`;
     return;
   }
 
@@ -10579,7 +10592,7 @@ function renderCash(){
 
   if (!list.length){
     sumEl.innerHTML = '';
-    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">💵</div><div class="empty-title">No cash accounts yet</div><div class="empty-sub">Click <b>Add account</b> to log a bank balance, fixed deposit, or foreign currency holding. Foreign balances convert to SGD using FX from Settings.</div><button class="btn btn-primary" data-click="openEntity" data-a0="cash" style="margin-top:14px">＋ Add account</button></div></div></div>`;
+    bodyEl.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('cash')}</div><div class="empty-title">No cash accounts yet</div><div class="empty-sub">Click <b>Add account</b> to log a bank balance, fixed deposit, or foreign currency holding. Foreign balances convert to SGD using FX from Settings.</div><button class="btn btn-primary" data-click="openEntity" data-a0="cash" style="margin-top:14px">＋ Add account</button></div></div></div>`;
     return;
   }
 
@@ -10667,7 +10680,7 @@ function renderCashTxns(){
   const TYPE_LABEL = { deposit:'Deposit', withdrawal:'Withdrawal', transfer:'Transfer', dividend:'Dividend', interest:'Interest', fee:'Fee', adjustment:'Adjustment' };
 
   if (!txns.length){
-    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">🧾</div><div class="empty-title">No cash movements</div><div class="empty-sub">Log deposits, withdrawals, transfers, dividends, and interest here. Account balances are calculated from these plus any trades funded from them.</div></div></div></div>`;
+    el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('cash')}</div><div class="empty-title">No cash movements</div><div class="empty-sub">Log deposits, withdrawals, transfers, dividends, and interest here. Account balances are calculated from these plus any trades funded from them.</div></div></div></div>`;
     return;
   }
 
@@ -10688,7 +10701,7 @@ function renderCashTxns(){
           return `<tr>
             <td class="tl">${fmtDateSG(t.date)}</td>
             <td class="tl cell-sym">${kjrEscape(nameOf(t.fromAccountId))} → ${kjrEscape(nameOf(t.cashAccountId))}</td>
-            <td class="tl"><span class="tag">Transfer</span></td>
+            <td class="tl"><span class="txn-kind">Transfer</span></td>
             <td class="num">${amtTxt}</td>
             <td class="tl muted">${kjrEscape(t.notes || '')}</td>
             <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cashTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
@@ -10700,8 +10713,8 @@ function renderCashTxns(){
         return `<tr>
           <td class="tl">${fmtDateSG(t.date)}</td>
           <td class="tl cell-sym">${kjrEscape(nameOf(t.cashAccountId))}</td>
-          <td class="tl"><span class="tag ${delta >= 0 ? 'pos' : 'neg'}">${kjrEscape(TYPE_LABEL[t.type] || t.type)}</span></td>
-          <td class="num ${cls}">${fmt(toSGD(delta, ccy))}</td>
+          <td class="tl"><span class="txn-kind">${kjrEscape(TYPE_LABEL[t.type] || t.type)}</span></td>
+          <td class="num ${cls}">${fmt(toSGD(delta, ccy), { signed:true })}</td>
           <td class="tl muted">${kjrEscape(t.notes || '')}</td>
           <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cashTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
         </tr>`;
@@ -10859,11 +10872,11 @@ function renderCpf(){
   }).sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
 
   if (!all.length){
-    histEl.innerHTML = `<div class="empty"><div class="empty-icon">📜</div><div class="empty-title">No history yet</div><div class="empty-sub">Click <b>Add entry</b> to log contributions and interest credits from your CPF statement. Use negative amounts for withdrawals.</div></div>`;
+    histEl.innerHTML = `<div class="empty"><div class="empty-icon">${_emptyIcon('cpf')}</div><div class="empty-title">No history yet</div><div class="empty-sub">Click <b>Add entry</b> to log contributions and interest credits from your CPF statement. Use negative amounts for withdrawals.</div></div>`;
     return;
   }
   if (!filtered.length){
-    histEl.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">No entries match the filters</div><div class="empty-sub">Adjust the year, type, or account filters above.</div></div>`;
+    histEl.innerHTML = `<div class="empty"><div class="empty-icon">${_emptyIcon('cpf')}</div><div class="empty-title">No entries match the filters</div><div class="empty-sub">Adjust the year, type, or account filters above.</div></div>`;
     return;
   }
 
@@ -10888,9 +10901,9 @@ function renderCpf(){
         const cls = (Number(h.amount) || 0) >= 0 ? 'pos' : 'neg';
         return `<tr>
           <td class="tl">${fmtDateSG(h.date)}</td>
-          <td class="tl"><span class="tag ${cpfTypeColour(h.type)}">${kjrEscape(cpfTypeLabel(h.type))}</span></td>
+          <td class="tl"><span class="txn-kind">${kjrEscape(cpfTypeLabel(h.type))}</span></td>
           <td class="tl"><span class="tag">${kjrEscape(h.account)}</span></td>
-          <td class="num ${cls}">${fmt(Number(h.amount) || 0)}</td>
+          <td class="num ${cls}">${fmt(Number(h.amount) || 0, { signed:true })}</td>
           <td class="tl muted">${kjrEscape(h.source || '')}</td>
           <td class="tl muted">${kjrEscape(h.notes || '')}</td>
           <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cpfHistory" data-edit-id="${kjrEscape(h.id)}">Edit</button></td>
@@ -10898,14 +10911,6 @@ function renderCpf(){
       }).join('')}
     </tbody></table></div>
   `;
-}
-
-function cpfTypeColour(t){
-  if (t === 'contribution') return 'us';      // accent (teal)
-  if (t === 'interest')     return 'crypto';  // amber
-  if (t === 'transfer')     return 'sgx';     // blue
-  if (t === 'withdrawal')   return '';        // neutral
-  return '';
 }
 
 /* Display-only capitalisation for CPF entry types, mirrors the cash ledger's
@@ -11010,7 +11015,7 @@ function renderCashflow(){
   const months = Array.from(ymSet).sort().reverse();
 
   if (!months.length){
-    rollupEl.innerHTML = `<div class="empty"><div class="empty-icon">📅</div><div class="empty-title">No P&L data yet</div><div class="empty-sub">Add an income entry and a few expenses to see your monthly net and savings rate.</div></div>`;
+    rollupEl.innerHTML = `<div class="empty"><div class="empty-icon">${_emptyIcon('cashflow')}</div><div class="empty-title">No P&L data yet</div><div class="empty-sub">Add an income entry and a few expenses to see your monthly net and savings rate.</div></div>`;
   } else {
     rollupEl.innerHTML = `<div class="tbl-wrap"><table class="holdings"><thead><tr>
       <th class="tl">Month</th><th>Income (net)</th><th>Income (gross)</th><th>Expenses</th><th>Net</th><th>Savings rate</th><th>Txns</th>
@@ -11042,7 +11047,7 @@ function renderCashflow(){
   const incomeMeta = document.getElementById('cf-income-meta');
   if (incomeMeta) incomeMeta.textContent = income.length + ' entr' + (income.length === 1 ? 'y' : 'ies') + ' · ' + fmt(totNet,{dp:0}) + ' take-home';
   if (!income.length){
-    incomeEl.innerHTML = `<div class="empty"><div class="empty-icon">💰</div><div class="empty-title">No income yet</div><div class="empty-sub">Click <b>＋ Add income</b> to log a salary, bonus, or other inflow.</div><button class="btn btn-primary" data-click="openEntity" data-a0="income" style="margin-top:14px">＋ Add income</button></div>`;
+    incomeEl.innerHTML = `<div class="empty"><div class="empty-icon">${_emptyIcon('cashflow')}</div><div class="empty-title">No income yet</div><div class="empty-sub">Click <b>＋ Add income</b> to log a salary, bonus, or other inflow.</div><button class="btn btn-primary" data-click="openEntity" data-a0="income" style="margin-top:14px">＋ Add income</button></div>`;
   } else {
     const sortedIn = income.slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
     incomeEl.innerHTML = `<div class="tbl-wrap"><table class="holdings"><thead><tr>
@@ -11063,7 +11068,7 @@ function renderCashflow(){
   const expenseMeta = document.getElementById('cf-expense-meta');
   if (expenseMeta) expenseMeta.textContent = expenses.length + ' txn' + (expenses.length === 1 ? '' : 's') + ' · ' + fmt(totExp);
   if (!expenses.length){
-    expenseEl.innerHTML = `<div class="empty"><div class="empty-icon">🧾</div><div class="empty-title">No expenses yet</div><div class="empty-sub">Click <b>＋ Add expense</b> to log a transaction.</div><button class="btn btn-primary" data-click="openEntity" data-a0="expenses" style="margin-top:14px">＋ Add expense</button></div>`;
+    expenseEl.innerHTML = `<div class="empty"><div class="empty-icon">${_emptyIcon('cashflow')}</div><div class="empty-title">No expenses yet</div><div class="empty-sub">Click <b>＋ Add expense</b> to log a transaction.</div><button class="btn btn-primary" data-click="openEntity" data-a0="expenses" style="margin-top:14px">＋ Add expense</button></div>`;
   } else {
     const sortedEx = expenses.slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
     expenseEl.innerHTML = `<div class="tbl-wrap"><table class="holdings"><thead><tr>
@@ -11657,7 +11662,7 @@ function renderDashboard(){
   const assetsEl = document.getElementById('dash-assets');
   if (assetsEl){
     if (!displayClasses.length && !valuation.incomplete){
-      assetsEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">📊</div><div class="empty-title">No holdings yet</div><div class="empty-sub">Add stocks, cash, CPF, or property and your net worth and allocation appear here.</div></div></div></div>`;
+      assetsEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('dashboard')}</div><div class="empty-title">No holdings yet</div><div class="empty-sub">Add stocks, cash, CPF, or property and your net worth and allocation appear here.</div></div></div></div>`;
     } else {
       const canShowAllocation = !valuation.incomplete && allocation.canAllocate && !allocation.hasNegative;
       const pctOf = c => canShowAllocation ? (c.val / displayNet * 100) : null;
@@ -11679,7 +11684,7 @@ function renderDashboard(){
           : (!allocation.canAllocate
             ? 'Net allocation is zero or negative. Signed balances are shown above.'
             : 'A class balance is negative. Signed balances are shown above, and the proportion bar is hidden.');
-        allocationHtml = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">📊</div><div class="empty-title">${title}</div><div class="empty-sub">${sub}</div></div></div></div>`;
+        allocationHtml = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('dashboard')}</div><div class="empty-title">${title}</div><div class="empty-sub">${sub}</div></div></div></div>`;
       } else {
         const bar = displayClasses.map(c => {
           const p = pctOf(c);
@@ -11725,7 +11730,7 @@ function renderDashboard(){
       const sub = valuation.incomplete
         ? `Set FX rates for ${valuation.missingFxCount} asset${valuation.missingFxCount === 1 ? '' : 's'} before comparing against targets.`
         : 'Net allocation is zero, negative, or contains a negative class balance. Signed values remain visible above.';
-      targetEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">🎯</div><div class="empty-title">Target allocation unavailable</div><div class="empty-sub">${sub}</div></div></div></div>`;
+      targetEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('projections')}</div><div class="empty-title">Target allocation unavailable</div><div class="empty-sub">${sub}</div></div></div></div>`;
     }
   } else renderTargetAllocation(classes, netFull);
   // Top movers (today's gainers/losers)
@@ -11753,7 +11758,7 @@ function renderEmergencyFund(){
   if (target <= 0){ el.innerHTML = ''; return; }
   const cashInfo = _cashSGDInfo();
   if (cashInfo.excludedCount){
-    el.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head"><h3>Emergency fund</h3></div><div class="card-body"><div class="empty"><div class="empty-icon">💱</div><div class="empty-title">Emergency fund progress unavailable</div><div class="empty-sub">Set FX rates for ${cashInfo.excludedCount} cash account${cashInfo.excludedCount === 1 ? '' : 's'} before comparing the balance with this target.</div></div></div></div>`;
+    el.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head"><h3>Emergency fund</h3></div><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('cash')}</div><div class="empty-title">Emergency fund progress unavailable</div><div class="empty-sub">Set FX rates for ${cashInfo.excludedCount} cash account${cashInfo.excludedCount === 1 ? '' : 's'} before comparing the balance with this target.</div></div></div></div>`;
     return;
   }
   const cash = cashInfo.total;
