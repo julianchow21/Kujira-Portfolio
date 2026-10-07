@@ -11178,6 +11178,8 @@ function _cryptoSGDInfo(){
 function _cryptoSGD(){ return _cryptoSGDInfo().total; }
 
 function _cssVar(name){ return (getComputedStyle(document.documentElement).getPropertyValue(name) || '').trim() || '#888'; }
+// Canvas text does not inherit CSS fonts, so point Chart.js at the one UI family.
+if (window.Chart) Chart.defaults.font.family = getComputedStyle(document.documentElement).getPropertyValue('--font-display').trim() || 'system-ui, sans-serif';
 
 /* ─── Money integrity / reconciliation ─────────────────────────────────
    Surfaces places where double-entry is incomplete so no money silently

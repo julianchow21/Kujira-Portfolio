@@ -21,7 +21,7 @@
 <link rel="apple-touch-icon" href="Worker/whale-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;600;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap">
 <!-- No JS in this file may set this dynamically (owned by app.js/theme-init.js,
      out of scope here), so this follows the OS colour-scheme preference via
      media queries rather than the in-app manual toggle. See QA fix c handoff
@@ -62,7 +62,7 @@
   --shadow-card:0 1px 3px rgba(60,50,40,0.07);
   --surface-solid:#ffffff;
   --glow1:rgba(15,110,86,0.06);--glow2:rgba(240,195,109,0.07);
-  --font-display:'Lexend',-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,system-ui,sans-serif;
+  --font-display:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,system-ui,sans-serif;
   --tx:var(--text);--tx2:var(--text2);--tx3:var(--text3);
 }
 html.dark{
@@ -84,7 +84,7 @@ html.dark{
   --glow1:rgba(45,212,191,0.16);--glow2:rgba(240,195,109,0.10);
   --tx:var(--text);--tx2:var(--text2);--tx3:var(--text3);
 }
-body{font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;transition:background 0.2s,color 0.2s}
+body{font-family:var(--font-display);background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;transition:background 0.2s,color 0.2s}
 body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:radial-gradient(420px circle at 14% 2%,var(--glow1),transparent 60%),
              radial-gradient(460px circle at 92% 96%,var(--glow2),transparent 60%)}
