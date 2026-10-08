@@ -21,3 +21,7 @@ Backups/
 
 # Personal financial data, never commit spreadsheets
 *.xlsx
+
+# Secrets files, only the placeholder template is tracked
+.env*
+!.env.example

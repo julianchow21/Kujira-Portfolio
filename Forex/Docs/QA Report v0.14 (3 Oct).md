@@ -55,9 +55,9 @@ Local verification is complete. Hosted launch remains pending, and M5 to M10 are
 
 ### Hosted test-surface receipt, 04/10/2026
 
-- Supabase console login succeeded, but the `free2` project quota is full with Collectibles and Journal. No Forex database was created and no existing data was touched
+- Supabase console login succeeded, but the free project quota is already used by other projects. No Forex database was created and no existing data was touched
 - Cloudflare deployed the isolated `kjr-forex-stripe-test` Worker from the existing committed source with `STRIPE_BILLING_ENABLED:false` and `--strict`, with no provider secrets or bindings
-- The test Worker is available at `https://kjr-forex-stripe-test.julianchow21.workers.dev`, version `216295fa-d155-40fb-a0aa-de2ecfc92506`
+- The test Worker is deployed on the owner's workers.dev subdomain. Its address and version id are kept out of the repo
 - Live probes returned `GET /account` and `POST /checkout` as `403 origin_denied`, `POST /webhook` as `503 webhook secret not configured`, and `GET /unknown` as `404 not found`
 - All probe responses were `no-store` and had no `Access-Control-Allow-Origin` response
 - The authenticated `billing_disabled` branch remains unverified because it requires a Supabase session
@@ -90,7 +90,7 @@ Local verification is complete. Hosted launch remains pending, and M5 to M10 are
 
 ## External gates
 
-- Forex Supabase test project and owner-run migration, with no free2 capacity currently available
+- Forex Supabase test project and owner-run migration, with no free Supabase project capacity currently available
 - Paid Pro organisation and other paid project infrastructure are explicitly not authorised and are ruled out under the zero-cost constraint
 - Stripe test setup, secrets, configured prices, and the Google-auth surface that was auto-review denied outside the original provider approval, pending the user sign-in or explicit approval choice
 - Exact deployed Worker origin in the Forex CSP configuration
