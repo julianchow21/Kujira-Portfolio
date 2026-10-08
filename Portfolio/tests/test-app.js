@@ -111,9 +111,17 @@ const FUNCTION_TARGETS = [
   '_salaryPayMonths', 'generateAutoSalaryEntries', 'generateAutoSalaryCashEntries', 'generateAutoCpfEntries',
   'deriveStockPosition', '_cpfAnchorDate', 'cpfEffectiveBalances',
   'annualIncomeSGD', 'annualExpensesSGD', 'derivedMonthlySavingsSGD', 'fireNumberSGD',
-  'expenseAmountSgdOrNull', 'renderProjections', 'autoRefreshTick', 'ibkrConfirmImport', 'disableVaultProtection'
+  'expenseAmountSgdOrNull', 'renderProjections', 'autoRefreshTick', 'ibkrConfirmImport', 'disableVaultProtection',
+  // renderProjections calls these shared FIRE helpers (also used by the dashboard Financial independence tile)
+  '_fireProgress', '_fireAssumptions', '_fireProjectLiquid', '_fireYearAge',
+  // Dashboard rows (v2.70): layout migration, the Where it sits maths, Coming up, and the shared P&L, insurance, dividend and crypto rules
+  '_migrateDashLayout', 'loadDashLayout', '_applyDashLayout', '_dashWidgetBaseName',
+  '_gainPill', '_monogram', '_dayMoveSgd', '_stockDayMove', '_rebalanceThreshold', '_allocRows', '_allocInsight',
+  '_whereModel', '_allocationData', '_allocRowHtml', '_dashWhereItSits',
+  '_ringSvg', '_miniBars', '_nextPayday', '_comingUp',
+  '_ymOf', '_cfMonthRollup', '_insuranceDueWithin', '_upcomingDividendRows', '_cryptoRow', 'isStale'
 ];
-const CONST_TARGETS = ['APP_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS'];
+const CONST_TARGETS = ['APP_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES'];
 
 const extractedFns = {};
 const missingFns = [];
@@ -182,6 +190,7 @@ function freshSandbox(dbOverrides){
     computeSgIncomeTax: core.computeSgIncomeTax,
     _round2: core._round2,
     roundMoney: core.roundMoney,
+    safeRatio: core.safeRatio,
     deriveStockPosition: () => null,
     yahooSymbol: s => s.symbol,
     coinIdFor: id => id,
@@ -333,6 +342,78 @@ function stubNow(sandbox, isoInstant){
       };
     })();
   `, sandbox);
+}
+
+/* The saved-chart helpers in a sandbox of their own. freshSandbox() stubs
+   pbLoadSaved with a raw clone, so it cannot show what the real whitelist does
+   to a chart. This one runs the REAL pbLoadSaved, pbPersistSaved, the dashboard
+   switch helpers and the dashboard renderer against stubbed chart sources and a
+   tiny fake dashboard stack, so the onDashboard rules are tested where they live.
+   opts: saveResult (what saveData returns, default true), dashboardActive and
+   chartLib (default true), oldCards (chart ids already drawn on the stack). */
+const CHART_SANDBOX_CONSTS = ['SAFE_ID_RE', 'PB_SERIES_MODES', 'PB_CLASS_KEYS', 'PB_PERIODS'];
+const CHART_SANDBOX_FNS = [
+  'kjrSafeId', 'pbSource', 'pbFields', 'pbLoadSaved', 'pbPersistSaved', 'pbSetOnDashboard',
+  'pbToggleOnDashboard', 'pbRemoveFromDashboard', 'pbTogglePin', 'pbSeedDefaults',
+  '_pbSavedDescriptor', '_pbDestroyChart', '_pbRenderDashCharts'
+];
+const CHART_SANDBOX_SRC = (() => {
+  const missing = [];
+  const consts = CHART_SANDBOX_CONSTS.map(n => { const s = extractConstLine(n); if (!s) missing.push(n); return s; });
+  const fns = CHART_SANDBOX_FNS.map(n => { const s = extractFunction(n); if (!s) missing.push(n); return s; });
+  if (missing.length){
+    throw new Error('test-app.js chart sandbox could not find: ' + missing.join(', ') +
+      '. This is a harness bug (the function/const moved or was renamed in Worker/app.js), not a test to drop.');
+  }
+  return [...consts, ...fns].join('\n\n');
+})();
+
+function chartSandbox(savedCharts, opts){
+  opts = opts || {};
+  const calls = { saves:0, repaints:0, toasts:[], rendered:[], destroyed:[], layouts:0, selectors:[] };
+  const stack = {
+    cards: [],
+    querySelectorAll(selector){ calls.selectors.push(selector); return this.cards.slice(); }
+  };
+  const addCard = id => {
+    const canvas = { id:'pb-sc-canvas-' + id };
+    const card = {
+      dataset: { wid:'chart:' + id },
+      querySelectorAll(selector){ return selector === 'canvas' ? [canvas] : []; },
+      remove(){ stack.cards = stack.cards.filter(c => c !== card); }
+    };
+    stack.cards.push(card);
+    return card;
+  };
+  const sandbox = {
+    DB: { settings: { savedCharts } },
+    PB_SOURCES: {
+      holdings:   { key:'holdings',   label:'Holdings',   kind:'holdings', fields:{ symbol:{type:'dim'}, marketValue:{type:'meas'} } },
+      allocation: { key:'allocation', label:'Allocation', kind:'crosssec', fields:{ assetClass:{type:'dim'}, value:{type:'meas'} } },
+      cashflow:   { key:'cashflow',   label:'Cashflow',   kind:'crosssec', fields:{ month:{type:'dim'}, income:{type:'meas'}, expense:{type:'meas'} } },
+      networth:   { key:'networth',   label:'Net worth',  kind:'series' },
+      cpf:        { key:'cpf',        label:'CPF',        kind:'series' }
+    },
+    _pbCharts: {},
+    saveData: () => { calls.saves++; return opts.saveResult === undefined ? true : opts.saveResult; },
+    showToast: (message, kind, action) => { calls.toasts.push({ message, kind, action }); },
+    pbRenderAllSaved: () => { calls.repaints++; },
+    document: { getElementById: id => (id === 'dash-stack' ? stack : null) },
+    _isPageActive: key => key === 'dashboard' && opts.dashboardActive !== false,
+    buildStockChartRows: () => [],
+    _pbRenderOneSaved: cfg => { calls.rendered.push(cfg.id); addCard(cfg.id); },
+    _applyDashLayout: () => { calls.layouts++; }
+  };
+  if (opts.chartLib !== false) sandbox.Chart = function Chart(){};
+  (opts.oldCards || []).forEach(id => {
+    addCard(id);
+    sandbox._pbCharts['pb-sc-canvas-' + id] = { destroy(){ calls.destroyed.push(id); } };
+  });
+  vm.createContext(sandbox);
+  vm.runInContext(CHART_SANDBOX_SRC, sandbox, { filename: 'app.js (chart helpers)' });
+  sandbox.calls = calls;
+  sandbox.stack = stack;
+  return sandbox;
 }
 
 async function runTests(){
@@ -1463,6 +1544,815 @@ async function runTests(){
       assert.strictEqual(result.host.wrapEl.style.display, 'block');
       assert.strictEqual(result.host.emptyEl.style.display, 'none');
     }
+  });
+
+  /* ═══ Explore page, saved charts and the dashboard switch (onDashboard) ═══ */
+
+  test('pbLoadSaved - onDashboard defaults on read: off only for the seeded Allocation doughnut, and the DB is never written', () => {
+    const raw = [
+      { id:'def_alloc', title:'Allocation', source:'allocation', xFields:['assetClass'], yFields:['value'], chartType:'doughnut', pinned:true, order:1 },
+      { id:'def_networth', title:'Net worth over time', source:'networth', pinned:true, order:0 },
+      { id:'sc_mine', title:'Mine', source:'holdings', xFields:['symbol'], yFields:['marketValue'], order:5 }
+    ];
+    const sb = chartSandbox(raw);
+    const loaded = sb.pbLoadSaved();
+    const byId = id => loaded.find(c => c.id === id);
+    assert.strictEqual(byId('def_alloc').onDashboard, false);
+    assert.strictEqual(byId('def_networth').onDashboard, true);
+    assert.strictEqual(byId('sc_mine').onDashboard, true);
+    assert.deepStrictEqual(Array.from(loaded.map(c => c.id)), ['def_networth', 'def_alloc', 'sc_mine']);
+    // Read-time default only: the stored records still carry no onDashboard field.
+    raw.forEach(c => assert.strictEqual('onDashboard' in c, false));
+    assert.strictEqual(sb.calls.saves, 0);
+  });
+
+  test('pbLoadSaved - an explicit onDashboard is kept, a non-boolean value falls back to the default', () => {
+    const keep = chartSandbox([
+      { id:'def_alloc', source:'allocation', xFields:['assetClass'], yFields:['value'], onDashboard:true, order:1 },
+      { id:'sc_off', source:'holdings', xFields:['symbol'], yFields:['marketValue'], onDashboard:false, order:2 }
+    ]).pbLoadSaved();
+    assert.strictEqual(keep.find(c => c.id === 'def_alloc').onDashboard, true);
+    assert.strictEqual(keep.find(c => c.id === 'sc_off').onDashboard, false);
+
+    const junk = chartSandbox([
+      { id:'def_alloc', source:'allocation', xFields:['assetClass'], yFields:['value'], onDashboard:'yes', order:1 },
+      { id:'sc_a', source:'holdings', xFields:['symbol'], yFields:['marketValue'], onDashboard:'false', order:2 },
+      { id:'sc_b', source:'holdings', xFields:['symbol'], yFields:['marketValue'], onDashboard:0, order:3 },
+      { id:'sc_c', source:'holdings', xFields:['symbol'], yFields:['marketValue'], onDashboard:null, order:4 }
+    ]).pbLoadSaved();
+    assert.strictEqual(junk.find(c => c.id === 'def_alloc').onDashboard, false);
+    ['sc_a', 'sc_b', 'sc_c'].forEach(id => assert.strictEqual(junk.find(c => c.id === id).onDashboard, true, id));
+  });
+
+  await testAsync('pbSaveChart - a newly saved chart is on the dashboard, whatever the builder config says, and the toast text is unchanged', async () => {
+    const sb = freshSandbox({settings:{savedCharts:[],salary:{},tax:{},fxOverrides:{},fxRates:{}}});
+    const toasts = [];
+    sb.showToast = (message, kind) => toasts.push({message, kind});
+    sb.saveData = () => true;
+    sb.prompt = () => 'Mine';
+    assert.strictEqual(await sb.pbSaveChart(), true);
+    assert.strictEqual(sb.DB.settings.savedCharts.length, 1);
+    assert.strictEqual(sb.DB.settings.savedCharts[0].onDashboard, true);
+    assert.strictEqual(sb.DB.settings.savedCharts[0].title, 'Mine');
+    assert.deepStrictEqual(toasts.at(-1), {message:'Chart added to dashboard', kind:'success'});
+
+    sb._pbLiveConfig = () => ({ source:'holdings', mode:'crosssec', xFields:['symbol'], yFields:['marketValue'], tsSymbols:[], onDashboard:false });
+    sb.prompt = () => 'Second';
+    assert.strictEqual(await sb.pbSaveChart(), true);
+    assert.strictEqual(sb.DB.settings.savedCharts.find(c => c.title === 'Second').onDashboard, true);
+  });
+
+  await testAsync('pbSetOnDashboard and pbToggleOnDashboard - persist the switch, repaint, and leave unknown ids and a never-seeded list alone', async () => {
+    const sb = chartSandbox([
+      { id:'def_alloc', title:'Allocation', source:'allocation', xFields:['assetClass'], yFields:['value'], pinned:true, order:1 },
+      { id:'sc_1', title:'One', source:'holdings', xFields:['symbol'], yFields:['marketValue'], pinned:true, order:2 }
+    ]);
+    assert.strictEqual(await sb.pbSetOnDashboard('def_alloc', true), true);
+    const stored = () => sb.DB.settings.savedCharts;
+    assert.strictEqual(stored().find(c => c.id === 'def_alloc').onDashboard, true);
+    // The write makes the other chart's read-time default explicit, and keeps its other fields.
+    assert.strictEqual(stored().find(c => c.id === 'sc_1').onDashboard, true);
+    assert.strictEqual(stored().find(c => c.id === 'sc_1').pinned, true);
+    assert.strictEqual(sb.calls.saves, 1);
+    assert.strictEqual(sb.calls.repaints, 1);
+
+    assert.strictEqual(await sb.pbToggleOnDashboard('def_alloc'), true);
+    assert.strictEqual(stored().find(c => c.id === 'def_alloc').onDashboard, false);
+    assert.strictEqual(await sb.pbToggleOnDashboard('def_alloc'), true);
+    assert.strictEqual(stored().find(c => c.id === 'def_alloc').onDashboard, true);
+
+    const savesBefore = sb.calls.saves;
+    assert.strictEqual(await sb.pbSetOnDashboard('missing', false), false);
+    assert.strictEqual(await sb.pbToggleOnDashboard('missing'), false);
+    assert.strictEqual(sb.calls.saves, savesBefore);
+
+    // null means "never seeded": a switch call must not turn it into [].
+    const fresh = chartSandbox(null);
+    assert.strictEqual(await fresh.pbSetOnDashboard('def_alloc', true), false);
+    assert.strictEqual(fresh.DB.settings.savedCharts, null);
+    assert.strictEqual(fresh.calls.saves, 0);
+  });
+
+  await testAsync('pbRemoveFromDashboard - hides the chart without deleting it, offers Undo, and says nothing when the save fails', async () => {
+    const charts = () => [{ id:'sc_1', title:'One', source:'holdings', xFields:['symbol'], yFields:['marketValue'], order:1 }];
+    const sb = chartSandbox(charts());
+    assert.strictEqual(await sb.pbRemoveFromDashboard('sc_1'), true);
+    assert.strictEqual(sb.DB.settings.savedCharts.length, 1);
+    assert.strictEqual(sb.DB.settings.savedCharts[0].onDashboard, false);
+    const toast = sb.calls.toasts.at(-1);
+    assert.strictEqual(toast.message, 'Removed from dashboard, still on Explore');
+    assert.strictEqual(toast.action.label, 'Undo');
+    assert.strictEqual(await toast.action.fn(), true);
+    assert.strictEqual(sb.DB.settings.savedCharts[0].onDashboard, true);
+
+    const failing = chartSandbox(charts(), { saveResult:false });
+    assert.strictEqual(await failing.pbRemoveFromDashboard('sc_1'), false);
+    assert.strictEqual(failing.calls.toasts.length, 0);
+  });
+
+  await testAsync('pbTogglePin - pinning keeps the onDashboard setting through the real load and persist round trip', async () => {
+    const sb = chartSandbox([{ id:'sc_1', title:'One', source:'holdings', xFields:['symbol'], yFields:['marketValue'], onDashboard:false, order:1 }]);
+    await sb.pbTogglePin('sc_1');
+    assert.strictEqual(sb.DB.settings.savedCharts[0].pinned, true);
+    assert.strictEqual(sb.DB.settings.savedCharts[0].onDashboard, false);
+    await sb.pbTogglePin('sc_1');
+    assert.strictEqual(sb.DB.settings.savedCharts[0].pinned, false);
+    assert.strictEqual(sb.DB.settings.savedCharts[0].onDashboard, false);
+  });
+
+  test('pbSeedDefaults - seeds the three defaults once with Allocation off the dashboard, and never re-seeds an empty list', () => {
+    const sb = chartSandbox(null);
+    sb.pbSeedDefaults();
+    const seeded = sb.DB.settings.savedCharts;
+    assert.deepStrictEqual(Array.from(seeded.map(c => c.id)), ['def_networth', 'def_alloc', 'def_cashflow']);
+    assert.deepStrictEqual(Array.from(seeded.map(c => c.onDashboard)), [true, false, true]);
+    assert.deepStrictEqual(Array.from(seeded.map(c => c.pinned)), [true, true, true]);
+    const once = JSON.stringify(seeded);
+    sb.pbSeedDefaults();
+    assert.strictEqual(JSON.stringify(sb.DB.settings.savedCharts), once);
+    assert.strictEqual(sb.calls.saves, 1);
+
+    const emptied = chartSandbox([]);
+    emptied.pbSeedDefaults();
+    assert.strictEqual(emptied.DB.settings.savedCharts.length, 0);
+    assert.strictEqual(emptied.calls.saves, 0);
+  });
+
+  test('_pbSavedDescriptor - names the chart type and source, as a line for net worth, CPF and price history', () => {
+    const sb = chartSandbox([]);
+    assert.strictEqual(sb._pbSavedDescriptor({ source:'allocation', mode:'crosssec', chartType:'doughnut' }), 'Doughnut · Allocation');
+    assert.strictEqual(sb._pbSavedDescriptor({ source:'holdings', mode:'crosssec', chartType:'scatter' }), 'Scatter · Holdings');
+    assert.strictEqual(sb._pbSavedDescriptor({ source:'networth', mode:'crosssec', chartType:'bar' }), 'Line · Net worth');
+    assert.strictEqual(sb._pbSavedDescriptor({ source:'cpf', mode:'crosssec', chartType:'bar' }), 'Line · CPF');
+    assert.strictEqual(sb._pbSavedDescriptor({ source:'holdings', mode:'timeseries', chartType:'bar' }), 'Line · Holdings price history');
+    assert.strictEqual(sb._pbSavedDescriptor({ source:'cashflow', mode:'crosssec', chartType:'weird' }), 'Bar · Cashflow');
+  });
+
+  test('_pbRenderDashCharts - draws only charts switched on, clears every old chart card and its Chart instance, never touches other widgets', () => {
+    const sb = chartSandbox([
+      { id:'on1', source:'networth', onDashboard:true, order:0 },
+      { id:'off1', source:'networth', onDashboard:false, order:1 },
+      { id:'on2', source:'networth', onDashboard:true, order:2 }
+    ], { oldCards:['off1', 'gone'] });
+    sb._pbRenderDashCharts();
+    assert.deepStrictEqual(Array.from(sb.calls.rendered), ['on1', 'on2']);
+    assert.deepStrictEqual(Array.from(sb.stack.cards.map(c => c.dataset.wid)), ['chart:on1', 'chart:on2']);
+    assert.deepStrictEqual(Array.from(sb.calls.destroyed).sort(), ['gone', 'off1']);
+    assert.deepStrictEqual(Object.keys(sb._pbCharts), []);
+    assert.strictEqual(sb.calls.layouts, 1);
+    // Only chart cards are ever matched, so the fixed widgets stay put.
+    assert.deepStrictEqual(Array.from(sb.calls.selectors), [':scope > [data-wid^="chart:"]']);
+  });
+
+  test('_pbRenderDashCharts - a hidden dashboard or a missing chart library draws nothing but still clears stale cards and settles the layout', () => {
+    const charts = [{ id:'on1', source:'networth', onDashboard:true, order:0 }];
+    const hidden = chartSandbox(charts, { oldCards:['on1'], dashboardActive:false });
+    hidden._pbRenderDashCharts();
+    assert.deepStrictEqual(Array.from(hidden.calls.rendered), []);
+    assert.strictEqual(hidden.stack.cards.length, 0);
+    assert.deepStrictEqual(Array.from(hidden.calls.destroyed), ['on1']);
+    assert.strictEqual(hidden.calls.layouts, 1);
+
+    const noLib = chartSandbox(charts, { oldCards:['on1'], chartLib:false });
+    noLib._pbRenderDashCharts();
+    assert.deepStrictEqual(Array.from(noLib.calls.rendered), []);
+    assert.strictEqual(noLib.stack.cards.length, 0);
+    assert.strictEqual(noLib.calls.layouts, 1);
+  });
+
+  test('Explore - tab sits after Projections and before Settings, stays out of the mobile bottom bar, and routes through showPage, renderAll and the theme redraw', () => {
+    const tabsBlock = appSrc.slice(appSrc.indexOf('const TABS = ['), appSrc.indexOf('const PHASE_2_TABS'));
+    const keys = Array.from(tabsBlock.matchAll(/key:'([a-z0-9]+)'/g)).map(m => m[1]);
+    assert.strictEqual(keys[keys.indexOf('projections') + 1], 'explore');
+    assert.strictEqual(keys[keys.indexOf('explore') + 1], 'settings');
+    assert.strictEqual(keys.filter(k => k === 'explore').length, 1);
+    const bottom = /const MOBILE_BOTTOM_TABS = \[([^\]]*)\]/.exec(appSrc)[1];
+    assert.strictEqual(bottom.includes('explore'), false);
+    assert.ok(extractFunction('showPage').includes("if (key === 'explore') renderExplore();"));
+    assert.ok(extractFunction('renderAll').includes("if (_isPageActive('explore')) renderExplore();"));
+    assert.ok(extractFunction('applyTheme').includes("_currentTab === 'explore'"));
+    assert.ok(extractFunction('toggleDashCpf').includes('renderExplore();'));
+  });
+
+  test('Explore - the Chart Builder host and saved list live on the Explore page, the dashboard no longer renders the builder', () => {
+    const dash = indexSrc.slice(indexSrc.indexOf('id="page-dashboard"'), indexSrc.indexOf('id="page-stocks"'));
+    const explore = indexSrc.slice(indexSrc.indexOf('id="page-explore"'), indexSrc.indexOf('id="page-settings"'));
+    assert.strictEqual(dash.includes('id="stocks-builder"'), false);
+    assert.strictEqual((indexSrc.match(/id="stocks-builder"/g) || []).length, 1);
+    assert.ok(explore.includes('id="stocks-builder"'));
+    assert.ok(explore.includes('id="explore-saved"'));
+    assert.ok(explore.includes('<h2 class="page-title">Explore</h2>'));
+    assert.ok(/id="explore-cpf-switch" role="switch" aria-checked="false" data-click="toggleDashCpf"/.test(explore));
+    const dashboardSrc = extractFunction('renderDashboard');
+    assert.strictEqual(dashboardSrc.includes('renderChartBuilder('), false);
+    assert.ok(dashboardSrc.includes('pbSeedDefaults();'));
+    assert.ok(dashboardSrc.includes('_pbRenderDashCharts();'));
+  });
+
+  test('Saved chart controls - dashboard cards remove from the dashboard instead of deleting, Explore rows carry switch, pin and delete with names', () => {
+    const card = extractFunction('_pbRenderOneSaved');
+    assert.ok(card.includes('data-click="pbRemoveFromDashboard"'));
+    assert.strictEqual(card.includes('data-click="pbDeleteSaved"'), false);
+    assert.ok(card.includes('title="Remove from dashboard"'));
+    const list = extractFunction('_pbRenderSavedList');
+    assert.ok(list.includes('role="switch"'));
+    assert.ok(list.includes('data-click="pbToggleOnDashboard"'));
+    assert.ok(list.includes('aria-labelledby="pb-sl-t-${id} pb-sl-s-${id}"'));
+    assert.ok(list.includes('Show on dashboard'));
+    assert.ok(list.includes('data-click="pbTogglePin"'));
+    assert.ok(list.includes('data-click="pbDeleteSaved"'));
+    assert.ok(list.includes('kjrEscape(cfg.title)'));
+    assert.ok(list.includes('Charts you add appear here.'));
+    assert.ok(appSrc.includes('pbToggleOnDashboard:') && appSrc.includes('pbRemoveFromDashboard:'));
+  });
+
+  test('Asset-class ink tokens - six light values and six dark aliases sit beside the class colours', () => {
+    assert.ok(indexSrc.includes('--c-stocks-ink:#375BD2;--c-cash-ink:#5A6778;--c-cpf-ink:#6E4CD0;--c-re-ink:#845F22;--c-crypto-ink:#A74629;--c-insurance-ink:#984981;'));
+    ['stocks', 'cash', 'cpf', 're', 'crypto', 'insurance'].forEach(name => {
+      assert.ok(indexSrc.includes('--c-' + name + '-ink:var(--c-' + name + ')'), name + ' dark ink must alias the class colour');
+    });
+  });
+
+  /* ═══ Dashboard rows (v2.70): layout migration, monogram, Where it sits, Health, Coming up ═══ */
+
+  /* kjrEscape carries quote characters inside regex literals, which the brace-matching extractor cannot skip, so it is sliced by its own shape (three lines, closing brace in column 0). */
+  const realEscape = sb => { vm.runInContext(/function kjrEscape\(s\)\{[\s\S]*?\n\}/.exec(appSrc)[0], sb); return sb; };
+  const arr = list => Array.from(list);
+
+  test('_migrateDashLayout - the documented example, an empty layout and an already current one', () => {
+    const sb = freshSandbox();
+    const m = ids => arr(sb._migrateDashLayout(ids));
+    assert.deepStrictEqual(m(['movers', 'assets', 'chart:def_networth', 'ef']), ['activity', 'overview', 'chart:def_networth', 'networth', 'cpf']);
+    assert.deepStrictEqual(m([]), ['networth', 'overview', 'activity', 'cpf']);
+    assert.deepStrictEqual(m(null), ['networth', 'overview', 'activity', 'cpf']);
+    assert.deepStrictEqual(m(['cpf', 'chart:b', 'networth', 'activity', 'chart:a', 'overview']), ['cpf', 'chart:b', 'networth', 'activity', 'chart:a', 'overview']);
+    // a legacy layout saved by Arrange (every widget and chart id) keeps its order of charts and gains the rows
+    assert.deepStrictEqual(m(['networth', 'assets', 'ef', 'targets', 'movers', 'cpf', 'chart:def_networth', 'chart:def_alloc', 'chart:def_cashflow']),
+      ['networth', 'overview', 'activity', 'cpf', 'chart:def_networth', 'chart:def_alloc', 'chart:def_cashflow']);
+  });
+
+  test('_migrateDashLayout - duplicates keep the first, unknown and unsafe ids are dropped, chart order is kept', () => {
+    const sb = freshSandbox();
+    const m = ids => arr(sb._migrateDashLayout(ids));
+    assert.deepStrictEqual(m(['assets', 'overview', 'targets', 'ef', 'overview']), ['overview', 'networth', 'activity', 'cpf']);
+    assert.deepStrictEqual(m(['movers', 'activity', 'movers']), ['activity', 'networth', 'overview', 'cpf']);
+    assert.deepStrictEqual(m(['bogus', '__proto__', 'constructor', 'toString', 'hasOwnProperty', 'chart']), ['networth', 'overview', 'activity', 'cpf']);
+    assert.deepStrictEqual(m([1, null, undefined, {}, ['cpf'], 'networth']), ['networth', 'overview', 'activity', 'cpf']);
+    // a chart id that is not a safe chart:<id> could never match a card, and would break the attribute selector
+    assert.deepStrictEqual(m(['chart:"]', 'chart:', 'chart:a b', 'chart:' + 'x'.repeat(65), 'chart:ok_1', 'chart:a"b', 'chart:ok_1']), ['chart:ok_1', 'networth', 'overview', 'activity', 'cpf']);
+    assert.deepStrictEqual(m(['chart:c', 'chart:a', 'chart:b']), ['chart:c', 'chart:a', 'chart:b', 'networth', 'overview', 'activity', 'cpf']);
+  });
+
+  test('loadDashLayout - read-time migration only: an empty or missing layout stays empty and the stored layout is never rewritten', () => {
+    const sb = freshSandbox({settings:{dashLayout:[]}});
+    assert.deepStrictEqual(arr(sb.loadDashLayout()), []);
+    sb.DB.settings.dashLayout = null;
+    assert.deepStrictEqual(arr(sb.loadDashLayout()), []);
+    const legacy = ['networth', 'assets', 'ef', 'targets', 'movers', 'cpf', 'chart:def_networth'];
+    sb.DB.settings.dashLayout = legacy.slice();
+    assert.deepStrictEqual(arr(sb.loadDashLayout()), ['networth', 'overview', 'activity', 'cpf', 'chart:def_networth']);
+    assert.deepStrictEqual(arr(sb.DB.settings.dashLayout), legacy);
+  });
+
+  test('_applyDashLayout - orders by the migrated layout and puts a widget the order does not name after the named ones', () => {
+    const sb = freshSandbox({settings:{dashLayout:['movers', 'assets', 'chart:def_networth', 'ef']}});
+    const stack = {
+      kids: ['networth', 'overview', 'activity', 'cpf', 'chart:def_networth', 'chart:def_cashflow'].map(id => ({ id, getAttribute: () => id })),
+      querySelectorAll(){ return this.kids.slice(); },
+      querySelector(selector){ const match = /\[data-wid="([^"]*)"\]/.exec(selector); return this.kids.find(k => k.id === match[1]) || null; },
+      appendChild(el){ this.kids = this.kids.filter(k => k !== el); this.kids.push(el); }
+    };
+    sb.document = { getElementById: () => stack };
+    sb._dashDecorate = () => {};
+    sb._dashSortable = null;
+    sb._dashArrange = false;
+    sb._applyDashLayout();
+    assert.deepStrictEqual(stack.kids.map(k => k.id), ['activity', 'overview', 'chart:def_networth', 'networth', 'cpf', 'chart:def_cashflow']);
+    assert.deepStrictEqual(arr(sb.DB.settings.dashLayout), ['movers', 'assets', 'chart:def_networth', 'ef']);
+
+    // never saved: the markup order stands
+    const fresh = freshSandbox({settings:{dashLayout:[]}});
+    const stack2 = { kids: ['networth', 'overview'].map(id => ({ id, getAttribute: () => id })),
+      querySelectorAll(){ return this.kids.slice(); }, querySelector(){ return null; }, appendChild(el){ throw new Error('must not reorder'); } };
+    fresh.document = { getElementById: () => stack2 }; fresh._dashDecorate = () => {}; fresh._dashSortable = null; fresh._dashArrange = false;
+    fresh._applyDashLayout();
+    assert.deepStrictEqual(stack2.kids.map(k => k.id), ['networth', 'overview']);
+  });
+
+  test('_dashWidgetBaseName - fixed rows use their names, a chart card uses its title text without the info-tip popover', () => {
+    const sb = freshSandbox();
+    const widget = id => ({ getAttribute: () => id, querySelector: () => null });
+    assert.strictEqual(sb._dashWidgetBaseName(widget('overview')), 'Where it sits and Health');
+    assert.strictEqual(sb._dashWidgetBaseName(widget('activity')), 'Holdings and Today');
+    assert.strictEqual(sb._dashWidgetBaseName(widget('networth')), 'Net worth');
+    assert.strictEqual(sb._dashWidgetBaseName(widget('cpf')), 'CPF breakdown');
+    const names = vm.runInContext('DASH_WIDGET_NAMES', sb);
+    ['assets', 'ef', 'targets', 'movers'].forEach(id => assert.strictEqual(id in names, false, id + ' is retired'));
+    const chart = title => {
+      const clone = { textContent: title + 'About this chartX: Sector · Y: Market Value',
+        querySelectorAll(){ return [{ remove(){ clone.textContent = title; } }]; } };
+      return { getAttribute: () => 'chart:def_networth', querySelector: () => ({ cloneNode: () => clone }) };
+    };
+    assert.strictEqual(sb._dashWidgetBaseName(chart('Net worth over time')), 'Net worth over time');
+    const noTitle = { getAttribute: () => 'chart:x', querySelector: () => null };
+    assert.strictEqual(sb._dashWidgetBaseName(noTitle), 'Dashboard card');
+  });
+
+  test('_monogram - first letter in the class ink on its soft tint, BTC and ETH glyphs, hostile symbols escaped', () => {
+    const sb = realEscape(freshSandbox());
+    assert.strictEqual(sb._monogram('AAPL', 'stocks'),
+      '<span class="mono" style="background:var(--c-stocks-soft);color:var(--c-stocks-ink)" aria-hidden="true">A</span>');
+    assert.ok(sb._monogram('d05', 'stocks').includes('>D</span>'));
+    assert.ok(sb._monogram('BTC', 'crypto').includes('>₿</span>'));
+    assert.ok(sb._monogram(' btc ', 'crypto').includes('>₿</span>'));
+    assert.ok(sb._monogram('ETH', 'crypto').includes('>Ξ</span>'));
+    assert.ok(sb._monogram('SOL', 'crypto').includes('background:var(--c-crypto-soft);color:var(--c-crypto-ink)'));
+    ['cash', 'cpf', 're', 'insurance'].forEach(k => assert.ok(sb._monogram('X', k).includes('var(--c-' + k + '-soft);color:var(--c-' + k + '-ink)'), k));
+    assert.ok(sb._monogram('', 'stocks').includes('>?</span>'));
+    assert.ok(sb._monogram(null, 'stocks').includes('>?</span>'));
+    assert.ok(sb._monogram('😀X', 'stocks').includes('>😀</span>'));
+    const hostile = sb._monogram('<img src=x onerror=alert(1)>', 'stocks');
+    assert.strictEqual(hostile.includes('<img'), false);
+    assert.ok(hostile.includes('>&lt;</span>'));
+    assert.strictEqual(sb._monogram('"><script>', 'stocks').includes('<script>'), false);
+    // an unknown class key never reaches the style attribute
+    const unknown = sb._monogram('Q', 'x;background:url(evil)');
+    assert.strictEqual(unknown.includes('evil'), false);
+    assert.ok(unknown.includes('background:var(--bg3);color:var(--text2)'));
+    assert.strictEqual(sb._monogram('Q', undefined).includes('var(--c-undefined'), false);
+  });
+
+  test('_dayMoveSgd - value x pct / (100 + pct), null when it cannot be derived', () => {
+    const sb = freshSandbox();
+    assert.strictEqual(sb._dayMoveSgd(38000, 1.8), 671.91);
+    assert.strictEqual(sb._dayMoveSgd(10071, -2.11), -217.08);
+    assert.strictEqual(sb._dayMoveSgd(1000, 0), 0);
+    assert.strictEqual(sb._dayMoveSgd(1000, -100), null);
+    assert.strictEqual(sb._dayMoveSgd(1000, -150), null);
+    assert.strictEqual(sb._dayMoveSgd(NaN, 1), null);
+    assert.strictEqual(sb._dayMoveSgd(1000, 'x'), null);
+    assert.strictEqual(sb._dayMoveSgd(null, 5), 0);
+  });
+
+  test('_stockDayMove - the row own change first, then price less previous close, then value and percentage', () => {
+    const sb = freshSandbox();
+    const move = r => { const m = sb._stockDayMove(r); return { pct: m.pct, sgd: m.sgd }; };
+    // quote with its own change fields
+    assert.deepStrictEqual(move({ px:{ price:254.3, changePct:1.24 }, changeSgd:84.5, mv:6866, shares:20, priceSgd:343.3, prevCloseSgd:339.1 }), { pct:1.24, sgd:84.5 });
+    // synthetic seed style quote: previous close only
+    const seed = move({ px:{ price:186.5, previousClose:190.52, changePct:-2.11 }, changeSgd:null, mv:10071, shares:40, priceSgd:251.775, prevCloseSgd:257.202 });
+    assert.strictEqual(seed.pct, -2.11);
+    assert.strictEqual(seed.sgd, sb.roundMoney((251.775 - 257.202) * 40));
+    // percentage derived from the previous close when changePct is missing
+    assert.ok(Math.abs(move({ px:{ price:110, previousClose:100 }, changeSgd:null, priceSgd:110, prevCloseSgd:100, shares:2, mv:220 }).pct - 10) < 1e-9);
+    // only a value and a percentage
+    assert.strictEqual(move({ px:{ price:110, changePct:10 }, changeSgd:null, priceSgd:null, prevCloseSgd:null, mv:110, shares:1 }).sgd, 10);
+    // a zero change is a zero move, not missing
+    assert.strictEqual(move({ px:{ price:100, previousClose:100, changePct:0 }, changeSgd:0, mv:100, shares:1 }).sgd, 0);
+    // no price, no quote
+    assert.deepStrictEqual(move({ px:null }), { pct:null, sgd:null });
+    assert.deepStrictEqual(move({ px:{ price:null, changePct:5 } }), { pct:null, sgd:null });
+    assert.deepStrictEqual(move(null), { pct:null, sgd:null });
+  });
+
+  test('_rebalanceThreshold - 5 by default, an explicit 0 is kept, junk falls back', () => {
+    const sb = freshSandbox();
+    assert.strictEqual(sb._rebalanceThreshold(), 5);
+    sb.DB.settings.rebalanceThreshold = 0; assert.strictEqual(sb._rebalanceThreshold(), 0);
+    sb.DB.settings.rebalanceThreshold = 3; assert.strictEqual(sb._rebalanceThreshold(), 3);
+    sb.DB.settings.rebalanceThreshold = '7'; assert.strictEqual(sb._rebalanceThreshold(), 7);
+    sb.DB.settings.rebalanceThreshold = null; assert.strictEqual(sb._rebalanceThreshold(), 5);
+    sb.DB.settings.rebalanceThreshold = 'abc'; assert.strictEqual(sb._rebalanceThreshold(), 5);
+  });
+
+  test('_allocRows - biggest first, share of the net passed in, target and drift only where a target applies', () => {
+    const sb = freshSandbox();
+    const classes = [
+      { key:'Cash', val:52708, color:'--c-cash' }, { key:'Real Estate', val:500000, color:'--c-re' },
+      { key:'Stocks', val:30727, color:'--c-stocks' }, { key:'Insurance', val:1000, color:'--c-insurance' }
+    ];
+    const net = 584435;
+    const targets = { stocks:40, cash:20, cpf:30, realestate:10, crypto:0 };
+    const out = sb._allocRows(classes, net, targets, 5);
+    assert.strictEqual(out.hasTargets, true);
+    assert.deepStrictEqual(arr(out.rows.map(r => r.key)), ['Real Estate', 'Cash', 'Stocks', 'Insurance']);
+    const by = key => out.rows.find(r => r.key === key);
+    assert.ok(Math.abs(by('Real Estate').share - 500000 / net * 100) < 1e-9);
+    assert.strictEqual(by('Real Estate').target, 10);
+    assert.ok(Math.abs(by('Real Estate').drift - (500000 / net * 100 - 10)) < 1e-9);
+    assert.strictEqual(by('Real Estate').off, true);
+    assert.strictEqual(by('Cash').off, true);          // 9.0 against 20
+    assert.strictEqual(by('Insurance').target, null);  // no target setting exists for insurance
+    assert.strictEqual(by('Insurance').drift, null);
+    assert.strictEqual(by('Insurance').off, false);
+    // classes sum to the net they were given
+    assert.ok(Math.abs(out.rows.reduce((s, r) => s + r.val, 0) - net) < 1e-9);
+    assert.ok(Math.abs(out.rows.reduce((s, r) => s + r.share, 0) - 100) < 1e-9);
+    // a zero target is a target (hold none), not a missing one
+    const withCrypto = sb._allocRows([{ key:'Crypto', val:38000, color:'--c-crypto' }, { key:'Cash', val:62000, color:'--c-cash' }], 100000, targets, 5);
+    assert.strictEqual(withCrypto.rows.find(r => r.key === 'Crypto').target, 0);
+    assert.ok(Math.abs(withCrypto.rows.find(r => r.key === 'Crypto').drift - 38) < 1e-9);
+    // no target anywhere: no targets, no drift, nothing off
+    const none = sb._allocRows(classes, net, { stocks:0, cash:0, cpf:0, realestate:0, crypto:0 }, 5);
+    assert.strictEqual(none.hasTargets, false);
+    none.rows.forEach(r => { assert.strictEqual(r.target, null); assert.strictEqual(r.drift, null); assert.strictEqual(r.off, false); });
+    assert.strictEqual(sb._allocRows(classes, net, undefined, 5).hasTargets, false);
+    // the tolerance is strict: exactly on it is not off, and 0 flags any drift
+    const edge = sb._allocRows([{ key:'Stocks', val:45, color:'--c-stocks' }, { key:'Cash', val:55, color:'--c-cash' }], 100, { stocks:40, cash:55 }, 5);
+    assert.strictEqual(edge.rows.find(r => r.key === 'Stocks').off, false);
+    assert.strictEqual(sb._allocRows([{ key:'Stocks', val:45, color:'--c-stocks' }], 100, { stocks:40 }, 4.9).rows[0].off, true);
+    assert.strictEqual(sb._allocRows([{ key:'Stocks', val:40.2, color:'--c-stocks' }], 100, { stocks:40 }, 0).rows[0].off, true);
+    assert.strictEqual(sb._allocRows([{ key:'Stocks', val:40, color:'--c-stocks' }], 100, { stocks:40 }, 0).rows[0].off, false);
+    // no net, no shares
+    assert.strictEqual(sb._allocRows([{ key:'Cash', val:5, color:'--c-cash' }], 0, targets, 5).rows[0].share, null);
+  });
+
+  test('_allocInsight - names the most over and most under class beyond tolerance, adapts, and stays silent when nothing is off', () => {
+    const sb = freshSandbox();
+    const row = (key, share, drift, off) => ({ key, share, drift, off });
+    const rows = [row('Real Estate', 69.1, 59.1, true), row('Stocks', 4.2, -35.8, true), row('CPF', 14.1, -15.9, true), row('Cash', 7.3, -12.7, true), row('Crypto', 5.3, 5.3, true)];
+    assert.strictEqual(sb._allocInsight(rows),
+      'Real Estate carries 69% of your net worth, 59 points over target. New savings would close the gap fastest in Stocks, which sits 36 points under.');
+    assert.strictEqual(sb._allocInsight([row('Real Estate', 69.1, 39.4, true), row('Cash', 7.3, -1.2, false)]),
+      'Real Estate carries 69% of your net worth, 39 points over target.');
+    assert.strictEqual(sb._allocInsight([row('Stocks', 4.2, -25.8, true), row('Cash', 7.3, 1.2, false)]),
+      'Stocks holds 4% of your net worth, 26 points under target. New savings would close the gap fastest there.');
+    assert.strictEqual(sb._allocInsight([row('Cash', 7.3, -1.2, false), row('Stocks', 4.2, 0.4, false)]), null);
+    assert.strictEqual(sb._allocInsight([]), null);
+    assert.strictEqual(sb._allocInsight([row('Insurance', 1, null, false)]), null);
+    // singular and sub-point wording, for a tight tolerance
+    assert.ok(sb._allocInsight([row('Cash', 10, 1.2, true)]).includes('1 point over target'));
+    assert.ok(sb._allocInsight([row('Cash', 10, 0.3, true)]).includes('less than a point over target'));
+  });
+
+  /* Where it sits is always the full CPF-inclusive picture, whatever the Include CPF switch says. These are the QA seed with CPF counted
+     (S$723,075), the basis the old target allocation card used at HEAD: Stocks -36, Cash -13, CPF -16, Real Estate +59, Crypto +5. */
+  const whereSeed = () => ({ classes:{ stocks:30727.1, cash:52708.25, cpf:101640, realestate:500000, crypto:38000, insurance:0 }, total:723075.35, incomplete:false, missingFxCount:0 });
+  const whereTargets = { stocks:40, cash:20, cpf:30, realestate:10, crypto:0 };
+  const whereSandbox = targets => {
+    const sb = freshSandbox({ settings:{ targets: targets || whereTargets } });
+    sb.assetClassColor = key => ({ Stocks:'--c-stocks', Cash:'--c-cash', CPF:'--c-cpf', 'Real Estate':'--c-re', Crypto:'--c-crypto', Insurance:'--c-insurance' })[key] || '--text3';
+    sb._moneyHtml = s => s;
+    sb._emptyIcon = () => '<svg></svg>';
+    sb.ALERT_ICON = '<svg></svg>';
+    sb.fmt = n => 'S$' + Math.round(n).toLocaleString('en-US');
+    return sb;
+  };
+  const whereNone = { classes:{ stocks:0, cash:0, cpf:0, realestate:0, crypto:0, insurance:0 }, total:0, incomplete:false, missingFxCount:0 };
+
+  test('_whereModel - the CPF-inclusive basis gives the HEAD drifts for the seed, and the rows sum to the CPF-inclusive net worth', () => {
+    const sb = whereSandbox();
+    const v = whereSeed();
+    const m = sb._whereModel(v, whereTargets, 5);
+    assert.strictEqual(m.state, 'ok');
+    assert.strictEqual(m.hasTargets, true);
+    assert.deepStrictEqual(arr(m.rows.map(r => r.key)), ['Real Estate', 'CPF', 'Cash', 'Crypto', 'Stocks']);
+    const sign = n => (n >= 0 ? '+' : '') + n.toFixed(0);
+    assert.deepStrictEqual(arr(m.rows.map(r => sign(r.drift))), ['+59', '-16', '-13', '+5', '-36']);
+    assert.deepStrictEqual(arr(m.rows.map(r => r.share.toFixed(0) + '%')), ['69%', '14%', '7%', '5%', '4%']);
+    assert.ok(m.rows.every(r => r.off));
+    assert.ok(Math.abs(m.rows.reduce((s, r) => s + r.val, 0) - v.total) < 0.01);
+    assert.ok(Math.abs(m.rows.reduce((s, r) => s + r.share, 0) - 100) < 1e-9);
+    assert.strictEqual(m.insight, 'Real Estate carries 69% of your net worth, 59 points over target. New savings would close the gap fastest in Stocks, which sits 36 points under.');
+    assert.strictEqual(m.note, '');
+  });
+
+  test('_dashWhereItSits - Include CPF off and on give identical markup, the CPF row and the HEAD drifts included', () => {
+    const v = whereSeed();
+    const html = showCpf => { const sb = whereSandbox(); sb._dashShowCpf = showCpf; return sb._dashWhereItSits(v); };
+    const off = html(false), on = html(true);
+    assert.strictEqual(off, on);
+    ['+59 pts', '-16 pts', '-13 pts', '+5 pts', '-36 pts'].forEach(label => assert.ok(off.includes(label), label));
+    assert.ok(off.includes('</span>CPF</div>') && off.includes('S$101,640') && off.includes('S$500,000'));
+    assert.ok(off.includes('Share incl. CPF · marker shows your target') && off.includes('<span class="dash-hint-short">Share incl. CPF</span>'));
+    assert.ok(off.includes('Real Estate carries 69% of your net worth, 59 points over target.') && off.includes('Review targets'));
+    // neither function can see the switch, and the dashboard hands over the valuation alone
+    ['_dashWhereItSits', '_whereModel'].forEach(name => assert.strictEqual(extractFunction(name).includes('_dashShowCpf'), false, name));
+    const dashboardSrc = extractFunction('renderDashboard');
+    assert.ok(dashboardSrc.includes('_dashWhereItSits(valuation)') && !dashboardSrc.includes('displayClasses'));
+    // the hero and the Holdings shares keep following the switch
+    assert.ok(dashboardSrc.includes('_allocationData(valuation.classes, _dashShowCpf)') && dashboardSrc.includes('_dashHoldings(holdingRows, displayNet)'));
+    // with no target in use the hint drops the marker clause and the target column goes
+    const bare = whereSandbox({ stocks:0, cash:0, cpf:0, realestate:0, crypto:0 })._dashWhereItSits(v);
+    assert.ok(bare.includes('Share incl. CPF') && !bare.includes('marker shows') && bare.includes('no-target'));
+    assert.ok(!bare.includes('dash-adrift') && !bare.includes('dash-insight') && !bare.includes('<i style'));
+  });
+
+  test('_whereModel - a class is skipped only when it has no target and no balance, and Insurance never has a target', () => {
+    const sb = whereSandbox();
+    const base = { classes:{ stocks:60000, cash:40000, cpf:0, realestate:0, crypto:0, insurance:0 }, total:100000, incomplete:false, missingFxCount:0 };
+    const keys = (v, t) => arr(sb._whereModel(v, t, 5).rows.map(r => r.key));
+    // a target with no balance still shows, so a missing class reads as under target
+    assert.deepStrictEqual(keys(base, whereTargets), ['Stocks', 'Cash', 'CPF', 'Real Estate']);
+    const cpf = sb._whereModel(base, whereTargets, 5).rows.find(r => r.key === 'CPF');
+    assert.strictEqual(cpf.val, 0); assert.strictEqual(cpf.share, 0); assert.strictEqual(cpf.target, 30);
+    assert.strictEqual(cpf.drift, -30); assert.strictEqual(cpf.off, true);
+    // no target and no balance is skipped (Crypto above), and with no targets in use only held classes show
+    assert.deepStrictEqual(keys(base, { stocks:0, cash:0, cpf:0, realestate:0, crypto:0 }), ['Stocks', 'Cash']);
+    // Insurance appears once it has a value, with no target setting, so no drift and never off
+    const withIns = { classes:Object.assign({}, base.classes, { insurance:5000 }), total:105000, incomplete:false, missingFxCount:0 };
+    const ins = sb._whereModel(withIns, whereTargets, 5).rows.find(r => r.key === 'Insurance');
+    assert.ok(ins && ins.target === null && ins.drift === null && ins.off === false);
+    assert.strictEqual(sb._whereModel(base, whereTargets, 5).rows.some(r => r.key === 'Insurance'), false);
+  });
+
+  test('_whereModel - when a share would mislead, the rows keep their signed values and one line replaces targets, drift and insight', () => {
+    const sb = whereSandbox();
+    const noDrift = m => {
+      assert.strictEqual(m.insight, null);
+      m.rows.forEach(r => { assert.strictEqual(r.share, null); assert.strictEqual(r.target, null); assert.strictEqual(r.drift, null); assert.strictEqual(r.off, false); });
+    };
+    // missing FX with targets in use: the old target guard copy
+    const missing = Object.assign(whereSeed(), { incomplete:true, missingFxCount:2 });
+    const a = sb._whereModel(missing, whereTargets, 5);
+    assert.strictEqual(a.state, 'incomplete');
+    assert.strictEqual(a.note, 'Set FX rates for 2 assets before comparing against targets.');
+    assert.deepStrictEqual(arr(a.rows.map(r => r.key + ':' + Math.round(r.val))), ['Real Estate:500000', 'CPF:101640', 'Cash:52708', 'Crypto:38000', 'Stocks:30727']);
+    noDrift(a);
+    assert.strictEqual(sb._whereModel(Object.assign(whereSeed(), { incomplete:true, missingFxCount:1 }), whereTargets, 5).note, 'Set FX rates for 1 asset before comparing against targets.');
+    // missing FX with no target in use: it is the percentages that are unavailable
+    assert.strictEqual(sb._whereModel(Object.assign(whereSeed(), { incomplete:true, missingFxCount:1 }), {}, 5).note,
+      'Known values exclude 1 asset with missing FX. Set rates in Settings before calculating percentages.');
+    // a negative class balance: listed signed even with no target, and no share anywhere
+    const negative = { classes:{ stocks:50000, cash:-2000, cpf:0, realestate:0, crypto:-300, insurance:0 }, total:47700, incomplete:false, missingFxCount:0 };
+    const b = sb._whereModel(negative, whereTargets, 5);
+    assert.strictEqual(b.state, 'unavailable');
+    assert.strictEqual(b.note, 'Net allocation is zero, negative, or contains a negative class balance. Signed values remain visible above.');
+    assert.deepStrictEqual(arr(b.rows.map(r => r.key + ':' + r.val)), ['Stocks:50000', 'Crypto:-300', 'Cash:-2000']);
+    noDrift(b);
+    // a net that is below zero, and a total that rounds to zero, are not a net to share against
+    const underwater = { classes:{ stocks:1000, cash:-5000, cpf:0, realestate:0, crypto:0, insurance:0 }, total:-4000, incomplete:false, missingFxCount:0 };
+    assert.strictEqual(sb._whereModel(underwater, whereTargets, 5).state, 'unavailable');
+    const dust = { classes:{ stocks:0.004, cash:0, cpf:0, realestate:0, crypto:0, insurance:0 }, total:0, incomplete:false, missingFxCount:0 };
+    assert.strictEqual(sb._whereModel(dust, whereTargets, 5).state, 'unavailable');
+    // nothing held is an empty state, nothing known with FX missing is incomplete with no rows
+    const none = sb._whereModel(whereNone, whereTargets, 5);
+    assert.strictEqual(none.state, 'empty'); assert.strictEqual(none.rows.length, 0);
+    const unknown = sb._whereModel(Object.assign({}, whereNone, { incomplete:true, missingFxCount:3 }), whereTargets, 5);
+    assert.strictEqual(unknown.state, 'incomplete'); assert.strictEqual(unknown.rows.length, 0);
+  });
+
+  test('_dashWhereItSits - the guard state is signed rows and one --text3 line with no marker, drift, bar or insight, and the empty state is designed', () => {
+    const sb = whereSandbox();
+    const negative = sb._dashWhereItSits({ classes:{ stocks:50000, cash:-2000, cpf:0, realestate:0, crypto:0, insurance:0 }, total:48000, incomplete:false, missingFxCount:0 });
+    assert.ok(negative.includes('<p class="dash-note">Net allocation is zero, negative, or contains a negative class balance. Signed values remain visible above.</p>'));
+    assert.ok(negative.includes('signed balance') && negative.includes('S$-2,000') && negative.includes('S$50,000') && negative.includes('Values incl. CPF'));
+    ['dash-adrift', 'dash-insight', 'dash-split', '<i style', 'target'].forEach(part => assert.strictEqual(negative.includes(part), false, part));
+    const missing = sb._dashWhereItSits(Object.assign(whereSeed(), { incomplete:true, missingFxCount:2 }));
+    assert.ok(missing.includes('<p class="dash-note">Set FX rates for 2 assets before comparing against targets.</p>'));
+    assert.ok(missing.includes('known value') && missing.includes('S$101,640'));
+    ['dash-adrift', 'dash-insight', 'dash-split', '<i style'].forEach(part => assert.strictEqual(missing.includes(part), false, part));
+    // the line sits below the rows, so "visible above" reads true, in the quiet text colour
+    assert.ok(negative.indexOf('dash-arows') < negative.indexOf('dash-note'));
+    assert.ok(indexSrc.includes('.dash-note{margin:12px 0 0;font-size:12.5px;line-height:1.5;color:var(--text3)}'));
+    const empty = sb._dashWhereItSits(whereNone);
+    assert.ok(empty.includes('No holdings yet') && empty.includes('Add stocks, cash, CPF, or property'));
+    assert.strictEqual(empty.includes('NaN') || empty.includes('undefined'), false);
+  });
+
+  test('_gainPill - arrow carries the sign, amount in a money chip, flat for no change', () => {
+    const sb = freshSandbox();
+    sb.fmt = n => 'S$' + Math.round(n).toLocaleString('en-US');
+    assert.strictEqual(sb._gainPill(14698.6, 2.24), '<span class="dash-pill up">▲ <span class="money-chip">S$14,699</span> · 2.2%</span>');
+    assert.strictEqual(sb._gainPill(-57765, -8.5), '<span class="dash-pill down">▼ <span class="money-chip">S$57,765</span> · 8.5%</span>');
+    assert.strictEqual(sb._gainPill(0, 0), '<span class="dash-pill flat"><span class="money-chip">S$0</span> · 0.0%</span>');
+  });
+
+  test('_ringSvg - fill as a dash length of the 40px circle, empty and out-of-range inputs draw safely', () => {
+    const sb = freshSandbox();
+    const circumference = 2 * Math.PI * 16;
+    const half = sb._ringSvg(0.5, 'var(--gain)');
+    assert.ok(half.includes('stroke="var(--gain)"'));
+    assert.ok(half.includes('stroke-dasharray="' + (circumference / 2).toFixed(2) + ' ' + circumference.toFixed(2) + '"'));
+    assert.ok(half.includes('aria-hidden="true"') && half.includes('viewBox="0 0 40 40"'));
+    assert.strictEqual(sb._ringSvg(0, 'var(--gain)').includes('dash-ring-fg'), false);
+    assert.strictEqual(sb._ringSvg(-1, 'var(--gain)').includes('dash-ring-fg'), false);
+    assert.strictEqual(sb._ringSvg(NaN, 'var(--gain)').includes('dash-ring-fg'), false);
+    assert.ok(sb._ringSvg(7, 'var(--accent)').includes('stroke-dasharray="' + circumference.toFixed(2) + ' ' + circumference.toFixed(2) + '"'));
+  });
+
+  test('_miniBars - six bars scale to the percentage, the last one is the highlighted current bar, labels are escaped', () => {
+    const sb = realEscape(freshSandbox());
+    const html = sb._miniBars([{ pct:30, label:'a' }, { pct:60, label:'b' }, { pct:null, label:'<x>' }, { pct:-5, label:'d' }, { pct:45, label:'e' }, { pct:50, label:'Sep 2026: 50%' }]);
+    assert.strictEqual((html.match(/<span/g) || []).length, 6);
+    assert.strictEqual((html.match(/class="cur"/g) || []).length, 1);
+    assert.ok(html.indexOf('class="cur"') > html.indexOf('title="e"'));
+    assert.ok(html.includes('style="height:100.0%" title="b"'));
+    assert.ok(html.includes('style="height:50.0%" title="a"'));
+    assert.ok(html.includes('style="height:0.0%" title="&lt;x&gt;"'));   // no data draws a stub through min-height
+    assert.ok(html.includes('style="height:0.0%" title="d"'));          // a negative rate draws no height
+    assert.ok(html.includes('aria-hidden="true"'));
+    // a rate above the 60 floor lifts the ceiling to the next ten
+    assert.ok(sb._miniBars([{ pct:95, label:'a' }, { pct:50, label:'b' }]).includes('style="height:95.0%" title="a"'));
+  });
+
+  test('_nextPayday - the engine rule (last working day of a month), month by month, bounded by start and end', () => {
+    const sb = freshSandbox();
+    const sal = { grossMonthly:8000, startDate:'2026-01-01', endDate:null };
+    const next = (s, today) => { const p = sb._nextPayday(s, today); return p && { y:p.y, m:p.m, payday:p.payday }; };
+    assert.deepStrictEqual(next(sal, '2026-10-07'), { y:2026, m:10, payday:'2026-10-30' });
+    assert.deepStrictEqual(next(sal, '2026-10-30'), { y:2026, m:10, payday:'2026-10-30' });   // on the day still counts
+    assert.deepStrictEqual(next(sal, '2026-10-31'), { y:2026, m:11, payday:'2026-11-30' });   // after it, the next month
+    assert.deepStrictEqual(next(sal, '2026-12-31'), { y:2026, m:12, payday:'2026-12-31' });
+    assert.deepStrictEqual(next(sal, '2027-01-02'), { y:2027, m:1, payday:'2027-01-29' });
+    assert.deepStrictEqual(next({ grossMonthly:8000, startDate:'2026-12-15' }, '2026-10-07'), { y:2026, m:12, payday:'2026-12-31' });
+    assert.strictEqual(next({ grossMonthly:8000, startDate:'2027-06-01' }, '2026-10-07'), null);
+    assert.strictEqual(next({ grossMonthly:8000, startDate:'2026-01-01', endDate:'2026-09-30' }, '2026-10-07'), null);
+    assert.deepStrictEqual(next({ grossMonthly:8000, startDate:'2026-01-01', endDate:'2026-11-15' }, '2026-10-31'), { y:2026, m:11, payday:'2026-11-30' });
+    assert.strictEqual(next(null, '2026-10-07'), null);
+    assert.strictEqual(next({ grossMonthly:0, startDate:'2026-01-01' }, '2026-10-07'), null);
+    assert.strictEqual(next({ grossMonthly:8000 }, '2026-10-07'), null);
+  });
+
+  test('_comingUp - payday and CPF on the same day, dividend and premium by their rules, soonest first, four at most', () => {
+    const sb = freshSandbox({settings:{fxOverrides:{USDSGD:1.35},fxRates:{}}});
+    const money = n => 'S$' + n.toFixed(2);
+    const base = {
+      salary: { employer:'Acme Pte Ltd', grossMonthly:8000, startDate:'2026-01-01', endDate:null },
+      ageOf: () => 31, cpfAnchor: '2025-12-31',
+      policies: [
+        { status:'Active', insurer:'Seed Life', plan:'Term 65', type:'Term Life', premiumFreq:'Annual', premium:1200, premiumDue:'2026-10-28' },
+        { status:'Lapsed', insurer:'Old', plan:'Gone', premium:100, premiumDue:'2026-10-10' },
+        { status:'Active', insurer:'Far', plan:'Away', premium:100, premiumDue:'2027-03-01' }
+      ],
+      dividendRows: [
+        { s:{ symbol:'D05', divPerShare:0.55, divExDate:'2026-10-20', divPayDate:'2026-11-05' }, shares:300, ccy:'SGD' },
+        { s:{ symbol:'AAPL', divPerShare:1, divExDate:'2027-06-01' }, shares:20, ccy:'USD' }
+      ],
+      money
+    };
+    const items = list => arr(list.map(i => i.date + ' ' + i.kind));
+    const all = sb._comingUp('2026-10-07', '2027-01-05', base);
+    assert.deepStrictEqual(items(all), ['2026-10-28 insurance', '2026-10-30 payday', '2026-10-30 cpf', '2026-11-05 dividend']);
+    const byKind = k => all.find(i => i.kind === k);
+    assert.strictEqual(byKind('payday').title, 'Payday, Acme Pte Ltd');
+    assert.strictEqual(byKind('payday').amount, null);               // no deposit maths repeated on the dashboard
+    assert.strictEqual(byKind('cpf').amount, 2960);                  // computeCpfContribution total for S$8,000 gross
+    assert.strictEqual(byKind('cpf').line, 'OA, SA and MA from Acme Pte Ltd');
+    assert.strictEqual(byKind('insurance').title, 'Seed Life Term 65 premium');
+    assert.strictEqual(byKind('insurance').line, 'Term Life, Annual');
+    assert.strictEqual(byKind('insurance').amount, 1200);
+    assert.strictEqual(byKind('dividend').title, 'D05 dividend');
+    assert.strictEqual(byKind('dividend').line, '300 shares at S$0.55');
+    assert.strictEqual(byKind('dividend').amount, 165);
+    // a dividend with no pay date is dated by its ex-date and says so
+    const exOnly = sb._comingUp('2026-10-07', '2027-01-05', Object.assign({}, base, { salary:null, policies:[], dividendRows:[{ s:{ symbol:'D05', divPerShare:0.55, divExDate:'2026-10-20' }, shares:300, ccy:'SGD' }] }));
+    assert.deepStrictEqual(items(exOnly), ['2026-10-20 dividend']);
+    assert.strictEqual(exOnly[0].line, '300 shares at S$0.55, ex-date');
+    // only the next dividend is listed, however many are due
+    const two = sb._comingUp('2026-10-07', '2027-01-05', Object.assign({}, base, { salary:null, policies:[], dividendRows:[
+      { s:{ symbol:'LATER', divPerShare:1, divExDate:'2026-12-01' }, shares:10, ccy:'SGD' },
+      { s:{ symbol:'SOONER', divPerShare:1, divExDate:'2026-10-15' }, shares:10, ccy:'SGD' }] }));
+    assert.deepStrictEqual(arr(two.map(i => i.title)), ['SOONER dividend']);
+    // a pay date beyond the window falls back to the ex-date, so nothing is listed outside the 90 days
+    const lateDiv = sb._comingUp('2026-10-07', '2026-11-01', Object.assign({}, base, { salary:null, policies:[] }));
+    assert.deepStrictEqual(items(lateDiv), ['2026-10-20 dividend']);
+    assert.strictEqual(lateDiv[0].line, '300 shares at S$0.55, ex-date');
+    // 55 and over: the engine adds no CPF entries, so the list does not promise one
+    assert.deepStrictEqual(items(sb._comingUp('2026-10-07', '2027-01-05', Object.assign({}, base, { ageOf: () => 56 }))).filter(x => x.endsWith('cpf')), []);
+    // a payday on or before the CPF anchor is already inside the opening figure
+    assert.deepStrictEqual(items(sb._comingUp('2026-10-07', '2027-01-05', Object.assign({}, base, { cpfAnchor:'2026-10-30' }))).filter(x => x.endsWith('cpf')), []);
+    // no salary: only the other items
+    assert.deepStrictEqual(items(sb._comingUp('2026-10-07', '2027-01-05', Object.assign({}, base, { salary:null }))), ['2026-10-28 insurance', '2026-11-05 dividend']);
+    // nothing in the window
+    assert.deepStrictEqual(arr(sb._comingUp('2026-10-07', '2026-10-19', Object.assign({}, base, { salary:null }))), []);
+    // the window ends inclusively and four is the cap
+    const many = Object.assign({}, base, { policies: [1, 2, 3, 4, 5, 6].map(i => ({ status:'Active', insurer:'P' + i, plan:'', premium:10, premiumDue:'2026-10-1' + i })) });
+    const capped = sb._comingUp('2026-10-07', '2026-10-30', many);
+    assert.strictEqual(capped.length, 4);
+    assert.deepStrictEqual(arr(capped.map(i => i.title)), ['P1 premium', 'P2 premium', 'P3 premium', 'P4 premium']);
+    assert.strictEqual(sb._comingUp('2026-10-07', '2026-10-28', Object.assign({}, base, { salary:null, dividendRows:[] })).length, 1);
+    assert.strictEqual(sb._comingUp('2026-10-07', '2026-10-27', Object.assign({}, base, { salary:null, dividendRows:[] })).length, 0);
+    // a zero premium is shown without an amount, a missing insurer or plan does not print "undefined"
+    const bare = sb._comingUp('2026-10-07', '2026-12-01', { salary:null, ageOf:()=>null, cpfAnchor:'', dividendRows:[], money, policies:[{ status:'Active', premiumDue:'2026-10-20' }] });
+    assert.strictEqual(bare[0].title, 'Insurance premium');
+    assert.strictEqual(bare[0].amount, null);
+    assert.strictEqual(/undefined|NaN/.test(JSON.stringify(bare)), false);
+  });
+
+  test('_insuranceDueWithin and _upcomingDividendRows - the shared rules behind the register cards and the Coming up list', () => {
+    const sb = freshSandbox();
+    const policies = [
+      { id:'late', status:'Active', premiumDue:'2026-11-30' }, { id:'edge', status:'Active', premiumDue:'2026-10-07' },
+      { id:'lapsed', status:'Lapsed', premiumDue:'2026-10-20' }, { id:'past', status:'Active', premiumDue:'2026-10-06' },
+      { id:'none', status:'Active' }, { id:'end', status:'Active', premiumDue:'2027-01-05' }, { id:'after', status:'Active', premiumDue:'2027-01-06' }
+    ];
+    assert.deepStrictEqual(arr(sb._insuranceDueWithin(policies, '2026-10-07', '2027-01-05').map(p => p.id)), ['edge', 'late', 'end']);
+    assert.deepStrictEqual(arr(sb._insuranceDueWithin(null, '2026-10-07', '2027-01-05')), []);
+    const rows = [
+      { s:{ symbol:'B', divPerShare:1, divExDate:'2026-12-01' } }, { s:{ symbol:'A', divPerShare:1, divExDate:'2026-10-07' } },
+      { s:{ symbol:'C', divPerShare:0, divExDate:'2026-10-10' } }, { s:{ symbol:'D', divPerShare:1, divExDate:'' } },
+      { s:{ symbol:'E', divPerShare:1, divExDate:'2026-10-06' } }, { s:{ symbol:'F', divPerShare:1, divExDate:'2027-01-05' } },
+      { s:{ symbol:'G', divPerShare:1, divExDate:'2027-01-06' } }
+    ];
+    assert.deepStrictEqual(arr(sb._upcomingDividendRows(rows, '2026-10-07', '2027-01-05').map(r => r.s.symbol)), ['A', 'B', 'F']);
+    assert.deepStrictEqual(arr(sb._upcomingDividendRows(undefined, '2026-10-07', '2027-01-05')), []);
+    assert.ok(extractFunction('renderInsurance').includes('_insuranceDueWithin(list, todayISO, horizonISO)'));
+    assert.ok(extractFunction('renderDividendTimeline').includes('_upcomingDividendRows(rows, today, cutoff)'));
+  });
+
+  test('_cfMonthRollup - the P&L month definition: take-home, expenses (unconvertible ones count 0), net and savings rate', () => {
+    const sb = freshSandbox({settings:{fxOverrides:{USDSGD:1.35},fxRates:{}}});
+    const income = [{ date:'2026-09-30', gross:8000, net:6400 }, { date:'2026-09-10', gross:1000, employeeCPF:200 }, { date:'2026-08-31', gross:8000, net:6400 }];
+    const expenses = [{ date:'2026-09-30', amount:3200, currency:'SGD' }, { date:'2026-09-15', amount:1000, currency:'JPY' }, { date:'2026-09-02', amount:100, currency:'USD' }];
+    const sep = sb._cfMonthRollup(income, expenses, '2026-09');
+    assert.strictEqual(sep.gross, 9000);
+    assert.strictEqual(sep.net, 6400 + 800);                         // typed net wins, else gross less employee CPF
+    assert.ok(Math.abs(sep.exp - (3200 + 100 * 1.35)) < 1e-9);       // the JPY expense has no rate, so it counts 0
+    assert.ok(Math.abs(sep.ne - (7200 - 3335)) < 1e-9);
+    assert.ok(Math.abs(sep.rate - (3865 / 7200 * 100)) < 1e-9);
+    assert.strictEqual(sep.txns, 2 + 3);
+    const none = sb._cfMonthRollup(income, expenses, '2026-07');
+    assert.deepStrictEqual({ gross:none.gross, net:none.net, exp:none.exp, ne:none.ne, rate:none.rate, txns:none.txns }, { gross:0, net:0, exp:0, ne:0, rate:null, txns:0 });
+    assert.strictEqual(sb._cfMonthRollup([], [{ date:'2026-09-30', amount:50, currency:'SGD' }], '2026-09').rate, null);  // expenses with no take-home: no rate
+    assert.strictEqual(sb._cfMonthRollup([{ date:'2026-09-30', gross:0, net:0 }], [], '2026-09').rate, null);
+    assert.strictEqual(sb._cfMonthRollup([{ date:'2026-09-30', net:100 }], [{ date:'2026-09-30', amount:150, currency:'SGD' }], '2026-09').rate, -50);
+    // one definition: the P&L monthly table and the dashboard tile both read it
+    assert.ok(extractFunction('renderCashflow').includes('_cfMonthRollup(income, expenses, ym)'));
+    assert.ok(appSrc.includes('_cfMonthRollup(income, expenses, ym)'));
+    assert.ok(appSrc.slice(appSrc.indexOf('function _savingsTile')).includes('_cfMonthRollup(income, expenses, ym)'));
+  });
+
+  test('_fireYearAge and _fireProgress - the shared FIRE figures the Projections page and the dashboard tile both quote', () => {
+    const sb = freshSandbox({settings:{fireTarget:720000,fxOverrides:{USDSGD:1.35},fxRates:{}}});
+    assert.strictEqual(sb._fireYearAge(null, 31), null);
+    stubNow(sb, '2026-10-07T04:00:00.000Z');
+    assert.deepStrictEqual({ ...sb._fireYearAge(0, 31) }, { year:2026, age:31 });
+    assert.deepStrictEqual({ ...sb._fireYearAge(172, 31) }, { year:2040, age:45 });
+    assert.deepStrictEqual({ ...sb._fireYearAge(11, null) }, { year:2026, age:0 });
+    sb._liquidAssetValueInfo = () => ({ total:121435, incomplete:false });
+    const p = sb._fireProgress();
+    assert.strictEqual(p.fireNumber, 720000);
+    assert.strictEqual(p.liquidNow, 121435);
+    assert.strictEqual(p.progressPct, 17);
+    sb._liquidAssetValueInfo = () => ({ total:900000, incomplete:false });
+    assert.strictEqual(sb._fireProgress().progressPct, 100);          // capped
+    sb.DB.settings.fireTarget = null; sb.DB.expenses = [];
+    const none = sb._fireProgress();
+    assert.strictEqual(none.fireNumber, null);
+    assert.strictEqual(none.progressPct, 0);
+    assert.ok(extractFunction('renderProjections').includes('const progressPct = fire.progressPct;'));
+    assert.ok(appSrc.slice(appSrc.indexOf('function _fireTile')).includes('_fireProgress()'));
+  });
+
+  test('_cryptoRow - the Crypto tab rows: SGD value and cost, P&L only with a price, a missing FX rate leaves cost null', () => {
+    const sb = freshSandbox({settings:{fxOverrides:{USDSGD:1.35},fxRates:{}},_priceCache:{ bitcoin:{ sgd:152000, change24h:1.8, fetchedAt:new Date().toISOString() } }});
+    sb.coinIdFor = (id) => String(id).toLowerCase();
+    const row = c => sb._cryptoRow(c);
+    const btc = row({ id:'c1', symbol:'BTC', coingeckoId:'bitcoin', amount:0.25, avgCost:60000, currency:'USD' });
+    assert.strictEqual(btc.mv, 38000);
+    assert.strictEqual(btc.cost, sb.roundMoney(0.25 * 60000 * 1.35));
+    assert.strictEqual(btc.pl, sb.roundMoney(38000 - btc.cost));
+    assert.ok(Math.abs(btc.plPct - 17750 / 20250 * 100) < 1e-9);
+    assert.strictEqual(btc.priceSgd, 152000);
+    assert.strictEqual(btc.stale, false);
+    const noPrice = row({ id:'c2', symbol:'FOO', amount:5, avgCost:10, currency:'USD' });
+    assert.strictEqual(noPrice.mv, null); assert.strictEqual(noPrice.pl, null); assert.strictEqual(noPrice.plPct, null);
+    assert.strictEqual(noPrice.stale, true); assert.strictEqual(noPrice.cost, sb.roundMoney(5 * 10 * 1.35));
+    assert.strictEqual(row({ id:'c3', symbol:'BTC', coingeckoId:'bitcoin', amount:1, avgCost:5, currency:'JPY' }).cost, null);   // no JPY rate
+    assert.strictEqual(row({ id:'c4', symbol:'BTC', coingeckoId:'bitcoin', amount:1, avgCost:0, currency:'JPY' }).cost, 0);      // nothing to convert
+    assert.ok(extractFunction('renderCrypto').includes('_cryptoRow(c)'));
+  });
+
+  test('Dashboard rows - the retired widgets, code and styles are gone, the two row widgets and the Settings anchor exist', () => {
+    ['dash-assets', 'dash-ef', 'dash-targets', 'dash-movers'].forEach(id => assert.strictEqual(indexSrc.includes('id="' + id + '"'), false, id));
+    ['dash-overview', 'dash-activity', 'dash-cpf', 'dash-networth'].forEach(id => assert.ok(indexSrc.includes('id="' + id + '"'), id));
+    assert.ok(indexSrc.includes('<div id="dash-overview" data-wid="overview"></div>') && indexSrc.includes('<div id="dash-activity" data-wid="activity"></div>'));
+    assert.ok(indexSrc.includes('id="settings-targets"'));
+    ['renderEmergencyFund', 'renderTargetAllocation', 'renderTopMovers', 'rebal-alert', 'dash-hero-chip', 'dash-class-card', 'movers-grid', 'mover-sym', 'alloc-legend-amt', 'mover-px'].forEach(name => {
+      assert.strictEqual(appSrc.includes(name), false, name + ' in app.js');
+      assert.strictEqual(indexSrc.includes(name), false, name + ' in index.html');
+    });
+    // shared by the Stocks sector card, so it must stay
+    assert.ok(indexSrc.includes('.alloc-seg{display:flex'));
+    assert.ok(indexSrc.includes('.alloc-legend{display:flex;flex-wrap:wrap;gap:5px 14px'));
+    const dashboardSrc = extractFunction('renderDashboard');
+    ['_gainPill(change.diff, change.pct)', '_dashWhereItSits(', '_dashHealth(', '_dashHoldings(', '_dashToday('].forEach(call => assert.ok(dashboardSrc.includes(call), call));
+    assert.ok(dashboardSrc.includes('past month'));
+    assert.deepStrictEqual(arr(Object.keys(vm.runInContext('DASH_WIDGET_NAMES', freshSandbox()))), ['networth', 'overview', 'activity', 'cpf']);
+    assert.ok(indexSrc.includes('.dash-row{display:grid;grid-template-columns:minmax(0,1fr);gap:16px'));
+    assert.ok(indexSrc.includes('@media (min-width:1024px){.dash-row{grid-template-columns:minmax(0,1.55fr) minmax(0,1fr)}}'));
+  });
+
+  test('Tab icons - every tab has its own icon, Explore no longer reuses the Stocks line chart', () => {
+    const tabsBlock = appSrc.slice(appSrc.indexOf('const TABS = ['), appSrc.indexOf('const PHASE_2_TABS'));
+    const icons = Array.from(tabsBlock.matchAll(/key:'([a-z0-9]+)'[^\n]*?icon:'(<svg[^']*)'/g)).map(m => [m[1], m[2]]);
+    assert.strictEqual(icons.length, 12);
+    assert.strictEqual(new Set(icons.map(i => i[1])).size, icons.length, 'duplicate tab icon');
+    const explore = icons.find(i => i[0] === 'explore')[1];
+    assert.strictEqual(explore.includes('M3 17l6-6 4 4 8-8'), false);
+  });
+
+  test('Monogram and money markup - symbols and sectors reach the dashboard only through kjrEscape', () => {
+    const holdings = extractFunction('_dashHoldings'), today = extractFunction('_dashToday'), rows = extractFunction('_dashHoldingRows');
+    assert.ok(holdings.includes('kjrEscape(r.sym)') && holdings.includes('kjrEscape(r.sub)'));
+    assert.ok(today.includes('kjrEscape(r.sym)') && today.includes('kjrEscape(r.name)') && today.includes('kjrEscape(it.title)') && today.includes('kjrEscape(it.line)'));
+    assert.ok(holdings.includes('_monogram(r.sym, r.cls)') && today.includes('_monogram(r.sym, r.cls)'));
+    assert.ok(rows.includes('_cryptoRow(c)') && rows.includes('_stockDayMove(r)') && rows.includes('_dayMoveSgd('));
+    assert.ok(extractFunction('_allocRowHtml').includes('kjrEscape(r.key)'));
+    // every amount on the new cards sits in a .money-chip, so privacy mode blurs it
+    assert.ok(holdings.includes('dash-hval money-chip') && today.includes('money-chip'));
+    assert.ok(indexSrc.includes('html.privacy .money-chip,'));
   });
 
   await testAsync('refreshFx - native and vault persistence failures suppress success', async () => {

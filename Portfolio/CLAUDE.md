@@ -29,6 +29,7 @@ Chart.js 4.4.1 (CDN, SRI-pinned). Backend is Google Apps Script + Google Sheets 
 | CPF | `cpf` | Live |
 | P&L | `cashflow` | Live |
 | Projections | `projections` | Live (v2.45, FIRE + CPF trajectory in today's dollars) |
+| Explore | `explore` | Live (v2.70, Chart Builder and the saved charts list) |
 | Settings | `settings` | Live |
 
 `PHASE_2_TABS` is currently empty. To park a future tab without deleting its markup, add its key to this set. Remove the key when the tab is ready to return to the live navigation.
@@ -38,6 +39,8 @@ Chart.js 4.4.1 (CDN, SRI-pinned). Backend is Google Apps Script + Google Sheets 
 `freshDB()` returns the canonical empty DB shape. `ENTITY_SCHEMAS` defines per-table field types and validation. Conflict modal fires when a cloud write is attempted over a newer remote version. `kjr-core.js:looksPopulated()` guards against seeding a non-empty cloud sheet.
 
 **Sync flow:** `pullFromRemote()` reconciles the Google Sheet on boot, `pushToRemote()` writes after a debounced local save. Apps Script `doGet` reads, `doPost` writes. `seedDecision()` (in kjr-core) prevents accidental overwrites on first run.
+
+**Dashboard and saved charts:** Arrange orders the widgets `networth`, `overview` (Where it sits and Health), `activity` (Holdings and Today), `cpf` and `chart:<id>` in `DB.settings.dashLayout`. `_migrateDashLayout()` maps the pre-v2.70 ids (`assets`, `ef`, `targets`, `movers`) at read time and never writes on load. Saved charts carry `onDashboard`, with a read-time default of true except the seeded `def_alloc`. The dashboard draws only those, Explore lists every one. Where it sits always uses the CPF-inclusive total, because targets include CPF.
 
 **Optional device encryption:** `kjr-vault.js` protects the local DB, price cache, Apps Script URL and `LK_DB_*` recovery snapshots. It keeps its derived key only in the unlocked tab, serialises writes through one authenticated encryption queue, and verifies ciphertext before deleting plaintext during migration. Boot must await the unlock gate before `loadLocal()`. Do not bypass `protectedStorage` for a sensitive key, and do not treat a locked vault as an empty first run.
 
@@ -51,7 +54,7 @@ Chart.js 4.4.1 (CDN, SRI-pinned). Backend is Google Apps Script + Google Sheets 
 
 Dark theme default (`--bg:#0B1120`, `--accent:#2dd4bf` teal). Warm light opt-in (`--bg:#F6F4EE`, `--accent:#0F6E56` deep teal). Base tokens: `--bg/bg2/bg3/bg4`, `--text/text2/text3`, `--red/green/blue/amber/purple`, `--radius/radius-lg`.
 
-Glass layer (both themes): `--glass`, `--glass-strong`, `--glass-border`, `--glass-hi`, `--glass-blur`, `--glass-shadow`, `--surface-solid` (opaque backing for dense tables), `--glow1/--glow2`, `--tx/--tx2/--tx3` (text aliases). Since the v2.39 restyle, glass is reserved for floating elements only (topbar, modals, toasts, bottom tab bar, sync pill, currency and theme toggles). In-flow cards (`.card`, `.metric`, `.stat-box`, `.dash-hero`, `.h-summary`, `.mover`, `.bucket`, `.hint-block`, `.freshness`) are solid `--bg2` with a `--border` hairline and the `--shadow-card` token. Dense table cells and sticky columns use `--surface-solid`. `@supports not (backdrop-filter)` falls back to `--surface-solid` for the floating elements only.
+Glass layer (both themes): `--glass`, `--glass-strong`, `--glass-border`, `--glass-hi`, `--glass-blur`, `--glass-shadow`, `--surface-solid` (opaque backing for dense tables), `--glow1/--glow2`, `--tx/--tx2/--tx3` (text aliases). Since the v2.39 restyle, glass is reserved for floating elements only (topbar, modals, toasts, bottom tab bar, sync pill, currency and theme toggles). In-flow cards (`.card`, `.metric`, `.stat-box`, `.dash-hero`, `.h-summary`, `.bucket`, `.hint-block`, `.freshness`) are solid `--bg2` with a `--border` hairline and the `--shadow-card` token. Dense table cells and sticky columns use `--surface-solid`. `@supports not (backdrop-filter)` falls back to `--surface-solid` for the floating elements only.
 
 ## Files
 

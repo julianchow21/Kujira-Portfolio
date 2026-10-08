@@ -57,6 +57,8 @@
   /* Asset-class roles: one colour per class across cards, bars and charts.
      Soft tints resolve per theme because they reference the class token. */
   --c-stocks:#3F62D4;--c-cash:#7A889B;--c-cpf:#7656D3;--c-re:#B5822E;--c-crypto:#CF5E3C;--c-insurance:#A8508E;
+  /* Ink variants: the class colours darkened for small coloured text (monogram letters). The dark theme reuses the class colour as it is. */
+  --c-stocks-ink:#375BD2;--c-cash-ink:#5A6778;--c-cpf-ink:#6E4CD0;--c-re-ink:#845F22;--c-crypto-ink:#A74629;--c-insurance-ink:#984981;
   --c-stocks-soft:color-mix(in srgb,var(--c-stocks) 16%,transparent);
   --c-cash-soft:color-mix(in srgb,var(--c-cash) 16%,transparent);
   --c-cpf-soft:color-mix(in srgb,var(--c-cpf) 16%,transparent);
@@ -86,6 +88,7 @@ html.dark{
   --gain:#43D193;--loss:#F2707A;--gain-soft:rgba(67,209,147,0.12);--loss-soft:rgba(242,112,122,0.12);
   --green-soft:#152a20;--green-border:#243a2e;
   --c-stocks:#7398FF;--c-cash:#A9B6CA;--c-cpf:#AB8DFB;--c-re:#E2B66D;--c-crypto:#EF8768;--c-insurance:#D98BC2;
+  --c-stocks-ink:var(--c-stocks);--c-cash-ink:var(--c-cash);--c-cpf-ink:var(--c-cpf);--c-re-ink:var(--c-re);--c-crypto-ink:var(--c-crypto);--c-insurance-ink:var(--c-insurance);
   --blue:#4a9eff;--blue-soft:#101f33;--blue-border:#1a2f43;
   --amber:#F0C36D;--amber-soft:#2a2213;--amber-border:#3a3220;
   --purple:#a78bfa;
@@ -195,16 +198,12 @@ a{color:var(--blue);text-decoration:none}
 html.privacy .dash-hero-value,
 html.privacy .h-summary-value,
 html.privacy .metric-value,
-html.privacy .alloc-legend-amt,
-html.privacy .mover-px,
 html.privacy .money-chip,
 html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user-select:none;user-select:none;cursor:default}
 @media (hover:hover){
   html.privacy .dash-hero-value:hover,
   html.privacy .h-summary-value:hover,
   html.privacy .metric-value:hover,
-  html.privacy .alloc-legend-amt:hover,
-  html.privacy .mover-px:hover,
   html.privacy .money-chip:hover,
   html.privacy td.num:hover{filter:none;-webkit-user-select:auto;user-select:auto}
 }
@@ -476,28 +475,8 @@ textarea.fi{resize:vertical;min-height:70px}
 .integrity-list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
 .integrity-list li{color:var(--text2);line-height:1.5}
 .integrity-list li.error{color:var(--red)}
-.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
-@media (max-width:840px){.dash-grid{grid-template-columns:1fr}}
-/* Allocation proportion bar (asset-class mix, dashboard only). NOTE: .alloc-bar
-   and .alloc-legend are reused bare (unscoped) by the Stocks-tab sector card
-   further down this stylesheet (.alloc-stack/.alloc-key there instead), so the
-   dashboard-only tweaks below are scoped under #dash-assets to avoid bleeding
-   into that unrelated component. */
-.alloc-bar{display:flex;gap:6px;height:46px;margin-bottom:16px}
 .alloc-seg{display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;letter-spacing:0.2px;border-radius:var(--radius);min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:0 10px;transition:flex-grow 0.3s ease,filter 0.15s;cursor:default}
 @media (hover:hover){.alloc-seg:hover{filter:brightness(1.1)}}
-.alloc-legend{display:flex;flex-wrap:wrap;gap:8px 18px}
-.alloc-legend-item{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2)}
-.alloc-legend-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
-.alloc-legend-amt{color:var(--text);font-weight:600}
-.alloc-legend-pct{color:var(--text3)}
-/* Dashboard segmented bar: thin pill, no in-slice labels (legend below always
-   carries every class regardless of slice size, fixing the old small-segment
-   label loss). */
-#dash-assets .alloc-bar{height:10px;border-radius:999px;overflow:hidden;gap:2px;margin-bottom:14px}
-#dash-assets .alloc-seg{padding:0;border-radius:0;font-size:0}
-#dash-assets .alloc-legend-item{gap:6px}
-#dash-assets .alloc-legend-dot{width:8px;height:8px;border-radius:2px}
 .dash-chart-wrap{position:relative;height:260px}
 /* Dashboard hero: solid card (glass reserved for topbar/modals/toasts/bottom
    bar per the restyle), value/label/subline on the left, sparkline on the
@@ -510,49 +489,123 @@ textarea.fi{resize:vertical;min-height:70px}
 .ccy{font-size:0.72em;font-weight:500;color:var(--text3);letter-spacing:0;margin-right:1px}
 .dash-hero-value .ccy{font-size:0.45em;margin-right:4px;vertical-align:0.62em}
 @media (max-width:640px){.dash-hero-value{font-size:36px;line-height:1.11}}
-.dash-hero-chip{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:500;border-radius:999px;padding:2px 9px;margin-left:8px;vertical-align:middle;text-transform:none;letter-spacing:normal}
-.dash-hero-chip.pos{color:var(--gain);background:var(--gain-soft)}
-.dash-hero-chip.neg{color:var(--loss);background:var(--loss-soft)}
 .dash-hero-spark{flex-shrink:0;margin-left:auto}
-/* Asset-class cards (one per class, above the allocation bar) */
-.dash-class-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
-.dash-class-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px}
-.dash-class-icon{width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:8px}
-.dash-class-icon svg{width:14px;height:14px}
-.dash-class-value{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
-.dash-class-label{font-size:12px;color:var(--text2);margin-top:2px}
-/* Target allocation bars */
-.alloc-row{display:grid;grid-template-columns:120px 1fr auto auto auto;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
-.alloc-row:last-child{border-bottom:none}
-.alloc-bar{position:relative;height:16px;background:var(--bg3);border-radius:4px;overflow:visible}
-.alloc-fill{position:absolute;top:0;left:0;bottom:0;border-radius:4px;transition:width .3s}
-.alloc-target{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--text);opacity:0.5}
-/* Below 640px the 120px-label / 1fr-bar / auto / auto / auto grid leaves the
-   bar a sliver (~14px at 430 wide). Stack instead: line 1 label + current% +
-   target + drift (the row's 1st, 3rd, 4th, 5th DOM children, in that visual
-   order via grid-template-areas), line 2 the bar at full width. Markup order
-   in app.js (renderTargets) is label, bar, current%, target, drift, so the
-   areas are assigned positionally with nth-child rather than new classes. */
+/* Change under the headline number: a gain or loss pill, then "past month". */
+.dash-hero-delta{display:flex;align-items:center;gap:10px;margin-top:8px;min-height:24px}
+.dash-hero-when{font-size:12.5px;color:var(--text3)}
+.dash-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums}
+.dash-pill.up{background:var(--gain-soft);color:var(--gain)}
+.dash-pill.down{background:var(--loss-soft);color:var(--loss)}
+.dash-pill.flat{background:var(--bg3);color:var(--text2)}
+
+/* DASHBOARD ROWS. Overview (Where it sits, Health) and activity (Holdings,
+   Today) are two solid cards side by side from 1024px, one column below, 16px
+   apart. The row's own 16px margins collapse with the neighbouring widgets. */
+.dash-row{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;margin:16px 0}
+@media (min-width:1024px){.dash-row{grid-template-columns:minmax(0,1.55fr) minmax(0,1fr)}}
+.dash-row > .card{margin-bottom:0;min-width:0}
+.dash-hint-short{display:none}
+@media (max-width:640px){.dash-hint-long{display:none}.dash-hint-short{display:inline}}
+/* Quiet text-style buttons: Refresh prices, Set up Projections and the like. */
+.dash-link{padding:0;border:0;background:none;font:inherit;font-size:12px;font-weight:600;color:var(--accent);text-align:left;cursor:pointer}
+@media (hover:hover){.dash-link:hover{text-decoration:underline}}
+.dash-link:focus-visible,.dash-insight-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+/* Monogram, a generated 32px stand-in for a logo (the CSP blocks external images). */
+.mono{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;flex:none;font-size:13px;font-weight:800;line-height:1}
+
+/* Where it sits: one split bar, then a row per class (swatch and name, a track
+   filled to the share with a 2px target marker, value, share, drift). */
+.dash-split{display:flex;height:10px;border-radius:999px;overflow:hidden;gap:2px;margin-bottom:6px}
+.dash-split-seg{height:100%;min-width:2px}
+.dash-arow{display:grid;grid-template-columns:minmax(104px,1.1fr) minmax(60px,1.4fr) 108px 56px 84px;align-items:center;gap:14px;padding:11px 0;font-size:13px}
+.dash-arows.no-target .dash-arow{grid-template-columns:minmax(104px,1.1fr) minmax(60px,1.4fr) 108px 56px}
+.dash-arow + .dash-arow{border-top:1px solid var(--border)}
+.dash-aname{display:flex;align-items:center;gap:9px;min-width:0;font-weight:600}
+.dash-swatch{width:9px;height:9px;border-radius:3px;flex:none}
+.dash-track{position:relative;height:6px;border-radius:999px;background:var(--bg3)}
+.dash-track b{position:absolute;inset:0 auto 0 0;border-radius:999px}
+.dash-track i{position:absolute;top:-4px;bottom:-4px;width:2px;border-radius:1px;background:var(--text2)}
+.dash-aval{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.dash-apct{text-align:right;color:var(--text2);font-variant-numeric:tabular-nums}
+.dash-adrift{text-align:right;font-size:12px;font-weight:600;line-height:1.3;font-variant-numeric:tabular-nums;color:var(--text3)}
+.dash-adrift.off{color:var(--amber)}
+.dash-adrift span{display:block;font-size:11.5px;font-weight:500;color:var(--text3)}
+.dash-arow.plain{grid-template-columns:minmax(0,1fr) auto auto}
+.dash-alabel{text-align:right;font-size:12px;color:var(--text3)}
+.dash-note{margin:12px 0 0;font-size:12.5px;line-height:1.5;color:var(--text3)}
+/* Below 640px each row takes two lines: swatch, name, value and share, then the
+   track and the drift. */
 @media (max-width:640px){
-  .alloc-row{
-    grid-template-columns:1fr auto auto auto;
-    grid-template-areas:"lbl cur tgt drift" "bar bar bar bar";
-    row-gap:6px;column-gap:10px;
-  }
-  .alloc-row > *:nth-child(1){grid-area:lbl}
-  .alloc-row > *:nth-child(2){grid-area:bar;min-width:0}
-  .alloc-row > *:nth-child(3){grid-area:cur;min-width:0;text-align:right}
-  .alloc-row > *:nth-child(4){grid-area:tgt;min-width:0}
-  .alloc-row > *:nth-child(5){grid-area:drift;min-width:0}
+  .dash-arow:not(.plain){grid-template-columns:minmax(0,1fr) auto 68px;grid-template-areas:"name val pct" "track track track";gap:8px 12px}
+  .dash-arow.has-drift:not(.plain){grid-template-areas:"name val pct" "track track drift"}
+  .dash-arows.no-target .dash-arow{grid-template-columns:minmax(0,1fr) auto 68px}
+  .dash-arow:not(.plain) .dash-aname{grid-area:name}
+  .dash-arow:not(.plain) .dash-track{grid-area:track}
+  .dash-arow:not(.plain) .dash-aval{grid-area:val}
+  .dash-arow:not(.plain) .dash-apct{grid-area:pct}
+  .dash-arow:not(.plain) .dash-adrift{grid-area:drift}
 }
-.rebal-alerts{margin-top:12px;display:flex;flex-direction:column;gap:8px}
-.rebal-alert{background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--text);border-radius:var(--radius);padding:9px 12px;font-size:13px}
-/* Top movers */
-.movers-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
-.mover{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;display:flex;flex-direction:column;gap:3px}
-.mover-sym{font-weight:700;font-size:13px}
-.mover-px{font-size:13px;color:var(--text2)}
-.mover-chg{font-size:13px;font-weight:700}
+/* The insight: one amber-soft box with a line icon, one sentence and a link. */
+.dash-insight{display:flex;gap:12px;align-items:flex-start;margin-top:12px;padding:12px 14px;border-radius:12px;background:var(--amber-soft);border:1px solid var(--amber-border);font-size:12.5px;color:var(--text)}
+.dash-insight-icon{flex:none;margin-top:1px;color:var(--amber)}
+.dash-insight-icon svg{display:block;width:16px;height:16px}
+.dash-insight p{margin:0;line-height:1.5}
+.dash-insight-link{margin-top:4px;padding:0;border:0;background:none;font:inherit;font-size:12.5px;font-weight:600;color:var(--text);text-decoration:underline;cursor:pointer}
+
+/* Health tiles: a 40px ring or mini bars, a label, a value and one quiet line. */
+.dash-tiles{display:grid;padding:4px 0}
+.dash-tile{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:center;gap:14px;padding:14px 18px}
+.dash-tile + .dash-tile{border-top:1px solid var(--border)}
+.dash-tile-label{font-size:12px;font-weight:600;color:var(--text2)}
+.dash-tile-value{font-size:20px;font-weight:600;line-height:1.3;letter-spacing:-0.01em;font-variant-numeric:tabular-nums}
+.dash-tile-value small{margin-left:4px;font-size:12px;font-weight:600;letter-spacing:0;color:var(--text3)}
+.dash-tile-line{margin:0;font-size:12px;line-height:1.5;color:var(--text3)}
+.dash-ring{display:block;width:40px;height:40px}
+.dash-ring circle{fill:none;stroke-width:4}
+.dash-ring-bg{stroke:var(--bg3)}
+.dash-ring-fg{stroke-linecap:round;transform:rotate(-90deg);transform-origin:50% 50%}
+.dash-minibars{display:flex;align-items:flex-end;gap:3px;width:40px;height:36px}
+.dash-minibars span{flex:1;min-height:3px;border-radius:2px 2px 1px 1px;background:color-mix(in srgb,var(--text3) 38%,transparent)}
+.dash-minibars span.cur{background:var(--gain)}
+
+/* Holdings: label row, then one button per position (the whole row opens its tab). */
+.dash-hold{padding:6px 8px 10px}
+.dash-hrow{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);align-items:center;gap:12px;width:100%;padding:10px 12px;border:0;border-radius:10px;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+@media (hover:hover){.dash-hrow:hover{background:var(--bg3)}}
+.dash-hrow:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.dash-hrow.dash-hhead{padding-block:10px 4px;font-size:11px;font-weight:700;line-height:14px;letter-spacing:0.08em;text-transform:uppercase;color:var(--text3);cursor:default}
+.dash-hrow.dash-hhead:hover{background:none}
+.dash-hhead span:not(:first-child){text-align:right}
+.dash-who{display:flex;align-items:center;gap:11px;min-width:0}
+.dash-who-t{display:block;min-width:0}
+.dash-who-t b{display:block;font-size:13.5px;font-weight:600;line-height:1.35}
+.dash-who-t span{display:block;overflow:hidden;font-size:12px;line-height:1.4;color:var(--text3);text-overflow:ellipsis;white-space:nowrap}
+.dash-hcell{display:flex;flex-direction:column;align-items:flex-end;min-width:0;text-align:right;font-variant-numeric:tabular-nums}
+.dash-hval{font-size:13px;font-weight:600}
+.dash-chg{font-size:12.5px;font-weight:600}
+.dash-chg.up{color:var(--gain)}
+.dash-chg.down{color:var(--loss)}
+.dash-sub{font-size:11.5px;font-weight:500;color:var(--text3)}
+@media (max-width:640px){
+  .dash-hrow{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr)}
+  .dash-col-day{display:none}
+}
+
+/* Today: biggest moves, then Coming up (a date block, a title and line, an amount). */
+.dash-list{padding:6px 18px 12px}
+.dash-li{display:flex;align-items:center;gap:12px;padding:10px 0;font-size:13px}
+.dash-li + .dash-li{border-top:1px solid var(--border)}
+.dash-li-main{flex:1;min-width:0}
+.dash-li-t{overflow:hidden;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.dash-li-s{overflow:hidden;font-size:12px;color:var(--text3);text-overflow:ellipsis;white-space:nowrap}
+.dash-li-end{flex:none;text-align:right;font-variant-numeric:tabular-nums}
+.dash-li-amt{flex:none;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.dash-date{flex:none;width:40px;text-align:center;line-height:1.1}
+.dash-date b{display:block;font-size:15px}
+.dash-date span{font-size:10.5px;font-weight:700;letter-spacing:0.08em;color:var(--text3)}
+.dash-sect{padding:14px 0 2px;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text3)}
+.dash-empty-line{margin:0;padding:10px 0;font-size:13px;color:var(--text3)}
+#settings-targets{scroll-margin-top:72px}
 /* Salary allocation rules */
 .rule-row{display:grid;grid-template-columns:1fr 90px 1fr auto;gap:10px;align-items:center;margin-bottom:8px}
 /* Recently deleted (trash) */
@@ -710,13 +763,13 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   .tbl-wrap.tbl-scroll-end::after{opacity:0}
 }
 /* Only the elements still on the glass treatment need this fallback now
-   (.card/.metric/.stat-box/.dash-hero/.h-summary/.mover/.bucket/.hint-block/
+   (.card/.metric/.stat-box/.dash-hero/.h-summary/.bucket/.hint-block/
    .freshness went solid var(--bg2) in the restyle, so they no longer need it). */
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
   .topbar,.modal,.toast,.bottom-tab-bar,.icon-btn,.sync-pill,.ccy-toggle,.theme-toggle{background:var(--surface-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
 }
 
-/* ── Custom Chart Builder (Stocks tab) ── */
+/* ── Custom Chart Builder (Explore page) ── */
 .cb-drop-zone{border:1.5px dashed var(--border2);border-radius:var(--radius);padding:8px 10px;font-size:12px;color:var(--text3);transition:all 0.15s;cursor:default;min-height:42px;display:flex;align-items:flex-start;gap:4px;background:var(--bg2);flex-wrap:wrap}
 .cb-multi-zone{min-height:52px;align-items:flex-start;flex-direction:column;gap:6px}
 .cb-drop-zone.drag-over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
@@ -735,6 +788,18 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 .cb-period-btn{font-size:12px;padding:3px 9px;border:1px solid var(--border2);background:var(--bg2);color:var(--text2);border-radius:var(--radius);cursor:pointer}
 .cb-period-btn.active{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
 .saved-chart-card{position:relative;margin-bottom:16px}
+/* Explore, Saved charts list: one row per chart (title and descriptor, dashboard switch, pin, delete). */
+.pb-saved-row{display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;padding:12px 18px;border-top:1px solid var(--border)}
+.pb-saved-row:first-child{border-top:0}
+.pb-saved-main{flex:1 1 220px;min-width:0}
+.pb-saved-title{font-size:14px;line-height:20px;font-weight:600;overflow-wrap:anywhere}
+.pb-saved-meta{font-size:12px;line-height:16px;color:var(--text3)}
+.pb-saved-actions{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap}
+.pb-saved-actions .switch,#page-explore .page-head .switch{margin-left:0}
+/* A pinned chart cannot be deleted. The button stays pressable so its toast can say why, the dimming only backs up aria-disabled. */
+.pb-saved-actions .btn[aria-disabled="true"]{opacity:0.55}
+.pb-saved-empty{padding:18px;font-size:13px;line-height:18px;color:var(--text3)}
+@media (max-width:768px){.pb-saved-actions .switch{min-height:44px}}
 @media (max-width:720px){
   .cb-builder-head{flex-direction:column;align-items:flex-start}
   .cb-layout{grid-template-columns:1fr !important;min-height:0 !important}
@@ -851,14 +916,10 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     <div id="dash-arrange-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
     <div id="dash-stack">
       <div id="dash-networth" data-wid="networth"></div>
-      <div id="dash-assets"   data-wid="assets"></div>
-      <div id="dash-ef"       data-wid="ef"></div>
-      <div id="dash-targets"  data-wid="targets"></div>
-      <div id="dash-movers"   data-wid="movers"></div>
+      <div id="dash-overview" data-wid="overview"></div>
+      <div id="dash-activity" data-wid="activity"></div>
       <div id="dash-cpf"      data-wid="cpf"></div>
     </div>
-    <!-- Chart Builder, buildable dashboard charts -->
-    <div id="stocks-builder"></div>
   </section>
 
   <!-- STOCKS -->
@@ -1014,6 +1075,18 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <section class="page" id="page-projections">
     <div class="page-head"><div><h2 class="page-title">Projections</h2><div class="page-sub">FIRE number, retirement readiness, CPF growth. Figures in today's dollars.</div></div></div>
     <div id="projections-root"></div>
+  </section>
+
+  <!-- EXPLORE, the Chart Builder and the saved charts list (the dashboard only shows saved charts that are switched on) -->
+  <section class="page" id="page-explore">
+    <div class="page-head">
+      <div><h2 class="page-title">Explore</h2><p class="page-status">Build charts from your holdings and history</p></div>
+      <div style="display:flex;align-items:center;gap:10px"><button type="button" class="switch" id="explore-cpf-switch" role="switch" aria-checked="false" data-click="toggleDashCpf"><span class="switch-track" aria-hidden="true"></span>Include CPF</button></div>
+    </div>
+    <div id="explore-chart-note" hidden></div>
+    <!-- Chart Builder, injected once by _pbEnsureUI -->
+    <div id="stocks-builder"></div>
+    <div id="explore-saved"></div>
   </section>
 
   <!-- SETTINGS -->
@@ -1406,8 +1479,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-head"><h3>Target allocation &amp; emergency fund</h3><span class="hint">Drives the rebalancing + emergency fund widgets on the Dashboard.</span></div>
+    <div class="card" id="settings-targets">
+      <div class="card-head"><h3>Target allocation &amp; emergency fund</h3><span class="hint">Drives the target markers, the insight and the emergency fund tile on the Dashboard.</span></div>
       <div class="card-body">
         <div class="form-grid">
           <div class="form-group"><label class="lbl" for="cfg-target-stocks">Stocks target %</label><input type="number" step="1" min="0" max="100" id="cfg-target-stocks" class="fi" placeholder="0" data-input="updateTargetSumHint"></div>
@@ -1691,12 +1764,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.69"></script>
-<script src="Worker/kjr-sortable.js?v=2.69"></script>
-<script src="Worker/kjr-vault.js?v=2.69"></script>
-<script src="Worker/kjr-migration.js?v=2.69"></script>
-<script src="Worker/supabase.js?v=2.69"></script>
-<script src="Worker/kjr-nas.js?v=2.69"></script>
-<script src="Worker/app.js?v=2.69"></script>
+<script src="Worker/kjr-core.js?v=2.70"></script>
+<script src="Worker/kjr-sortable.js?v=2.70"></script>
+<script src="Worker/kjr-vault.js?v=2.70"></script>
+<script src="Worker/kjr-migration.js?v=2.70"></script>
+<script src="Worker/supabase.js?v=2.70"></script>
+<script src="Worker/kjr-nas.js?v=2.70"></script>
+<script src="Worker/app.js?v=2.70"></script>
 </body>
 </html>

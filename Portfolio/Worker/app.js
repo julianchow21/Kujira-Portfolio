@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.69';
-const APP_DISPLAY_VERSION = 'v2.69 (07 Oct)';
+const APP_VERSION = 'v2.70';
+const APP_DISPLAY_VERSION = 'v2.70 (08 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -525,6 +525,8 @@ const TABS = [
   { key:'insurance',   label:'Insurance',   icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6z"/></svg>' },
   { key:'crypto',      label:'Crypto',      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 8h4a2 2 0 1 1 0 4H9zm0 4h4.5a2 2 0 1 1 0 4H9zM10 6v2M10 16v2M13 6v2M13 16v2"/></svg>' },
   { key:'projections', label:'Projections', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>' },
+  /* Explore holds the Chart Builder and the saved charts list. Not in MOBILE_BOTTOM_TABS, so it shows in the More sheet. Its own bar-chart icon, distinct from every other tab. */
+  { key:'explore',     label:'Explore',     icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v16h16"/><rect x="8" y="12" width="3" height="5" rx="1"/><rect x="14" y="7" width="3" height="10" rx="1"/></svg>' },
   { key:'settings',    label:'Settings',    icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' }
 ];
 
@@ -5394,6 +5396,7 @@ function showPage(key){
   _layoutDesktopNav(); // re-run so the newly active tab is guaranteed inline (F1)
   updateCcyToggleUI(); // reflect the new tab's currency
   if (key === 'dashboard') renderDashboard(); // (re)draw charts now the canvas is sized
+  if (key === 'explore') renderExplore(); // same: the builder canvas needs a visible, sized page
   if (key === 'projections') renderProjections(); // same reason: canvas needs to be sized/visible
   if (key === 'settings') { loadSettingsForm(); renderDiagnostics(); }
   // renderAll() now gates these 6 renderers on their page being active (see
@@ -5445,9 +5448,12 @@ function applyTheme(t){
     const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
     if (bg) themeMeta.setAttribute('content', bg);
   }
-  // Charts read colours from CSS vars at draw time, so redraw if the dashboard is up.
+  // Charts read colours from CSS vars at draw time, so redraw if the dashboard or Explore is up.
   if (typeof _currentTab !== 'undefined' && _currentTab === 'dashboard' && typeof renderDashboard === 'function') {
     renderDashboard();
+  }
+  if (typeof _currentTab !== 'undefined' && _currentTab === 'explore' && typeof renderExplore === 'function') {
+    renderExplore();
   }
 }
 function setThemeChoice(t){
@@ -7862,7 +7868,7 @@ function renderStocks(){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   CUSTOM CHART BUILDER (Stocks tab)
+   CUSTOM CHART BUILDER (Explore page)
    A modular drag-and-drop chart builder over the holdings, ported from the
    Collectibles app. Two modes share one surface:
      • cross-sectional — group holdings by a dimension, aggregate a measure
@@ -7922,7 +7928,46 @@ const PB_STATE_KEY = 'kjr_pb_cb_state_v1';
 const PB_SAVED_KEY  = 'kjr_portfolio_saved_charts';
 const PB_SEEDED_KEY = 'kjr_pb_defaults_seeded_v1';
 const DASH_LAYOUT_KEY = 'kjr_portfolio_dash_layout';
-function loadDashLayout(){ return Array.isArray(DB.settings.dashLayout) ? DB.settings.dashLayout : []; }
+/* Dashboard widgets (Arrange order). Since v2.70 the stack is networth, overview
+   (Where it sits and Health), activity (Holdings and Today), cpf, then one
+   chart:<id> card per saved chart that is on the dashboard. */
+const DASH_DEFAULT_WIDGETS = ['networth', 'overview', 'activity', 'cpf'];
+/* Widgets retired in v2.70, each mapped to the row that now holds its content. */
+const DASH_LEGACY_WIDGETS = { assets:'overview', targets:'overview', ef:'overview', movers:'activity' };
+const DASH_CHART_ID_RE = /^chart:[A-Za-z0-9_-]{1,64}$/;
+/* Pure. Turns a saved Arrange order, possibly from before v2.70, into current
+   widget ids, deterministically:
+   1. a retired id becomes the row that replaced it (assets, targets and ef to
+      overview, movers to activity)
+   2. an unknown non-chart id is dropped, and so is a chart id that is not a
+      safe chart:<id> (it could never match a card, and a quote or bracket in it
+      would break the attribute selector _applyDashLayout builds from it)
+   3. duplicates are dropped, the first occurrence wins
+   4. every valid chart:<id> keeps its position relative to the others
+   5. any default widget still missing is appended after the saved ids, in
+      default order (networth, overview, activity, cpf)
+   So ['movers','assets','chart:def_networth','ef'] becomes
+   ['activity','overview','chart:def_networth','networth','cpf']. */
+function _migrateDashLayout(ids){
+  const out = [], seen = new Set();
+  (Array.isArray(ids) ? ids : []).forEach(raw => {
+    if (typeof raw !== 'string') return;
+    const id = Object.prototype.hasOwnProperty.call(DASH_LEGACY_WIDGETS, raw) ? DASH_LEGACY_WIDGETS[raw] : raw;
+    const valid = DASH_DEFAULT_WIDGETS.indexOf(id) !== -1 || DASH_CHART_ID_RE.test(id);
+    if (!valid || seen.has(id)) return;
+    seen.add(id);
+    out.push(id);
+  });
+  DASH_DEFAULT_WIDGETS.forEach(id => { if (!seen.has(id)){ seen.add(id); out.push(id); } });
+  return out;
+}
+/* Read-time only: the stored layout is never rewritten here, the migrated order
+   is saved on the next reorder as before. A layout that was never saved (empty)
+   stays empty so the markup order applies and the charts follow the four widgets. */
+function loadDashLayout(){
+  const raw = DB.settings.dashLayout;
+  return (Array.isArray(raw) && raw.length) ? _migrateDashLayout(raw) : [];
+}
 function saveDashLayout(ids){ DB.settings.dashLayout = Array.isArray(ids) ? ids : []; saveData(); }
 const PB_PERIODS = { ONE_MONTH:'1mo', THREE_MONTHS:'3mo', SIX_MONTHS:'6mo', ONE_YEAR:'1y', ALL:'all' };
 const PB_PERIOD_LABELS = { ONE_MONTH:'1M', THREE_MONTHS:'3M', SIX_MONTHS:'6M', ONE_YEAR:'1Y', ALL:'All' };
@@ -8278,6 +8323,9 @@ function _pbEnsureUI(){
 }
 
 /* ── Entry point ── */
+/* The builder itself, on the Explore page. Saved charts render separately: the
+   dashboard draws the ones switched on (_pbRenderDashCharts), Explore lists
+   every one (_pbRenderSavedList), and pbRenderAllSaved repaints both. */
 function renderChartBuilder(){
   buildStockChartRows();
   setRenderCcy('dashboard');
@@ -8293,7 +8341,31 @@ function renderChartBuilder(){
   _pbRenderSymbolList();
   _pbMarkPeriodBtns();
   pbRenderChart();
-  pbRenderAllSaved();
+}
+
+/* Explore page: the Chart Builder plus the Saved charts list. Draws only while
+   the page is on screen (Chart.js needs a sized canvas), so showPage() and
+   renderAll() can both call it and a hidden Explore costs nothing. */
+function renderExplore(){
+  _syncExploreCpfSwitch();
+  if (!_isPageActive('explore')) return;
+  const noChart = typeof Chart === 'undefined';
+  const note = document.getElementById('explore-chart-note');
+  if (note){
+    note.hidden = !noChart;
+    note.innerHTML = noChart
+      ? `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('explore')}</div><div class="empty-title">Charts are unavailable</div><div class="empty-sub">The chart library did not load. Check your connection and reload the page. Your saved charts are safe.</div></div></div></div>`
+      : '';
+  }
+  if (!noChart) renderChartBuilder();
+  _pbRenderSavedList();
+}
+
+/* The Include CPF switch in the Explore page head mirrors the dashboard hero
+   switch (the hero one is rebuilt by renderDashboard, this one is static). */
+function _syncExploreCpfSwitch(){
+  const sw = document.getElementById('explore-cpf-switch');
+  if (sw) sw.setAttribute('aria-checked', String(!!_dashShowCpf));
 }
 
 /* View options per series source. */
@@ -8856,6 +8928,10 @@ function pbLoadSaved(){
       tsValue: c.tsValue === 'positionValue' ? 'positionValue' : 'price',
       tsAvgCost: !!c.tsAvgCost,
       pinned: !!c.pinned,
+      // Read-time default only, never written on load. Charts saved before the
+      // field existed stay on the dashboard, except the seeded Allocation
+      // doughnut, which the dashboard's own allocation widgets already cover.
+      onDashboard: typeof c.onDashboard === 'boolean' ? c.onDashboard : (c.id !== 'def_alloc'),
       order: typeof c.order === 'number' ? c.order : 999,
     };
   }).filter(c => {
@@ -8894,7 +8970,7 @@ async function pbSaveChart(){
   const title = prompt('Name this chart:', defTitle);
   if (title === null) return;
   const charts = pbLoadSaved();
-  charts.push(Object.assign({ id:'sc_' + Date.now(), title: title || 'Chart', pinned:false, order:999 }, cfg));
+  charts.push(Object.assign({ id:'sc_' + Date.now(), title: title || 'Chart', pinned:false, order:999 }, cfg, { onDashboard:true }));
   _pbSaveInFlight = true;
   let saved = false;
   try { saved = await Promise.resolve(pbPersistSaved(charts)); }
@@ -8904,14 +8980,88 @@ async function pbSaveChart(){
   return saved;
 }
 
+/* Saved charts changed (add, pin, delete, undo, dashboard switch): repaint every
+   surface that shows them, the dashboard cards and the Explore list. */
 function pbRenderAllSaved(){
+  _pbRenderDashCharts();
+  _pbRenderSavedList();
+}
+
+/* Free a Chart.js instance by canvas id and forget it. Safe when none exists. */
+function _pbDestroyChart(canvasId){
+  const inst = _pbCharts[canvasId];
+  if (inst){ try{ inst.destroy(); }catch(e){} }
+  delete _pbCharts[canvasId];
+}
+
+/* Dashboard saved charts: one card per chart with onDashboard true, appended to
+   #dash-stack with data-wid="chart:<id>" so Arrange can order them. Needs no
+   Chart Builder, so a user who never opens Explore still gets them. Every old
+   chart card goes first (its Chart instance destroyed, never only detached), so
+   a chart switched off leaves no orphan node and no leaked instance. Cards draw
+   only while the dashboard is on screen, a hidden page gets none until
+   showPage() paints it. Never wipes the fixed widgets. */
+function _pbRenderDashCharts(){
   const stack = document.getElementById('dash-stack');
   if (!stack) return;
-  // Remove only chart cards, never wipe the fixed blocks.
-  stack.querySelectorAll(':scope > [data-wid^="chart:"]').forEach(el => el.remove());
-  const charts = pbLoadSaved();
-  charts.forEach(cfg => _pbRenderOneSaved(cfg));
+  stack.querySelectorAll(':scope > [data-wid^="chart:"]').forEach(el => {
+    el.querySelectorAll('canvas').forEach(cv => _pbDestroyChart(cv.id));
+    el.remove();
+  });
+  if (_isPageActive('dashboard') && typeof Chart !== 'undefined'){
+    buildStockChartRows();   // saved Holdings charts read these rows
+    pbLoadSaved().filter(cfg => cfg.onDashboard).forEach(cfg => _pbRenderOneSaved(cfg));
+  }
   _applyDashLayout();
+}
+
+/* Short descriptor under a saved chart's title: chart type and source,
+   e.g. "Doughnut · Allocation". Net worth, CPF and price history always draw as lines. */
+function _pbSavedDescriptor(cfg){
+  const src = pbSource(cfg);
+  const isSeries = src.kind === 'series';
+  const isHistory = !isSeries && cfg.mode === 'timeseries';
+  const types = { bar:'Bar', line:'Line', doughnut:'Doughnut', scatter:'Scatter' };
+  const type = (isSeries || isHistory) ? 'Line' : (types[cfg.chartType] || 'Bar');
+  return type + ' · ' + (isHistory ? 'Holdings price history' : (src.label || 'Holdings'));
+}
+
+/* Explore "Saved charts" card: every saved chart in order, each with its
+   "Show on dashboard" switch, pin and delete. Switching one off keeps it saved,
+   it just stops drawing on the dashboard. */
+function _pbRenderSavedList(){
+  const host = document.getElementById('explore-saved');
+  if (!host) return;
+  const charts = pbLoadSaved();
+  // The list is rebuilt after every change, so hand keyboard focus back to the
+  // control that had it (matched by action and chart id).
+  const ae = document.activeElement;
+  const focusKey = (ae && ae !== document.body && host.contains(ae))
+    ? [ae.getAttribute('data-click'), ae.getAttribute('data-a0')] : null;
+  const rows = charts.map(cfg => {
+    const id = kjrEscape(cfg.id), title = kjrEscape(cfg.title);
+    return `<div class="pb-saved-row">
+      <div class="pb-saved-main">
+        <div class="pb-saved-title" id="pb-sl-t-${id}">${title}</div>
+        <div class="pb-saved-meta">${kjrEscape(_pbSavedDescriptor(cfg))}</div>
+      </div>
+      <div class="pb-saved-actions">
+        <button type="button" class="switch" role="switch" aria-checked="${cfg.onDashboard ? 'true' : 'false'}" aria-labelledby="pb-sl-t-${id} pb-sl-s-${id}" data-click="pbToggleOnDashboard" data-a0="${id}"><span class="switch-track" aria-hidden="true"></span><span id="pb-sl-s-${id}">Show on dashboard</span></button>
+        <button type="button" class="btn btn-sm btn-ghost" aria-describedby="pb-sl-t-${id}" data-click="pbTogglePin" data-a0="${id}">${cfg.pinned ? 'Pinned' : 'Pin'}</button>
+        <button type="button" class="btn btn-sm btn-ghost" aria-label="Delete ${title}" data-click="pbDeleteSaved" data-a0="${id}"${cfg.pinned ? ' aria-disabled="true" title="Pinned, unpin it to delete"' : ''}>Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+  const onCount = charts.filter(cfg => cfg.onDashboard).length;
+  host.innerHTML = `<div class="card">
+    <div class="card-head"><h3>Saved charts</h3>${charts.length ? `<span class="hint">${onCount} of ${charts.length} on the dashboard</span>` : ''}</div>
+    ${charts.length ? rows : '<div class="pb-saved-empty">Charts you add appear here. Build one above, then choose Add to Dashboard.</div>'}
+  </div>`;
+  if (focusKey){
+    const again = Array.from(host.querySelectorAll('[data-click]')).find(el =>
+      el.getAttribute('data-click') === focusKey[0] && el.getAttribute('data-a0') === focusKey[1]);
+    if (again) again.focus({ preventScroll:true });
+  }
 }
 function _pbRenderOneSaved(cfg){
   const stack = document.getElementById('dash-stack');
@@ -8936,7 +9086,7 @@ function _pbRenderOneSaved(cfg){
       <div style="display:flex;gap:6px;align-items:center">
         <button class="btn btn-sm btn-ghost" data-click="pbTogglePin" data-a0="${cfg.id}">${cfg.pinned ? 'Pinned' : 'Pin'}</button>
         <button class="btn btn-sm btn-ghost" data-click="pbRefreshSaved" data-a0="${cfg.id}">↻</button>
-        ${cfg.pinned?'':`<button class="btn btn-sm btn-ghost" data-click="pbDeleteSaved" data-a0="${cfg.id}" title="Delete">×</button>`}
+        <button class="btn btn-sm btn-ghost" data-click="pbRemoveFromDashboard" data-a0="${cfg.id}" title="Remove from dashboard" aria-label="Remove ${kjrEscape(cfg.title)} from dashboard">×</button>
       </div>
     </div>
     <div class="card-body" style="padding:12px 18px">
@@ -8967,6 +9117,30 @@ async function pbTogglePin(id){
   const saved = await Promise.resolve(pbPersistSaved(charts));
   pbRenderAllSaved();
   if (saved) showToast(cfg.pinned ? 'Chart pinned — protected from delete' : 'Chart unpinned');
+  return saved;
+}
+/* Show or hide a saved chart on the dashboard. The chart stays saved either
+   way, so this never loses a configuration. Same persist-then-repaint order as
+   pbTogglePin: the in-memory change stays on a failed save, the caller gets false. */
+async function pbSetOnDashboard(id, on){
+  const charts = pbLoadSaved();
+  const cfg = charts.find(c => c.id === id);
+  if (!cfg) return false;
+  cfg.onDashboard = !!on;
+  const saved = await Promise.resolve(pbPersistSaved(charts));
+  pbRenderAllSaved();
+  return saved;
+}
+/* The Explore "Show on dashboard" switch: flip whatever the chart has now. */
+function pbToggleOnDashboard(id){
+  const cfg = pbLoadSaved().find(c => c.id === id);
+  return cfg ? pbSetOnDashboard(id, !cfg.onDashboard) : false;
+}
+/* The dashboard card's × control: hide the chart from the dashboard, never
+   delete it (deleting is on Explore only), and offer Undo on the toast. */
+async function pbRemoveFromDashboard(id){
+  const saved = await pbSetOnDashboard(id, false);
+  if (saved) showToast('Removed from dashboard, still on Explore', '', { label:'Undo', fn: () => pbSetOnDashboard(id, true) });
   return saved;
 }
 function pbDeleteSaved(id){
@@ -9079,13 +9253,14 @@ function pbSeedDefaults(){
   const defaults = [
     { id:'def_networth',  title:'Net worth over time', source:'networth',  mode:'crosssec', seriesMode:'total',
       range:'ONE_YEAR',    xFields:[], yFields:[], chartType:'line', topN:'all', sort:'alpha',
-      dualAxis:false, kwFilter:'', tsSymbols:[], tsValue:'price', tsAvgCost:false, pinned:true, order:0 },
+      dualAxis:false, kwFilter:'', tsSymbols:[], tsValue:'price', tsAvgCost:false, pinned:true, onDashboard:true, order:0 },
+    // Allocation is seeded off the dashboard (its own allocation widgets cover it), still listed on Explore.
     { id:'def_alloc',     title:'Allocation',          source:'allocation', mode:'crosssec', seriesMode:'total',
       range:'SIX_MONTHS', xFields:['assetClass'], yFields:['value'], chartType:'doughnut', topN:'all', sort:'desc',
-      dualAxis:false, kwFilter:'', tsSymbols:[], tsValue:'price', tsAvgCost:false, pinned:true, order:1 },
+      dualAxis:false, kwFilter:'', tsSymbols:[], tsValue:'price', tsAvgCost:false, pinned:true, onDashboard:false, order:1 },
     { id:'def_cashflow',  title:'Cashflow',             source:'cashflow',   mode:'crosssec', seriesMode:'total',
       range:'SIX_MONTHS', xFields:['month'], yFields:['income','expense'], chartType:'bar', topN:'all', sort:'alpha',
-      dualAxis:false, kwFilter:'', tsSymbols:[], tsValue:'price', tsAvgCost:false, pinned:true, order:2 },
+      dualAxis:false, kwFilter:'', tsSymbols:[], tsValue:'price', tsAvgCost:false, pinned:true, onDashboard:true, order:2 },
   ];
   defaults.forEach(def => { if (!ids.has(def.id)) charts.push(def); });
   charts.sort((a,b) => (a.order??999) - (b.order??999));
@@ -9539,6 +9714,16 @@ function resetStockColumns(){ resetColumns('stocks'); }
 /* Upcoming dividend payments — shows holdings with ex-dates in the next 90 days.
    Takes the full (unfiltered) rows array from renderStocks so share counts and
    derived values are already computed and don't need to be recalculated. */
+/* Stock rows with a positive dividend per share and an ex-date between two ISO
+   dates (inclusive), soonest first. The Upcoming dividends card and the
+   dashboard Coming up list both use this rule. */
+function _upcomingDividendRows(rows, fromISO, toISO){
+  return (rows || [])
+    .filter(r => r.s.divExDate && Number(r.s.divPerShare) > 0
+               && r.s.divExDate >= fromISO && r.s.divExDate <= toISO)
+    .sort((a, b) => a.s.divExDate < b.s.divExDate ? -1 : a.s.divExDate > b.s.divExDate ? 1 : 0);
+}
+
 function renderDividendTimeline(rows){
   const el = document.getElementById('stocks-dividends');
   if (!el) return;
@@ -9547,10 +9732,7 @@ function renderDividendTimeline(rows){
   const cutoff = _isoDateSG(new Date(Date.now() + 90 * 86400000));
 
   // Filter: ex-date set, positive divPerShare, ex-date in today..today+90d window
-  const upcoming = rows
-    .filter(r => r.s.divExDate && Number(r.s.divPerShare) > 0
-               && r.s.divExDate >= today && r.s.divExDate <= cutoff)
-    .sort((a, b) => a.s.divExDate < b.s.divExDate ? -1 : a.s.divExDate > b.s.divExDate ? 1 : 0);
+  const upcoming = _upcomingDividendRows(rows, today, cutoff);
 
   // Check whether any stock at all has an ex-date (for empty-state messaging)
   const anyExDate = rows.some(r => r.s.divExDate && Number(r.s.divPerShare) > 0);
@@ -9701,6 +9883,29 @@ function renderStockTxns(){
 /* ═══════════════════════════════════════════════════════════════════════
    CRYPTO — render
    ═══════════════════════════════════════════════════════════════════════ */
+/* One coin's row for the Crypto tab and the dashboard Holdings card: price,
+   market value, cost basis (all SGD) and unrealised P&L. cost is null when its
+   currency has no FX rate, mv and pl are null without a CoinGecko SGD price. */
+function _cryptoRow(c){
+  const cid = coinIdFor(c.coingeckoId || c.symbol);
+  const px  = DB._priceCache[cid] || null;
+  const ccy = c.currency || 'USD';
+  const nativeCost = (Number(c.amount) || 0) * (Number(c.avgCost) || 0);
+  const costSgd = sgdOrNull(nativeCost, ccy);
+  const cost = costSgd == null ? (nativeCost === 0 ? 0 : null) : roundMoney(costSgd);
+  let mv = null, pl = null, plPct = null, stale = true, priceSgd = null;
+  if (px && px.sgd != null){
+    priceSgd = px.sgd; // CoinGecko prices come in SGD
+    mv = roundMoney(priceSgd * (c.amount || 0));
+    if (cost != null){
+      pl = roundMoney(mv - cost);
+      plPct = safeRatio(pl, cost);
+    }
+    stale = isStale(px.fetchedAt, 24);
+  }
+  return { c, cid, px, ccy, cost, mv, pl, plPct, stale, priceSgd };
+}
+
 function renderCrypto(){
   setRenderCcy('crypto');
   const list = DB.crypto || [];
@@ -9718,27 +9923,12 @@ function renderCrypto(){
 
   let totCost = 0, totMv = 0, anyPriceMissing = false, anyCostMissing = false, anyPriced = false;
   const rows = list.map(c => {
-    const cid = coinIdFor(c.coingeckoId || c.symbol);
-    const px  = DB._priceCache[cid] || null;
-    const ccy = c.currency || 'USD';
-    const nativeCost = (Number(c.amount) || 0) * (Number(c.avgCost) || 0);
-    const costSgd = sgdOrNull(nativeCost, ccy);
-    const cost = costSgd == null ? (nativeCost === 0 ? 0 : null) : roundMoney(costSgd);
-    if (cost == null) anyCostMissing = true;
-    let mv = null, pl = null, plPct = null, stale = true, priceSgd = null;
-    if (px && px.sgd != null){
-      anyPriced = true;
-      priceSgd = px.sgd; // CoinGecko prices come in SGD
-      mv = roundMoney(priceSgd * (c.amount || 0));
-      if (cost != null){
-        pl = roundMoney(mv - cost);
-        plPct = safeRatio(pl, cost);
-      }
-      stale = isStale(px.fetchedAt, 24);
-    } else { anyPriceMissing = true; }
-    if (cost != null) totCost += cost;
-    if (mv != null) totMv += mv;
-    return { c, cid, px, ccy, cost, mv, pl, plPct, stale, priceSgd };
+    const r = _cryptoRow(c);
+    if (r.cost == null) anyCostMissing = true;
+    if (r.px && r.px.sgd != null) anyPriced = true; else anyPriceMissing = true;
+    if (r.cost != null) totCost += r.cost;
+    if (r.mv != null) totMv += r.mv;
+    return r;
   });
 
   const showPl = anyPriced && !anyPriceMissing && !anyCostMissing;
@@ -10054,6 +10244,15 @@ function openRiderForPolicy(policyId){
   openEntityModal('insuranceRiders', undefined, { policyId });
 }
 
+/* Active policies whose next premium falls between two ISO dates (inclusive),
+   soonest first. ISO strings compare directly, which is why a policy due today
+   still counts all day (see the QA #Med-5 note in renderInsurance). The
+   Upcoming premiums card and the dashboard Coming up list both use this rule. */
+function _insuranceDueWithin(list, fromISO, toISO){
+  return (list || []).filter(p => p.status === 'Active' && p.premiumDue && p.premiumDue >= fromISO && p.premiumDue <= toISO)
+    .sort((a,b) => String(a.premiumDue).localeCompare(String(b.premiumDue)));
+}
+
 function renderInsurance(){
   setRenderCcy('insurance');
   const el = document.getElementById('insurance-root');
@@ -10226,8 +10425,7 @@ function renderInsurance(){
   // never surface here as if a payment were still owed.
   const todayISO = _isoDateSG(new Date());
   const horizonISO = _isoDateSG(new Date(Date.now() + 90 * 86400000));
-  const due = list.filter(p => p.status === 'Active' && p.premiumDue && p.premiumDue >= todayISO && p.premiumDue <= horizonISO)
-    .sort((a,b) => String(a.premiumDue).localeCompare(String(b.premiumDue)));
+  const due = _insuranceDueWithin(list, todayISO, horizonISO);
   let renew = '';
   if (due.length){
     renew = `<div class="card"><div class="card-head"><h3>Upcoming premiums <span class="page-sub">next 90 days</span></h3></div><div class="card-body"><div class="tbl-wrap"><table class="holdings"><tbody>${
@@ -10371,6 +10569,46 @@ function _clearProjectionChart(){
   delete _pbCharts['proj-canvas'];
 }
 
+/* FIRE progress, read once and shared by the Projections page and the dashboard
+   Financial independence tile so both quote the same figures: the liquid
+   assets (stocks, cash and crypto, never CPF), the FIRE number (null when none
+   is derivable), the expense and savings inputs behind it, and the progress
+   percentage (rounded, capped at 100). Pure reads of DB, no rendering. */
+function _fireProgress(){
+  const liquidInfo = _liquidAssetValueInfo();
+  const liquidNow = liquidInfo.total;
+  const fireNumber = fireNumberSGD();
+  const expInfo = annualExpensesSGD();
+  const monthlySavings = derivedMonthlySavingsSGD();
+  const progressPct = fireNumber > 0 ? Math.min(100, Math.round(liquidNow / fireNumber * 100)) : 0;
+  return { liquidInfo, liquidNow, fireNumber, expInfo, monthlySavings, progressPct };
+}
+/* Projection assumptions with their defaults, one definition for page and tile. */
+function _fireAssumptions(){
+  const s = DB.settings || {};
+  return {
+    returnPct: s.expectedReturn != null ? Number(s.expectedReturn) : 6.0,
+    inflationPct: s.inflationRate != null ? Number(s.inflationRate) : 3.0,
+    retirementAge: Number(s.retirementAge) || 65
+  };
+}
+/* The liquid-assets projection behind the crossover verdict. Call only when the
+   inputs are complete (the page's guards: birth year set, no missing FX, a FIRE
+   number), same as the page does. */
+function _fireProjectLiquid(fire, assume){
+  return kjrProjectLiquid({
+    liquidNow: fire.liquidNow, monthlySavings: fire.monthlySavings, annualReturnPct: assume.returnPct,
+    annualInflationPct: assume.inflationPct, months: PROJECTION_MONTHS, fireNumber: fire.fireNumber
+  });
+}
+/* Calendar year and age at which the projection crosses the FIRE number, or
+   null when it does not within the horizon. */
+function _fireYearAge(crossoverMonth, currentAge){
+  if (crossoverMonth == null) return null;
+  const years = Math.floor(crossoverMonth / 12);
+  return { year: new Date().getFullYear() + years, age: (currentAge || 0) + years };
+}
+
 function renderProjections(){
   setRenderCcy('projections');
   const el = document.getElementById('projections-root');
@@ -10378,17 +10616,13 @@ function renderProjections(){
 
   const s = DB.settings || {};
   const birthYear = s.birthYear;
-  const liquidInfo = _liquidAssetValueInfo();
-  const liquidNow = liquidInfo.total;
+  const fire = _fireProgress();
+  const { liquidInfo, liquidNow, fireNumber, expInfo, monthlySavings } = fire;
   const cpfNow = cpfEffectiveBalances();
-  const fireNumber = fireNumberSGD();
-  const expInfo = annualExpensesSGD();
-  const monthlySavings = derivedMonthlySavingsSGD();
   const hasIncome = (DB.income || []).length > 0;
   const grossMonthly = (s.salary && s.salary.grossMonthly) || 0;
-  const returnPct = s.expectedReturn != null ? Number(s.expectedReturn) : 6.0;
-  const inflationPct = s.inflationRate != null ? Number(s.inflationRate) : 3.0;
-  const retirementAge = Number(s.retirementAge) || 65;
+  const assume = _fireAssumptions();
+  const { returnPct, inflationPct, retirementAge } = assume;
 
   if (!birthYear){
     _clearProjectionChart();
@@ -10414,10 +10648,7 @@ function renderProjections(){
   const currentAge = _ageOnYear(new Date().getFullYear());
   const monthsToRetire = Math.max(0, (retirementAge - (currentAge||0)) * 12);
 
-  const liquidProj = kjrProjectLiquid({
-    liquidNow, monthlySavings, annualReturnPct: returnPct, annualInflationPct: inflationPct,
-    months: PROJECTION_MONTHS, fireNumber
-  });
+  const liquidProj = _fireProjectLiquid(fire, assume);
 
   const cpfProjNominal = kjrProjectCpf({
     balances: { OA: cpfNow.OA||0, SA: cpfNow.SA||0, MA: cpfNow.MA||0 },
@@ -10428,14 +10659,12 @@ function renderProjections(){
   const cpfProjReal = cpfProjNominal.series.map((v,m) => (v + cpfRA) * Math.pow(1 + inflationPct/100, -m/12));
 
   // Crossover verdict
-  const nowYear = new Date().getFullYear();
+  const crossing = _fireYearAge(liquidProj.crossoverMonth, currentAge);
   let verdict;
-  if (liquidProj.crossoverMonth == null){
+  if (!crossing){
     verdict = `Not reached within the ${Math.round(PROJECTION_MONTHS/12)}-year horizon at current savings.`;
   } else {
-    const yr = nowYear + Math.floor(liquidProj.crossoverMonth / 12);
-    const ageAt = (currentAge||0) + Math.floor(liquidProj.crossoverMonth / 12);
-    verdict = `On current savings you reach it around <b>${yr}</b> (age ${ageAt}).`;
+    verdict = `On current savings you reach it around <b>${crossing.year}</b> (age ${crossing.age}).`;
   }
   // On track only when the crossover lands ON OR BEFORE retirement. A null
   // crossover (never reached in the horizon) must read as not on track.
@@ -10443,7 +10672,7 @@ function renderProjections(){
     ? `On track to be financially independent by retirement age ${retirementAge}.`
     : `Not reached by retirement age ${retirementAge} at current savings.`;
 
-  const progressPct = fireNumber > 0 ? Math.min(100, Math.round(liquidNow / fireNumber * 100)) : 0;
+  const progressPct = fire.progressPct;
 
   const fireCard = `<div class="card"><div class="card-head"><h3>FIRE progress</h3></div><div class="card-body">
     <div class="metrics">
@@ -10987,6 +11216,22 @@ function expenseAmountSgdOrNull(x){
   return sgdOrNull(Number(x.amount) || 0, x.currency || 'SGD');
 }
 
+/* One month of the P&L roll-up: take-home and gross income, expenses (an
+   expense whose currency cannot be converted counts as 0, same as the table),
+   net, and the savings rate (null when there is no take-home). The P&L monthly
+   table and the dashboard Savings rate tile both read this one function, so
+   the two can never define the rate differently. ym is 'YYYY-MM'. */
+function _cfMonthRollup(income, expenses, ym){
+  const mIn = income.filter(i => _ymOf(i.date) === ym);
+  const mEx = expenses.filter(x => _ymOf(x.date) === ym);
+  const gross = mIn.reduce((s,i) => s + (Number(i.gross) || 0), 0);
+  const net   = mIn.reduce((s,i) => s + incomeNet(i), 0);
+  const exp   = mEx.reduce((s,x) => { const sgd = expenseAmountSgdOrNull(x); return s + (sgd == null ? 0 : sgd); }, 0);
+  const ne    = net - exp;
+  const rate  = net > 0 ? (ne / net * 100) : null;
+  return { gross, net, exp, ne, rate, txns: mIn.length + mEx.length };
+}
+
 function renderCashflow(){
   setRenderCcy('cashflow');
   const rollupEl  = document.getElementById('cf-rollup-body');
@@ -11059,13 +11304,7 @@ function renderCashflow(){
     rollupEl.innerHTML = `<div class="tbl-wrap"><table class="holdings"><thead><tr>
       <th class="tl">Month</th><th>Income (net)</th><th>Income (gross)</th><th>Expenses</th><th>Net</th><th>Savings rate</th><th>Txns</th>
     </tr></thead><tbody>${months.map(ym => {
-      const mIn = income.filter(i => _ymOf(i.date) === ym);
-      const mEx = expenses.filter(x => _ymOf(x.date) === ym);
-      const gross = mIn.reduce((s,i) => s + (Number(i.gross) || 0), 0);
-      const net   = mIn.reduce((s,i) => s + incomeNet(i), 0);
-      const exp   = mEx.reduce((s,x) => { const sgd = expenseAmountSgdOrNull(x); return s + (sgd == null ? 0 : sgd); }, 0);
-      const ne    = net - exp;
-      const rate  = net > 0 ? (ne / net * 100) : null;
+      const { gross, net, exp, ne, rate, txns } = _cfMonthRollup(income, expenses, ym);
       const cls   = ne >= 0 ? 'pos' : 'neg';
       return `<tr>
         <td class="tl cell-sym">${_ymLabel(ym)}</td>
@@ -11074,7 +11313,7 @@ function renderCashflow(){
         <td class="num">${fmt(exp,{dp:0})}</td>
         <td class="num ${cls}">${fmt(ne,{dp:0})}</td>
         <td class="num ${cls}">${rate != null ? fmtPct(rate) : '—'}</td>
-        <td class="num muted">${mIn.length + mEx.length}</td>
+        <td class="num muted">${txns}</td>
       </tr>`;
     }).join('')}</tbody></table></div>`;
   }
@@ -11381,14 +11620,7 @@ let _dashArrange  = false;
 let _dashSortable = null;
 let _dashArrangeStatusToken = 0;
 
-const DASH_WIDGET_NAMES = {
-  networth:'Net worth',
-  assets:'Asset allocation',
-  ef:'Emergency fund',
-  targets:'Target allocation',
-  movers:'Top movers',
-  cpf:'CPF breakdown'
-};
+const DASH_WIDGET_NAMES = { networth:'Net worth', overview:'Where it sits and Health', activity:'Holdings and Today', cpf:'CPF breakdown' };
 
 function _dashArrangeItems(stack){
   if (!stack) return [];
@@ -11401,7 +11633,15 @@ function _dashWidgetBaseName(el){
   const id = el && el.getAttribute('data-wid');
   if (id && DASH_WIDGET_NAMES[id]) return DASH_WIDGET_NAMES[id];
   const heading = el && el.querySelector('h2,h3,h4');
-  return (heading && heading.textContent.trim()) || 'Dashboard card';
+  if (heading){
+    // Title text only: a chart card's heading also holds its info-tip popover,
+    // whose text must not leak into the Arrange button names.
+    const clone = heading.cloneNode(true);
+    clone.querySelectorAll('.info-tip').forEach(tip => tip.remove());
+    const title = clone.textContent.trim();
+    if (title) return title;
+  }
+  return 'Dashboard card';
 }
 
 function _dashWidgetName(el, items){
@@ -11457,10 +11697,15 @@ function _applyDashLayout(){
   if (!stack) return;
   const order = loadDashLayout();
   if (order.length){
+    // A widget the saved order does not name (a chart added after the order was
+    // saved) goes after the named ones, never above them.
+    const named = new Set(order);
+    const strays = Array.from(stack.querySelectorAll(':scope > [data-wid]')).filter(el => !named.has(el.getAttribute('data-wid')));
     order.forEach(id => {
       const el = stack.querySelector(':scope > [data-wid="' + id + '"]');
       if (el) stack.appendChild(el);
     });
+    strays.forEach(el => stack.appendChild(el));
   }
   _dashDecorate();
   // Lazy-create sortable after stack exists.
@@ -11521,6 +11766,14 @@ function _dashDecorate(){
   });
 }
 
+/* Include CPF is one flag shared by the dashboard hero switch and the Explore
+   switch. Flip it, then repaint both pages (each guards on being on screen). */
+function toggleDashCpf(){
+  _dashShowCpf = !_dashShowCpf;
+  renderDashboard();
+  renderExplore();
+}
+
 function toggleArrange(){
   _dashArrange = !_dashArrange;
   document.body.classList.toggle('dash-arranging', _dashArrange);
@@ -11567,12 +11820,13 @@ function _dashStatusLine(rec){
   return parts.join(' · ');
 }
 
-/* ─── Hero monthly-change chip + sparkline ──────────────────────────────
+/* ─── Hero monthly change + sparkline ───────────────────────────────────
    Both read the same DB.snapshots series renderDashboard already uses (one
    row/day: {date, net, byClass}). Pure presentation, no new stored figures. */
 /* Latest snapshot vs the closest one at least 28 days older. Needs 2+
-   qualifying snapshots or returns null (caller renders no chip at all, never
-   an empty pill). netOf lets the caller pick full or ex-CPF net per row. */
+   qualifying snapshots or returns null (caller renders nothing at all, never
+   an empty pill). netOf lets the caller pick full or ex-CPF net per row.
+   Returns the change as a percentage and in SGD. */
 function _heroMonthlyChange(snaps, netOf){
   if (!Array.isArray(snaps) || snaps.length < 2) return null;
   const sorted = snaps.slice().sort((a,b) => String(a.date).localeCompare(String(b.date)));
@@ -11589,14 +11843,15 @@ function _heroMonthlyChange(snaps, netOf){
   if (!baseline) return null;
   const curNet = netOf(latest), baseNet = netOf(baseline);
   if (!isFinite(curNet) || !isFinite(baseNet) || baseNet === 0) return null;
-  const pct = (curNet - baseNet) / Math.abs(baseNet) * 100;
+  const diff = curNet - baseNet;
+  const pct = diff / Math.abs(baseNet) * 100;
   if (!isFinite(pct)) return null;
-  return { pct };
+  return { pct, diff };
 }
 
 /* Inline SVG polyline, ~150x52, from the same series (every point). Hidden
    entirely (caller returns '') when under 2 snapshots. Shape-only + aria-hidden,
-   the numbers themselves live in the value/chip, not the sparkline. */
+   the numbers themselves live in the value/pill, not the sparkline. */
 function _heroSparkline(snaps, netOf){
   if (!Array.isArray(snaps) || snaps.length < 2) return '';
   const sorted = snaps.slice().sort((a,b) => String(a.date).localeCompare(String(b.date)));
@@ -11618,6 +11873,443 @@ function _heroSparkline(snaps, netOf){
   </svg>`;
 }
 
+/* ─── Dashboard building blocks ─────────────────────────────────────────
+   Small pure helpers first (unit-tested in tests/test-app.js), then the card
+   renderers renderDashboard stitches into the overview and activity rows. */
+
+/* Gain or loss pill, for example "▲ S$14,699 · 2.2%". The arrow carries the
+   sign (never colour alone), a zero change gets a flat pill with no arrow.
+   The amount sits in a .money-chip so privacy mode blurs it and leaves the
+   percentage readable. */
+function _gainPill(diff, pct){
+  const dir = diff > 0 ? 'up' : (diff < 0 ? 'down' : 'flat');
+  const arrow = diff > 0 ? '▲ ' : (diff < 0 ? '▼ ' : '');
+  return '<span class="dash-pill ' + dir + '">' + arrow + '<span class="money-chip">' + fmt(Math.abs(diff), {dp:0}) + '</span> · ' + Math.abs(pct).toFixed(1) + '%</span>';
+}
+
+/* Monogram: a 32px rounded square with the first letter of a symbol (BTC shows
+   ₿, ETH shows Ξ) tinted with its asset class. The CSP blocks external logos,
+   so these are generated. The symbol is printed next to it, hence aria-hidden.
+   An unknown class key falls back to neutral tokens, never to unchecked CSS. */
+const MONOGRAM_CLASSES = ['stocks', 'cash', 'cpf', 're', 'crypto', 'insurance'];
+function _monogram(symbol, classKey){
+  const sym = String(symbol == null ? '' : symbol).trim();
+  const upper = sym.toUpperCase();
+  const glyph = upper === 'BTC' ? '₿' : (upper === 'ETH' ? 'Ξ' : (Array.from(upper)[0] || '?'));
+  const style = MONOGRAM_CLASSES.indexOf(classKey) !== -1
+    ? 'background:var(--c-' + classKey + '-soft);color:var(--c-' + classKey + '-ink)'
+    : 'background:var(--bg3);color:var(--text2)';
+  return '<span class="mono" style="' + style + '" aria-hidden="true">' + kjrEscape(glyph) + '</span>';
+}
+
+/* S$ move of a position worth valueSgd now after a pct percent change since
+   the previous close: value x pct / (100 + pct). Null when it cannot be
+   derived (a non-finite input, or a change of -100% or worse). */
+function _dayMoveSgd(valueSgd, pct){
+  const v = Number(valueSgd), p = Number(pct);
+  if (!isFinite(v) || !isFinite(p) || 100 + p <= 0) return null;
+  return roundMoney(v * p / (100 + p));
+}
+
+/* Day move of a stock row from buildStockChartRows: the percentage (the quote's
+   own changePct, else derived from the previous close) and the S$ amount (the
+   row's own changeSgd, else price less previous close times shares, else the
+   value and percentage). Either side is null when no price data supports it. */
+function _stockDayMove(r){
+  const px = r && r.px;
+  if (!px || px.price == null) return { pct:null, sgd:null };
+  let pct = null;
+  if (px.changePct != null && isFinite(Number(px.changePct))) pct = Number(px.changePct);
+  else if (Number(px.previousClose) > 0 && isFinite(Number(px.price))) pct = (Number(px.price) - Number(px.previousClose)) / Number(px.previousClose) * 100;
+  let sgd = null;
+  if (r.changeSgd != null && isFinite(Number(r.changeSgd))) sgd = Number(r.changeSgd);
+  else if (r.priceSgd != null && r.prevCloseSgd != null) sgd = roundMoney((r.priceSgd - r.prevCloseSgd) * (Number(r.shares) || 0));
+  else if (r.mv != null && pct != null) sgd = _dayMoveSgd(r.mv, pct);
+  return { pct, sgd };
+}
+
+/* Rebalance tolerance in percentage points. An explicit null check rather than
+   `|| 5`: a typed 0 ("flag any drift at all") is a legitimate strict setting. */
+function _rebalanceThreshold(){
+  const raw = DB.settings.rebalanceThreshold;
+  return (raw != null && isFinite(Number(raw))) ? Number(raw) : 5;
+}
+
+/* Rows for the Where it sits card, biggest first. share is a percentage of the
+   net passed in (the full CPF-inclusive net worth, see _whereModel), target is the
+   stored target % for the class (null when targets are not in use or the class has
+   no target setting, as Insurance has none), drift is share less target, off is
+   true beyond the tolerance. Targets are in use once any of the five sums above 0. */
+function _allocRows(classes, net, targets, thr){
+  const keys = { Stocks:'stocks', Cash:'cash', CPF:'cpf', 'Real Estate':'realestate', Crypto:'crypto' };
+  const t = targets || {};
+  const hasTargets = ((Number(t.stocks) || 0) + (Number(t.cash) || 0) + (Number(t.cpf) || 0) + (Number(t.realestate) || 0) + (Number(t.crypto) || 0)) > 0;
+  const rows = classes.slice().sort((a, b) => b.val - a.val).map(c => {
+    const k = keys[c.key];
+    const target = (hasTargets && k) ? (Number(t[k]) || 0) : null;
+    const share = net > 0 ? c.val / net * 100 : null;
+    const drift = (target != null && share != null) ? share - target : null;
+    return { key:c.key, val:c.val, color:c.color, share, target, drift, off: drift != null && Math.abs(drift) > thr };
+  });
+  return { rows, hasTargets };
+}
+
+/* The single sentence under the allocation rows: the class furthest over its
+   target and the class furthest under, each only beyond the tolerance. Null when
+   nothing is beyond tolerance (no targets set, or every class on target). */
+function _allocInsight(rows){
+  const over = rows.filter(r => r.off && r.drift > 0).sort((a, b) => b.drift - a.drift)[0];
+  const under = rows.filter(r => r.off && r.drift < 0).sort((a, b) => a.drift - b.drift)[0];
+  if (!over && !under) return null;
+  const pts = n => { const k = Math.round(Math.abs(n)); return k === 0 ? 'less than a point' : (k === 1 ? '1 point' : k + ' points'); };
+  if (over && under) return over.key + ' carries ' + Math.round(over.share) + '% of your net worth, ' + pts(over.drift) + ' over target. New savings would close the gap fastest in ' + under.key + ', which sits ' + pts(under.drift) + ' under.';
+  if (over) return over.key + ' carries ' + Math.round(over.share) + '% of your net worth, ' + pts(over.drift) + ' over target.';
+  return under.key + ' holds ' + Math.round(under.share) + '% of your net worth, ' + pts(under.drift) + ' under target. New savings would close the gap fastest there.';
+}
+
+/* What the Where it sits card shows, always the full CPF-inclusive picture: the
+   same six classes the net worth total adds up, whatever the Include CPF switch
+   says. The targets in Settings include CPF, so shares left ex-CPF would skew
+   every drift. This is the basis the old target allocation card used. Pure over
+   the valuation, the stored targets and the tolerance.
+     state    'empty' (nothing held), 'ok', or 'incomplete' / 'unavailable' when a
+              share would mislead: missing FX, a zero or negative net, or a
+              negative class balance
+     rows     biggest first. In 'ok' a class is skipped only when it has no target
+              and no balance. Otherwise every class with a balance, signed, with
+              no share, target or drift
+     note     the one quiet line that replaces the targets, drift and insight
+     insight  the sentence under the rows ('ok' only) */
+function _whereModel(valuation, targets, thr){
+  const vc = (valuation && valuation.classes) || {};
+  const classes = [['Stocks', 'stocks'], ['Cash', 'cash'], ['CPF', 'cpf'], ['Real Estate', 'realestate'], ['Crypto', 'crypto'], ['Insurance', 'insurance']]
+    .map(([key, k]) => ({ key, val:Number(vc[k]) || 0, color:assetClassColor(key) }));
+  const t = targets || {};
+  const hasTargets = ((Number(t.stocks) || 0) + (Number(t.cash) || 0) + (Number(t.cpf) || 0) + (Number(t.realestate) || 0) + (Number(t.crypto) || 0)) > 0;
+  const full = _allocationData(vc, true);
+  if (!full.hasValues && !valuation.incomplete) return { state:'empty', rows:[], hasTargets, note:'', insight:null };
+  const net = Number(valuation.total) || 0;
+  if (valuation.incomplete || !full.canAllocate || full.hasNegative || !(net > 0)){
+    const n = valuation.missingFxCount;
+    const assets = n + ' asset' + (n === 1 ? '' : 's');
+    const note = valuation.incomplete
+      ? (hasTargets
+        ? 'Set FX rates for ' + assets + ' before comparing against targets.'
+        : 'Known values exclude ' + assets + ' with missing FX. Set rates in Settings before calculating percentages.')
+      : 'Net allocation is zero, negative, or contains a negative class balance. Signed values remain visible above.';
+    const rows = classes.filter(c => c.val !== 0).sort((a, b) => b.val - a.val)
+      .map(c => ({ key:c.key, val:c.val, color:c.color, share:null, target:null, drift:null, off:false }));
+    return { state:valuation.incomplete ? 'incomplete' : 'unavailable', rows, hasTargets, note, insight:null };
+  }
+  const keys = { Stocks:'stocks', Cash:'cash', CPF:'cpf', 'Real Estate':'realestate', Crypto:'crypto' };
+  const kept = classes.filter(c => (Number(t[keys[c.key]]) || 0) > 0 || c.val > 0);
+  const rows = _allocRows(kept, net, t, thr).rows;
+  return { state:'ok', rows, hasTargets, note:'', insight:_allocInsight(rows) };
+}
+
+/* A 40px progress ring (fill is 0 to 1) as an SVG string. colour is a CSS
+   colour, passed as an attribute so a var() token works. At 0 only the track
+   draws, so an empty ring never shows a stray round-cap dot. */
+function _ringSvg(frac, colour){
+  const f = Math.max(0, Math.min(1, Number(frac) || 0));
+  const c = 2 * Math.PI * 16;
+  const fg = f > 0 ? '<circle class="dash-ring-fg" cx="20" cy="20" r="16" stroke="' + colour + '" stroke-dasharray="' + (c * f).toFixed(2) + ' ' + c.toFixed(2) + '"/>' : '';
+  return '<svg class="dash-ring" viewBox="0 0 40 40" aria-hidden="true"><circle class="dash-ring-bg" cx="20" cy="20" r="16"/>' + fg + '</svg>';
+}
+
+/* Mini bars, one per item {pct, label}: height follows the percentage against a
+   ceiling of 60 (higher when a bar needs it), the last bar is the current one
+   and gets the highlight class. A missing or zero value draws a short stub. */
+function _miniBars(items){
+  const vals = items.map(i => (i.pct == null || !isFinite(i.pct)) ? 0 : Math.max(0, i.pct));
+  const ceil = Math.max(60, Math.ceil(Math.max.apply(null, vals.concat([0])) / 10) * 10);
+  return '<div class="dash-minibars" aria-hidden="true">' + items.map((it, i) => {
+    const h = vals[i] > 0 ? Math.max(8, vals[i] / ceil * 100) : 0;
+    return '<span' + (i === items.length - 1 ? ' class="cur"' : '') + ' style="height:' + h.toFixed(1) + '%" title="' + kjrEscape(it.label) + '"></span>';
+  }).join('') + '</div>';
+}
+
+/* The next payday on or after todayISO, by the same rule the salary engine
+   uses (the last working day of a month, never before the salary start month,
+   never past an end date). Looks three months ahead. Null when salary is not
+   configured or has ended. Dates only, no salary maths. */
+function _nextPayday(sal, todayISO){
+  if (!sal || !sal.grossMonthly || !sal.startDate) return null;
+  const startYM = String(sal.startDate).slice(0, 7);
+  const endYM = sal.endDate ? String(sal.endDate).slice(0, 7) : '';
+  let y = Number(todayISO.slice(0, 4)), m = Number(todayISO.slice(5, 7));
+  for (let i = 0; i < 3; i++){
+    const ym = y + '-' + String(m).padStart(2, '0');
+    if (endYM && ym > endYM) return null;
+    const payday = getPayday(y, m);
+    if (ym >= startYM && payday >= todayISO) return { y, m, payday };
+    m++;
+    if (m > 12){ m = 1; y++; }
+  }
+  return null;
+}
+
+/* The Coming up list: up to four dated items between todayISO and horizonISO,
+   soonest first. Inputs are passed in so this stays pure:
+     salary      DB.settings.salary
+     ageOf       year -> age (or null), as _ageOnYear
+     cpfAnchor   ISO date of the CPF opening anchor, or ''
+     policies    DB.insurance
+     dividendRows  stock rows from buildStockChartRows
+     money       amount formatter for the dividend line (SGD number -> text)
+   Payday: salary is logged by the engine on its own, so the item carries no
+   amount (the deposit share is engine logic, not repeated here). CPF
+   contribution: kjr-core computeCpfContribution on the same payday, skipped at
+   55+ and before the anchor, as the engine does. Dividends: the upcoming-dividend
+   rule (ex-date in the window), the next one only, dated by the pay date while
+   that is inside the window, else by the ex-date. Premiums: the Upcoming premiums rule.
+   Each item is {date, kind, title, line, amount (number or null)}. */
+function _comingUp(todayISO, horizonISO, inp){
+  const items = [];
+  const sal = inp.salary;
+  const pay = _nextPayday(sal, todayISO);
+  if (pay && pay.payday <= horizonISO){
+    const employer = String(sal.employer || '').trim();
+    items.push({ date:pay.payday, kind:'payday', title: employer ? 'Payday, ' + employer : 'Payday', line:'Salary is logged automatically', amount:null });
+    const c = computeCpfContribution(sal.grossMonthly, inp.ageOf(pay.y));
+    if (c.allocated && c.total > 0 && (!inp.cpfAnchor || pay.payday > inp.cpfAnchor)){
+      items.push({ date:pay.payday, kind:'cpf', title:'CPF contribution', line: employer ? 'OA, SA and MA from ' + employer : 'OA, SA and MA', amount:c.total });
+    }
+  }
+  _upcomingDividendRows(inp.dividendRows, todayISO, horizonISO).slice(0, 1).forEach(r => {   // the next one only
+    const perShare = toSGD(Number(r.s.divPerShare), r.ccy);
+    const paid = r.s.divPayDate && r.s.divPayDate >= todayISO && r.s.divPayDate <= horizonISO;   // dated by pay date only while that is inside the window
+    items.push({ date: paid ? r.s.divPayDate : r.s.divExDate, kind:'dividend', title: String(r.s.symbol || '?') + ' dividend',
+      line: r.shares.toLocaleString('en-SG', {maximumFractionDigits:4}) + ' shares at ' + inp.money(perShare) + (paid ? '' : ', ex-date'),
+      amount: roundMoney(toSGD(r.shares * Number(r.s.divPerShare), r.ccy)) });
+  });
+  _insuranceDueWithin(inp.policies, todayISO, horizonISO).forEach(p => {
+    const title = [p.insurer, p.plan].filter(Boolean).join(' ');
+    items.push({ date:p.premiumDue, kind:'insurance', title: (title || 'Insurance') + ' premium',
+      line:[p.type, p.premiumFreq].filter(Boolean).join(', '), amount: Number(p.premium) > 0 ? Number(p.premium) : null });
+  });
+  const rank = { payday:0, cpf:1, dividend:2, insurance:3 };
+  items.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : rank[a.kind] - rank[b.kind]);
+  return items.slice(0, 4);
+}
+
+const DASH_MONTHS_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const ALERT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.5"/></svg>';
+
+/* One Health tile: a small visual, a label, a value (HTML, already escaped) with
+   an optional unit, and one quiet line (HTML, already escaped). */
+function _tileHtml(visual, label, value, unit, line){
+  return '<div class="dash-tile">' + visual + '<div class="dash-tile-body"><div class="dash-tile-label">' + kjrEscape(label) + '</div>'
+    + '<div class="dash-tile-value">' + value + (unit ? '<small>' + kjrEscape(unit) + '</small>' : '') + '</div>'
+    + '<p class="dash-tile-line">' + line + '</p></div></div>';
+}
+
+/* Emergency fund: cash (the same _cashSGDInfo figure the Cash tab and net worth
+   use) over the target in Settings. */
+function _efTile(valuation){
+  const target = Number(DB.settings.efTarget) || 0;
+  const label = 'Emergency fund';
+  if (target <= 0) return _tileHtml(_ringSvg(0, 'var(--gain)'), label, 'Not set', '', '<button type="button" class="dash-link" data-click="reviewTargets">Set an emergency fund target in Settings</button>');
+  const info = valuation.cashInfo;
+  if (info.excludedCount) return _tileHtml(_ringSvg(0, 'var(--gain)'), label, 'Unavailable', '', 'Set FX rates for ' + info.excludedCount + ' cash account' + (info.excludedCount === 1 ? '' : 's') + ' first');
+  const cash = info.total;
+  if (cash < 0) return _tileHtml(_ringSvg(0, 'var(--gain)'), label, 'Negative', '', 'Cash is below zero, reconcile your accounts');
+  const ratio = cash / target;
+  return _tileHtml(_ringSvg(Math.min(1, ratio), 'var(--gain)'), label, ratio.toFixed(1) + '×', 'covered',
+    '<span class="money-chip">' + fmt(cash, {dp:0}) + '</span> against a <span class="money-chip">' + fmt(target, {dp:0}) + '</span> target');
+}
+
+/* Savings rate: the last complete month, with six mini bars. The rate is the
+   P&L tab's own (_cfMonthRollup), so the two always agree. */
+function _savingsTile(){
+  const months = _recentMonths(7).slice(0, 6);   // the six complete months before this one, oldest first
+  const income = DB.income || [], expenses = DB.expenses || [];
+  const series = months.map(ym => Object.assign({ ym }, _cfMonthRollup(income, expenses, ym)));
+  const last = series[series.length - 1];
+  const bars = _miniBars(series.map(s => ({ pct:s.rate, label: DASH_MONTHS_LONG[Number(s.ym.slice(5, 7)) - 1].slice(0, 3) + ' ' + s.ym.slice(0, 4) + ': ' + (s.rate == null ? 'no data' : Math.round(s.rate) + '%') })));
+  if (last.rate == null) return _tileHtml(bars, 'Savings rate', 'No data', '', '<button type="button" class="dash-link" data-click="navigate" data-a0="cashflow">Add income on P&amp;L</button>');
+  const name = DASH_MONTHS_LONG[Number(last.ym.slice(5, 7)) - 1];
+  const line = last.ne >= 0
+    ? '<span class="money-chip">' + fmt(last.ne, {dp:0}) + '</span> saved from <span class="money-chip">' + fmt(last.net, {dp:0}) + '</span>'
+    : '<span class="money-chip">' + fmt(-last.ne, {dp:0}) + '</span> overspent against <span class="money-chip">' + fmt(last.net, {dp:0}) + '</span>';
+  return _tileHtml(bars, 'Savings rate · ' + name, Math.round(last.rate) + '%', 'of take-home', line);
+}
+
+/* Financial independence: liquid assets over the FIRE number, the same
+   progress the Projections page shows (_fireProgress). */
+function _fireTile(){
+  const fire = _fireProgress();
+  const label = 'Financial independence';
+  if (fire.fireNumber == null) return _tileHtml(_ringSvg(0, 'var(--accent)'), label, 'Not set', '', '<button type="button" class="dash-link" data-click="navigate" data-a0="projections">Set up Projections</button>');
+  if (fire.liquidInfo.incomplete) return _tileHtml(_ringSvg(0, 'var(--accent)'), label, 'Unavailable', '', 'Set FX rates in Settings, liquid assets are incomplete');
+  let line = '<span class="money-chip">' + fmt(fire.liquidNow, {dp:0}) + '</span> liquid of <span class="money-chip">' + fmt(fire.fireNumber, {dp:0}) + '</span>';
+  if (DB.settings.birthYear && !fire.expInfo.excluded && fire.monthlySavings != null){
+    if (fire.liquidNow >= fire.fireNumber) line = 'Reached, your liquid assets cover the FIRE number';
+    else {
+      const crossing = _fireYearAge(_fireProjectLiquid(fire, _fireAssumptions()).crossoverMonth, _ageOnYear(new Date().getFullYear()));
+      if (crossing) line = 'On pace for ' + crossing.year + ', age ' + crossing.age;
+    }
+  }
+  return _tileHtml(_ringSvg(fire.progressPct / 100, 'var(--accent)'), label, fire.progressPct + '%', 'of FIRE number', line);
+}
+
+/* One allocation row: swatch and name, a track filled to the share with a 2px
+   target marker (only for a class with a target), value, share, and the drift
+   over the target. Colour is never the only signal: the drift is also signed
+   text and the amber is reserved for drift beyond the tolerance. */
+function _allocRowHtml(r){
+  const marker = (r.target != null && r.target > 0) ? '<i style="left:calc(' + Math.min(100, r.target) + '% - 1px)"></i>' : '';
+  let drift = '';
+  if (r.drift != null){
+    const label = (Math.abs(r.drift) < 0.5 && !r.off) ? 'on target' : (r.drift >= 0 ? '+' : '-') + Math.abs(r.drift).toFixed(0) + ' pts';
+    drift = '<div class="dash-adrift' + (r.off ? ' off' : '') + '">' + label + '<span>target ' + +Number(r.target).toFixed(1) + '%</span></div>';
+  }
+  return '<div class="dash-arow' + (r.drift != null ? ' has-drift' : '') + '">'
+    + '<div class="dash-aname"><span class="dash-swatch" style="background:var(' + r.color + ')"></span>' + kjrEscape(r.key) + '</div>'
+    + '<div class="dash-track" aria-hidden="true"><b style="width:' + Math.max(0, Math.min(100, r.share)).toFixed(1) + '%;background:var(' + r.color + ')"></b>' + marker + '</div>'
+    + '<div class="dash-aval money-chip">' + _moneyHtml(fmt(r.val, {dp:0})) + '</div>'
+    + '<div class="dash-apct">' + r.share.toFixed(1) + '%</div>'
+    + drift + '</div>';
+}
+
+/* Where it sits: one split bar, one row per class and the insight. Always the
+   full CPF-inclusive picture, whatever the Include CPF switch says (see
+   _whereModel), so the rows sum to the CPF-inclusive net worth. When a share
+   would mislead, the rows keep their signed or known values and one quiet line
+   says why in place of the targets, drift and insight. Takes only the valuation
+   so the switch cannot reach it. */
+function _dashWhereItSits(valuation){
+  const wrap = (hint, body) => '<section class="card" aria-label="Where it sits"><div class="card-head"><h3>Where it sits</h3>' + hint + '</div>' + body + '</section>';
+  const m = _whereModel(valuation, DB.settings.targets, _rebalanceThreshold());
+  if (m.state === 'empty'){
+    return wrap('', '<div class="card-body"><div class="empty"><div class="empty-icon">' + _emptyIcon('dashboard') + '</div><div class="empty-title">No holdings yet</div><div class="empty-sub">Add stocks, cash, CPF, or property and your net worth and allocation appear here.</div></div></div>');
+  }
+  if (m.state !== 'ok'){
+    const plain = m.rows.map(r =>
+      '<div class="dash-arow plain"><div class="dash-aname"><span class="dash-swatch" style="background:var(' + r.color + ')"></span>' + kjrEscape(r.key) + '</div>'
+      + '<div class="dash-aval money-chip">' + _moneyHtml(fmt(r.val, {dp:0})) + '</div>'
+      + '<div class="dash-alabel">' + (r.val < 0 ? 'signed balance' : (valuation.incomplete ? 'known value' : 'value')) + '</div></div>').join('');
+    return wrap('<span class="hint">Values incl. CPF</span>', '<div class="card-body"><div class="dash-arows">' + plain + '</div><p class="dash-note">' + kjrEscape(m.note) + '</p></div>');
+  }
+  const hint = '<span class="hint">' + (m.hasTargets
+    ? '<span class="dash-hint-long">Share incl. CPF · marker shows your target</span><span class="dash-hint-short">Share incl. CPF</span>'
+    : 'Share incl. CPF') + '</span>';
+  const bar = m.rows.filter(r => r.val > 0).map(r => '<div class="dash-split-seg" style="flex:' + r.val + ';background:var(' + r.color + ')" title="' + kjrEscape(r.key) + ' · ' + kjrEscape(fmt(r.val, {dp:0})) + ' (' + r.share.toFixed(0) + '%)"></div>').join('');
+  const insightHtml = m.insight
+    ? '<div class="dash-insight"><span class="dash-insight-icon">' + ALERT_ICON + '</span><div><p>' + kjrEscape(m.insight) + '</p><button type="button" class="dash-insight-link" data-click="reviewTargets">Review targets</button></div></div>'
+    : '';
+  return wrap(hint, '<div class="card-body"><div class="dash-split" aria-hidden="true">' + bar + '</div><div class="dash-arows' + (m.hasTargets ? '' : ' no-target') + '">' + m.rows.map(_allocRowHtml).join('') + '</div>' + insightHtml + '</div>');
+}
+
+/* Health: emergency fund, savings rate and financial independence. */
+function _dashHealth(valuation){
+  return '<section class="card" aria-label="Financial health"><div class="card-head"><h3>Health</h3><span class="hint">Updated with each payday</span></div>'
+    + '<div class="dash-tiles">' + _efTile(valuation) + _savingsTile() + _fireTile() + '</div></section>';
+}
+
+/* Every stock and coin as one list shape for the Holdings and Today cards.
+   Stocks come from buildStockChartRows (the rows the Stocks tab renders) and
+   coins from _cryptoRow (the Crypto tab's). */
+function _dashHoldingRows(stockRows){
+  const rows = [];
+  stockRows.forEach(r => {
+    const move = _stockDayMove(r);
+    rows.push({ nav:'stocks', cls:'stocks', sym:String(r.s.symbol || '?'), sub:[r.s.market, r.s.sector].filter(Boolean).join(' · '),
+      name:(r.px && r.px.shortName) ? String(r.px.shortName) : String(r.s.market || ''),
+      mv:r.mv, pl:r.pl, plPct:r.plPct, dayPct:move.pct, daySgd:move.sgd });
+  });
+  (DB.crypto || []).forEach(c => {
+    const r = _cryptoRow(c);
+    const pct = (r.px && r.px.change24h != null && isFinite(Number(r.px.change24h))) ? Number(r.px.change24h) : null;
+    const id = String(c.coingeckoId || '').replace(/-/g, ' ').trim();
+    rows.push({ nav:'crypto', cls:'crypto', sym:String(c.symbol || '?'), sub:'Crypto',
+      name: id ? id.charAt(0).toUpperCase() + id.slice(1) : 'Crypto',
+      mv:r.mv, pl:r.pl, plPct:r.plPct, dayPct:pct, daySgd:(r.mv != null && pct != null) ? _dayMoveSgd(r.mv, pct) : null });
+  });
+  return rows;
+}
+
+/* Holdings: the eight largest positions by S$ value. Each row is one button
+   that opens its tab. A missing price shows a dash, never NaN. */
+function _dashHoldings(rows, displayNet){
+  const dash = '–';
+  const head = withLink => '<div class="card-head"><h3>Holdings</h3>' + (withLink ? '<button type="button" class="dash-link" data-click="refreshDashPrices">Refresh prices</button>' : '') + '</div>';
+  if (!rows.length){
+    return '<section class="card" aria-label="Holdings">' + head(false) + '<div class="card-body"><div class="empty"><div class="empty-icon">' + _emptyIcon('stocks') + '</div><div class="empty-title">No holdings yet</div><div class="empty-sub">Add a stock or a coin and it appears here with its value, day move and return.</div><button class="btn btn-primary" data-click="openEntity" data-a0="stocks" style="margin-top:14px">＋ Add a stock</button></div></div></section>';
+  }
+  const top = rows.slice().sort((a, b) => {
+    const va = a.mv == null ? -Infinity : a.mv, vb = b.mv == null ? -Infinity : b.mv;
+    return vb > va ? 1 : (vb < va ? -1 : 0);
+  }).slice(0, 8);
+  const list = top.map(r => {
+    const share = (r.mv != null && displayNet > 0) ? (r.mv / displayNet * 100).toFixed(1) + '% of total' : dash;
+    const day = r.dayPct != null ? '<span class="dash-chg ' + (r.dayPct >= 0 ? 'up' : 'down') + '">' + fmtPct(r.dayPct) + '</span><span class="dash-sub">today</span>' : '<span class="dash-chg">' + dash + '</span><span class="dash-sub">today</span>';
+    const ret = r.plPct != null ? '<span class="dash-chg ' + (r.pl >= 0 ? 'up' : 'down') + '">' + fmtPct(r.plPct) + '</span><span class="dash-sub money-chip">' + fmt(r.pl, {dp:0, signed:true}) + '</span>' : '<span class="dash-chg">' + dash + '</span><span class="dash-sub">&nbsp;</span>';
+    return '<button type="button" class="dash-hrow" data-click="navigate" data-a0="' + r.nav + '">'
+      + '<span class="dash-who">' + _monogram(r.sym, r.cls) + '<span class="dash-who-t"><b>' + kjrEscape(r.sym) + '</b><span>' + kjrEscape(r.sub) + '</span></span></span>'
+      + '<span class="dash-hcell"><span class="dash-hval money-chip">' + (r.mv != null ? _moneyHtml(fmt(r.mv, {dp:0})) : dash) + '</span><span class="dash-sub">' + share + '</span></span>'
+      + '<span class="dash-hcell dash-col-day">' + day + '</span>'
+      + '<span class="dash-hcell">' + ret + '</span></button>';
+  }).join('');
+  return '<section class="card" aria-label="Holdings">' + head(true) + '<div class="dash-hold"><div class="dash-hrow dash-hhead"><span>Asset</span><span>Value</span><span class="dash-col-day">Day</span><span>Return</span></div>' + list + '</div></section>';
+}
+
+/* Today: the four biggest day moves in S$, then Coming up. */
+function _dashToday(rows, stockRows){
+  const movers = rows.filter(r => r.daySgd != null && Math.abs(r.daySgd) >= 0.005)
+    .sort((a, b) => Math.abs(b.daySgd) - Math.abs(a.daySgd)).slice(0, 4);
+  const moveHtml = movers.length
+    ? movers.map(r => {
+        const up = r.daySgd > 0;
+        const amount = _plArrow(r.daySgd) + fmt(r.daySgd, {dp: Math.abs(r.daySgd) >= 1 ? 0 : 2, signed:true});
+        return '<div class="dash-li">' + _monogram(r.sym, r.cls) + '<div class="dash-li-main"><div class="dash-li-t">' + kjrEscape(r.sym) + '</div><div class="dash-li-s">' + kjrEscape(r.name) + '</div></div>'
+          + '<div class="dash-li-end"><div class="dash-chg ' + (up ? 'up' : 'down') + ' money-chip">' + amount + '</div><div class="dash-li-s">' + (r.dayPct != null ? (r.dayPct >= 0 ? '+' : '') + r.dayPct.toFixed(2) + '%' : '') + '</div></div></div>';
+      }).join('')
+    : '<p class="dash-empty-line">' + (rows.length ? 'Refresh prices for today\'s moves' : 'No holdings yet') + '</p>';
+  const todayISO = _isoDateSG(new Date());
+  const horizonISO = _isoDateSG(new Date(Date.now() + 90 * 86400000));
+  const items = _comingUp(todayISO, horizonISO, {
+    salary: DB.settings.salary, ageOf: _ageOnYear, cpfAnchor: _cpfAnchorDate(), policies: DB.insurance,
+    dividendRows: stockRows, money: n => fmt(n)
+  });
+  const upcoming = items.length
+    ? items.map(it => {
+        const d = _parseDateOnlyLocal(it.date);
+        const amount = it.amount == null ? '' : '<div class="dash-li-amt money-chip' + (it.kind === 'insurance' ? '' : ' pos') + '">' + (it.kind === 'insurance' ? '' : '+') + fmt(it.amount, {dp:0}) + '</div>';
+        return '<div class="dash-li"><div class="dash-date"><b>' + d.getDate() + '</b><span>' + PB_MONTHS[d.getMonth()].toUpperCase() + '</span></div>'
+          + '<div class="dash-li-main"><div class="dash-li-t">' + kjrEscape(it.title) + '</div><div class="dash-li-s">' + kjrEscape(it.line) + '</div></div>' + amount + '</div>';
+      }).join('')
+    : '<p class="dash-empty-line">Nothing due in the next 90 days</p>';
+  return '<section class="card" aria-label="Today and upcoming"><div class="card-head"><h3>Today</h3><span class="hint">Biggest moves in S$</span></div>'
+    + '<div class="dash-list">' + moveHtml + '<div class="dash-sect">Coming up</div>' + upcoming + '</div></section>';
+}
+
+/* Refresh prices from the dashboard: the existing stock and coin refreshes
+   (each reports its own result), then repaint so the cards pick up the quotes.
+   One toast, not two, when no backend is set. */
+async function refreshDashPrices(){
+  const hasStocks = (DB.stocks || []).length || (DB.watchlist || []).length;
+  const hasCoins = (DB.crypto || []).length;
+  if (!hasStocks && !hasCoins){ showToast('No holdings to refresh'); return; }
+  if (!getSyncUrl()){ showToast('Set the Apps Script URL first', 'error'); return; }
+  const jobs = [];
+  if (hasStocks) jobs.push(refreshStockPrices());
+  if (hasCoins) jobs.push(refreshCryptoPrices());
+  await Promise.allSettled(jobs);
+  renderDashboard();
+}
+
+/* Review targets, and the other "set it in Settings" links: open Settings and
+   bring the targets card into view (showPage scrolls to the top once the route
+   lands, so the scroll waits a moment). */
+function reviewTargets(){
+  navigate('settings');
+  setTimeout(() => {
+    const card = document.getElementById('settings-targets');
+    if (card && card.scrollIntoView) card.scrollIntoView({ block:'start' });
+  }, 80);
+}
+
 function renderDashboard(){
   // Never reflow the stack mid-drag (a price refresh or stray event would
   // destroy the lifted card and leave it stuck).
@@ -11627,25 +12319,17 @@ function renderDashboard(){
   if (!nwEl) return;
 
   const valuation = _netWorthValueInfo();
-  const { cashInfo, stockInfo, cryptoInfo } = valuation;
-  const classes = [
-    { key:'Stocks',      val:valuation.classes.stocks,     color:assetClassColor('Stocks') },
-    { key:'Cash',        val:valuation.classes.cash,       color:assetClassColor('Cash') },
-    { key:'CPF',         val:valuation.classes.cpf,        color:assetClassColor('CPF') },
-    { key:'Real Estate', val:valuation.classes.realestate, color:assetClassColor('Real Estate') },
-    { key:'Crypto',      val:valuation.classes.crypto,     color:assetClassColor('Crypto') },
-    { key:'Insurance',   val:valuation.classes.insurance,  color:assetClassColor('Insurance') }
-  ];
+  const { stockInfo, cryptoInfo } = valuation;
   const netFull   = valuation.total;
   const cpfVal    = valuation.classes.cpf;
   const netExCpf  = roundMoney(netFull - cpfVal);
 
-  // displayClasses + displayNet respect the CPF toggle
+  // displayNet respects the CPF toggle (the hero and the Holdings shares).
+  // Where it sits does not, it always shows the full CPF-inclusive picture.
   const allocation = _allocationData(valuation.classes, _dashShowCpf);
-  const displayClasses = allocation.items.map(c => ({ key:c.cls, val:c.val, color:assetClassColor(c.cls) }));
   const displayNet = allocation.total;
 
-  // Net worth hero — secondary (ex-CPF) only shown when CPF is on. The
+  // Net worth hero: secondary (ex-CPF) only shown when CPF is on. The
   // Include CPF switch beside the label carries the with/without state.
   const headline = valuation.incomplete ? 'Known net worth (incomplete)' : 'Net worth';
   const cpfSwitch = `<button type="button" class="switch" role="switch" aria-checked="${_dashShowCpf}" data-click="toggleDashCpf"><span class="switch-track" aria-hidden="true"></span>Include CPF</button>`;
@@ -11662,19 +12346,19 @@ function renderDashboard(){
     ? `<div class="dash-hero-label" style="margin-top:4px">Includes cost-basis estimate for ${estimateCount} stock/crypto position${estimateCount>1?'s':''} without a live price (${fmt(estimateAmount,{dp:0})})</div>`
     : '';
 
-  // Monthly change chip: latest snapshot vs the closest one >=28 days older,
-  // in the same full/ex-CPF terms as the headline figure. No chip at all
-  // (not an empty pill) when fewer than 2 qualifying snapshots exist.
+  // Change under the number: latest snapshot vs the closest one >=28 days
+  // older, in the same full/ex-CPF terms as the headline figure. Nothing at
+  // all (not an empty pill) when fewer than 2 qualifying snapshots exist.
   const snaps = DB.snapshots || [];
   const netOf = s => _dashShowCpf ? s.net : (s.net - ((s.byClass && s.byClass.cpf) || 0));
   const change = valuation.incomplete ? null : _heroMonthlyChange(snaps, netOf);
-  const changeChip = change
-    ? `<span class="dash-hero-chip ${change.pct >= 0 ? 'pos' : 'neg'}">${change.pct >= 0 ? '▲' : '▼'} ${change.pct >= 0 ? '+' : ''}${change.pct.toFixed(1)}% this month</span>`
+  const deltaRow = change
+    ? `<div class="dash-hero-delta">${_gainPill(change.diff, change.pct)}<span class="dash-hero-when">past month</span></div>`
     : '';
   const spark = valuation.incomplete ? '' : _heroSparkline(snaps, netOf);
 
   nwEl.innerHTML = `<div class="dash-hero">
-    <div><div class="dash-hero-label">${headline}${cpfSwitch}${changeChip}</div><div class="dash-hero-value">${_moneyHtml(fmt(displayNet, {dp:0}))}</div>${marketEstimateNote}${fxExclusionNote}</div>
+    <div><div class="dash-hero-label">${headline}${cpfSwitch}</div><div class="dash-hero-value">${_moneyHtml(fmt(displayNet, {dp:0}))}</div>${deltaRow}${marketEstimateNote}${fxExclusionNote}</div>
     ${heroSecondary}
     ${spark}
   </div>`;
@@ -11699,60 +12383,11 @@ function renderDashboard(){
     </div>`;
   }
 
-  // Asset-class cards + allocation bar. One small card per class (icon chip,
-  // value, share of net worth), a segmented proportion bar, and a $ + %
-  // legend that always lists every class regardless of slice size. When CPF
-  // is toggled off it is excluded entirely, like everywhere else on the
-  // dashboard. Icons reuse the exact SVGs from TABS (Stocks/Cash/CPF/Real
-  // Estate) rather than inventing new artwork.
-  const CLASS_ICON = {
-    Stocks: TABS.find(t => t.key === 'stocks').icon,
-    Cash:   TABS.find(t => t.key === 'cash').icon,
-    CPF:    TABS.find(t => t.key === 'cpf').icon,
-    'Real Estate': TABS.find(t => t.key === 'realestate').icon,
-    Crypto: TABS.find(t => t.key === 'crypto').icon,
-    Insurance: TABS.find(t => t.key === 'insurance').icon
-  };
-  const assetsEl = document.getElementById('dash-assets');
-  if (assetsEl){
-    if (!displayClasses.length && !valuation.incomplete){
-      assetsEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('dashboard')}</div><div class="empty-title">No holdings yet</div><div class="empty-sub">Add stocks, cash, CPF, or property and your net worth and allocation appear here.</div></div></div></div>`;
-    } else {
-      const canShowAllocation = !valuation.incomplete && allocation.canAllocate && !allocation.hasNegative;
-      const pctOf = c => canShowAllocation ? (c.val / displayNet * 100) : null;
-      const classCards = displayClasses.map(c => {
-        const p = pctOf(c);
-        const label = p != null ? kjrEscape(c.key) + ' · ' + p.toFixed(0) + '%'
-          : kjrEscape(c.key) + ' · ' + (c.val < 0 ? 'signed balance' : (valuation.incomplete ? 'known value' : 'value'));
-        return `<div class="dash-class-card">
-          <div class="dash-class-icon" style="background:var(${c.color}-soft,var(${c.color}));color:var(${c.color})">${CLASS_ICON[c.key] || ''}</div>
-          <div class="dash-class-value metric-value">${_moneyHtml(fmt(c.val,{dp:0}))}</div>
-          <div class="dash-class-label">${label}</div>
-        </div>`;
-      }).join('');
-      let allocationHtml = '';
-      if (!canShowAllocation){
-        const title = valuation.incomplete ? 'Allocation incomplete' : 'Allocation unavailable';
-        const sub = valuation.incomplete
-          ? `Known values exclude ${valuation.missingFxCount} asset${valuation.missingFxCount === 1 ? '' : 's'} with missing FX. Set rates in Settings before calculating percentages.`
-          : (!allocation.canAllocate
-            ? 'Net allocation is zero or negative. Signed balances are shown above.'
-            : 'A class balance is negative. Signed balances are shown above, and the proportion bar is hidden.');
-        allocationHtml = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('dashboard')}</div><div class="empty-title">${title}</div><div class="empty-sub">${sub}</div></div></div></div>`;
-      } else {
-        const bar = displayClasses.map(c => {
-          const p = pctOf(c);
-          return `<div class="alloc-seg" style="flex:${c.val};background:var(${c.color})" title="${kjrEscape(c.key)} · ${fmt(c.val,{dp:0})} (${p.toFixed(0)}%)"></div>`;
-        }).join('');
-        const legend = displayClasses.map(c => {
-          const p = pctOf(c);
-          return `<div class="alloc-legend-item"><span class="alloc-legend-dot" style="background:var(${c.color})"></span>${kjrEscape(c.key)} <span class="alloc-legend-amt">${fmt(c.val,{dp:0})}</span> <span class="alloc-legend-pct">${p.toFixed(0)}%</span></div>`;
-        }).join('');
-        allocationHtml = `<div class="card"><div class="card-body"><div class="alloc-bar">${bar}</div><div class="alloc-legend">${legend}</div></div></div>`;
-      }
-      assetsEl.innerHTML = `${classCards ? `<div class="dash-class-grid" style="margin-top:16px">${classCards}</div>` : ''}${allocationHtml}`;
-    }
-  }
+  // Overview row: Where it sits (one split bar, one row per class, one
+  // insight, always CPF-inclusive) beside Health (emergency fund, savings
+  // rate, FIRE progress).
+  const overviewEl = document.getElementById('dash-overview');
+  if (overviewEl) overviewEl.innerHTML = '<div class="dash-row">' + _dashWhereItSits(valuation) + _dashHealth(valuation) + '</div>';
 
   // CPF breakdown
   const cpfEl = document.getElementById('dash-cpf');
@@ -11772,160 +12407,28 @@ function renderDashboard(){
     }
   }
 
-  // Emergency fund progress
-  renderEmergencyFund();
-  // Target allocation: always use full picture (planning tool; CPF is a real asset class)
-  const targetSettings = DB.settings.targets || {};
-  const targetSum = (Number(targetSettings.stocks)||0) + (Number(targetSettings.cash)||0) + (Number(targetSettings.cpf)||0) + (Number(targetSettings.realestate)||0) + (Number(targetSettings.crypto)||0);
-  const fullAllocation = _allocationData(valuation.classes, true);
-  if (targetSum > 0 && (valuation.incomplete || !fullAllocation.canAllocate || fullAllocation.hasNegative)){
-    const targetEl = document.getElementById('dash-targets');
-    if (targetEl){
-      const sub = valuation.incomplete
-        ? `Set FX rates for ${valuation.missingFxCount} asset${valuation.missingFxCount === 1 ? '' : 's'} before comparing against targets.`
-        : 'Net allocation is zero, negative, or contains a negative class balance. Signed values remain visible above.';
-      targetEl.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('projections')}</div><div class="empty-title">Target allocation unavailable</div><div class="empty-sub">${sub}</div></div></div></div>`;
-    }
-  } else renderTargetAllocation(classes, netFull);
-  // Top movers (today's gainers/losers)
-  renderTopMovers();
+  // Activity row: Holdings (top eight by value) beside Today (biggest moves,
+  // then Coming up).
+  const activityEl = document.getElementById('dash-activity');
+  if (activityEl){
+    const stockRows = buildStockChartRows();
+    const holdingRows = _dashHoldingRows(stockRows);
+    activityEl.innerHTML = '<div class="dash-row">' + _dashHoldings(holdingRows, displayNet) + _dashToday(holdingRows, stockRows) + '</div>';
+  }
 
-  // Charts only when the tab is visible (Chart.js needs a sized canvas).
+  // Saved charts only when the tab is visible (Chart.js needs a sized canvas).
+  // The Chart Builder lives on Explore, so the dashboard seeds the three
+  // default charts itself (idempotent) and draws only the ones switched on.
   const visible = document.getElementById('page-dashboard').classList.contains('active');
   if (visible && typeof Chart !== 'undefined'){
-    renderChartBuilder();   // Chart Builder card + seeded + saved charts (also calls _applyDashLayout)
+    pbSeedDefaults();
+    _pbRenderDashCharts();   // also calls _applyDashLayout
   } else {
     _applyDashLayout();
   }
   // Show Arrange button once content is present.
   const arrangeBtn = document.getElementById('dash-arrange-btn');
   if (arrangeBtn) arrangeBtn.style.display = '';
-}
-
-/* ─── Emergency fund widget ─────────────────────────────────────────────
-   Tracks cash + savings against a target. Cash only (not CPF/stocks), since
-   an emergency fund is liquid by definition. */
-function renderEmergencyFund(){
-  const el = document.getElementById('dash-ef');
-  if (!el) return;
-  const target = Number(DB.settings.efTarget) || 0;
-  if (target <= 0){ el.innerHTML = ''; return; }
-  const cashInfo = _cashSGDInfo();
-  if (cashInfo.excludedCount){
-    el.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head"><h3>Emergency fund</h3></div><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('cash')}</div><div class="empty-title">Emergency fund progress unavailable</div><div class="empty-sub">Set FX rates for ${cashInfo.excludedCount} cash account${cashInfo.excludedCount === 1 ? '' : 's'} before comparing the balance with this target.</div></div></div></div>`;
-    return;
-  }
-  const cash = cashInfo.total;
-  const pct = target > 0 ? Math.max(0, Math.min(100, cash / target * 100)) : 0;
-  const done = cash >= target;
-  const barColor = done ? 'var(--green)' : (pct >= 50 ? 'var(--amber)' : 'var(--red)');
-  el.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head">
-      <h3>Emergency fund</h3>
-      <span class="hint">${cash < 0 ? 'negative balance, reconcile cash' : (done ? 'fully funded' : fmt(target - cash, {dp:0}) + ' to go')}</span>
-    </div><div class="card-body">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
-        <span style="font-size:18px;font-weight:600;font-variant-numeric:tabular-nums">${fmt(cash, {dp:0})}</span>
-        <span class="hint">of ${fmt(target, {dp:0})} target · ${pct.toFixed(0)}%</span>
-      </div>
-      <div style="height:10px;background:var(--bg3);border-radius:6px;overflow:hidden">
-        <div style="height:100%;width:${pct}%;background:${barColor};transition:width .3s"></div>
-      </div>
-    </div></div>`;
-}
-
-/* ─── Target allocation + rebalancing ──────────────────────────────────
-   Compares current allocation against DB.settings.targets and flags any
-   class that has drifted more than the rebalance threshold off target. */
-function renderTargetAllocation(classes, net){
-  const el = document.getElementById('dash-targets');
-  if (!el) return;
-  const t = DB.settings.targets || {};
-  const targetSum = (Number(t.stocks)||0)+(Number(t.cash)||0)+(Number(t.cpf)||0)+(Number(t.realestate)||0)+(Number(t.crypto)||0);
-  if (targetSum <= 0 || net <= 0){ el.innerHTML = ''; return; }
-
-  const keyMap = { Stocks:'stocks', Cash:'cash', CPF:'cpf', 'Real Estate':'realestate', Crypto:'crypto' };
-  // Explicit null check, not `|| 5`: a typed 0 ("flag any drift at all") is a
-  // legitimate strict setting and must not be silently reverted to 5.
-  const rawThr = DB.settings.rebalanceThreshold;
-  const thr = (rawThr != null && isFinite(Number(rawThr))) ? Number(rawThr) : 5;
-  const rows = [];
-  const alerts = [];
-  classes.forEach(c => {
-    const k = keyMap[c.key];
-    const tgt = Number(t[k]) || 0;
-    if (tgt <= 0 && c.val <= 0) return;
-    const cur = net > 0 ? c.val / net * 100 : 0;
-    const drift = cur - tgt;
-    const off = Math.abs(drift) > thr;
-    rows.push({ key:c.key, color:c.color, cur, tgt, drift, off });
-    if (off) alerts.push({ key:c.key, drift, tgt, cur,
-      action: drift > 0 ? 'trim' : 'top up' });
-  });
-  if (!rows.length){ el.innerHTML = ''; return; }
-
-  const bars = rows.map(r => {
-    const driftTxt = (r.drift >= 0 ? '+' : '') + r.drift.toFixed(0) + ' pts';
-    const driftCls = r.off ? (r.drift > 0 ? 'neg' : 'pos') : '';
-    return `<div class="alloc-row">
-      <div style="font-weight:600">${kjrEscape(r.key)}</div>
-      <div class="alloc-bar">
-        <div class="alloc-fill" style="width:${Math.min(100,r.cur)}%;background:${_cssVar(r.color)}"></div>
-        <div class="alloc-target" style="left:${Math.min(100,r.tgt)}%" title="target ${r.tgt.toFixed(0)}%"></div>
-      </div>
-      <div class="num" style="min-width:54px">${r.cur.toFixed(0)}%</div>
-      <div class="hint" style="min-width:64px;text-align:right">tgt ${r.tgt.toFixed(0)}%</div>
-      <div class="num ${driftCls}" style="min-width:64px">${driftTxt}</div>
-    </div>`;
-  }).join('');
-
-  const alertHtml = alerts.length
-    ? `<div class="rebal-alerts">${alerts.map(a =>
-        `<div class="rebal-alert"><b>${kjrEscape(a.key)}</b> is ${Math.abs(a.drift).toFixed(0)} pts ${a.drift>0?'over':'under'} target, consider ${a.action === 'trim' ? 'trimming' : 'topping up'}.</div>`
-      ).join('')}</div>`
-    : `<div class="integrity-bar ok" style="margin-top:12px">✓ Allocation is within ${thr} pts of every target.</div>`;
-
-  el.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head">
-      <h3>Target allocation</h3><span class="hint">current vs target · ${thr} pt tolerance · set in Settings</span>
-    </div><div class="card-body">${bars}${alertHtml}</div></div>`;
-}
-
-/* ─── Top movers ───────────────────────────────────────────────────────
-   Today's biggest stock movers by % change (last price vs prevClose from the
-   price cache). Crypto uses 24h change. Skips holdings with no fresh price. */
-function renderTopMovers(){
-  const el = document.getElementById('dash-movers');
-  if (!el) return;
-  const movers = [];
-  (DB.stocks || []).forEach(s => {
-    const px = DB._priceCache[yahooSymbol(s)];
-    if (!px || px.price == null || px.previousClose == null || !px.previousClose) return;
-    const chgPct = (px.price - px.previousClose) / px.previousClose * 100;
-    if (!isFinite(chgPct)) return;
-    movers.push({ label: (s.symbol||'').toUpperCase(), sub:'stock', chgPct, price: px.price, ccy: px.currency || s.currency || 'USD' });
-  });
-  (DB.crypto || []).forEach(c => {
-    const px = DB._priceCache[coinIdFor(c.coingeckoId || c.symbol)];
-    if (!px || px.change24h == null) return;
-    const chgPct = Number(px.change24h);
-    if (!isFinite(chgPct)) return;
-    movers.push({ label: (c.symbol||'').toUpperCase(), sub:'crypto', chgPct, price: px.sgd, ccy:'SGD' });
-  });
-  if (!movers.length){ el.innerHTML = ''; return; }
-  movers.sort((a,b) => Math.abs(b.chgPct) - Math.abs(a.chgPct));
-  const top = movers.slice(0, 6);
-  const cells = top.map(m => {
-    const up = m.chgPct >= 0;
-    const cls = up ? 'pos' : 'neg';
-    const arrow = up ? '▲' : '▼';
-    return `<div class="mover">
-      <div class="mover-sym">${kjrEscape(m.label)} <span class="hint">${m.sub}</span></div>
-      <div class="mover-px num">${fmt(m.price, { currency: m.ccy, dp:0 })}</div>
-      <div class="mover-chg num ${cls}">${arrow} ${(up?'+':'')}${m.chgPct.toFixed(1)}%</div>
-    </div>`;
-  }).join('');
-  el.innerHTML = `<div class="card" style="margin-top:16px"><div class="card-head">
-      <h3>Top movers</h3><span class="hint">today · by % change</span>
-    </div><div class="card-body"><div class="movers-grid">${cells}</div></div></div>`;
 }
 
 const INFO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>';
@@ -11979,6 +12482,7 @@ function renderAll(){
   if (_isPageActive('cashflow')) renderCashflow();
   if (_isPageActive('insurance')) renderInsurance();
   if (_isPageActive('projections')) renderProjections();
+  if (_isPageActive('explore')) renderExplore();
   if (document.getElementById('page-settings').classList.contains('active')) {
     loadSettingsForm();
     renderDiagnostics();
@@ -12207,7 +12711,9 @@ function installEventDelegation(){
     ledgerViewFlat:      () => { _ledgerView = 'flat'; renderStockTxns(); },
     ledgerViewByStock:   () => { _ledgerView = 'by-stock'; renderStockTxns(); },
     // dashboard
-    toggleDashCpf:       () => { _dashShowCpf = !_dashShowCpf; renderDashboard(); },
+    toggleDashCpf:       () => toggleDashCpf(),
+    refreshDashPrices:   () => refreshDashPrices(),
+    reviewTargets:       () => reviewTargets(),
     toggleInfoTip:       (el) => { const tip = el.closest('.info-tip'); if (!tip) return; tip.classList.remove('dismissed'); tip.classList.toggle('open'); },
     toggleArrange:       () => toggleArrange(),
     moveDashWidget:     (el) => { const [id, direction] = A(el); moveDashWidget(id, Number(direction)); },
@@ -12275,6 +12781,8 @@ function installEventDelegation(){
     pbTogglePin:         (el) => pbTogglePin(A(el)[0]),
     pbRefreshSaved:      (el) => pbRefreshSaved(A(el)[0]),
     pbDeleteSaved:       (el) => pbDeleteSaved(A(el)[0]),
+    pbToggleOnDashboard: (el) => pbToggleOnDashboard(A(el)[0]),
+    pbRemoveFromDashboard:(el) => pbRemoveFromDashboard(A(el)[0]),
     // misc
     overlayBackdropClose: (el, ev) => {
       if (ev.target !== el) return;
