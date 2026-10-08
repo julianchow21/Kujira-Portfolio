@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.70';
-const APP_DISPLAY_VERSION = 'v2.70 (08 Oct)';
+const APP_VERSION = 'v2.71';
+const APP_DISPLAY_VERSION = 'v2.71 (08 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -32,6 +32,7 @@ const LK_UNSAVED   = 'kjr-pf-unsaved-v1'; // durable warning that the latest in-
 const LK_CLOUD_DIRTY = 'kjr-pf-cloud-dirty-v1'; // locally durable financial changes that have not reached the configured cloud
 const LK_THEME     = 'kjr-pf-theme-v1';
 const LK_PRIVACY   = 'kjr-pf-privacy-v1';   // blur all money figures (shoulder-surfing guard)
+const LK_HERO_RANGE = 'kjr-pf-hero-range-v1'; // dashboard hero chart range (1M, 3M, YTD, 1Y, ALL), a per-device view preference only
 const LK_PRICE_CACHE = 'kjr-pf-price-cache-v1'; // persisted separately so first paint uses last-known prices
 const LK_VAULT     = 'kjr-pf-encrypted-vault-v1';
 // Backend selection stays in harmless native metadata. NAS configuration,
@@ -8929,9 +8930,10 @@ function pbLoadSaved(){
       tsAvgCost: !!c.tsAvgCost,
       pinned: !!c.pinned,
       // Read-time default only, never written on load. Charts saved before the
-      // field existed stay on the dashboard, except the seeded Allocation
-      // doughnut, which the dashboard's own allocation widgets already cover.
-      onDashboard: typeof c.onDashboard === 'boolean' ? c.onDashboard : (c.id !== 'def_alloc'),
+      // field existed stay on the dashboard, except the two seeded charts the
+      // dashboard already covers: the Allocation doughnut (Where it sits) and
+      // Net worth over time (the hero chart). An explicit value is always kept.
+      onDashboard: typeof c.onDashboard === 'boolean' ? c.onDashboard : (c.id !== 'def_alloc' && c.id !== 'def_networth'),
       order: typeof c.order === 'number' ? c.order : 999,
     };
   }).filter(c => {
@@ -9251,9 +9253,10 @@ function pbSeedDefaults(){
   const charts = pbLoadSaved();
   const ids = new Set(charts.map(c => c.id));
   const defaults = [
+    // Net worth over time is seeded off the dashboard (the hero chart covers it), still listed on Explore.
     { id:'def_networth',  title:'Net worth over time', source:'networth',  mode:'crosssec', seriesMode:'total',
       range:'ONE_YEAR',    xFields:[], yFields:[], chartType:'line', topN:'all', sort:'alpha',
-      dualAxis:false, kwFilter:'', tsSymbols:[], tsValue:'price', tsAvgCost:false, pinned:true, onDashboard:true, order:0 },
+      dualAxis:false, kwFilter:'', tsSymbols:[], tsValue:'price', tsAvgCost:false, pinned:true, onDashboard:false, order:0 },
     // Allocation is seeded off the dashboard (its own allocation widgets cover it), still listed on Explore.
     { id:'def_alloc',     title:'Allocation',          source:'allocation', mode:'crosssec', seriesMode:'total',
       range:'SIX_MONTHS', xFields:['assetClass'], yFields:['value'], chartType:'doughnut', topN:'all', sort:'desc',
@@ -11820,57 +11823,373 @@ function _dashStatusLine(rec){
   return parts.join(' · ');
 }
 
-/* ─── Hero monthly change + sparkline ───────────────────────────────────
-   Both read the same DB.snapshots series renderDashboard already uses (one
-   row/day: {date, net, byClass}). Pure presentation, no new stored figures. */
-/* Latest snapshot vs the closest one at least 28 days older. Needs 2+
-   qualifying snapshots or returns null (caller renders nothing at all, never
-   an empty pill). netOf lets the caller pick full or ex-CPF net per row.
-   Returns the change as a percentage and in SGD. */
-function _heroMonthlyChange(snaps, netOf){
-  if (!Array.isArray(snaps) || snaps.length < 2) return null;
-  const sorted = snaps.slice().sort((a,b) => String(a.date).localeCompare(String(b.date)));
-  const latest = sorted[sorted.length - 1];
-  const latestMs = new Date(latest.date + 'T00:00:00').getTime();
-  if (!isFinite(latestMs)) return null;
-  let baseline = null;
-  for (let i = sorted.length - 2; i >= 0; i--){
-    const ms = new Date(sorted[i].date + 'T00:00:00').getTime();
-    if (!isFinite(ms)) continue;
-    const days = (latestMs - ms) / 86400000;
-    if (days >= 28){ baseline = sorted[i]; break; }
+/* ─── Hero chart: series, ranges and scrubbing ──────────────────────────
+   The hero draws DB.snapshots (one row per Singapore day at most), with today's
+   point swapped for the live headline figure, as a hand-rolled SVG area chart with
+   five ranges. The maths is pure and unit-tested in tests/test-app.js (_heroSeries,
+   _heroWithLive, _heroNearest, _heroNiceTicks, _heroGeometry).
+   Scrub state lives in _heroView, outside the DOM that renderDashboard rebuilds
+   on every CPF switch, price refresh and theme change, and the pointer and key
+   handlers are delegated once (installHeroEvents), so a re-render never leaves a
+   handler holding a dead node. Pure presentation, no new stored figures. */
+const HERO_RANGES = ['1M', '3M', 'YTD', '1Y', 'ALL'];
+const HERO_RANGE_LABELS = { '1M':'1M', '3M':'3M', YTD:'YTD', '1Y':'1Y', ALL:'All' };
+const _heroState = { range:null };
+let _heroView = null;   // the scrubbable chart on screen: { hero, geo, restValue, restPill, restWhen, idx }, replaced by every render
+
+/* The remembered range, read once. A per-device view preference only, so a blocked
+   or full store (private mode, quota) falls back to 1M and never throws. */
+function _heroRangeGet(){
+  if (_heroState.range === null){
+    let saved = null;
+    try { saved = localStorage.getItem(LK_HERO_RANGE); } catch (_) {}
+    _heroState.range = HERO_RANGES.indexOf(saved) === -1 ? '1M' : saved;
   }
-  if (!baseline) return null;
-  const curNet = netOf(latest), baseNet = netOf(baseline);
-  if (!isFinite(curNet) || !isFinite(baseNet) || baseNet === 0) return null;
-  const diff = curNet - baseNet;
-  const pct = diff / Math.abs(baseNet) * 100;
-  if (!isFinite(pct)) return null;
-  return { pct, diff };
+  return _heroState.range;
+}
+/* Range tab pressed: remember it and redraw the hero alone (not the whole dashboard,
+   so the saved charts below do not redraw and animate on every tab). */
+function setHeroRange(key){
+  if (HERO_RANGES.indexOf(key) === -1) return false;
+  _heroState.range = key;
+  try { localStorage.setItem(LK_HERO_RANGE, key); } catch (_) {}
+  renderDashboard({ heroOnly:true });
+  return true;
 }
 
-/* Inline SVG polyline, ~150x52, from the same series (every point). Hidden
-   entirely (caller returns '') when under 2 snapshots. Shape-only + aria-hidden,
-   the numbers themselves live in the value/pill, not the sparkline. */
-function _heroSparkline(snaps, netOf){
-  if (!Array.isArray(snaps) || snaps.length < 2) return '';
-  const sorted = snaps.slice().sort((a,b) => String(a.date).localeCompare(String(b.date)));
-  const pts = sorted.map(s => netOf(s)).filter(v => isFinite(v));
-  if (pts.length < 2) return '';
-  const w = 150, h = 52, pad = 3;
-  const min = Math.min(...pts), max = Math.max(...pts);
-  const span = (max - min) || 1;
-  const stepX = (w - pad*2) / (pts.length - 1);
-  const coords = pts.map((v, i) => {
-    const x = pad + i * stepX;
-    const y = pad + (1 - (v - min) / span) * (h - pad*2);
-    return x.toFixed(1) + ',' + y.toFixed(1);
+/* UTC day number of a valid 'YYYY-MM-DD', so day arithmetic never meets a
+   timezone or a daylight-saving change. */
+function _heroDay(iso){
+  return Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000;
+}
+
+/* The hero series for one range. snapshots is DB.snapshots, one row per Singapore
+   day at most, so any range can hold fewer than 2 points. range is 1M (30 days
+   counting today), 3M (91), YTD (from 1 January of todayIso's year), 1Y (365) or
+   ALL, and an unknown range reads as 1M. includeCpf follows the Include CPF
+   switch, with the Chart Builder's rule: s.net, or s.net less the CPF class.
+   A row with a bad date or a net that is not a finite number is skipped, a date
+   that appears twice keeps its later row, the input is never changed, and a bad
+   todayIso falls back to the newest row's date. Returns the points in the range
+   ({date, value}, oldest first) and state:
+     'empty'  no usable row at all
+     'single' exactly one usable row in the whole history
+     'sparse' history exists but under 2 points fall in this range
+     'ok'     2+ points, with first, last, change, changePct (null when the first
+              value is 0) and up (last >= first)
+   total is the usable rows across the whole history. */
+function _heroSeries(snapshots, range, includeCpf, todayIso){
+  const byDate = new Map();
+  (Array.isArray(snapshots) ? snapshots : []).forEach(s => {
+    if (!s || typeof s !== 'object' || !kjrValidDate(s.date)) return;
+    if (typeof s.net !== 'number' || !isFinite(s.net)) return;
+    const cpf = Number(s.byClass && s.byClass.cpf);
+    byDate.set(s.date, { date:s.date, value: includeCpf ? s.net : s.net - (isFinite(cpf) ? cpf : 0) });
   });
-  const last = coords[coords.length - 1].split(',');
-  return `<svg class="dash-hero-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
-    <polyline points="${coords.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="${last[0]}" cy="${last[1]}" r="3" fill="var(--accent)"/>
-  </svg>`;
+  const all = Array.from(byDate.values()).sort((a, b) => a.date < b.date ? -1 : (a.date > b.date ? 1 : 0));
+  const key = HERO_RANGES.indexOf(range) === -1 ? '1M' : range;
+  const today = kjrValidDate(todayIso) ? todayIso : (all.length ? all[all.length - 1].date : null);
+  let from = null;   // first day number kept, null keeps everything
+  if (today !== null && key !== 'ALL'){
+    const t = _heroDay(today);
+    from = key === 'YTD' ? _heroDay(today.slice(0, 4) + '-01-01') : (key === '3M' ? t - 90 : (key === '1Y' ? t - 364 : t - 29));
+  }
+  const points = from === null ? all : all.filter(p => _heroDay(p.date) >= from);
+  const out = { state:'ok', range:key, total:all.length, points, first:null, last:null, change:null, changePct:null, up:true };
+  if (all.length === 0) out.state = 'empty';
+  else if (all.length === 1) out.state = 'single';
+  else if (points.length < 2) out.state = 'sparse';
+  else {
+    out.first = points[0];
+    out.last = points[points.length - 1];
+    out.change = out.last.value - out.first.value;
+    out.changePct = out.first.value !== 0 ? out.change / Math.abs(out.first.value) * 100 : null;
+    out.up = out.last.value >= out.first.value;
+  }
+  return out;
+}
+
+/* The figure the hero adds as today's point: the one the headline shows (displayNet,
+   already in the Include CPF terms of the switch). Null, so no live point, when the
+   valuation is incomplete (missing FX) or has nothing to record (total 0 or less),
+   the two cases where autoSnapshot writes nothing either, or when the figure is not a
+   finite number. */
+function _heroLiveValue(valuation, displayNet){
+  if (!valuation || valuation.incomplete) return null;
+  const total = valuation.total;
+  if (typeof total !== 'number' || !isFinite(total) || !(total > 0)) return null;
+  return (typeof displayNet === 'number' && isFinite(displayNet)) ? displayNet : null;
+}
+
+/* The snapshot rows with today's live figure in place of the stored one, so the
+   chart's last point, the pill and a scrub to the end all equal the headline between
+   two boot snapshots (a price refresh moves the headline, the day's row stays as
+   written at boot). Any row dated todayIso (a Singapore date) is replaced, or the
+   point is appended when there is none, and rows dated after today are left alone.
+   liveValue is already in the terms of the Include CPF switch, so the row built for it
+   carries a CPF figure of 0 and _heroSeries reads it back unchanged whichever way the
+   switch points. A liveValue that is not a finite number, or a todayIso that is not a
+   valid date, changes nothing. Display only: returns a new list, never touches the
+   input or its rows, and nothing here is ever stored in DB.snapshots. */
+function _heroWithLive(snapshots, todayIso, liveValue){
+  const rows = Array.isArray(snapshots) ? snapshots : [];
+  if (typeof liveValue !== 'number' || !isFinite(liveValue) || !kjrValidDate(todayIso)) return rows.slice();
+  return rows.filter(s => !(s && typeof s === 'object' && s.date === todayIso)).concat([{ id:'live', date:todayIso, net:liveValue, byClass:{ cpf:0 } }]);
+}
+
+/* Index of the x (0 to 1) nearest to x in a sorted list of xs, the earlier one on
+   a tie, -1 for an empty list. Binary search, so a scrub across thousands of
+   points stays cheap. */
+function _heroNearest(xs, x){
+  const n = xs.length;
+  if (!n) return -1;
+  let lo = 0, hi = n - 1;
+  while (lo < hi){
+    const mid = (lo + hi) >> 1;
+    if (xs[mid] < x) lo = mid + 1; else hi = mid;
+  }
+  return (lo > 0 && Math.abs(xs[lo - 1] - x) <= Math.abs(xs[lo] - x)) ? lo - 1 : lo;
+}
+
+/* Round-number gridlines inside the value domain [lo, hi]: the 1-2-2.5-5 step that
+   leaves three or four lines clear of the top and bottom edges, where each label
+   sits above its line (the biggest such step wins, then five lines, then two, when
+   no step gives three or four). A step is also skipped when its labels would round,
+   so from 1,000 up every line is a multiple of 100 (S$612.5k) and from a million up
+   of 10,000 (S$1.25M, see _heroAxisLabel). Every tick carries y, 0 at the top, 1 at
+   the bottom. */
+function _heroNiceTicks(lo, hi){
+  const span = hi - lo;
+  if (!(span > 0) || !isFinite(span)) return [];
+  const top = Math.max(Math.abs(lo), Math.abs(hi));
+  const unit = top >= 1e6 ? 1e4 : (top >= 1e3 ? 100 : 0);   // the finest value an axis label can show
+  const base = Math.pow(10, Math.floor(Math.log10(span / 3)));
+  let best = null;
+  [1, 2, 2.5, 5, 10, 20, 25, 50].forEach(mult => {
+    const step = mult * base;
+    if (unit && Math.abs(step / unit - Math.round(step / unit)) > 1e-9) return;
+    const ticks = [];
+    for (let k = Math.ceil(lo / step), guard = 0; k * step <= hi && guard < 60; k++, guard++){
+      const y = (hi - k * step) / span;
+      if (y >= 0.12 && y <= 0.96) ticks.push({ value:+(k * step).toPrecision(12), y });
+    }
+    const n = ticks.length;
+    const score = (n === 3 || n === 4) ? 0 : (n === 5 ? 1 : (n === 2 ? 2 : 3));
+    if (n && (best === null || score < best.score || (score === best.score && step > best.step))) best = { ticks, score, step };
+  });
+  return best === null ? [] : best.ticks;
+}
+
+/* Layout numbers for an 'ok' series. x runs 0 to 1 by time, so a gap in the history
+   reads as a gap. y runs 0 (top) to 1 inside a value domain padded 12% either side
+   and at least 1% of the level wide, so a near-flat series does not zoom into noise.
+   grid holds the round-number lines, dates the equal-time ticks along the bottom,
+   labelled by day up to about 100 days and by month beyond (style 'short' or
+   'month' for _pbHumanDate). A month label never repeats, there are fewer ticks
+   when the span is short. */
+function _heroGeometry(points){
+  const t0 = _heroDay(points[0].date), t1 = _heroDay(points[points.length - 1].date);
+  const spanDays = Math.max(1, t1 - t0);
+  let lo = Infinity, hi = -Infinity;
+  points.forEach(p => { if (p.value < lo) lo = p.value; if (p.value > hi) hi = p.value; });
+  const span = Math.max(hi - lo, Math.max(Math.abs(hi), Math.abs(lo)) * 0.01, 1);
+  const mid = (lo + hi) / 2;
+  const dLo = mid - span * 0.62, dHi = mid + span * 0.62;
+  const style = spanDays <= 100 ? 'short' : 'month';
+  const count = style === 'short' ? Math.min(5, spanDays + 1) : Math.min(5, Math.floor(spanDays / 32) + 1);
+  const dates = [];
+  for (let k = 0; k < count; k++){
+    const x = k / (count - 1);
+    dates.push({ x, iso:new Date(Math.round(t0 + x * spanDays) * 86400000).toISOString().slice(0, 10) });
+  }
+  return {
+    xs: points.map(p => (_heroDay(p.date) - t0) / spanDays),
+    ys: points.map(p => (dHi - p.value) / (dHi - dLo)),
+    lo:dLo, hi:dHi, spanDays, style, dates,
+    grid: _heroNiceTicks(dLo, dHi)
+  };
+}
+
+/* Compact axis label for a gridline value. kjrFmtAxis (S$650k, S$612.5k) keeps one
+   decimal, which misstates a round line such as 1.25M, so from a million up this
+   shows up to two decimals (S$1.25M), the finest step _heroNiceTicks allows there. */
+function _heroAxisLabel(v, sym){
+  if (Math.abs(v) < 1e6) return kjrFmtAxis(v, { unit:'money' }, sym);
+  return (v < 0 ? '-' : '') + sym + (Math.abs(v) / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
+}
+
+/* The range tabs: a segmented tablist on desktop, chips under the chart on a phone
+   (the grid in index.html moves it). One tab stop, Left and Right move between tabs. */
+function _heroRangesHtml(range){
+  return '<div class="hero-ranges" role="tablist" aria-label="Chart range">' + HERO_RANGES.map(key => {
+    const on = key === range;
+    return '<button type="button" class="hero-range" role="tab" id="hero-tab-' + key + '" aria-selected="' + on + '" aria-controls="hero-chart" tabindex="' + (on ? '0' : '-1') + '" data-click="setHeroRange" data-a0="' + key + '">' + HERO_RANGE_LABELS[key] + '</button>';
+  }).join('') + '</div>';
+}
+
+/* What a screen reader hears for point i: the date, the amount (never spoken in
+   Hide amounts) and the move since the start of the range. */
+function _heroPointText(hero, i){
+  const pt = hero.points[i], base = hero.first.value;
+  const amount = privacyOn() ? 'amount hidden' : fmt(pt.value, { dp:0 });
+  let trend = 'start of the range';
+  if (i > 0){
+    const diff = pt.value - base;
+    trend = diff === 0 ? 'level with the start of the range'
+      : (diff > 0 ? 'up' : 'down') + (base !== 0 ? ' ' + Math.abs(diff / Math.abs(base) * 100).toFixed(1) + '%' : '') + ' from the start of the range';
+  }
+  return _pbHumanDate(pt.date, 'full') + ', ' + amount + ', ' + trend;
+}
+
+/* The chart area for one series: the SVG area and line (gain or loss colour from the
+   period's result), HTML overlays for the labels so text never stretches with the
+   SVG, the end dot (pulsing) and an overlay that takes the pointer and the keys.
+   A series with no line to draw gets one quiet line of text in its place. */
+function _heroChartHtml(hero, geo, range, whenText){
+  if (hero.state === 'empty') return '<p class="hero-note compact">Your history starts with today\'s snapshot</p>';
+  if (hero.state === 'single') return '<p class="hero-note compact">One snapshot so far, the chart fills in from tomorrow</p>';
+  if (hero.state === 'sparse') return '<p class="hero-note" id="hero-chart" role="tabpanel" aria-labelledby="hero-tab-' + range + '">Not enough history for this range</p>';
+  const last = hero.points.length - 1;
+  const pos = v => (v * 100).toFixed(3) + '%';
+  let line = '';
+  for (let i = 0; i <= last; i++) line += (i ? 'L' : 'M') + (geo.xs[i] * 1000).toFixed(1) + ' ' + (geo.ys[i] * 300).toFixed(1);
+  const sym = _pbCurSym();
+  let prevLabel = '';
+  const grid = geo.grid.map(t => {
+    const label = _heroAxisLabel(toDisplay(t.value, 'SGD'), sym);
+    if (label === prevLabel) return '';
+    prevLabel = label;
+    return '<i style="top:' + pos(t.y) + '"><b class="money-chip">' + kjrEscape(label) + '</b></i>';
+  }).join('');
+  const ticks = geo.dates.map(t => '<span style="left:' + pos(t.x) + '">' + kjrEscape(_pbHumanDate(t.iso, geo.style)) + '</span>').join('');
+  const trend = hero.changePct == null ? '' : (hero.change === 0 ? ', level' : ', ' + (hero.change > 0 ? 'up ' : 'down ') + Math.abs(hero.changePct).toFixed(1) + '%');
+  const name = 'Net worth, ' + whenText + trend;
+  return '<div class="hero-chart ' + (hero.up ? 'up' : 'down') + '" id="hero-chart" role="tabpanel" aria-labelledby="hero-tab-' + range + '">'
+    + '<div class="hero-grid" aria-hidden="true">' + grid + '</div>'
+    + '<div class="hero-plot" id="hero-plot"><svg viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true" focusable="false">'
+    + '<defs><linearGradient id="hero-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity=".22"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>'
+    + '<path d="' + line + 'L1000 300L0 300Z" fill="url(#hero-fill)"/>'
+    + '<path d="' + line + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
+    + '</svg>'
+    + '<i class="hero-cross" id="hero-cross" style="left:' + pos(geo.xs[last]) + '"></i>'
+    + '<i class="hero-dot end" id="hero-dot" style="left:' + pos(geo.xs[last]) + ';top:' + pos(geo.ys[last]) + '"></i></div>'
+    + '<div class="hero-ticks' + (geo.style === 'month' ? ' month' : '') + '" aria-hidden="true">' + ticks + '</div>'
+    + '<div class="hero-scrub" id="hero-scrub" role="slider" tabindex="0" aria-orientation="horizontal" aria-label="' + kjrEscape(name) + '" aria-valuemin="0" aria-valuemax="' + last + '" aria-valuenow="' + last + '" aria-valuetext="' + kjrEscape(_heroPointText(hero, last)) + '"></div>'
+    + '</div>';
+}
+
+/* Scrubbing. At rest (idx null) the hero shows the live figures renderDashboard
+   built, kept in _heroView.rest*. A scrub swaps in one point's value, date and the
+   change from the first point in view, and leaving restores the rest figures.
+   Elements are looked up by id on every call, never held, so a re-render between
+   two events cannot leave this writing to a dead node. */
+function _heroSyncSlider(v, i){
+  const el = document.getElementById('hero-scrub');
+  if (!el) return;
+  el.setAttribute('aria-valuenow', String(i));
+  el.setAttribute('aria-valuetext', _heroPointText(v.hero, i));
+}
+function _heroPlaceDot(v, i, atEnd){
+  const dot = document.getElementById('hero-dot');
+  const cross = document.getElementById('hero-cross');
+  if (cross) cross.style.left = (v.geo.xs[i] * 100) + '%';
+  if (!dot) return;
+  dot.style.left = (v.geo.xs[i] * 100) + '%';
+  dot.style.top = (v.geo.ys[i] * 100) + '%';
+  dot.classList.toggle('end', atEnd);
+}
+function _heroSetScrub(i){
+  const v = _heroView;
+  if (!v || !(i >= 0 && i < v.hero.points.length) || v.idx === i) return;
+  v.idx = i;
+  setRenderCcy('dashboard');
+  const pt = v.hero.points[i], base = v.hero.first.value, diff = pt.value - base;
+  const valueEl = document.getElementById('hero-value');
+  if (valueEl) valueEl.innerHTML = _moneyHtml(fmt(pt.value, { dp:0 }));
+  const pillEl = document.getElementById('hero-pill');
+  if (pillEl) pillEl.innerHTML = base !== 0 ? _gainPill(diff, diff / Math.abs(base) * 100) : '';
+  const whenEl = document.getElementById('hero-when');
+  if (whenEl) whenEl.textContent = _pbHumanDate(pt.date, 'full');
+  _heroPlaceDot(v, i, false);
+  const card = document.getElementById('dash-hero');
+  if (card) card.classList.add('scrubbing');
+  _heroSyncSlider(v, i);
+}
+function _heroEndScrub(){
+  const v = _heroView;
+  if (!v || v.idx === null) return;
+  v.idx = null;
+  const last = v.hero.points.length - 1;
+  const valueEl = document.getElementById('hero-value');
+  if (valueEl) valueEl.innerHTML = v.restValue;
+  const pillEl = document.getElementById('hero-pill');
+  if (pillEl) pillEl.innerHTML = v.restPill;
+  const whenEl = document.getElementById('hero-when');
+  if (whenEl) whenEl.textContent = v.restWhen;
+  _heroPlaceDot(v, last, true);
+  const card = document.getElementById('dash-hero');
+  if (card) card.classList.remove('scrubbing');
+  _heroSyncSlider(v, last);
+}
+/* The point under clientX, measured against the plot box, -1 when there is none to hit (no chart, or the page is hidden). */
+function _heroIdxAt(clientX){
+  const v = _heroView, plot = document.getElementById('hero-plot');
+  if (!v || !plot) return -1;
+  const r = plot.getBoundingClientRect();
+  if (!(r.width > 0)) return -1;
+  return _heroNearest(v.geo.xs, Math.max(0, Math.min(1, (clientX - r.left) / r.width)));
+}
+/* Delegated once at boot (installEventDelegation). A mouse scrubs on hover, a finger
+   or pen while pressed. touch-action: pan-y keeps vertical page scroll working,
+   and the browser sends pointercancel if it takes a gesture over. */
+function installHeroEvents(){
+  const scrubOf = e => (e.target && e.target.closest) ? e.target.closest('.hero-scrub') : null;
+  const scrubAt = e => { const i = _heroIdxAt(e.clientX); if (i >= 0) _heroSetScrub(i); };
+  document.addEventListener('pointerdown', e => {
+    if (!scrubOf(e) || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+    scrubAt(e);
+  });
+  document.addEventListener('pointermove', e => { if (scrubOf(e)) scrubAt(e); });
+  document.addEventListener('pointerup', e => { if (scrubOf(e) && e.pointerType !== 'mouse') _heroEndScrub(); });
+  document.addEventListener('pointercancel', e => { if (scrubOf(e)) _heroEndScrub(); });
+  // pointerleave does not bubble, so listen in the capture phase.
+  document.addEventListener('pointerleave', e => { if (scrubOf(e)) _heroEndScrub(); }, true);
+  document.addEventListener('focusout', e => { if (scrubOf(e)) _heroEndScrub(); });
+  // A screen reader reads aria-valuetext on focus, and Hide amounts may have changed since the last render.
+  document.addEventListener('focusin', e => {
+    const v = _heroView;
+    if (v && scrubOf(e)) _heroSyncSlider(v, v.idx === null ? v.hero.points.length - 1 : v.idx);
+  });
+  document.addEventListener('keydown', e => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    // Range tabs: Left and Right move between them (selection follows focus), Home and End jump.
+    const tab = e.target && e.target.closest ? e.target.closest('.hero-range') : null;
+    if (tab){
+      const at = HERO_RANGES.indexOf(tab.getAttribute('data-a0')), size = HERO_RANGES.length;
+      const to = e.key === 'ArrowRight' ? (at + 1) % size : (e.key === 'ArrowLeft' ? (at + size - 1) % size : (e.key === 'Home' ? 0 : (e.key === 'End' ? size - 1 : -1)));
+      if (at < 0 || to < 0) return;
+      e.preventDefault();
+      if (setHeroRange(HERO_RANGES[to])){
+        const next = document.getElementById('hero-tab-' + HERO_RANGES[to]);
+        if (next) next.focus();
+      }
+      return;
+    }
+    // Chart: Left and Right step point by point, Home and End jump, Escape restores.
+    const v = _heroView;
+    if (!scrubOf(e) || !v) return;
+    const last = v.hero.points.length - 1, at = v.idx === null ? last : v.idx;
+    let next = null;
+    if (e.key === 'ArrowLeft') next = Math.max(0, at - 1);
+    else if (e.key === 'ArrowRight') next = v.idx === null ? null : Math.min(last, at + 1);
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = last;
+    else if (e.key === 'Escape'){ _heroEndScrub(); return; }
+    else return;
+    e.preventDefault();
+    if (next !== null) _heroSetScrub(next);
+  });
 }
 
 /* ─── Dashboard building blocks ─────────────────────────────────────────
@@ -12310,7 +12629,10 @@ function reviewTargets(){
   }, 80);
 }
 
-function renderDashboard(){
+/* opts.heroOnly redraws the hero card alone (a range tab pressed), leaving the
+   rows and saved charts below untouched so their Chart.js canvases do not
+   rebuild and animate on every tab. */
+function renderDashboard(opts){
   // Never reflow the stack mid-drag (a price refresh or stray event would
   // destroy the lifted card and leave it stuck).
   if (_dashSortable && _dashSortable.isDragging()) return;
@@ -12332,10 +12654,10 @@ function renderDashboard(){
   // Net worth hero: secondary (ex-CPF) only shown when CPF is on. The
   // Include CPF switch beside the label carries the with/without state.
   const headline = valuation.incomplete ? 'Known net worth (incomplete)' : 'Net worth';
-  const cpfSwitch = `<button type="button" class="switch" role="switch" aria-checked="${_dashShowCpf}" data-click="toggleDashCpf"><span class="switch-track" aria-hidden="true"></span>Include CPF</button>`;
+  const cpfSwitch = `<button type="button" class="switch" id="hero-cpf-switch" role="switch" aria-checked="${_dashShowCpf}" data-click="toggleDashCpf"><span class="switch-track" aria-hidden="true"></span>Include CPF</button>`;
   const heroSecondary = _dashShowCpf
-    ? `<div style="width:1px;height:48px;background:var(--border);align-self:center;flex-shrink:0"></div>
-    <div><div class="dash-hero-label">${valuation.incomplete ? 'Known ex-CPF subtotal' : 'Ex-CPF'}</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${_moneyHtml(fmt(netExCpf, {dp:0}))}</div></div>`
+    ? `<div class="dash-hero-sec"><div style="width:1px;height:48px;background:var(--border);align-self:center;flex-shrink:0"></div>
+    <div><div class="dash-hero-label">${valuation.incomplete ? 'Known ex-CPF subtotal' : 'Ex-CPF'}</div><div class="dash-hero-value" style="font-size:28px;color:var(--text2)">${_moneyHtml(fmt(netExCpf, {dp:0}))}</div></div></div>`
     : '';
   const fxExclusionNote = valuation.incomplete
     ? `<div class="dash-hero-label" style="margin-top:4px">Known subtotal excludes ${valuation.missingFxCount} asset${valuation.missingFxCount === 1 ? '' : 's'} with missing FX, refresh FX in Settings</div>`
@@ -12346,22 +12668,51 @@ function renderDashboard(){
     ? `<div class="dash-hero-label" style="margin-top:4px">Includes cost-basis estimate for ${estimateCount} stock/crypto position${estimateCount>1?'s':''} without a live price (${fmt(estimateAmount,{dp:0})})</div>`
     : '';
 
-  // Change under the number: latest snapshot vs the closest one >=28 days
-  // older, in the same full/ex-CPF terms as the headline figure. Nothing at
-  // all (not an empty pill) when fewer than 2 qualifying snapshots exist.
-  const snaps = DB.snapshots || [];
-  const netOf = s => _dashShowCpf ? s.net : (s.net - ((s.byClass && s.byClass.cpf) || 0));
-  const change = valuation.incomplete ? null : _heroMonthlyChange(snaps, netOf);
-  const deltaRow = change
-    ? `<div class="dash-hero-delta">${_gainPill(change.diff, change.pct)}<span class="dash-hero-when">past month</span></div>`
-    : '';
-  const spark = valuation.incomplete ? '' : _heroSparkline(snaps, netOf);
+  // Change under the number, the range tabs and the chart all read one series
+  // from DB.snapshots for the chosen range (_heroSeries), in the same full or
+  // ex-CPF terms as the headline figure, with today's point taken from that
+  // headline figure (_heroWithLive, display only, never stored) so the chart's end,
+  // the pill and a scrub to the end all agree with the number above them. An
+  // incomplete valuation draws none of them (a known subtotal has no history to
+  // compare with), and a range with under 2 points draws no pill at all, never an
+  // empty one.
+  const whenLabels = { '1M':'past month', '3M':'past 3 months', YTD:'this year', '1Y':'past year', ALL:'all time' };
+  const heroRange = _heroRangeGet();
+  const todayIso = _isoDateSG(new Date());
+  const hero = valuation.incomplete ? null : _heroSeries(_heroWithLive(DB.snapshots, todayIso, _heroLiveValue(valuation, displayNet)), heroRange, _dashShowCpf, todayIso);
+  const heroOk = !!hero && hero.state === 'ok';
+  const geo = heroOk ? _heroGeometry(hero.points) : null;
+  const change = heroOk && hero.changePct != null ? { diff:hero.change, pct:hero.changePct } : null;
+  const valueHtml = _moneyHtml(fmt(displayNet, {dp:0}));
+  const pillHtml = change ? _gainPill(change.diff, change.pct) : '';
+  const whenText = change ? whenLabels[heroRange] : '';
+  // A range short of history keeps an empty row, so the chart does not jump as the tabs change.
+  const deltaRow = heroOk
+    ? `<div class="dash-hero-delta"><span id="hero-pill">${pillHtml}</span><span class="dash-hero-when" id="hero-when">${whenText}</span></div>`
+    : (hero && hero.state === 'sparse' ? '<div class="dash-hero-delta"></div>' : '');
+  const heroRanges = hero && (heroOk || hero.state === 'sparse') ? _heroRangesHtml(heroRange) : '';
+  const heroChart = hero ? _heroChartHtml(hero, geo, heroRange, whenLabels[heroRange]) : '';
 
-  nwEl.innerHTML = `<div class="dash-hero">
-    <div><div class="dash-hero-label">${headline}${cpfSwitch}</div><div class="dash-hero-value">${_moneyHtml(fmt(displayNet, {dp:0}))}</div>${deltaRow}${marketEstimateNote}${fxExclusionNote}</div>
-    ${heroSecondary}
-    ${spark}
+  // Rebuilding the card drops keyboard focus, so put it back on the same control.
+  const keepFocus = nwEl.contains(document.activeElement) ? document.activeElement.id : '';
+  nwEl.innerHTML = `<div class="dash-hero" id="dash-hero">
+    <div class="dash-hero-head">
+      <div><div class="dash-hero-label">${headline}${cpfSwitch}</div><div class="dash-hero-value" id="hero-value">${valueHtml}</div>${deltaRow}${marketEstimateNote}${fxExclusionNote}</div>
+      ${heroSecondary}
+    </div>
+    ${heroRanges}
+    ${heroChart}
   </div>`;
+  // Scrub state sits outside the DOM just rebuilt, at rest after every render.
+  _heroView = heroOk ? { hero, geo, restValue:valueHtml, restPill:pillHtml, restWhen:whenText, idx:null } : null;
+  if (keepFocus){
+    const back = document.getElementById(keepFocus);
+    if (back) back.focus({ preventScroll:true });
+  }
+  if (opts && opts.heroOnly){
+    if (_dashArrange) _dashDecorate();   // the rebuild removed the Arrange controls
+    return;
+  }
 
   // Data integrity / reconciliation — the ok state is a phrase in the status
   // line under the page title, the bad state adds a full bar below the hero
@@ -12712,6 +13063,7 @@ function installEventDelegation(){
     ledgerViewByStock:   () => { _ledgerView = 'by-stock'; renderStockTxns(); },
     // dashboard
     toggleDashCpf:       () => toggleDashCpf(),
+    setHeroRange:        (el) => setHeroRange(A(el)[0]),
     refreshDashPrices:   () => refreshDashPrices(),
     reviewTargets:       () => reviewTargets(),
     toggleInfoTip:       (el) => { const tip = el.closest('.info-tip'); if (!tip) return; tip.classList.remove('dismissed'); tip.classList.toggle('open'); },
@@ -12821,6 +13173,8 @@ function installEventDelegation(){
     const z = e.target.closest('[data-drop]');
     if (z){ e.preventDefault(); z.classList.remove('drag-over'); pbDrop(z.getAttribute('data-drop'), e.dataTransfer.getData('text/plain')); }
   });
+  // Dashboard hero chart: scrub by pointer and keys, range tabs by keys.
+  installHeroEvents();
 }
 
 async function boot(){

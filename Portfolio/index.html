@@ -479,9 +479,15 @@ textarea.fi{resize:vertical;min-height:70px}
 @media (hover:hover){.alloc-seg:hover{filter:brightness(1.1)}}
 .dash-chart-wrap{position:relative;height:260px}
 /* Dashboard hero: solid card (glass reserved for topbar/modals/toasts/bottom
-   bar per the restyle), value/label/subline on the left, sparkline on the
-   right. */
-.dash-hero{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px 22px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+   bar per the restyle). Figures on the left, the range tabs top right, the area
+   chart below. Under 641px the tabs become chips under the chart and the chart
+   runs edge to edge of the card. */
+.dash-hero{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px 22px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"head ranges" "chart chart";column-gap:20px;align-items:start}
+.dash-hero-head{grid-area:head;display:flex;align-items:center;gap:20px;flex-wrap:wrap;min-width:0}
+/* The Ex-CPF figure beside the headline. It is a live figure, not part of a scrub, so it dims while scrubbing. */
+.dash-hero-sec{display:flex;align-items:center;gap:20px;transition:opacity 0.15s ease-out}
+.dash-hero.scrubbing .dash-hero-sec{opacity:0.45}
+@media (prefers-reduced-motion:reduce){.dash-hero-sec{transition:none}}
 .dash-hero-label{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px}
 .dash-hero-value{font-family:var(--font-display);font-size:48px;font-weight:300;letter-spacing:-0.035em;font-variant-numeric:tabular-nums;line-height:1.08}
 /* Currency prefix on display and metric figures (wrapped by _moneyHtml): smaller and
@@ -489,8 +495,53 @@ textarea.fi{resize:vertical;min-height:70px}
 .ccy{font-size:0.72em;font-weight:500;color:var(--text3);letter-spacing:0;margin-right:1px}
 .dash-hero-value .ccy{font-size:0.45em;margin-right:4px;vertical-align:0.62em}
 @media (max-width:640px){.dash-hero-value{font-size:36px;line-height:1.11}}
-.dash-hero-spark{flex-shrink:0;margin-left:auto}
-/* Change under the headline number: a gain or loss pill, then "past month". */
+/* Range tabs (1M, 3M, YTD, 1Y, All): a segmented tablist, the selected segment on --bg3. The group stays on the card colour so the dim tab text (--text3) keeps 4.5:1 in the light theme too. */
+.hero-ranges{grid-area:ranges;justify-self:end;display:inline-flex;gap:2px;padding:3px;border-radius:10px;background:var(--bg2);border:1px solid var(--border)}
+.hero-range{border:0;background:none;padding:5px 11px;border-radius:7px;font:inherit;font-size:12px;font-weight:700;line-height:16px;color:var(--text3);cursor:pointer;transition:background 0.15s ease-out,color 0.15s ease-out}
+@media (hover:hover){.hero-range:hover{color:var(--text)}}
+.hero-range[aria-selected="true"]{background:var(--bg3);color:var(--text);box-shadow:inset 0 0 0 1px var(--border2)}
+.hero-range:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+@media (prefers-reduced-motion:reduce){.hero-range{transition:none}}
+/* Hero chart. The SVG carries only the stretched area and line (non-scaling stroke), every label,
+   dot and the crosshair is HTML laid over it by percentage, so text and dots never stretch.
+   Plot and gridlines share one box, so a gridline's top % is its y in the SVG. The plot stops
+   --hc-r short of the right edge, so the pulsing end dot is never clipped. */
+.hero-chart{grid-area:chart;position:relative;height:230px;margin-top:10px;overflow:hidden;touch-action:pan-y;--hc-r:14px;--hc-edge:0px}
+.hero-chart.up{color:var(--gain)}
+.hero-chart.down{color:var(--loss)}
+.hero-grid{position:absolute;left:0;right:0;top:0;bottom:26px;pointer-events:none}
+.hero-grid i{position:absolute;left:0;right:0;border-top:1px dashed var(--border)}
+/* The dashed lines sit under the chart line, the labels above it (z-index) and clear of the end dot, with a card-coloured halo so a line crossing one stays readable. */
+.hero-grid b{position:absolute;z-index:1;right:calc(var(--hc-r) + 16px);top:-17px;font-size:10.5px;font-style:normal;font-weight:500;line-height:14px;color:var(--text3);font-variant-numeric:tabular-nums;text-shadow:0 0 3px var(--bg2),0 0 3px var(--bg2)}
+.hero-plot{position:absolute;left:0;right:var(--hc-r);top:0;bottom:26px}
+.hero-plot svg{position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible}
+.hero-ticks{position:absolute;left:0;right:var(--hc-r);bottom:0;height:20px;font-size:10.5px;line-height:20px;color:var(--text3);pointer-events:none}
+.hero-ticks span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.hero-ticks span:first-child{transform:none;margin-left:var(--hc-edge)}
+.hero-ticks span:last-child{transform:translateX(-100%)}
+.hero-scrub{position:absolute;left:0;right:0;top:0;bottom:26px;z-index:3;cursor:crosshair;touch-action:pan-y;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.hero-scrub:focus{outline:none}
+.hero-scrub:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:var(--radius)}
+.hero-cross{position:absolute;top:0;bottom:0;z-index:2;width:1px;margin-left:-0.5px;background:var(--border2);opacity:0;pointer-events:none;transition:opacity 0.12s}
+.dash-hero.scrubbing .hero-cross{opacity:1}
+.hero-dot{position:absolute;z-index:2;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-radius:50%;background:var(--bg2);border:2.5px solid currentColor;pointer-events:none}
+.hero-dot.end::after{content:"";position:absolute;left:-7px;right:-7px;top:-7px;bottom:-7px;border-radius:50%;border:1px solid currentColor;opacity:0.35;animation:hero-pulse 2.4s ease-out infinite}
+@keyframes hero-pulse{0%{transform:scale(0.6);opacity:0.5}100%{transform:scale(1.5);opacity:0}}
+@media (prefers-reduced-motion:reduce){.hero-dot.end::after{animation:none;content:none}.hero-cross{transition:none}}
+/* A series with no line to draw: one quiet line in the chart's place. */
+.hero-note{grid-area:chart;display:flex;align-items:center;justify-content:center;min-height:230px;margin:10px 0 0;padding:0 16px;text-align:center;font-size:13px;line-height:18px;color:var(--text3)}
+.hero-note.compact{min-height:96px}
+@media (max-width:640px){
+  .dash-hero{grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "chart" "ranges"}
+  .hero-chart{height:180px;margin-left:-22px;margin-right:-22px;--hc-r:16px;--hc-edge:16px}
+  /* Month labels (Nov 2025) are wide: on a phone keep the first, middle and last, and the first, one in the middle and the last when there are four. */
+  .hero-ticks.month span:nth-child(2),.hero-ticks.month span:nth-child(4):not(:last-child){display:none}
+  .hero-note{min-height:180px}
+  .hero-note.compact{min-height:88px}
+  .hero-ranges{justify-self:stretch;display:flex;gap:4px;padding:0;margin-top:2px;border:0;background:none}
+  .hero-range{flex:1 1 0;min-height:36px;padding:6px 4px;text-align:center}
+}
+/* Change under the headline number: a gain or loss pill, then the range label ("past month"). */
 .dash-hero-delta{display:flex;align-items:center;gap:10px;margin-top:8px;min-height:24px}
 .dash-hero-when{font-size:12.5px;color:var(--text3)}
 .dash-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums}
@@ -1764,12 +1815,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.70"></script>
-<script src="Worker/kjr-sortable.js?v=2.70"></script>
-<script src="Worker/kjr-vault.js?v=2.70"></script>
-<script src="Worker/kjr-migration.js?v=2.70"></script>
-<script src="Worker/supabase.js?v=2.70"></script>
-<script src="Worker/kjr-nas.js?v=2.70"></script>
-<script src="Worker/app.js?v=2.70"></script>
+<script src="Worker/kjr-core.js?v=2.71"></script>
+<script src="Worker/kjr-sortable.js?v=2.71"></script>
+<script src="Worker/kjr-vault.js?v=2.71"></script>
+<script src="Worker/kjr-migration.js?v=2.71"></script>
+<script src="Worker/supabase.js?v=2.71"></script>
+<script src="Worker/kjr-nas.js?v=2.71"></script>
+<script src="Worker/app.js?v=2.71"></script>
 </body>
 </html>

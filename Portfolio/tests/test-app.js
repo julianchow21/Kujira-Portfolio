@@ -119,9 +119,12 @@ const FUNCTION_TARGETS = [
   '_gainPill', '_monogram', '_dayMoveSgd', '_stockDayMove', '_rebalanceThreshold', '_allocRows', '_allocInsight',
   '_whereModel', '_allocationData', '_allocRowHtml', '_dashWhereItSits',
   '_ringSvg', '_miniBars', '_nextPayday', '_comingUp',
-  '_ymOf', '_cfMonthRollup', '_insuranceDueWithin', '_upcomingDividendRows', '_cryptoRow', 'isStale'
+  '_ymOf', '_cfMonthRollup', '_insuranceDueWithin', '_upcomingDividendRows', '_cryptoRow', 'isStale',
+  // Hero chart (v2.71): the series and layout maths, the remembered range, and the markup builders
+  '_pbHumanDate', '_heroRangeGet', 'setHeroRange', '_heroDay', '_heroSeries', '_heroNearest', '_heroNiceTicks', '_heroGeometry',
+  '_heroLiveValue', '_heroWithLive', '_heroAxisLabel', '_heroRangesHtml', '_heroPointText', '_heroChartHtml'
 ];
-const CONST_TARGETS = ['APP_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES'];
+const CONST_TARGETS = ['APP_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState'];
 
 const extractedFns = {};
 const missingFns = [];
@@ -1548,19 +1551,21 @@ async function runTests(){
 
   /* ═══ Explore page, saved charts and the dashboard switch (onDashboard) ═══ */
 
-  test('pbLoadSaved - onDashboard defaults on read: off only for the seeded Allocation doughnut, and the DB is never written', () => {
+  test('pbLoadSaved - onDashboard defaults on read: off for the two seeded charts the dashboard already covers (Allocation, Net worth over time), on for every other, and the DB is never written', () => {
     const raw = [
       { id:'def_alloc', title:'Allocation', source:'allocation', xFields:['assetClass'], yFields:['value'], chartType:'doughnut', pinned:true, order:1 },
       { id:'def_networth', title:'Net worth over time', source:'networth', pinned:true, order:0 },
+      { id:'def_cashflow', title:'Cashflow', source:'cashflow', xFields:['month'], yFields:['income'], pinned:true, order:2 },
       { id:'sc_mine', title:'Mine', source:'holdings', xFields:['symbol'], yFields:['marketValue'], order:5 }
     ];
     const sb = chartSandbox(raw);
     const loaded = sb.pbLoadSaved();
     const byId = id => loaded.find(c => c.id === id);
     assert.strictEqual(byId('def_alloc').onDashboard, false);
-    assert.strictEqual(byId('def_networth').onDashboard, true);
+    assert.strictEqual(byId('def_networth').onDashboard, false);
+    assert.strictEqual(byId('def_cashflow').onDashboard, true);
     assert.strictEqual(byId('sc_mine').onDashboard, true);
-    assert.deepStrictEqual(Array.from(loaded.map(c => c.id)), ['def_networth', 'def_alloc', 'sc_mine']);
+    assert.deepStrictEqual(Array.from(loaded.map(c => c.id)), ['def_networth', 'def_alloc', 'def_cashflow', 'sc_mine']);
     // Read-time default only: the stored records still carry no onDashboard field.
     raw.forEach(c => assert.strictEqual('onDashboard' in c, false));
     assert.strictEqual(sb.calls.saves, 0);
@@ -1569,18 +1574,23 @@ async function runTests(){
   test('pbLoadSaved - an explicit onDashboard is kept, a non-boolean value falls back to the default', () => {
     const keep = chartSandbox([
       { id:'def_alloc', source:'allocation', xFields:['assetClass'], yFields:['value'], onDashboard:true, order:1 },
+      { id:'def_networth', source:'networth', onDashboard:true, order:0 },
       { id:'sc_off', source:'holdings', xFields:['symbol'], yFields:['marketValue'], onDashboard:false, order:2 }
     ]).pbLoadSaved();
     assert.strictEqual(keep.find(c => c.id === 'def_alloc').onDashboard, true);
+    // an explicit true on Net worth over time (a v2.70 install seeded it on) is never overridden by the new default
+    assert.strictEqual(keep.find(c => c.id === 'def_networth').onDashboard, true);
     assert.strictEqual(keep.find(c => c.id === 'sc_off').onDashboard, false);
 
     const junk = chartSandbox([
       { id:'def_alloc', source:'allocation', xFields:['assetClass'], yFields:['value'], onDashboard:'yes', order:1 },
+      { id:'def_networth', source:'networth', onDashboard:'yes', order:0 },
       { id:'sc_a', source:'holdings', xFields:['symbol'], yFields:['marketValue'], onDashboard:'false', order:2 },
       { id:'sc_b', source:'holdings', xFields:['symbol'], yFields:['marketValue'], onDashboard:0, order:3 },
       { id:'sc_c', source:'holdings', xFields:['symbol'], yFields:['marketValue'], onDashboard:null, order:4 }
     ]).pbLoadSaved();
     assert.strictEqual(junk.find(c => c.id === 'def_alloc').onDashboard, false);
+    assert.strictEqual(junk.find(c => c.id === 'def_networth').onDashboard, false);
     ['sc_a', 'sc_b', 'sc_c'].forEach(id => assert.strictEqual(junk.find(c => c.id === id).onDashboard, true, id));
   });
 
@@ -1660,12 +1670,14 @@ async function runTests(){
     assert.strictEqual(sb.DB.settings.savedCharts[0].onDashboard, false);
   });
 
-  test('pbSeedDefaults - seeds the three defaults once with Allocation off the dashboard, and never re-seeds an empty list', () => {
+  test('pbSeedDefaults - seeds the three defaults once with Net worth over time and Allocation off the dashboard, and never re-seeds an empty list', () => {
     const sb = chartSandbox(null);
     sb.pbSeedDefaults();
     const seeded = sb.DB.settings.savedCharts;
     assert.deepStrictEqual(Array.from(seeded.map(c => c.id)), ['def_networth', 'def_alloc', 'def_cashflow']);
-    assert.deepStrictEqual(Array.from(seeded.map(c => c.onDashboard)), [true, false, true]);
+    assert.deepStrictEqual(Array.from(seeded.map(c => c.onDashboard)), [false, false, true]);
+    // seeded off yet still listed: the read-back keeps the explicit false
+    assert.deepStrictEqual(Array.from(sb.pbLoadSaved().map(c => c.onDashboard)), [false, false, true]);
     assert.deepStrictEqual(Array.from(seeded.map(c => c.pinned)), [true, true, true]);
     const once = JSON.stringify(seeded);
     sb.pbSeedDefaults();
@@ -1676,6 +1688,19 @@ async function runTests(){
     emptied.pbSeedDefaults();
     assert.strictEqual(emptied.DB.settings.savedCharts.length, 0);
     assert.strictEqual(emptied.calls.saves, 0);
+  });
+
+  await testAsync('pbToggleOnDashboard - Net worth over time, seeded off because the hero chart covers it, can be switched on and off again from Explore', async () => {
+    const sb = chartSandbox(null);
+    sb.pbSeedDefaults();
+    const stored = () => sb.DB.settings.savedCharts.find(c => c.id === 'def_networth');
+    assert.strictEqual(stored().onDashboard, false);
+    assert.strictEqual(await sb.pbToggleOnDashboard('def_networth'), true);
+    assert.strictEqual(stored().onDashboard, true);
+    assert.strictEqual(await sb.pbToggleOnDashboard('def_networth'), true);
+    assert.strictEqual(stored().onDashboard, false);
+    // the other two seeded charts are untouched by the switch
+    assert.deepStrictEqual(Array.from(sb.DB.settings.savedCharts.map(c => c.onDashboard)), [false, false, true]);
   });
 
   test('_pbSavedDescriptor - names the chart type and source, as a line for net worth, CPF and price history', () => {
@@ -2353,6 +2378,611 @@ async function runTests(){
     // every amount on the new cards sits in a .money-chip, so privacy mode blurs it
     assert.ok(holdings.includes('dash-hval money-chip') && today.includes('money-chip'));
     assert.ok(indexSrc.includes('html.privacy .money-chip,'));
+  });
+
+  /* ═══ Hero chart (v2.71): series, ranges, geometry, the remembered range, markup and wiring ═══ */
+
+  // The vm sandbox has its own Object and Array, so results are copied to plain host objects before a deep compare.
+  const plain = x => JSON.parse(JSON.stringify(x));
+  const heroDay = iso => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000;
+  const heroIso = day => new Date(day * 86400000).toISOString().slice(0, 10);
+  // One snapshot a day for `days` days ending on endIso, valued f(i) with i 0 at the oldest.
+  const dailySnaps = (endIso, days, f, cpf) => Array.from({ length:days }, (_, i) => ({
+    id:'s' + i, date:heroIso(heroDay(endIso) - (days - 1 - i)), net:f(i),
+    byClass:{ stocks:0, cash:0, cpf:cpf == null ? 0 : cpf, realestate:0, crypto:0, insurance:0 }
+  }));
+  const HERO_TODAY = '2026-10-08';
+  const HERO_RANGES = ['1M', '3M', 'YTD', '1Y', 'ALL'];
+
+  test('_heroSeries - each range cuts its own window: 1M is 30 days counting today, 3M 91, 1Y 365, YTD from 1 January, ALL everything', () => {
+    const sb = freshSandbox();
+    const snaps = dailySnaps(HERO_TODAY, 400, i => 600000 + i * 100);
+    const run = range => sb._heroSeries(snaps, range, true, HERO_TODAY);
+    const len = range => run(range).points.length;
+    assert.deepStrictEqual(['1M', '3M', 'YTD', '1Y', 'ALL'].map(len), [30, 91, 281, 365, 400]);
+    assert.strictEqual(run('1M').points[0].date, '2026-09-09');
+    assert.strictEqual(run('3M').points[0].date, '2026-07-10');
+    assert.strictEqual(run('1Y').points[0].date, '2025-10-09');
+    assert.strictEqual(run('YTD').points[0].date, '2026-01-01');
+    assert.strictEqual(run('ALL').points[0].date, '2025-09-04');
+    HERO_RANGES.forEach(range => {
+      const s = run(range);
+      assert.strictEqual(s.state, 'ok'); assert.strictEqual(s.range, range); assert.strictEqual(s.total, 400);
+      assert.strictEqual(s.last.date, HERO_TODAY);
+    });
+    // the boundary day itself is in, the day before is out
+    const edge = (day, range) => sb._heroSeries([{ date:day, net:1 }, { date:HERO_TODAY, net:2 }], range, true, HERO_TODAY).state;
+    assert.strictEqual(edge('2026-09-09', '1M'), 'ok');   assert.strictEqual(edge('2026-09-08', '1M'), 'sparse');
+    assert.strictEqual(edge('2026-07-10', '3M'), 'ok');   assert.strictEqual(edge('2026-07-09', '3M'), 'sparse');
+    assert.strictEqual(edge('2025-10-09', '1Y'), 'ok');   assert.strictEqual(edge('2025-10-08', '1Y'), 'sparse');
+    assert.strictEqual(edge('2026-01-01', 'YTD'), 'ok');  assert.strictEqual(edge('2025-12-31', 'YTD'), 'sparse');
+  });
+
+  test('_heroSeries - 0 snapshots is empty, 1 is single in every range, 2 draw a line, and a non-list reads as empty', () => {
+    const sb = freshSandbox();
+    HERO_RANGES.forEach(range => {
+      const none = plain(sb._heroSeries([], range, false, HERO_TODAY));
+      assert.deepStrictEqual(none, { state:'empty', range, total:0, points:[], first:null, last:null, change:null, changePct:null, up:true });
+      [null, undefined, 'nope', 42, {}].forEach(bad => assert.strictEqual(sb._heroSeries(bad, range, false, HERO_TODAY).state, 'empty'));
+      const one = plain(sb._heroSeries(dailySnaps(HERO_TODAY, 1, () => 650000), range, false, HERO_TODAY));
+      assert.strictEqual(one.state, 'single'); assert.strictEqual(one.total, 1); assert.strictEqual(one.points.length, 1);
+      assert.strictEqual(one.first, null); assert.strictEqual(one.change, null);
+      // a lone old row is still single, and just sits outside every window but ALL
+      const old = plain(sb._heroSeries(dailySnaps('2024-01-15', 1, () => 650000), range, false, HERO_TODAY));
+      assert.strictEqual(old.state, 'single'); assert.strictEqual(old.points.length, range === 'ALL' ? 1 : 0);
+      const two = plain(sb._heroSeries(dailySnaps(HERO_TODAY, 2, i => 650000 + i * 1000), range, false, HERO_TODAY));
+      assert.strictEqual(two.state, 'ok'); assert.strictEqual(two.points.length, 2);
+      assert.strictEqual(two.first.value, 650000); assert.strictEqual(two.last.value, 651000);
+      assert.strictEqual(two.change, 1000); assert.ok(Math.abs(two.changePct - 1000 / 650000 * 100) < 1e-12); assert.strictEqual(two.up, true);
+    });
+  });
+
+  test('_heroSeries - a range with under 2 points is sparse while the history has more, and stays selectable', () => {
+    const sb = freshSandbox();
+    const rows = [{ date:'2025-01-01', net:600000 }, { date:'2026-07-20', net:640000 }, { date:HERO_TODAY, net:650000 }];
+    const state = (list, range) => sb._heroSeries(list, range, true, HERO_TODAY).state;
+    assert.deepStrictEqual(HERO_RANGES.map(r => state(rows, r)), ['sparse', 'ok', 'ok', 'ok', 'ok']);
+    // a year-old first row and today: only All has two points, every shorter range stays selectable and reads sparse
+    assert.deepStrictEqual(HERO_RANGES.map(r => state([rows[0], rows[2]], r)), ['sparse', 'sparse', 'sparse', 'sparse', 'ok']);
+    const oneInWindow = plain(sb._heroSeries(rows, '1M', true, HERO_TODAY));
+    assert.strictEqual(oneInWindow.points.length, 1); assert.strictEqual(oneInWindow.total, 3);
+    assert.strictEqual(oneInWindow.first, null); assert.strictEqual(oneInWindow.last, null);
+    assert.strictEqual(oneInWindow.change, null); assert.strictEqual(oneInWindow.changePct, null);
+    // nothing at all in the window is sparse too, not empty
+    const gap = plain(sb._heroSeries([{ date:'2026-05-01', net:1 }, { date:'2026-05-02', net:2 }], '1M', true, HERO_TODAY));
+    assert.strictEqual(gap.state, 'sparse'); assert.strictEqual(gap.points.length, 0); assert.strictEqual(gap.total, 2);
+  });
+
+  test('_heroSeries - 400 daily snapshots: every range gives its change, percentage and direction', () => {
+    const sb = freshSandbox();
+    const snaps = dailySnaps(HERO_TODAY, 400, i => 600000 + i * 100);
+    const m = sb._heroSeries(snaps, '1M', true, HERO_TODAY);
+    assert.strictEqual(m.first.value, 637000); assert.strictEqual(m.last.value, 639900);
+    assert.strictEqual(m.change, 2900); assert.ok(Math.abs(m.changePct - 2900 / 637000 * 100) < 1e-12); assert.strictEqual(m.up, true);
+    const all = sb._heroSeries(snaps, 'ALL', true, HERO_TODAY);
+    assert.strictEqual(all.first.value, 600000); assert.strictEqual(all.change, 39900);
+    // a falling series reads down, with a negative change and percentage
+    const falling = sb._heroSeries(dailySnaps(HERO_TODAY, 400, i => 700000 - i * 100), '3M', true, HERO_TODAY);
+    assert.strictEqual(falling.up, false); assert.ok(falling.change < 0 && falling.changePct < 0);
+    assert.strictEqual(falling.change, -9000);
+    // level is not a loss: last equal to first reads up, with a zero change
+    const level = sb._heroSeries(dailySnaps(HERO_TODAY, 40, () => 650000), '1M', true, HERO_TODAY);
+    assert.strictEqual(level.up, true); assert.strictEqual(level.change, 0); assert.strictEqual(level.changePct, 0);
+    // a first value of 0 gives a change but no percentage
+    const fromZero = sb._heroSeries([{ date:'2026-10-07', net:0 }, { date:HERO_TODAY, net:100 }], '1M', true, HERO_TODAY);
+    assert.strictEqual(fromZero.state, 'ok'); assert.strictEqual(fromZero.change, 100); assert.strictEqual(fromZero.changePct, null);
+  });
+
+  test('_heroSeries - YTD on 1 January is that day alone, on 31 December the whole year, 366 days in a leap year', () => {
+    const sb = freshSandbox();
+    const jan1 = sb._heroSeries(dailySnaps('2026-01-01', 10, i => 600000 + i), 'YTD', true, '2026-01-01');
+    assert.strictEqual(jan1.state, 'sparse'); assert.strictEqual(jan1.points.length, 1);
+    assert.strictEqual(jan1.points[0].date, '2026-01-01'); assert.strictEqual(jan1.total, 10);
+    const jan2 = sb._heroSeries(dailySnaps('2026-01-02', 10, i => 600000 + i), 'YTD', true, '2026-01-02');
+    assert.strictEqual(jan2.state, 'ok'); assert.strictEqual(jan2.points.length, 2); assert.strictEqual(jan2.first.date, '2026-01-01');
+    const dec31 = sb._heroSeries(dailySnaps('2026-12-31', 400, i => 600000 + i), 'YTD', true, '2026-12-31');
+    assert.strictEqual(dec31.points.length, 365); assert.strictEqual(dec31.first.date, '2026-01-01'); assert.strictEqual(dec31.last.date, '2026-12-31');
+    assert.strictEqual(sb._heroSeries(dailySnaps('2028-12-31', 400, i => 600000 + i), 'YTD', true, '2028-12-31').points.length, 366);
+    // 1M across a year boundary counts calendar days, not months
+    const across = sb._heroSeries(dailySnaps('2026-01-10', 60, i => 600000 + i), '1M', true, '2026-01-10');
+    assert.strictEqual(across.points.length, 30); assert.strictEqual(across.first.date, '2025-12-12');
+  });
+
+  test('_heroSeries - Include CPF off takes the CPF class out of every row, on keeps the whole net, a missing or unreadable CPF figure counts as 0', () => {
+    const sb = freshSandbox();
+    const rows = [
+      { date:'2026-10-01', net:700000, byClass:{ cpf:100000 } },
+      { date:'2026-10-02', net:710000, byClass:{ cpf:101000 } },
+      { date:'2026-10-03', net:720000 },
+      { date:'2026-10-04', net:730000, byClass:{ cpf:null } },
+      { date:'2026-10-05', net:740000, byClass:{ cpf:'abc' } },
+      { date:'2026-10-06', net:750000, byClass:{ cpf:Infinity } }
+    ];
+    const on = plain(sb._heroSeries(rows, 'ALL', true, '2026-10-06'));
+    const off = plain(sb._heroSeries(rows, 'ALL', false, '2026-10-06'));
+    assert.deepStrictEqual(on.points.map(p => p.value), [700000, 710000, 720000, 730000, 740000, 750000]);
+    assert.deepStrictEqual(off.points.map(p => p.value), [600000, 609000, 720000, 730000, 740000, 750000]);
+    assert.strictEqual(on.change, 50000); assert.strictEqual(off.change, 150000);
+    assert.ok(Math.abs(off.changePct - 150000 / 600000 * 100) < 1e-12);
+    // the switch can flip the result: CPF falling away makes the ex-CPF line the loser
+    const flip = [{ date:'2026-10-01', net:700000, byClass:{ cpf:50000 } }, { date:'2026-10-02', net:701000, byClass:{ cpf:60000 } }];
+    assert.strictEqual(sb._heroSeries(flip, 'ALL', true, '2026-10-02').up, true);
+    assert.strictEqual(sb._heroSeries(flip, 'ALL', false, '2026-10-02').up, false);
+  });
+
+  test('_heroSeries - malformed rows are ignored, a repeated date keeps its later row, order does not matter, and the input is never changed', () => {
+    const sb = freshSandbox();
+    const good = [
+      { id:'a', date:'2026-10-03', net:630000, byClass:{ cpf:0 } },
+      { id:'b', date:'2026-10-01', net:610000, byClass:{ cpf:0 } },
+      { id:'c', date:'2026-10-02', net:620000, byClass:{ cpf:0 } }
+    ];
+    const junk = [
+      null, undefined, 7, 'row', [], {}, { date:'2026-10-04' }, { net:1 },
+      { date:'2026-02-30', net:1 }, { date:'2026-13-01', net:1 }, { date:'20261004', net:1 }, { date:'2026-10-4', net:1 }, { date:'2026-10-04T00:00:00', net:1 },
+      { date:20261004, net:1 }, { date:'2026-10-04', net:NaN }, { date:'2026-10-04', net:Infinity }, { date:'2026-10-04', net:-Infinity },
+      { date:'2026-10-04', net:'650000' }, { date:'2026-10-04', net:null }, { date:'2026-10-04', net:{} }
+    ];
+    const mixed = [junk[0], good[0], junk[1], junk[8], good[1], junk[14], junk[17], good[2]].concat(junk);
+    const out = plain(sb._heroSeries(mixed, 'ALL', true, '2026-10-03'));
+    assert.strictEqual(out.total, 3);
+    assert.deepStrictEqual(out.points, [{ date:'2026-10-01', value:610000 }, { date:'2026-10-02', value:620000 }, { date:'2026-10-03', value:630000 }]);
+    // a repeated date keeps the later row in the list
+    const dup = plain(sb._heroSeries([{ date:'2026-10-01', net:1 }, { date:'2026-10-01', net:5 }, { date:'2026-10-02', net:9 }], 'ALL', true, '2026-10-02'));
+    assert.deepStrictEqual(dup.points, [{ date:'2026-10-01', value:5 }, { date:'2026-10-02', value:9 }]);
+    // nothing readable is empty, whatever the junk
+    assert.strictEqual(sb._heroSeries(junk, 'ALL', true, '2026-10-03').state, 'empty');
+    // the input is never changed: a deep-frozen copy would throw on sort, and the JSON is identical after
+    const frozen = mixed.map(r => r && typeof r === 'object' ? Object.freeze(Object.assign(Array.isArray(r) ? [] : {}, r)) : r);
+    Object.freeze(frozen);
+    const before = JSON.stringify(frozen);
+    sb._heroSeries(frozen, '1M', false, '2026-10-03');
+    sb._heroSeries(frozen, 'ALL', true, '2026-10-03');
+    assert.strictEqual(JSON.stringify(frozen), before);
+    const live = JSON.parse(JSON.stringify(good)); const liveBefore = JSON.stringify(live);
+    sb._heroSeries(live, '3M', false, '2026-10-03');
+    assert.strictEqual(JSON.stringify(live), liveBefore);
+    assert.deepStrictEqual(live.map(r => r.id), ['a', 'b', 'c']);
+  });
+
+  test('_heroSeries - an unknown range reads as 1M, a bad todayIso falls back to the newest row, and future rows stay in', () => {
+    const sb = freshSandbox();
+    const snaps = dailySnaps(HERO_TODAY, 60, i => 600000 + i);
+    assert.strictEqual(sb._heroSeries(snaps, 'bogus', true, HERO_TODAY).points.length, 30);
+    assert.strictEqual(sb._heroSeries(snaps, 'bogus', true, HERO_TODAY).range, '1M');
+    assert.strictEqual(sb._heroSeries(snaps, undefined, true, HERO_TODAY).range, '1M');
+    ['', null, undefined, '2026-02-30', 'today', 20261008].forEach(bad => {
+      const s = sb._heroSeries(snaps, '1M', true, bad);
+      assert.strictEqual(s.points.length, 30, String(bad)); assert.strictEqual(s.last.date, HERO_TODAY);
+    });
+    // a row dated after today (a device clock that ran ahead) is shown, not hidden
+    const ahead = sb._heroSeries([{ date:HERO_TODAY, net:1 }, { date:'2026-10-09', net:2 }], '1M', true, HERO_TODAY);
+    assert.strictEqual(ahead.state, 'ok'); assert.strictEqual(ahead.last.date, '2026-10-09');
+  });
+
+  /* ═══ Hero chart, live point: today's row swapped for the headline figure, display only ═══ */
+
+  test('_heroWithLive - replaces the row dated today or appends one when there is none, and the chart then ends on the live figure in every range and both CPF states', () => {
+    const sb = freshSandbox();
+    const live = 641250.5;
+    // history ends today at 659,000 net with 100,000 of CPF in every row, and the headline has since moved to the live figure
+    const stored = dailySnaps(HERO_TODAY, 60, i => 600000 + i * 1000, 100000);
+    const replaced = sb._heroWithLive(stored, HERO_TODAY, live);
+    assert.strictEqual(replaced.length, 60);   // replaced, not added
+    assert.deepStrictEqual(replaced.filter(r => r.date === HERO_TODAY).map(r => [r.net, r.byClass.cpf]), [[live, 0]]);
+    assert.ok(replaced.slice(0, 59).every((r, i) => r === stored[i]), 'earlier rows are the same objects');
+    // no row for today yet (the first paint of a new day, before the boot snapshot is written): one is appended
+    const yesterday = heroIso(heroDay(HERO_TODAY) - 1);
+    const dated = dailySnaps(yesterday, 60, i => 600000 + i * 1000, 100000);
+    const appended = sb._heroWithLive(dated, HERO_TODAY, live);
+    assert.strictEqual(appended.length, 61);
+    assert.deepStrictEqual(appended.slice(0, 60).map(r => r.date), dated.map(r => r.date));
+    assert.deepStrictEqual([appended[60].date, appended[60].net, appended[60].byClass.cpf], [HERO_TODAY, live, 0]);
+    // in every range and with the switch either way the last point is the live figure, and the change is measured from the first point in view to it
+    [replaced, appended].forEach(rows => HERO_RANGES.forEach(range => [true, false].forEach(cpf => {
+      const s = sb._heroSeries(rows, range, cpf, HERO_TODAY);
+      const where = range + (cpf ? ' with CPF' : ' without CPF');
+      assert.strictEqual(s.state, 'ok', where);
+      assert.strictEqual(s.last.date, HERO_TODAY, where); assert.strictEqual(s.last.value, live, where);
+      assert.strictEqual(s.points[s.points.length - 1].value, live, where);
+      assert.strictEqual(s.change, live - s.first.value, where);
+      assert.ok(Math.abs(s.changePct - (live - s.first.value) / Math.abs(s.first.value) * 100) < 1e-12, where);
+      assert.strictEqual(s.up, live >= s.first.value, where);
+    })));
+    // the stored figure that was on the end of the chart (659,000 net, 559,000 ex-CPF) is what the headline had before a price refresh moved it
+    assert.strictEqual(sb._heroSeries(stored, '1M', true, HERO_TODAY).last.value, 659000);
+    assert.strictEqual(sb._heroSeries(stored, '1M', false, HERO_TODAY).last.value, 559000);
+    // a date that appears twice for today leaves exactly one row, the live one
+    const twice = stored.concat([Object.assign({}, stored[59], { id:'twin', net:1 })]);
+    assert.deepStrictEqual(sb._heroWithLive(twice, HERO_TODAY, live).filter(r => r.date === HERO_TODAY).map(r => r.net), [live]);
+    // rows dated after today are left alone (a clock that ran ahead is shown, never hidden), so only then does the chart not end on the live figure
+    const ahead = sb._heroWithLive(stored.concat([{ date:'2026-10-09', net:1, byClass:{ cpf:0 } }]), HERO_TODAY, live);
+    assert.ok(ahead.some(r => r.date === '2026-10-09') && ahead.filter(r => r.date === HERO_TODAY).length === 1);
+    // a live figure of 0 is a figure (only CPF held, CPF off): it is used, not skipped
+    assert.strictEqual(sb._heroSeries(sb._heroWithLive(stored, HERO_TODAY, 0), '1M', false, HERO_TODAY).last.value, 0);
+    // a negative one too
+    assert.strictEqual(sb._heroSeries(sb._heroWithLive(stored, HERO_TODAY, -250), '1M', true, HERO_TODAY).last.value, -250);
+  });
+
+  test('_heroWithLive - a live figure that is not a finite number, or a date that is not a date, changes nothing, and a non-list reads as empty', () => {
+    const sb = freshSandbox();
+    const stored = dailySnaps(HERO_TODAY, 5, i => 600000 + i * 1000, 100000);
+    [null, undefined, NaN, Infinity, -Infinity, '641250', '', {}, [], true, () => 1].forEach(bad => {
+      const out = sb._heroWithLive(stored, HERO_TODAY, bad);
+      assert.notStrictEqual(out, stored, 'a new list even when nothing changes');
+      assert.strictEqual(out.length, stored.length, String(bad)); assert.ok(out.every((r, i) => r === stored[i]), String(bad));
+    });
+    ['', null, undefined, '2026-02-30', '2026-13-01', 'today', '20261008', '2026-10-08T00:00:00', 20261008, {}].forEach(bad => {
+      const out = sb._heroWithLive(stored, bad, 641250);
+      assert.strictEqual(out.length, stored.length, String(bad)); assert.ok(out.every((r, i) => r === stored[i]), String(bad));
+    });
+    // not a list: treated as no rows, like _heroSeries does
+    [null, undefined, 'rows', 7, {}].forEach(bad => {
+      assert.deepStrictEqual(plain(sb._heroWithLive(bad, HERO_TODAY, NaN)), []);
+      assert.deepStrictEqual(plain(sb._heroWithLive(bad, HERO_TODAY, 650000)), [{ id:'live', date:HERO_TODAY, net:650000, byClass:{ cpf:0 } }]);
+    });
+    // a malformed row dated today is replaced all the same, and malformed rows elsewhere pass through for _heroSeries to ignore
+    const junk = [null, 5, { date:HERO_TODAY, net:NaN }, { date:'2026-10-07', net:'x' }];
+    const out = sb._heroWithLive(junk, HERO_TODAY, 650000);
+    assert.strictEqual(out.length, 4); assert.deepStrictEqual(plain(out.slice(0, 3)), [null, 5, { date:'2026-10-07', net:'x' }]);
+    assert.strictEqual(sb._heroSeries(out, 'ALL', true, HERO_TODAY).total, 1);
+  });
+
+  test('_heroWithLive - never changes its input: a deep-frozen list and rows, the JSON and the row objects stay as they were, so DB.snapshots is never written', () => {
+    const sb = freshSandbox();
+    const stored = dailySnaps(HERO_TODAY, 40, i => 600000 + i * 100, 100000);
+    const frozen = stored.map(r => Object.freeze(Object.assign({}, r, { byClass:Object.freeze(Object.assign({}, r.byClass)) })));
+    Object.freeze(frozen);
+    const before = JSON.stringify(frozen), todayRow = frozen[39], todayNet = todayRow.net;
+    const out = sb._heroWithLive(frozen, HERO_TODAY, 123456.78);
+    sb._heroWithLive(frozen, HERO_TODAY, NaN);
+    sb._heroWithLive(frozen, '2026-02-30', 5);
+    sb._heroSeries(out, '3M', false, HERO_TODAY);
+    assert.strictEqual(JSON.stringify(frozen), before);
+    assert.strictEqual(todayRow.net, todayNet); assert.strictEqual(frozen.length, 40);
+    assert.ok(!frozen.some(r => r.net === 123456.78) && !frozen.some(r => r.id === 'live'));
+    // and the live row is a fresh object each call, never shared
+    assert.notStrictEqual(sb._heroWithLive(frozen, HERO_TODAY, 1).at(-1), sb._heroWithLive(frozen, HERO_TODAY, 1).at(-1));
+    // the same holds with a plain, unfrozen list: the order, the ids and the stored figure are as they were
+    const live = JSON.parse(JSON.stringify(stored)); const liveBefore = JSON.stringify(live);
+    sb._heroWithLive(live, HERO_TODAY, 99);
+    assert.strictEqual(JSON.stringify(live), liveBefore);
+  });
+
+  test('_heroLiveValue - the headline figure, unless the valuation is incomplete or has nothing to record (the cases autoSnapshot skips) or the figure is not finite', () => {
+    const sb = freshSandbox();
+    const ok = { incomplete:false, total:723075.35 };
+    assert.strictEqual(sb._heroLiveValue(ok, 621435.35), 621435.35);   // CPF off: the headline is the ex-CPF figure, not the total
+    assert.strictEqual(sb._heroLiveValue(ok, 723075.35), 723075.35);
+    assert.strictEqual(sb._heroLiveValue(ok, 0), 0);                   // only CPF held, CPF off: 0 is a real figure
+    assert.strictEqual(sb._heroLiveValue(ok, -10), -10);
+    // incomplete (a missing FX rate): no live point, whatever the figure
+    assert.strictEqual(sb._heroLiveValue({ incomplete:true, total:723075.35, missingFxCount:1 }, 621435.35), null);
+    // nothing to record: autoSnapshot writes no row at a total of 0 or less, so the chart adds none either
+    [0, -1, NaN, undefined, null, '5', {}].forEach(total => assert.strictEqual(sb._heroLiveValue({ incomplete:false, total }, 100), null, String(total)));
+    // a figure that is not a finite number
+    [NaN, Infinity, -Infinity, null, undefined, '621435', {}, [], true].forEach(bad => assert.strictEqual(sb._heroLiveValue(ok, bad), null, String(bad)));
+    // no valuation at all
+    [null, undefined, 0, 'x'].forEach(v => assert.strictEqual(sb._heroLiveValue(v, 100), null, String(v)));
+  });
+
+  test('Hero live point - the empty, single and sparse states count it: nothing stored plus a live figure is one point, a lone old row plus it is a line, a short range stays short', () => {
+    const sb = freshSandbox();
+    const live = 650000, T = HERO_TODAY;
+    const run = (rows, range, cpf) => sb._heroSeries(sb._heroWithLive(rows, T, live), range, cpf == null ? true : cpf, T);
+    HERO_RANGES.forEach(range => {
+      // no stored row yet: today's live figure alone is one point, "One snapshot so far", not the empty line
+      const none = run([], range);
+      assert.strictEqual(none.state, 'single', range); assert.strictEqual(none.total, 1); assert.strictEqual(none.first, null);
+      // no live figure (nothing to record) leaves the empty state exactly as _heroSeries gives it
+      assert.strictEqual(sb._heroSeries(sb._heroWithLive([], T, sb._heroLiveValue({ incomplete:false, total:0 }, 0)), range, true, T).state, 'empty', range);
+      // yesterday's row alone plus the live figure draws a two point line in every range, instead of "One snapshot so far"
+      const prev = run(dailySnaps(heroIso(heroDay(T) - 1), 1, () => 648000), range);
+      assert.strictEqual(prev.state, 'ok', range); assert.strictEqual(prev.points.length, 2);
+      assert.strictEqual(prev.change, live - 648000); assert.strictEqual(prev.last.value, live);
+    });
+    // a lone old row: the live point makes All a line, but a short range has only the live point in view and stays sparse
+    const old = dailySnaps('2025-01-15', 1, () => 600000);
+    assert.deepStrictEqual(HERO_RANGES.map(r => run(old, r).state), ['sparse', 'sparse', 'sparse', 'sparse', 'ok']);
+    // the QA seed shape: monthly rows and today's boot row, 1M holds only today, so it stays sparse after the swap too
+    const seed = [{ date:'2026-08-01', net:672000 }, { date:'2026-09-01', net:679200 }, { date:T, net:723075.35, byClass:{ cpf:101640 } }];
+    assert.strictEqual(run(seed, '1M', false).state, 'sparse');
+    const threeM = run(seed, '3M', false);
+    assert.strictEqual(threeM.last.value, live); assert.strictEqual(threeM.change, live - 672000);
+  });
+
+  test('_heroNearest - the closest point to x by distance, the earlier one on a tie, clamped at both ends, -1 for no points', () => {
+    const sb = freshSandbox();
+    assert.strictEqual(sb._heroNearest([], 0.5), -1);
+    assert.strictEqual(sb._heroNearest([0], 0.9), 0);
+    const xs = [0, 0.1, 0.2, 0.9, 1];
+    assert.deepStrictEqual([-5, 0, 0.04, 0.06, 0.1, 0.16, 0.5, 0.54, 0.56, 0.94, 0.96, 1, 7].map(x => sb._heroNearest(xs, x)), [0, 0, 0, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4]);
+    assert.strictEqual(sb._heroNearest([0, 1], 0.5), 0);   // exact tie keeps the earlier
+    // every point is its own nearest, on a long series too
+    const long = Array.from({ length:1800 }, (_, i) => i / 1799);
+    for (let i = 0; i < long.length; i += 37) assert.strictEqual(sb._heroNearest(long, long[i]), i);
+    assert.strictEqual(sb._heroNearest(long, 0.4996), 899);
+    assert.strictEqual(sb._heroNearest(long, 0.5004), 900);
+  });
+
+  test('_heroNiceTicks - round-number lines clear of the edges, three or four for a net-worth sized domain, and only lines a label can show exactly', () => {
+    const sb = freshSandbox();
+    const at = (lo, hi) => plain(sb._heroNiceTicks(lo, hi));
+    assert.deepStrictEqual(at(600000, 700000).map(t => t.value), [625000, 650000, 675000]);
+    assert.deepStrictEqual(at(590000, 700000).map(t => t.value), [600000, 625000, 650000, 675000]);
+    assert.deepStrictEqual(at(603260, 621240).map(t => t.value), [605000, 610000, 615000]);
+    assert.deepStrictEqual(at(0, 1).map(t => t.value), [0.25, 0.5, 0.75]);
+    assert.deepStrictEqual(at(-5000, 3000).map(t => t.value), [-4000, -2000, 0, 2000]);
+    // y is 0 at the top (hi) and 1 at the bottom (lo), and never inside the label bands at the edges
+    const t = at(590000, 700000);
+    assert.ok(Math.abs(t[0].y - (700000 - 600000) / 110000) < 1e-12);
+    t.forEach((tick, i) => { assert.ok(tick.y >= 0.12 && tick.y <= 0.96); if (i) assert.ok(tick.y < t[i - 1].y); });
+    // from a million up a line is a multiple of 10,000, so S$1.05M is never rounded to S$1.1M
+    assert.deepStrictEqual(at(950000, 1150000).map(v => v.value), [1000000, 1050000, 1100000]);
+    assert.deepStrictEqual(at(1020000, 1080000).map(v => v.value), [1030000, 1040000, 1050000, 1060000, 1070000]);
+    // a span too small for any label to tell the lines apart draws none, rather than lines that all read the same
+    assert.deepStrictEqual(at(621000, 621010), []);
+    // across 3000 domains the size of a real net worth (S$10k to S$2m, moving 1% to 40%): at most 5 lines, all inside the domain, all exactly labelable,
+    // and three or four for most of them
+    let seed = 7; const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+    let threeOrFour = 0;
+    for (let n = 0; n < 3000; n++) {
+      const level = 10000 + rnd() * 1990000, width = level * (0.01 + rnd() * 0.39);
+      const lo = level - width / 2, hi = level + width / 2, unit = hi >= 1e6 ? 1e4 : 100;
+      const ticks = at(lo, hi);
+      assert.ok(ticks.length <= 5, lo + '..' + hi + ' gave ' + ticks.length);
+      if (ticks.length === 3 || ticks.length === 4) threeOrFour++;
+      ticks.forEach(k => { assert.ok(k.value >= lo && k.value <= hi); assert.ok(Math.abs(k.value / unit - Math.round(k.value / unit)) < 1e-9, 'tick ' + k.value + ' not a multiple of ' + unit); });
+    }
+    assert.ok(threeOrFour > 2300, 'three or four lines for most domains, got ' + threeOrFour + ' of 3000');
+    // small figures (under 1,000) have no label-precision limit, and a domain from 0.001 to 1e9 wide always gives 2 to 5 lines
+    for (let n = 0; n < 1500; n++) {
+      const mag = Math.pow(10, Math.floor(rnd() * 3) - 3), lo = rnd() * 100 * mag, hi = lo + (0.05 + rnd() * 5) * mag;
+      if (hi >= 1000) continue;
+      const ticks = at(lo, hi);
+      assert.ok(ticks.length >= 1 && ticks.length <= 5, lo + '..' + hi + ' gave ' + ticks.length);
+    }
+    // no span, an inverted or unreadable one: no lines
+    [[5, 5], [10, 5], [NaN, 5], [0, Infinity]].forEach(([lo, hi]) => assert.deepStrictEqual(at(lo, hi), []));
+  });
+
+  test('_heroAxisLabel - kjrFmtAxis below a million, up to two decimals from a million so a round line is never misstated', () => {
+    const sb = freshSandbox();
+    sb.kjrFmtAxis = core.kjrFmtAxis;
+    const label = v => sb._heroAxisLabel(v, 'S$');
+    assert.deepStrictEqual([0, 500, 650000, 612500, 999000].map(label), ['S$0', 'S$500', 'S$650k', 'S$612.5k', 'S$999k']);
+    assert.deepStrictEqual([1000000, 1100000, 1050000, 1250000, 1750000, 2000000, 12340000].map(label), ['S$1M', 'S$1.1M', 'S$1.05M', 'S$1.25M', 'S$1.75M', 'S$2M', 'S$12.34M']);
+    assert.strictEqual(label(-1250000), '-S$1.25M');
+    assert.strictEqual(sb._heroAxisLabel(1500000, 'US$'), 'US$1.5M');
+    // the plain formatter would round the same lines
+    assert.strictEqual(core.kjrFmtAxis(1250000, { unit:'money' }, 'S$'), 'S$1.3M');
+  });
+
+  test('_heroGeometry - x by time so a gap reads as a gap, y inside a 12% padded domain, ticks at equal times with day labels up to ~100 days', () => {
+    const sb = freshSandbox();
+    const pts = [{ date:'2026-09-09', value:100 }, { date:'2026-09-10', value:150 }, { date:'2026-09-24', value:110 }, { date:'2026-10-08', value:200 }];
+    const g = plain(sb._heroGeometry(pts));
+    assert.deepStrictEqual(g.xs, [0, 1 / 29, 15 / 29, 1]);
+    // data runs 100 to 200: domain 38 either side of the middle, so the lowest point sits at 0.9032 and the highest at 0.0968
+    assert.ok(Math.abs(g.ys[0] - 1.12 / 1.24) < 1e-12 && Math.abs(g.ys[3] - 0.12 / 1.24) < 1e-12);
+    g.ys.forEach(y => assert.ok(y > 0.09 && y < 0.91));
+    assert.ok(Math.abs(g.lo - (150 - 62)) < 1e-9 && Math.abs(g.hi - (150 + 62)) < 1e-9);
+    assert.strictEqual(g.style, 'short'); assert.strictEqual(g.spanDays, 29);
+    assert.deepStrictEqual(g.dates.map(d => d.iso), ['2026-09-09', '2026-09-16', '2026-09-24', '2026-10-01', '2026-10-08']);
+    assert.deepStrictEqual(g.dates.map(d => d.x), [0, 0.25, 0.5, 0.75, 1]);
+    // a flat series is drawn mid-height with a domain 1% of the level wide, not zoomed into nothing
+    const flat = plain(sb._heroGeometry([{ date:'2026-10-01', value:650000 }, { date:'2026-10-02', value:650000 }]));
+    assert.deepStrictEqual(flat.ys, [0.5, 0.5]);
+    assert.ok(Math.abs((flat.hi - flat.lo) - 650000 * 0.01 * 1.24) < 1e-6);
+    // a near-flat series (0.001% moves) keeps that 1% floor too, so noise stays small
+    const noise = plain(sb._heroGeometry([{ date:'2026-10-01', value:650000 }, { date:'2026-10-02', value:650006 }]));
+    assert.ok(noise.ys[0] - noise.ys[1] < 0.01 && noise.ys[0] > noise.ys[1]);
+    // all-zero data and a negative level still give finite numbers
+    [[0, 0], [-5000, -4000]].forEach(([a, b]) => {
+      const z = plain(sb._heroGeometry([{ date:'2026-10-01', value:a }, { date:'2026-10-03', value:b }]));
+      z.ys.concat(z.xs, [z.lo, z.hi]).forEach(n => assert.ok(Number.isFinite(n)));
+    });
+  });
+
+  test('_heroGeometry - tick count and label style follow the span: a day each for short spans, months beyond 100 days, never a repeated month', () => {
+    const sb = freshSandbox();
+    const geo = days => plain(sb._heroGeometry([{ date:'2026-01-01', value:1 }, { date:heroIso(heroDay('2026-01-01') + days), value:2 }]));
+    const shape = days => { const g = geo(days); return [g.style, g.dates.length]; };
+    assert.deepStrictEqual([1, 2, 3, 4, 29, 30, 100].map(shape), [['short', 2], ['short', 3], ['short', 4], ['short', 5], ['short', 5], ['short', 5], ['short', 5]]);
+    assert.deepStrictEqual([101, 127, 128, 200, 364, 1400].map(shape), [['month', 4], ['month', 4], ['month', 5], ['month', 5], ['month', 5], ['month', 5]]);
+    // first and last ticks sit on the ends, ticks are in order and 1 to 5 days or more apart
+    [1, 2, 30, 101, 364, 1400].forEach(days => {
+      const g = geo(days);
+      assert.strictEqual(g.dates[0].x, 0); assert.strictEqual(g.dates[g.dates.length - 1].x, 1);
+      assert.strictEqual(g.dates[0].iso, '2026-01-01'); assert.strictEqual(g.dates[g.dates.length - 1].iso, heroIso(heroDay('2026-01-01') + days));
+      for (let i = 1; i < g.dates.length; i++) assert.ok(g.dates[i].iso > g.dates[i - 1].iso);
+      if (g.style === 'month') {
+        const months = g.dates.map(d => d.iso.slice(0, 7));
+        assert.strictEqual(new Set(months).size, months.length, days + ' days repeats a month');
+      }
+    });
+  });
+
+  test('_heroRangeGet and setHeroRange - 1M by default, the stored range when valid, and a blocked or full store never throws', () => {
+    const sb = freshSandbox();
+    assert.strictEqual(sb._heroRangeGet(), '1M');
+    // read once, then served from memory
+    sb.localStorage.setItem('kjr-pf-hero-range-v1', 'YTD');
+    assert.strictEqual(sb._heroRangeGet(), '1M');
+    const stored = freshSandbox();
+    stored.localStorage.setItem('kjr-pf-hero-range-v1', '3M');
+    assert.strictEqual(stored._heroRangeGet(), '3M');
+    ['', 'all', '5Y', '1m', 'undefined', '{}'].forEach(bad => {
+      const s = freshSandbox(); s.localStorage.setItem('kjr-pf-hero-range-v1', bad);
+      assert.strictEqual(s._heroRangeGet(), '1M', JSON.stringify(bad));
+    });
+    // a store that throws on read (private mode, blocked cookies)
+    const blocked = freshSandbox();
+    blocked.localStorage = { getItem(){ throw new Error('blocked'); }, setItem(){ throw new Error('quota'); }, removeItem(){} };
+    assert.strictEqual(blocked._heroRangeGet(), '1M');
+    // setHeroRange: remembers, redraws the hero alone, and refuses an unknown range
+    const calls = [];
+    const set = freshSandbox();
+    set.renderDashboard = opts => calls.push(plain(opts));
+    assert.strictEqual(set.setHeroRange('1Y'), true);
+    assert.strictEqual(set.localStorage.getItem('kjr-pf-hero-range-v1'), '1Y');
+    assert.strictEqual(set._heroRangeGet(), '1Y');
+    assert.deepStrictEqual(calls, [{ heroOnly:true }]);
+    ['3m', 'week', '', null, undefined, 5].forEach(bad => assert.strictEqual(set.setHeroRange(bad), false));
+    assert.strictEqual(set._heroRangeGet(), '1Y'); assert.strictEqual(calls.length, 1);
+    assert.strictEqual(set.localStorage.getItem('kjr-pf-hero-range-v1'), '1Y');
+    // a failing write still changes the range for this session and redraws
+    const full = freshSandbox();
+    const redraws = [];
+    full.renderDashboard = () => redraws.push(1);
+    full.localStorage = { getItem(){ return null; }, setItem(){ throw new Error('quota'); }, removeItem(){} };
+    assert.strictEqual(full.setHeroRange('ALL'), true);
+    assert.strictEqual(full._heroRangeGet(), 'ALL'); assert.strictEqual(redraws.length, 1);
+  });
+
+  test('_heroRangesHtml - five tabs in a tablist, one selected and the only tab stop, each wired to setHeroRange', () => {
+    const sb = freshSandbox();
+    const html = sb._heroRangesHtml('YTD');
+    assert.ok(html.startsWith('<div class="hero-ranges" role="tablist" aria-label="Chart range">'));
+    const tabs = html.match(/<button[^>]*>[^<]*<\/button>/g);
+    assert.strictEqual(tabs.length, 5);
+    assert.deepStrictEqual(tabs.map(t => />([^<]*)</.exec(t)[1]), ['1M', '3M', 'YTD', '1Y', 'All']);
+    tabs.forEach(t => assert.ok(t.includes('role="tab"') && t.includes('data-click="setHeroRange"') && t.includes('aria-controls="hero-chart"')));
+    assert.deepStrictEqual(tabs.map(t => /aria-selected="(\w+)"/.exec(t)[1]), ['false', 'false', 'true', 'false', 'false']);
+    assert.deepStrictEqual(tabs.map(t => /tabindex="(-?\d)"/.exec(t)[1]), ['-1', '-1', '0', '-1', '-1']);
+    assert.deepStrictEqual(tabs.map(t => /data-a0="(\w+)"/.exec(t)[1]), ['1M', '3M', 'YTD', '1Y', 'ALL']);
+    assert.deepStrictEqual(tabs.map(t => /id="(hero-tab-\w+)"/.exec(t)[1]), ['hero-tab-1M', 'hero-tab-3M', 'hero-tab-YTD', 'hero-tab-1Y', 'hero-tab-ALL']);
+  });
+
+  /* The chart markup in a sandbox with the app's real axis formatter, date labels and escaping. */
+  const heroMarkupSandbox = privacy => {
+    const sb = realEscape(freshSandbox());
+    sb.kjrFmtAxis = core.kjrFmtAxis;
+    sb.toDisplay = v => v;
+    sb.privacyOn = () => !!privacy;
+    sb.fmt = (n, o) => 'S$' + Math.round(n).toLocaleString('en-SG');
+    return sb;
+  };
+  const heroChart = (sb, snaps, range, cpf) => {
+    const hero = sb._heroSeries(snaps, range, cpf == null ? true : cpf, HERO_TODAY);
+    return sb._heroChartHtml(hero, hero.state === 'ok' ? sb._heroGeometry(hero.points) : null, range, 'past month');
+  };
+
+  test('_heroChartHtml - the three degraded states show one quiet line and no chart, and the empty ones keep no tab to point at', () => {
+    const sb = heroMarkupSandbox();
+    const empty = heroChart(sb, [], '1M');
+    assert.strictEqual(empty, '<p class="hero-note compact">Your history starts with today\'s snapshot</p>');
+    const single = heroChart(sb, dailySnaps(HERO_TODAY, 1, () => 650000), '1M');
+    assert.strictEqual(single, '<p class="hero-note compact">One snapshot so far, the chart fills in from tomorrow</p>');
+    const sparse = heroChart(sb, [{ date:'2025-01-01', net:1 }, { date:HERO_TODAY, net:2 }], '3M');
+    assert.strictEqual(sparse, '<p class="hero-note" id="hero-chart" role="tabpanel" aria-labelledby="hero-tab-3M">Not enough history for this range</p>');
+    [empty, single, sparse].forEach(html => assert.ok(!html.includes('<svg') && !html.includes('role="slider"') && !html.includes('hero-dot')));
+    // a lone row far outside the window is still "one snapshot so far", not "not enough for this range"
+    assert.strictEqual(heroChart(sb, dailySnaps('2024-01-15', 1, () => 650000), '1M'), single);
+  });
+
+  test('_heroChartHtml - a drawn chart: gain or loss colour, one path point per snapshot, a pulsing end dot, labelled gridlines and ticks, and a slider overlay', () => {
+    const sb = heroMarkupSandbox();
+    const up = heroChart(sb, dailySnaps(HERO_TODAY, 40, i => 600000 + i * 500), '1M');
+    assert.ok(up.startsWith('<div class="hero-chart up" id="hero-chart" role="tabpanel" aria-labelledby="hero-tab-1M">'));
+    const down = heroChart(sb, dailySnaps(HERO_TODAY, 40, i => 700000 - i * 500), '1M');
+    assert.ok(down.startsWith('<div class="hero-chart down" '));
+    // preserveAspectRatio none, a constant-width stroke and a gradient fill: the SVG carries paths only, never text
+    assert.ok(up.includes('viewBox="0 0 1000 300" preserveAspectRatio="none"') && up.includes('vector-effect="non-scaling-stroke"'));
+    assert.ok(up.includes('fill="url(#hero-fill)"') && !/<text/.test(up));
+    const line = /<path d="(M[^"]*)" fill="none"/.exec(up)[1];
+    assert.strictEqual(line.split('L').length, 30);   // 30 days in 1M
+    assert.ok(line.startsWith('M0.0 ') && /L1000\.0 \d+\.\d$/.test(line));
+    assert.ok(up.includes('L1000 300L0 300Z'));
+    // end dot pulses, the cross line starts at the last point
+    assert.ok(up.includes('<i class="hero-dot end" id="hero-dot" style="left:100.000%;'));
+    assert.ok(up.includes('<i class="hero-cross" id="hero-cross" style="left:100.000%"></i>'));
+    // labelled with the compact currency format, blurred under Hide amounts through .money-chip
+    const labels = Array.from(up.matchAll(/<b class="money-chip">([^<]*)<\/b>/g)).map(m => m[1]);
+    assert.ok(labels.length >= 2 && labels.length <= 5);
+    labels.forEach(l => assert.ok(/^S\$\d+(\.\d)?k$/.test(l), l));
+    assert.strictEqual(new Set(labels).size, labels.length);
+    assert.deepStrictEqual(Array.from(up.matchAll(/<span style="left:[\d.]+%">([^<]*)<\/span>/g)).map(m => m[1]), ['9 Sep', '16 Sep', '24 Sep', '1 Oct', '8 Oct']);
+    // the overlay is the one tab stop: a labelled slider that starts at the latest point
+    const slider = /<div class="hero-scrub"[^>]*>/.exec(up)[0];
+    assert.ok(slider.includes('role="slider"') && slider.includes('tabindex="0"') && slider.includes('aria-orientation="horizontal"'));
+    assert.ok(slider.includes('aria-valuemin="0"') && slider.includes('aria-valuemax="29"') && slider.includes('aria-valuenow="29"'));
+    assert.ok(slider.includes('aria-label="Net worth, past month, up 2.4%"'), slider);
+    assert.ok(slider.includes('aria-valuetext="8 Oct 2026, S$619,500, up 2.4% from the start of the range"'), slider);
+    assert.ok(heroChart(sb, dailySnaps(HERO_TODAY, 40, i => 700000 - i * 500), '1M').includes('aria-label="Net worth, past month, down 2.1%"'));
+    // 400 daily snapshots on All: one path point each, month labels
+    const all = heroChart(sb, dailySnaps(HERO_TODAY, 400, i => 600000 + i * 100), 'ALL');
+    assert.strictEqual(/<path d="(M[^"]*)" fill="none"/.exec(all)[1].split('L').length, 400);
+    assert.deepStrictEqual(Array.from(all.matchAll(/<span style="left:[\d.]+%">([^<]*)<\/span>/g)).map(m => m[1]), ['Sep 2025', 'Dec 2025', 'Mar 2026', 'Jun 2026', 'Oct 2026']);
+  });
+
+  test('_heroChartHtml - past a million the gridline labels keep two decimals, and no two lines read the same', () => {
+    const sb = heroMarkupSandbox();
+    const labels = html => Array.from(html.matchAll(/<b class="money-chip">([^<]*)<\/b>/g)).map(m => m[1]);
+    assert.deepStrictEqual(labels(heroChart(sb, dailySnaps(HERO_TODAY, 40, i => 1000000 + i * 3000), '1M')), ['S$1.04M', 'S$1.06M', 'S$1.08M', 'S$1.1M']);
+    // across the S$1m line the labels move from k to M and stay exact
+    const across = labels(heroChart(sb, dailySnaps(HERO_TODAY, 40, i => 960000 + i * 3000), '1M'));
+    assert.ok(across.length >= 2 && new Set(across).size === across.length, across.join());
+    across.forEach(l => assert.ok(/^S\$(\d+k|\d+(\.\d+)?M)$/.test(l), l));
+  });
+
+  test('_heroChartHtml - amounts stay out of the label and the spoken value in Hide amounts, the percentage stays', () => {
+    const open = heroMarkupSandbox(false), hidden = heroMarkupSandbox(true);
+    const snaps = dailySnaps(HERO_TODAY, 40, i => 600000 + i * 500);
+    const a = heroChart(open, snaps, '1M'), b = heroChart(hidden, snaps, '1M');
+    assert.ok(a.includes('S$619,500') && !b.includes('S$619,500'));
+    assert.ok(b.includes('aria-valuetext="8 Oct 2026, amount hidden, up 2.4% from the start of the range"'));
+    assert.ok(b.includes('aria-label="Net worth, past month, up 2.4%"'));
+    // the plain-text helper gives the same words for any point
+    const hero = hidden._heroSeries(snaps, '1M', true, HERO_TODAY);
+    assert.strictEqual(hidden._heroPointText(hero, 0), '9 Sep 2026, amount hidden, start of the range');
+    assert.strictEqual(open._heroPointText(open._heroSeries(snaps, '1M', true, HERO_TODAY), 0), '9 Sep 2026, S$605,000, start of the range');
+    const level = open._heroSeries(dailySnaps(HERO_TODAY, 40, () => 650000), '1M', true, HERO_TODAY);
+    assert.strictEqual(open._heroPointText(level, 5), '14 Sep 2026, S$650,000, level with the start of the range');
+    const fromZero = open._heroSeries([{ date:'2026-10-07', net:0 }, { date:HERO_TODAY, net:100 }], '1M', true, HERO_TODAY);
+    assert.strictEqual(open._heroPointText(fromZero, 1), '8 Oct 2026, S$100, up from the start of the range');
+  });
+
+  test('Hero chart wiring - renderDashboard reads the range, redraws on heroOnly, restores focus and keeps scrub state outside the DOM', () => {
+    const dash = extractFunction('renderDashboard');
+    ['_heroRangeGet()', '_heroSeries(_heroWithLive(DB.snapshots, todayIso, _heroLiveValue(valuation, displayNet)), heroRange, _dashShowCpf, todayIso)', 'const todayIso = _isoDateSG(new Date());', '_heroGeometry(hero.points)', '_heroRangesHtml(heroRange)', '_heroChartHtml(hero, geo, heroRange, whenLabels[heroRange])'].forEach(call => assert.ok(dash.includes(call), call));
+    // the label map names the five ranges, "past month" first
+    assert.ok(dash.includes("'1M':'past month', '3M':'past 3 months', YTD:'this year', '1Y':'past year', ALL:'all time'"));
+    assert.ok(dash.includes('opts && opts.heroOnly') && dash.includes('_dashDecorate()'));
+    assert.ok(dash.includes('document.activeElement') && dash.includes('preventScroll'));
+    assert.ok(dash.includes('_heroView = heroOk ?'));
+    // an incomplete valuation draws no history
+    assert.ok(dash.includes('valuation.incomplete ? null : _heroSeries('));
+    // the old sparkline and its monthly change are gone, along with their style
+    ['_heroSparkline', '_heroMonthlyChange', 'dash-hero-spark'].forEach(name => { assert.strictEqual(appSrc.includes(name), false, name + ' in app.js'); assert.strictEqual(indexSrc.includes(name), false, name + ' in index.html'); });
+    // one delegated set of handlers, installed once from installEventDelegation
+    assert.ok(extractFunction('installEventDelegation').includes('installHeroEvents();'));
+    assert.ok(extractFunction('installEventDelegation').includes('setHeroRange:        (el) => setHeroRange(A(el)[0])'));
+    const events = extractFunction('installHeroEvents');
+    ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerleave', 'setPointerCapture', 'focusout', 'focusin', "'ArrowLeft'", "'ArrowRight'", "'Home'", "'End'", "'Escape'"].forEach(name => assert.ok(events.includes(name), name));
+    assert.ok(events.includes("document.addEventListener('pointerleave', e => { if (scrubOf(e)) _heroEndScrub(); }, true)"));
+    // handlers look elements up by id at call time, never closing over a node from an old render
+    ['_heroSetScrub', '_heroEndScrub', '_heroPlaceDot', '_heroSyncSlider'].forEach(name => assert.ok(extractFunction(name).includes('document.getElementById('), name));
+    // the delegation's key handler skips modified keys, so browser shortcuts such as Alt+Left still work
+    assert.ok(events.includes('e.altKey || e.ctrlKey || e.metaKey'));
+  });
+
+  test('Hero chart styles - 230px on desktop, edge to edge and 180px on a phone, pan-y touch, a pulse that stops under reduced motion, tokens only', () => {
+    const css = indexSrc.slice(indexSrc.indexOf('/* Dashboard hero: solid card'), indexSrc.indexOf('/* DASHBOARD ROWS.'));
+    assert.ok(css.includes('.hero-chart{grid-area:chart;position:relative;height:230px;'));
+    assert.ok(css.includes('touch-action:pan-y') && css.includes('.hero-scrub{') && /\.hero-scrub\{[^}]*touch-action:pan-y/.test(css));
+    assert.ok(css.includes('.hero-chart{height:180px;margin-left:-22px;margin-right:-22px;'));
+    assert.ok(css.includes('.hero-chart.up{color:var(--gain)}') && css.includes('.hero-chart.down{color:var(--loss)}'));
+    assert.ok(css.includes('@keyframes hero-pulse') && /@media \(prefers-reduced-motion:reduce\)\{\.hero-dot\.end::after\{animation:none/.test(css));
+    // the selected range segment sits on --bg3, the dashed grid on the border token
+    assert.ok(css.includes('.hero-range[aria-selected="true"]{background:var(--bg3)'));
+    assert.ok(css.includes('.hero-grid i{position:absolute;left:0;right:0;border-top:1px dashed var(--border)}'));
+    // tabs at the top right on desktop, chips under the chart on a phone
+    assert.ok(css.includes('grid-template-areas:"head ranges" "chart chart"') && css.includes('grid-template-areas:"head" "chart" "ranges"'));
+    // no raw colour: every colour in the hero block is a token or currentColor
+    assert.strictEqual(/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(css), false);
+    // the gridline labels blur in Hide amounts through the existing .money-chip rule
+    assert.ok(indexSrc.includes('html.privacy .money-chip,') && extractFunction('_heroChartHtml').includes('class="money-chip"'));
   });
 
   await testAsync('refreshFx - native and vault persistence failures suppress success', async () => {
