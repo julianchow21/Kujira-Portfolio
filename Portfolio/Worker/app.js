@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.71';
-const APP_DISPLAY_VERSION = 'v2.71 (08 Oct)';
+const APP_VERSION = 'v2.72';
+const APP_DISPLAY_VERSION = 'v2.72 (09 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -392,7 +392,7 @@ function generateAutoCpfInterest(){
    When a salary account is set, each payday on/after salaryCashEnabledAt:
    deposit the SAVED share of take-home into that account, and log the rest
    as a 'Discretionary' expense (the part spent via an untracked account).
-   Net worth grows by exactly the saved amount; the P&L savings rate reflects
+   Net worth grows by exactly the saved amount; the Income & spending savings rate reflects
    the true split. Idempotent: cash keyed (auto:'salaryCash', period+role),
    expense keyed (auto:'salaryCash', period). Never backfills before the
    enable date, so it cannot double-count the typed opening balance. Respects
@@ -513,22 +513,22 @@ function runSalaryEngine(opts){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   NAV — tab definitions in display order
+   NAV — tab definitions in display order (the sidebar's order, Settings last)
    ═══════════════════════════════════════════════════════════════════════ */
 const TABS = [
-  { key:'dashboard',   label:'Dashboard',   icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>' },
-  { key:'stocks',      label:'Stocks',      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>' },
-  { key:'board',       label:'Watchlist+',  icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h18M3 12h18M3 19h18"/><circle cx="7" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="14" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="10" cy="19" r="1.6" fill="currentColor" stroke="none"/></svg>' },
-  { key:'cash',        label:'Cash',        icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 10v4M18 10v4"/></svg>' },
-  { key:'cpf',         label:'CPF',         icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6z"/><path d="M9 12l2 2 4-4"/></svg>' },
-  { key:'cashflow',    label:'P&L',         icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h13l-3-3M21 17H8l3 3"/></svg>' },
-  { key:'realestate',  label:'Real Estate', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>' },
-  { key:'insurance',   label:'Insurance',   icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6z"/></svg>' },
-  { key:'crypto',      label:'Crypto',      icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 8h4a2 2 0 1 1 0 4H9zm0 4h4.5a2 2 0 1 1 0 4H9zM10 6v2M10 16v2M13 6v2M13 16v2"/></svg>' },
-  { key:'projections', label:'Projections', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>' },
-  /* Explore holds the Chart Builder and the saved charts list. Not in MOBILE_BOTTOM_TABS, so it shows in the More sheet. Its own bar-chart icon, distinct from every other tab. */
-  { key:'explore',     label:'Explore',     icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v16h16"/><rect x="8" y="12" width="3" height="5" rx="1"/><rect x="14" y="7" width="3" height="10" rx="1"/></svg>' },
-  { key:'settings',    label:'Settings',    icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' }
+  { key:'dashboard',   label:'Dashboard',         icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>' },
+  { key:'projections', label:'Projections',       icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>' },
+  /* Explore holds the Chart Builder and the saved charts list. It sits in the sidebar's Overview group and in the phone's More sheet. Its own bar-chart icon, distinct from every other tab. */
+  { key:'explore',     label:'Explore',           icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v16h16"/><rect x="8" y="12" width="3" height="5" rx="1"/><rect x="14" y="7" width="3" height="10" rx="1"/></svg>' },
+  { key:'stocks',      label:'Stocks',            icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>' },
+  { key:'crypto',      label:'Crypto',            icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 8h4a2 2 0 1 1 0 4H9zm0 4h4.5a2 2 0 1 1 0 4H9zM10 6v2M10 16v2M13 6v2M13 16v2"/></svg>' },
+  { key:'cash',        label:'Cash',              icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 10v4M18 10v4"/></svg>' },
+  { key:'cpf',         label:'CPF',               icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6z"/><path d="M9 12l2 2 4-4"/></svg>' },
+  { key:'realestate',  label:'Real estate',       icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>' },
+  { key:'insurance',   label:'Insurance',         icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6z"/></svg>' },
+  { key:'cashflow',    label:'Income & spending', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h13l-3-3M21 17H8l3 3"/></svg>' },
+  { key:'board',       label:'Watchlist',         icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h18M3 12h18M3 19h18"/><circle cx="7" cy="5" r="1.6" fill="currentColor" stroke="none"/><circle cx="14" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="10" cy="19" r="1.6" fill="currentColor" stroke="none"/></svg>' },
+  { key:'settings',    label:'Settings',          icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' }
 ];
 
 /* Phase 2 lock — tabs whose UI and renderers are parked while Phase 1 ships.
@@ -536,12 +536,76 @@ const TABS = [
    .phase2-locked class. To unblock a tab, remove it from this set. */
 const PHASE_2_TABS = new Set([]);
 
-/* Mobile bottom bar shows exactly 5 fixed destinations (Apple's pattern caps
-   a tab bar at 5); everything else lives behind the "More" sheet. Decided
-   03/07/2026: Dashboard, Stocks, Cash, P&L, More. */
-const MOBILE_BOTTOM_TABS = ['dashboard', 'stocks', 'cash', 'cashflow'];
+/* Navigation groups. Desktop: the sidebar shows three groups, Settings sits in
+   its footer. Phone: the bottom bar shows five areas. Overview and Plan go
+   straight to a page (goes), Assets, Money and More open a sheet. A key that is
+   parked in PHASE_2_TABS is left out at render time, and an area with no live
+   page left disappears (More always stays, it also carries the theme switch,
+   the guide and the app links). Every TABS key must sit in exactly one
+   MOBILE_GROUPS entry, and in one NAV_GROUPS entry unless it is Settings. */
+const NAV_GROUPS = [
+  { key:'overview', label:'Overview', tabs:['dashboard', 'projections', 'explore'] },
+  { key:'assets',   label:'Assets',   tabs:['stocks', 'crypto', 'cash', 'cpf', 'realestate', 'insurance'] },
+  { key:'money',    label:'Money',    tabs:['cashflow', 'board'] }
+];
+const MOBILE_GROUPS = [
+  { key:'overview', label:'Overview', icon:'dashboard',   tabs:['dashboard'], goes:'dashboard' },
+  { key:'assets',   label:'Assets',   icon:'stocks',      tabs:['stocks', 'crypto', 'cash', 'cpf', 'realestate', 'insurance'] },
+  { key:'money',    label:'Money',    icon:'cashflow',    tabs:['cashflow', 'board'] },
+  { key:'plan',     label:'Plan',     icon:'projections', tabs:['projections'], goes:'projections' },
+  { key:'more',     label:'More',     icon:'',            tabs:['explore', 'settings'], always:true }
+];
+/* Tabs that show a row count (sidebar and Assets sheet), and the DB list each one counts.
+   CPF has no list, so no count. Deleted rows sit in the separate trash store and never count. */
+const NAV_COUNT_TABLES = { stocks:'stocks', crypto:'crypto', cash:'cash', realestate:'realestate', insurance:'insurance' };
+/* The + Add menu. Each item opens the existing add flow through openEntityModal(table),
+   so table is an ENTITY_SCHEMAS key, and tab is the page the flow belongs to. A flow whose
+   schema is missing is left out, and so is one whose page is parked in PHASE_2_TABS. */
+const ADD_MENU_ITEMS = [
+  { table:'stocks',     tab:'stocks',     label:'Add stock',        group:'assets' },
+  { table:'stockTxns',  tab:'stocks',     label:'Record trade',     group:'assets' },
+  { table:'crypto',     tab:'crypto',     label:'Add coin',         group:'assets' },
+  { table:'cash',       tab:'cash',       label:'Add cash account', group:'assets' },
+  { table:'realestate', tab:'realestate', label:'Add property',     group:'assets' },
+  { table:'insurance',  tab:'insurance',  label:'Add policy',       group:'assets' },
+  { table:'income',     tab:'cashflow',   label:'Add income',       group:'money' },
+  { table:'expenses',   tab:'cashflow',   label:'Add expense',      group:'money' }
+];
 
-function _phase2LabelFor(key){
+/* The live tabs of a group, in the group's order: known to TABS and not parked. */
+function _groupTabKeys(group){
+  return ((group && group.tabs) || []).filter(key => TABS.some(t => t.key === key) && !PHASE_2_TABS.has(key));
+}
+
+/* Which bottom-bar area owns a page. Empty when no area lists it, so nothing is marked active by mistake. */
+function _mobileGroupForTab(key){
+  const group = MOBILE_GROUPS.find(g => g.tabs.includes(key));
+  return group ? group.key : '';
+}
+
+/* Row count beside a sidebar or sheet item. 0 for a tab without a counted list. */
+function _navCount(key){
+  const table = NAV_COUNT_TABLES[key];
+  const list = table && DB ? DB[table] : null;
+  return Array.isArray(list) ? list.length : 0;
+}
+
+/* The count as shown: empty (so the badge is hidden) when there is nothing to count. */
+function _navCountLabel(count){
+  const n = Math.floor(Number(count));
+  return n > 0 ? String(n) : '';
+}
+
+/* The + Add menu as data. A flow needs its entity schema and a live page, and a trade needs a stock
+   to belong to, so Record trade stays visible but disabled until the first stock exists. */
+function _addMenuModel(){
+  const hasStock = !!(DB && DB.stocks && DB.stocks.length);
+  return ADD_MENU_ITEMS
+    .filter(item => ENTITY_SCHEMAS[item.table] && !PHASE_2_TABS.has(item.tab))
+    .map(item => ({ table:item.table, label:item.label, group:item.group, disabled:item.table === 'stockTxns' && !hasStock }));
+}
+
+function _tabLabel(key){
   const tab = TABS.find(t => t.key === key);
   return tab ? tab.label : key;
 }
@@ -554,18 +618,18 @@ function _emptyIcon(key){
 
 function ensurePhase2Card(section, key){
   if (section.querySelector('.phase2-card')) return;
-  const label = _phase2LabelFor(key);
+  const label = _tabLabel(key);
   const card = document.createElement('div');
   card.className = 'phase2-card';
   card.innerHTML =
-    '<div class="page-head"><div>'
+    '<div class="page-head"><div class="ph-text">'
     + '<div class="page-title">' + kjrEscape(label) + ' <span class="phase-chip">Phase 2</span></div>'
     + '<div class="page-sub">Parked while Phase 1 ships.</div>'
     + '</div></div>'
     + '<div class="card"><div class="card-body"><div class="empty">'
     + '<div class="empty-icon">' + _emptyIcon(key) + '</div>'
     + '<div class="empty-title">Coming in Phase 2</div>'
-    + '<div class="empty-sub">Phase 1 focus is Stocks, Real Estate, Cash, CPF, P&amp;L, and Settings. The ' + kjrEscape(label) + ' code is preserved underneath and will return in Phase 2.</div>'
+    + '<div class="empty-sub">Phase 1 focus is Stocks, Real estate, Cash, CPF, Income &amp; spending, and Settings. The ' + kjrEscape(label) + ' code is preserved underneath and will return in Phase 2.</div>'
     + '</div></div></div>';
   section.insertBefore(card, section.firstChild);
 }
@@ -3250,17 +3314,23 @@ function openSyncDetails(){
   if (!overlay) return;
   renderSyncDetails();
   overlay.classList.add('open');
-  const pill = document.getElementById('sync-pill');
-  if (pill) pill.setAttribute('aria-expanded', 'true');
+  _setSyncExpanded(true);
   openModalFocus(overlay, closeSyncDetails);
+}
+
+/* The sync row in the sidebar and the dot in the phone header both open the details modal. */
+function _setSyncExpanded(open){
+  ['sync-pill', 'sync-dot'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
 }
 
 function closeSyncDetails(){
   const overlay = document.getElementById('sync-details-modal');
   if (!overlay) return;
   overlay.classList.remove('open');
-  const pill = document.getElementById('sync-pill');
-  if (pill) pill.setAttribute('aria-expanded', 'false');
+  _setSyncExpanded(false);
   closeModalFocus(overlay);
 }
 
@@ -3284,29 +3354,67 @@ function setSyncStatus(state, detail){
   if (visibleState === 'failed' && legacyBackendAllowed()) {
     try { pullBlocked = !!localStorage.getItem(LK_LOSSY_SYNC_BLOCK); } catch (_) {}
   }
-  let text = '';
+  let text = '', cls = '';
   switch (visibleState) {
-    case 'local':   pill.classList.add('s-local');   text = 'Local only'; break;
-    case 'syncing': pill.classList.add('s-syncing'); text = 'Syncing'; break;
-    case 'synced':  pill.classList.add('s-synced');  text = 'Synced'; break;
-    case 'failed':  pill.classList.add('s-failed');  text = pullBlocked ? 'Pull blocked' : 'Sync failed'; break;
-    case 'queued':  pill.classList.add('s-queued');  text = 'Queued'; break;
-    case 'conflict':pill.classList.add('s-conflict'); text = 'Conflict'; break;
+    case 'local':   cls = 's-local';   text = 'Local only'; break;
+    case 'syncing': cls = 's-syncing'; text = 'Syncing'; break;
+    case 'synced':  cls = 's-synced';  text = 'Synced'; break;
+    case 'failed':  cls = 's-failed';  text = pullBlocked ? 'Pull blocked' : 'Sync failed'; break;
+    case 'queued':  cls = 's-queued';  text = 'Queued'; break;
+    case 'conflict':cls = 's-conflict'; text = 'Conflict'; break;
   }
+  if (cls) pill.classList.add(cls);
   label.textContent = text;
-  pill.setAttribute('aria-label', 'Sync status: ' + text);
+  // "Synced" carries its age ("2m ago") beside it. Both parts are visible text, so the accessible name repeats them.
+  const age = visibleState === 'synced' ? _syncAgeText() : '';
+  const ageEl = document.getElementById('sync-pill-age');
+  if (ageEl) ageEl.textContent = age;
+  const spoken = 'Sync status: ' + text + (age ? ', ' + age : '');
+  pill.setAttribute('aria-label', spoken);
   const visibleDetail = detail || (visibleState === 'failed' && hasUnresolvedDiagnostic
     ? _syncDiagReason(diagnostics.writeFailure || diagnostics.readFailure)
     : '');
   pill.title = visibleDetail || (visibleState === 'synced'
     ? (isNasMode() ? 'All queued changes are synced to NAS' : 'All changes pushed to the cloud')
     : (visibleState === 'local' ? 'No Apps Script URL set' : ''));
+  _paintSyncDot(cls, spoken, pill.title);
   const det = document.getElementById('sync-status-detail');
   const confirmedTs = !isNasMode() ? _confirmedCloudTimestamp() : '';
   if (det) det.textContent = visibleDetail || (ts && confirmedTs && ts === confirmedTs ? 'Last confirmed cloud contact ' + relTime(confirmedTs) : (ts ? 'Cloud contact not confirmed by server' : 'No confirmed cloud contact'));
-  // The pill keeps a compact text label on every width.
+  // The sidebar row and the phone dot always carry the state in words.
   const details = document.getElementById('sync-details-modal');
   if (details && details.classList.contains('open')) renderSyncDetails();
+}
+
+/* How long ago the server last confirmed the cloud copy ("2m ago"), shown beside Synced. Empty in NAS mode and when the time is unknown. */
+function _syncAgeText(){
+  if (isNasMode()) return '';
+  const ts = _confirmedCloudTimestamp();
+  return ts ? relTime(ts) : '';
+}
+
+/* The phone header's sync dot mirrors the sidebar row: same state class, and its visually hidden label carries the words. */
+function _paintSyncDot(cls, spoken, title){
+  const dot = document.getElementById('sync-dot');
+  if (!dot) return;
+  dot.classList.remove('s-local','s-syncing','s-synced','s-failed','s-queued','s-conflict');
+  if (cls) dot.classList.add(cls);
+  const words = document.getElementById('sync-dot-label');
+  if (words) words.textContent = spoken;
+  dot.title = title || 'Open sync details';
+}
+
+/* Once a minute the age after "Synced" is recomputed. Any other state is left alone, so a failure is never repainted as synced. */
+function _refreshSyncAge(){
+  const pill = document.getElementById('sync-pill');
+  if (!pill || !pill.classList.contains('s-synced')) return;
+  const age = _syncAgeText();
+  const ageEl = document.getElementById('sync-pill-age');
+  if (ageEl) ageEl.textContent = age;
+  const spoken = 'Sync status: Synced' + (age ? ', ' + age : '');
+  pill.setAttribute('aria-label', spoken);
+  const words = document.getElementById('sync-dot-label');
+  if (words) words.textContent = spoken;
 }
 
 function updateSyncStatusPill(){
@@ -5125,230 +5233,271 @@ async function testPriceFetch(){
 
 /* ═══════════════════════════════════════════════════════════════════════
    NAV / ROUTING
+   The shell is a sidebar on desktop (renderSidebarNav) and a bottom bar with
+   sheets on the phone (renderBottomBar, openMoreSheet). Both are built from
+   NAV_GROUPS and MOBILE_GROUPS, so neither can drift from the tab list.
    ═══════════════════════════════════════════════════════════════════════ */
-const MORE_SHEET_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>';
+const MORE_SHEET_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>';
+const BOOK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>';
+const TRADING_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M3 17l6-6 4 4 8-8"/></svg>';
+const FOREX_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
+/* Both theme icons ship in every theme switch, CSS shows the one that offers the other theme (sun in dark, moon in light). */
+const THEME_ICONS = '<span class="ti ti-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg></span>'
+  + '<span class="ti ti-moon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></span>';
+
+/* The bottom-bar sheet that is open (or was last opened). */
+let _moreSheetGroup = 'more';
 
 function renderNav(){
-  const host  = document.getElementById('nav-host');
-  const bhost = document.getElementById('bottom-nav');
-  if (host)  host.innerHTML  = '';
-  if (bhost) bhost.innerHTML = '';
-
-  // Desktop topbar: every tab except Settings (shown via the cog icon).
-  // All tabs render inline first; _layoutDesktopNav() then measures the
-  // strip and moves whatever doesn't fit into the "More" dropdown (F1).
-  TABS.forEach(t => {
-    if (t.key === 'settings') return;
-    const btn = document.createElement('button');
-    btn.className = 'nav-btn'; btn.dataset.tab = t.key;
-    const chip = PHASE_2_TABS.has(t.key) ? '<span class="phase-chip-mini">P2</span>' : '';
-    btn.innerHTML = t.icon + '<span>' + t.label + chip + '</span>';
-    btn.onclick = () => navigate(t.key);
-    if (host) host.appendChild(btn);
-  });
-
-  // Mobile bottom bar: exactly 5 fixed destinations, MOBILE_BOTTOM_TABS in
-  // order, plus a "More" button that opens the sheet with everything else.
-  if (bhost) {
-    MOBILE_BOTTOM_TABS.forEach(key => {
-      const t = TABS.find(x => x.key === key);
-      if (!t) return;
-      const btn = document.createElement('button');
-      btn.className = 'nav-btn'; btn.dataset.tab = t.key;
-      btn.innerHTML = t.icon + '<span>' + t.label + '</span>';
-      btn.onclick = () => navigate(t.key);
-      bhost.appendChild(btn);
-    });
-    const moreBtn = document.createElement('button');
-    moreBtn.className = 'nav-btn'; moreBtn.dataset.tab = 'more';
-    moreBtn.innerHTML = MORE_SHEET_ICON + '<span>More</span>';
-    moreBtn.onclick = () => openMoreSheet();
-    bhost.appendChild(moreBtn);
-  }
-
-  renderMoreSheet();
-  _layoutDesktopNav();
+  renderSidebarNav();
+  renderBottomBar();
+  renderMoreSheet(_moreSheetGroup);
+  updateNavCounts();
+  _syncNavActive();
 }
 
-/* ─── Desktop nav overflow ("More ▾") ───────────────────────────────────
-   At 1280px and below, the 9-tab strip (Settings excluded) does not fit
-   the topbar. Previously the strip just scrolled off-screen with a fade
-   and no way to jump straight to a hidden tab, and the active tab could
-   itself be scrolled out of view (F1). Every tab renders inline first
-   (see renderNav), then this measures the strip's available width and
-   moves whichever buttons overflow into the "More" dropdown. The active
-   tab is always guaranteed a spot in the visible strip: if it wouldn't
-   otherwise fit, the last tab that did fit is evicted to make room for it
-   (both re-appear in TABS order, one inline, one in the dropdown). Re-run
-   on resize (debounced) and after every renderNav() / showPage(). */
-let _navMoreResizeBound = false;
-function _layoutDesktopNav(){
-  const host = document.getElementById('nav-host');
-  const wrap = document.getElementById('nav-more-wrap');
-  const menu = document.getElementById('nav-more-menu');
-  if (!host || !wrap || !menu) return;
-  // Mobile hides .nav entirely (display:none); nothing to lay out there,
-  // and getBoundingClientRect() would read 0 and wrongly overflow everything.
-  if (getComputedStyle(host).display === 'none'){ wrap.style.display = 'none'; return; }
+/* A tab's line icon for a nav item. The label beside it names the item, so the icon is hidden from assistive tech. */
+function _navIcon(key){
+  const tab = TABS.find(t => t.key === key);
+  return tab ? tab.icon.replace('<svg ', '<svg aria-hidden="true" focusable="false" ') : '';
+}
 
-  const btns = Array.from(host.children);
-  if (!btns.length) return;
+/* Sidebar items are real links (open in a new tab works), a plain click is routed through navLink. */
+function _sideItemHtml(key){
+  const tab = TABS.find(t => t.key === key);
+  if (!tab) return '';
+  const safeKey = kjrEscape(key);
+  return '<li><a class="side-item" href="#' + safeKey + '" data-click="navLink" data-a0="' + safeKey + '" data-tab="' + safeKey + '">'
+    + _navIcon(key)
+    + '<span class="side-text">' + kjrEscape(tab.label) + '</span>'
+    + (NAV_COUNT_TABLES[key] ? '<span class="side-count" data-count-for="' + safeKey + '"></span>' : '')
+    + '</a></li>';
+}
 
-  // Reset: put every button back inline before re-measuring, so shrinking
-  // the window back out doesn't leave stale entries stuck in the dropdown.
-  btns.forEach(b => { if (b.style.display === 'none') b.style.display = ''; });
-  menu.innerHTML = '';
-
-  // Available width, measured with the More wrap HIDDEN. #nav-more-wrap is a
-  // flex SIBLING of #nav-host in the topbar row (not nested inside it), so
-  // the moment it becomes visible the flex algorithm itself shrinks
-  // #nav-host by exactly the wrap's width, before any JS runs. Reading
-  // available AFTER showing the wrap (as this used to) already has that
-  // reservation baked in; then subtracting moreBtnWidth a second line down
-  // reserved it twice; up to ~69px of genuinely free strip space (measured
-  // 08/07, More button ~69px wide) was wasted on every layout pass, fitting
-  // fewer tabs than actually fit. Hidden-wrap width is the TRUE full budget;
-  // moreBtnWidth is only subtracted once, and only when a dropdown is
-  // actually needed.
-  wrap.style.display = 'none';
-  const available = host.getBoundingClientRect().width;
-  wrap.style.display = 'flex';
-  const moreBtnWidth = document.getElementById('nav-more-btn').getBoundingClientRect().width + 2;
-  wrap.style.display = 'none'; // back to the reset state until we know a dropdown is needed
-  const cur = (typeof _currentTab !== 'undefined' && _currentTab) ? _currentTab : 'dashboard';
-
-  let used = 0, overflowIdx = new Set();
-  const widths = btns.map(b => b.getBoundingClientRect().width + 2); // +2 gap
-  let budget = available; // shrinks once we know a More button will be needed
-  let needsMore = widths.reduce((s,w) => s+w, 0) > available;
-  if (needsMore) budget = available - moreBtnWidth;
-
-  btns.forEach((b, i) => {
-    if (used + widths[i] > budget){ overflowIdx.add(i); return; }
-    used += widths[i];
-  });
-
-  // Guarantee the active tab is inline: if it landed in overflow, evict the
-  // last-fitted inline tab (by strip position) to free up room instead.
-  const curIdx = btns.findIndex(b => b.dataset.tab === cur);
-  if (curIdx !== -1 && overflowIdx.has(curIdx)){
-    let lastInlineIdx = -1;
-    btns.forEach((b, i) => { if (!overflowIdx.has(i)) lastInlineIdx = i; });
-    if (lastInlineIdx !== -1){
-      overflowIdx.delete(curIdx);
-      overflowIdx.add(lastInlineIdx);
-    }
+function renderSidebarNav(){
+  const host = document.getElementById('side-nav');
+  if (host){
+    host.innerHTML = NAV_GROUPS.map(group => {
+      const keys = _groupTabKeys(group);
+      if (!keys.length) return '';   // every page of the group is parked
+      const labelId = 'side-group-' + group.key;
+      return '<div class="side-group">'
+        + '<p class="side-label" id="' + kjrEscape(labelId) + '">' + kjrEscape(group.label) + '</p>'
+        + '<ul class="side-list" aria-labelledby="' + kjrEscape(labelId) + '">' + keys.map(_sideItemHtml).join('') + '</ul>'
+        + '</div>';
+    }).join('');
   }
+  // Settings lives in the footer, its markup is static, so only the parked case is handled here.
+  const settings = document.getElementById('side-settings');
+  if (settings) settings.hidden = PHASE_2_TABS.has('settings');
+}
 
-  if (overflowIdx.size === 0){ wrap.style.display = 'none'; return; } // everything fits
-
-  // A dropdown IS genuinely needed: restore the wrap to visible. This line
-  // was missing entirely (F1 desktop-nav-overflow bug): every path below
-  // populated the menu and bound the resize handler, but the wrap itself
-  // stayed at the 'none' set above (line ~2611) forever, so openNavMore()'s
-  // `wrap.style.display === 'none'` gate always bailed and the More trigger
-  // was unclickable dead weight the moment anything overflowed.
-  // #nav-more-wrap's own CSS rule (index.html) declares only
-  // position/flex-shrink, no display at all, so there is no stylesheet
-  // "flex" value to restore here (the temporary 'flex' a few lines up was
-  // only ever a measurement convenience for #nav-more-btn's width). Clearing
-  // the inline override lets the normal block default apply, same as any
-  // other div, rather than hardcoding a display value the CSS never asked for.
-  wrap.style.display = '';
-
-  btns.forEach((b, i) => {
-    if (!overflowIdx.has(i)) return;
-    b.style.display = 'none';
-    const key = b.dataset.tab;
-    const t = TABS.find(x => x.key === key);
-    if (!t) return;
-    const item = document.createElement('button');
-    item.className = 'nav-btn'; item.dataset.tab = t.key;
-    const chip = PHASE_2_TABS.has(t.key) ? '<span class="phase-chip-mini">P2</span>' : '';
-    item.innerHTML = t.icon + '<span>' + t.label + chip + '</span>';
-    item.onclick = () => { navigate(t.key); closeNavMore(); };
-    menu.appendChild(item);
+/* Counts beside Stocks, Crypto, Cash, Real estate and Insurance. Runs after every renderAll, so a save, a delete and a sync all keep it current. */
+function updateNavCounts(){
+  document.querySelectorAll('[data-count-for]').forEach(el => {
+    el.textContent = _navCountLabel(_navCount(el.getAttribute('data-count-for')));
   });
-  _updateNavMoreActive();
+}
 
-  if (!_navMoreResizeBound){
-    _navMoreResizeBound = true;
-    let t;
-    window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(_layoutDesktopNav, 120); });
+/* Phone bottom bar, five areas. Overview and Plan go straight to a page, the others open their sheet. */
+function renderBottomBar(){
+  const host = document.getElementById('bottom-nav');
+  if (!host) return;
+  host.innerHTML = MOBILE_GROUPS.map(group => {
+    const keys = _groupTabKeys(group);
+    if (!keys.length && !group.always) return '';
+    const icon = group.icon ? _navIcon(group.icon) : MORE_SHEET_ICON;
+    const goes = group.goes && keys.includes(group.goes) ? group.goes : '';
+    const action = goes
+      ? 'data-click="navigate" data-a0="' + kjrEscape(goes) + '"'
+      : 'data-click="openMoreSheet" data-a0="' + kjrEscape(group.key) + '" aria-haspopup="dialog"';
+    return '<button type="button" class="bb-item" data-group="' + kjrEscape(group.key) + '" ' + action + '>'
+      + icon + '<span>' + kjrEscape(group.label) + '</span></button>';
+  }).join('');
+}
+
+/* Marks the current page in the sidebar (class and aria-current) and the area that owns it in the bottom bar.
+   sheetGroup is the area whose sheet is open: it takes the highlight as tap feedback, aria-current keeps following the page. */
+function _syncNavActive(key, sheetGroup){
+  key = key || _currentTab;
+  document.querySelectorAll('.side-item[data-tab]').forEach(el => {
+    const on = el.getAttribute('data-tab') === key;
+    el.classList.toggle('active', on);
+    if (on) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
+    // On a short window the list scrolls, so keep the current page in view.
+    if (on && el.scrollIntoView) el.scrollIntoView({ block:'nearest' });
+  });
+  const pageGroup = _mobileGroupForTab(key);
+  const shown = sheetGroup || pageGroup;
+  document.querySelectorAll('#bottom-nav .bb-item').forEach(el => {
+    const group = el.getAttribute('data-group');
+    el.classList.toggle('active', group === shown);
+    if (group === pageGroup) el.setAttribute('aria-current', el.hasAttribute('aria-haspopup') ? 'true' : 'page');
+    else el.removeAttribute('aria-current');
+  });
+}
+
+/* The top bar mirrors the current page: the TABS label as the title, then the page's own status or sub line
+   (the dashboard's live status line included). Above 768px the in-page copy is visually hidden, so this is what the eye sees. */
+function _syncTopbarContext(){
+  const titleEl = document.getElementById('tb-title');
+  const subEl = document.getElementById('tb-sub');
+  if (titleEl) titleEl.textContent = _tabLabel(_currentTab);
+  if (subEl){
+    const page = document.getElementById('page-' + _currentTab);
+    const src = page ? page.querySelector('.page-head .ph-text .page-status, .page-head .ph-text .page-sub') : null;
+    subEl.textContent = src ? src.textContent.trim() : '';
   }
 }
 
-/* Overflowed tabs keep their .active state inside the dropdown; the More
-   button itself also goes .active when the current tab lives behind it
-   (same pattern as the mobile bottom bar's More button). */
-function _updateNavMoreActive(){
-  const menu = document.getElementById('nav-more-menu');
-  const moreBtn = document.getElementById('nav-more-btn');
-  if (!menu || !moreBtn) return;
-  const cur = (typeof _currentTab !== 'undefined' && _currentTab) ? _currentTab : 'dashboard';
-  let curInMenu = false;
-  menu.querySelectorAll('.nav-btn').forEach(b => {
-    const isCur = b.dataset.tab === cur;
-    b.classList.toggle('active', isCur);
-    if (isCur) curInMenu = true;
+/* A plain click on a sidebar link routes inside the app. Modified clicks fall through so the browser can open it elsewhere. */
+function navLink(el, ev){
+  if (ev && (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey)) return;
+  if (ev) ev.preventDefault();
+  navigate(el.getAttribute('data-a0'));
+}
+
+/* ─── Shell menus (workspace switcher, + Add) ──────────────────────────
+   One menu is open at a time. Enter, Space or an arrow key on the button opens it with focus on an item.
+   Arrow keys, Home and End move between items, Escape closes it and returns focus to the button, Tab closes
+   it and carries on from the button, and a click outside closes it. */
+const SHELL_MENUS = { ws:['ws-btn', 'ws-menu'], add:['add-btn', 'add-menu'] };
+
+function _shellMenuItems(menu){
+  return Array.from(menu.querySelectorAll('[role="menuitem"]'));
+}
+
+function openShellMenu(which, focusLast){
+  const ids = SHELL_MENUS[which];
+  const btn = ids && document.getElementById(ids[0]);
+  const menu = ids && document.getElementById(ids[1]);
+  if (!btn || !menu) return;
+  closeShellMenus(false);
+  if (which === 'add') renderAddMenu();
+  menu.hidden = false;
+  btn.setAttribute('aria-expanded', 'true');
+  const items = _shellMenuItems(menu);
+  const first = focusLast ? items[items.length - 1] : items[0];
+  if (first) first.focus();
+}
+
+function closeShellMenus(returnFocus){
+  Object.keys(SHELL_MENUS).forEach(which => {
+    const btn = document.getElementById(SHELL_MENUS[which][0]);
+    const menu = document.getElementById(SHELL_MENUS[which][1]);
+    if (!btn || !menu || menu.hidden) return;
+    menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+    if (returnFocus) btn.focus();
   });
-  moreBtn.classList.toggle('active', curInMenu);
 }
 
-function openNavMore(){
-  const wrap = document.getElementById('nav-more-wrap');
-  const btn  = document.getElementById('nav-more-btn');
-  if (!wrap || wrap.style.display === 'none') return;
-  wrap.classList.add('open');
-  if (btn) btn.setAttribute('aria-expanded', 'true');
-}
-function closeNavMore(){
-  const wrap = document.getElementById('nav-more-wrap');
-  const btn  = document.getElementById('nav-more-btn');
-  if (wrap) wrap.classList.remove('open');
-  if (btn) btn.setAttribute('aria-expanded', 'false');
-}
-function toggleNavMore(){
-  const wrap = document.getElementById('nav-more-wrap');
-  if (!wrap) return;
-  if (wrap.classList.contains('open')) closeNavMore(); else openNavMore();
+function toggleShellMenu(which){
+  const ids = SHELL_MENUS[which];
+  const menu = ids && document.getElementById(ids[1]);
+  if (!menu) return;
+  if (menu.hidden) openShellMenu(which); else closeShellMenus(true);
 }
 
-/* Tabs reachable only through the More sheet on mobile: every TABS entry not
-   already pinned to the bottom bar, in TABS order (Settings included). */
-function _moreSheetTabs(){
-  return TABS.filter(t => !MOBILE_BOTTOM_TABS.includes(t.key));
+function shellMenuKeydown(e){
+  const menu = e.target.closest ? e.target.closest('.shell-menu') : null;
+  if (menu && !menu.hidden){
+    const items = _shellMenuItems(menu);
+    const at = items.indexOf(document.activeElement);
+    const go = n => { e.preventDefault(); if (items.length) items[(n + items.length) % items.length].focus(); };
+    if (e.key === 'ArrowDown') go(at + 1);
+    else if (e.key === 'ArrowUp') go(at - 1);
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(items.length - 1);
+    else if (e.key === 'Escape'){ e.preventDefault(); closeShellMenus(true); }
+    else if (e.key === 'Tab') closeShellMenus(true);
+    else if (e.key === ' ' && document.activeElement && document.activeElement.tagName === 'A'){ e.preventDefault(); document.activeElement.click(); }
+    return;
+  }
+  const btn = e.target.closest ? e.target.closest('[data-menu-btn]') : null;
+  if (btn && (e.key === 'ArrowDown' || e.key === 'ArrowUp')){
+    e.preventDefault();
+    openShellMenu(btn.getAttribute('data-menu-btn'), e.key === 'ArrowUp');
+    return;
+  }
+  if (e.key === 'Escape') closeShellMenus(true);   // a menu opened by mouse while focus sits elsewhere
 }
 
-function renderMoreSheet(){
+/* The + Add menu is built fresh each time it opens, so the Record trade rule always reads today's stocks. */
+function renderAddMenu(){
+  const menu = document.getElementById('add-menu');
+  if (!menu) return;
+  let prevGroup = '';
+  menu.innerHTML = _addMenuModel().map(item => {
+    const sep = prevGroup && prevGroup !== item.group ? '<div class="menu-sep" role="separator"></div>' : '';
+    prevGroup = item.group;
+    return sep + '<button type="button" class="menu-item" role="menuitem" tabindex="-1" data-click="addMenuPick" data-a0="' + kjrEscape(item.table) + '"'
+      + (item.disabled ? ' aria-disabled="true"' : '') + '>'
+      + '<span>' + kjrEscape(item.label) + '</span>'
+      + (item.disabled ? '<span class="menu-hint">Add a stock first</span>' : '')
+      + '</button>';
+  }).join('');
+}
+
+/* Only a flow the menu offers can open, and the modal opens after focus is back on + Add, so closing it returns there. */
+function addMenuPick(table){
+  const item = _addMenuModel().find(x => x.table === table);
+  if (!item) return;
+  closeShellMenus(true);
+  if (item.disabled){ showToast('Add a stock first, a trade belongs to a position', 'error'); return; }
+  openEntityModal(table);
+}
+
+/* ─── Phone sheets ─────────────────────────────────────────────────────
+   One sheet (#more-sheet) serves Assets, Money and More, the area decides the title and the rows. */
+function _sheetNavRowHtml(key){
+  const tab = TABS.find(t => t.key === key);
+  if (!tab) return '';
+  const count = _navCountLabel(_navCount(key));
+  const current = key === _currentTab;
+  return '<button type="button" class="btn more-sheet-row' + (current ? ' active' : '') + '" data-click="navigate" data-a0="' + kjrEscape(key) + '"' + (current ? ' aria-current="page"' : '') + '>'
+    + _navIcon(key)
+    + '<span class="msr-text">' + kjrEscape(tab.label) + '</span>'
+    + (count ? '<span class="msr-count">' + kjrEscape(count) + '</span>' : '')
+    + '</button>';
+}
+
+/* The extra rows of the More sheet: theme switch, the Journal guide, the sibling apps and the version. */
+function _sheetUtilityRowsHtml(){
+  return '<div class="msr-sep" role="separator"></div>'
+    + '<button type="button" class="btn more-sheet-row" data-click="toggleTheme" data-theme-switch>'
+    + THEME_ICONS + '<span class="msr-text"><span class="tt-light">Switch to light theme</span><span class="tt-dark">Switch to dark theme</span></span></button>'
+    + '<a class="btn more-sheet-row" href="https://kujira-journal.pages.dev" target="_blank" rel="noopener noreferrer">'
+    + BOOK_ICON + '<span class="msr-text">How it works</span><span class="msr-ext" aria-hidden="true">↗</span><span class="sr-only">(opens in a new tab)</span></a>'
+    + '<div class="msr-sep" role="separator"></div>'
+    + '<a class="btn more-sheet-row" href="../Trading/">' + TRADING_ICON + '<span class="msr-text">Trading</span></a>'
+    + '<a class="btn more-sheet-row" href="../Forex/">' + FOREX_ICON + '<span class="msr-text">Forex</span></a>'
+    + '<p class="sheet-version">Portfolio ' + kjrEscape(APP_DISPLAY_VERSION) + '</p>';
+}
+
+function renderMoreSheet(groupKey){
   const body = document.getElementById('more-sheet-body');
   if (!body) return;
-  const rows = _moreSheetTabs().map(t => {
-    const chip = PHASE_2_TABS.has(t.key) ? '<span class="phase-chip-mini">P2</span>' : '';
-    return '<button class="btn more-sheet-row" data-click="navigate" data-a0="' + t.key + '">'
-      + t.icon + '<span>' + kjrEscape(t.label) + '</span>' + chip + '</button>';
-  }).join('');
-  const crossApp = ''
-    + '<a class="btn more-sheet-row" href="../Trading/" style="text-decoration:none">'
-    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/></svg><span>Trading</span></a>'
-    + '<a class="btn more-sheet-row" href="../Forex/" style="text-decoration:none">'
-    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span>Forex</span></a>';
-  body.innerHTML = rows + crossApp;
+  const group = MOBILE_GROUPS.find(g => g.key === groupKey) || MOBILE_GROUPS.find(g => g.key === 'more');
+  _moreSheetGroup = group.key;
+  const title = document.getElementById('more-sheet-title');
+  if (title) title.textContent = group.label;
+  body.innerHTML = _groupTabKeys(group).map(_sheetNavRowHtml).join('') + (group.key === 'more' ? _sheetUtilityRowsHtml() : '');
+  if (group.key === 'more') updateThemeUI();
 }
 
-function openMoreSheet(){
+function openMoreSheet(groupKey){
   const ov = document.getElementById('more-sheet');
   if (!ov) return;
-  renderMoreSheet();
+  closeShellMenus(false);
+  renderMoreSheet(groupKey);
   ov.classList.add('open');
   openModalFocus(ov);
   // The sheet starts translated off-screen (CSS default) and slides in via
   // .sheet-in, added a frame after .open so display:none -> flex doesn't eat
   // the transition (no transition fires across a display change in the same frame).
   requestAnimationFrame(() => ov.classList.add('sheet-in'));
-  document.querySelectorAll('.bottom-tab-bar .nav-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.tab === 'more');
-  });
+  _syncNavActive(_currentTab, _moreSheetGroup);
 }
 
 function closeMoreSheet(){
@@ -5358,16 +5507,11 @@ function closeMoreSheet(){
     ov.classList.remove('sheet-in');
     closeModalFocus(ov);
   }
-  // Opening the sheet gave "More" the active state as tap feedback. If the
-  // user dismissed without navigating, hand the highlight back to the tab
+  // Opening the sheet gave its area the active state as tap feedback. If the
+  // user dismissed without navigating, hand the highlight back to the area
   // that actually owns the page. (showPage also calls this before its own
-  // active-state pass, which lands the same result, so there is no flicker.)
-  const cur = (typeof _currentTab !== 'undefined' && _currentTab) ? _currentTab : 'dashboard';
-  const inMoreSheet = !MOBILE_BOTTOM_TABS.includes(cur);
-  document.querySelectorAll('.bottom-tab-bar .nav-btn').forEach(b => {
-    if (b.dataset.tab === 'more') b.classList.toggle('active', inMoreSheet);
-    else b.classList.toggle('active', b.dataset.tab === cur);
-  });
+  // pass, which lands the same result, so there is no flicker.)
+  _syncNavActive();
 }
 
 function showPage(key){
@@ -5385,16 +5529,10 @@ function showPage(key){
       target.classList.add('phase2-locked');
     }
   }
-  // On mobile the current tab may live only in the More sheet (not one of the
-  // 5 fixed bottom-bar buttons); the "more" button then takes the active state.
-  const inMoreSheet = !MOBILE_BOTTOM_TABS.includes(key);
-  document.querySelectorAll('.nav-btn').forEach(b => {
-    if (b.dataset.tab === 'more') { b.classList.toggle('active', inMoreSheet); return; }
-    b.classList.toggle('active', b.dataset.tab === key);
-  });
   closeMoreSheet(); // navigating (incl. from within the sheet) always closes it
-  closeNavMore();   // desktop "More" dropdown: same, closes after a pick
-  _layoutDesktopNav(); // re-run so the newly active tab is guaranteed inline (F1)
+  closeShellMenus(false); // and so does it for the workspace and Add menus
+  _syncNavActive(key); // sidebar item and bottom-bar area for the new page
+  _syncTopbarContext(); // top bar title and status line
   updateCcyToggleUI(); // reflect the new tab's currency
   if (key === 'dashboard') renderDashboard(); // (re)draw charts now the canvas is sized
   if (key === 'explore') renderExplore(); // same: the builder canvas needs a visible, sized page
@@ -5504,6 +5642,12 @@ function updateThemeUI(t){
   t = t || currentTheme();
   document.querySelectorAll('.theme-toggle button').forEach(b => {
     b.classList.toggle('active', b.dataset.theme === t);
+  });
+  // Theme switches (sidebar footer, More sheet) name the action, so the label follows the current theme.
+  const next = t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+  document.querySelectorAll('[data-theme-switch]').forEach(el => {
+    el.setAttribute('aria-label', next);
+    el.title = next;
   });
 }
 
@@ -5719,6 +5863,7 @@ function updateCcyToggleUI(){
   const cur = tabDisplayCcy(_currentTab);
   document.querySelectorAll('.ccy-toggle [data-ccy]').forEach(b => {
     b.classList.toggle('active', b.dataset.ccy === cur);
+    b.setAttribute('aria-pressed', b.dataset.ccy === cur ? 'true' : 'false');
   });
 }
 
@@ -7914,7 +8059,7 @@ function assetClassColor(cls){ return ASSET_CLASS_COLORS[cls] || '--text3'; }
    Euclidean RGB distance against EVERY ASSET_CLASS_COLORS token resolved in
    BOTH themes (12 hexes total): these two literal hexes clear >=60 units
    from all twelve and from each other. Olive-green/red reads as
-   income/expense semantically (matches the P&L KPI strip's pos/neg colour
+   income/expense semantically (matches the Income & spending KPI strip's pos/neg colour
    language) without reusing --green (CPF) or --red directly, both of which
    sit inside the danger zone against other classes/palette members.
    Re-verified against the v2.69 --c-* class tokens: income's nearest is
@@ -10523,7 +10668,7 @@ function _renderInsPremiumChart(series){
 function renderCoverageAdequacy(){
   const a = coverageAdequacy();
   if (a.annual <= 0 && !_selfPolicies().length){
-    return `<div class="card"><div class="card-head"><h3>Protection adequacy</h3></div><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('insurance')}</div><div class="empty-title">Add income and policies to see your gaps</div><div class="empty-sub">Targets are based on your annual income. Log income on the P&amp;L tab and add your policies.</div></div></div></div>`;
+    return `<div class="card"><div class="card-head"><h3>Protection adequacy</h3></div><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('insurance')}</div><div class="empty-title">Add income and policies to see your gaps</div><div class="empty-sub">Targets are based on your annual income. Log income on the Income &amp; spending tab and add your policies.</div></div></div></div>`;
   }
   const t = coverageTargets();
   const cur = r => r.unit==='bool' ? (r.current?'Yes':'No') : fmt(r.current,{dp:0}) + (r.unit==='mo'?'/mo':'');
@@ -10644,7 +10789,7 @@ function renderProjections(){
   }
   if (fireNumber == null){
     _clearProjectionChart();
-    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('projections')}</div><div class="empty-title">No FIRE number yet</div><div class="empty-sub">Log expenses on the P&amp;L tab (trailing 12 months is annualised x your FIRE multiple), or set a manual FIRE target in Settings.</div></div></div></div>`;
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('projections')}</div><div class="empty-title">No FIRE number yet</div><div class="empty-sub">Log expenses on the Income &amp; spending tab (trailing 12 months is annualised x your FIRE multiple), or set a manual FIRE target in Settings.</div></div></div></div>`;
     return;
   }
 
@@ -11219,10 +11364,10 @@ function expenseAmountSgdOrNull(x){
   return sgdOrNull(Number(x.amount) || 0, x.currency || 'SGD');
 }
 
-/* One month of the P&L roll-up: take-home and gross income, expenses (an
+/* One month of the Income & spending roll-up: take-home and gross income, expenses (an
    expense whose currency cannot be converted counts as 0, same as the table),
-   net, and the savings rate (null when there is no take-home). The P&L monthly
-   table and the dashboard Savings rate tile both read this one function, so
+   net, and the savings rate (null when there is no take-home). The Income & spending
+   monthly table and the dashboard Savings rate tile both read this one function, so
    the two can never define the rate differently. ym is 'YYYY-MM'. */
 function _cfMonthRollup(income, expenses, ym){
   const mIn = income.filter(i => _ymOf(i.date) === ym);
@@ -11302,7 +11447,7 @@ function renderCashflow(){
   const months = Array.from(ymSet).sort().reverse();
 
   if (!months.length){
-    rollupEl.innerHTML = `<div class="empty"><div class="empty-icon">${_emptyIcon('cashflow')}</div><div class="empty-title">No P&L data yet</div><div class="empty-sub">Add an income entry and a few expenses to see your monthly net and savings rate.</div></div>`;
+    rollupEl.innerHTML = `<div class="empty"><div class="empty-icon">${_emptyIcon('cashflow')}</div><div class="empty-title">No income or spending data yet</div><div class="empty-sub">Add an income entry and a few expenses to see your monthly net and savings rate.</div></div>`;
   } else {
     rollupEl.innerHTML = `<div class="tbl-wrap"><table class="holdings"><thead><tr>
       <th class="tl">Month</th><th>Income (net)</th><th>Income (gross)</th><th>Expenses</th><th>Net</th><th>Savings rate</th><th>Txns</th>
@@ -12439,14 +12584,14 @@ function _efTile(valuation){
 }
 
 /* Savings rate: the last complete month, with six mini bars. The rate is the
-   P&L tab's own (_cfMonthRollup), so the two always agree. */
+   Income & spending tab's own (_cfMonthRollup), so the two always agree. */
 function _savingsTile(){
   const months = _recentMonths(7).slice(0, 6);   // the six complete months before this one, oldest first
   const income = DB.income || [], expenses = DB.expenses || [];
   const series = months.map(ym => Object.assign({ ym }, _cfMonthRollup(income, expenses, ym)));
   const last = series[series.length - 1];
   const bars = _miniBars(series.map(s => ({ pct:s.rate, label: DASH_MONTHS_LONG[Number(s.ym.slice(5, 7)) - 1].slice(0, 3) + ' ' + s.ym.slice(0, 4) + ': ' + (s.rate == null ? 'no data' : Math.round(s.rate) + '%') })));
-  if (last.rate == null) return _tileHtml(bars, 'Savings rate', 'No data', '', '<button type="button" class="dash-link" data-click="navigate" data-a0="cashflow">Add income on P&amp;L</button>');
+  if (last.rate == null) return _tileHtml(bars, 'Savings rate', 'No data', '', '<button type="button" class="dash-link" data-click="navigate" data-a0="cashflow">Add income on Income &amp; spending</button>');
   const name = DASH_MONTHS_LONG[Number(last.ym.slice(5, 7)) - 1];
   const line = last.ne >= 0
     ? '<span class="money-chip">' + fmt(last.ne, {dp:0}) + '</span> saved from <span class="money-chip">' + fmt(last.net, {dp:0}) + '</span>'
@@ -12720,7 +12865,10 @@ function renderDashboard(opts){
   const intEl = document.getElementById('dash-integrity');
   const rec = runReconciliation();
   const statusEl = document.getElementById('dash-status');
-  if (statusEl) statusEl.textContent = _dashStatusLine(rec);
+  if (statusEl){
+    statusEl.textContent = _dashStatusLine(rec);
+    _syncTopbarContext(); // the top bar shows the same status line
+  }
   if (rec.ok){
     if (intEl) intEl.innerHTML = '';
   } else {
@@ -12821,6 +12969,7 @@ function renderAll(){
   // Navigation scroll-to-top is handled separately in showPage().
   const sx = window.scrollX, sy = window.scrollY;
   updateCcyToggleUI();
+  updateNavCounts(); // sidebar counts follow every save, delete, restore and sync
   renderDashboard(); // self-checks visibility internally (dash-networth lookup), always safe to call
   // renderStocks() also drives renderWatchlist/renderBoard/renderDividendTimeline/
   // renderStockTxns internally, and renderBoard() targets the SEPARATE
@@ -12932,16 +13081,11 @@ function installEventDelegation(){
     const sheet = document.getElementById('more-sheet');
     if (sheet && sheet.classList.contains('open')) closeMoreSheet();
   });
-  // Desktop nav "More" dropdown (F1): Escape and outside-click both close it,
-  // same affordances as every other overlay in the app.
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    const wrap = document.getElementById('nav-more-wrap');
-    if (wrap && wrap.classList.contains('open')) closeNavMore();
-  });
+  // Workspace switcher and + Add menus: arrow keys, Home, End, Escape and Tab
+  // inside an open menu, arrow keys on the button, and a click outside closes.
+  document.addEventListener('keydown', shellMenuKeydown);
   document.addEventListener('click', (e) => {
-    const wrap = document.getElementById('nav-more-wrap');
-    if (wrap && wrap.classList.contains('open') && !wrap.contains(e.target)) closeNavMore();
+    if (!e.target.closest('.menu-wrap')) closeShellMenus(false);
   });
   // Backdrop-close for the four overlays with real teardown work, handed over
   // from the index.html pass: entity-modal/stock-cols-modal/board-cols-modal
@@ -12993,9 +13137,11 @@ function installEventDelegation(){
   const ACTIONS = {
     // navigation / theme / currency
     navigate:            (el) => navigate(A(el)[0]),
-    openMoreSheet:       () => openMoreSheet(),
+    navLink:             (el, ev) => navLink(el, ev),
+    openMoreSheet:       (el) => openMoreSheet(A(el)[0]),
     closeMoreSheet:      () => closeMoreSheet(),
-    toggleNavMore:       () => toggleNavMore(),
+    toggleShellMenu:     (el) => toggleShellMenu(A(el)[0]),
+    addMenuPick:         (el) => addMenuPick(A(el)[0]),
     toggleTheme:         () => toggleTheme(),
     togglePrivacy:       () => togglePrivacy(),
     setThemeChoice:      (el) => setThemeChoice(A(el)[0]),
@@ -13083,7 +13229,7 @@ function installEventDelegation(){
     closeSetupWizard:    () => closeSetupWizard(),
     setupWizardNext:     () => setupWizardNext(),
     setupWizardBack:     () => setupWizardBack(),
-    // salary rules / P&L
+    // salary rules / Income & spending
     addSalaryRule:       () => addSalaryRule(),
     removeSalaryRule:    (el) => removeSalaryRule(Number(A(el)[0])),
     onSalaryRuleInput:   () => onSalaryRuleInput(),
@@ -13186,6 +13332,7 @@ async function boot(){
   if (verEl) verEl.textContent = APP_DISPLAY_VERSION;
   renderNav();
   installEventDelegation();
+  setInterval(_refreshSyncAge, 60000); // "Synced 2m ago" keeps counting
   installAutoRefreshVisibility();
   _loadNasImportReceipt();
   renderBackendBanner();

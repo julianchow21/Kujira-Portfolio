@@ -78,6 +78,33 @@ function extractConstLine(name){
   return appSrc.slice(idx, nl === -1 ? undefined : nl);
 }
 
+/* extractConstBlock: the navigation tables (TABS, NAV_GROUPS, MOBILE_GROUPS, ADD_MENU_ITEMS) and a few
+   multi-part icon strings span several lines, so scan from `const NAME = ` to the `;` that closes the
+   statement at bracket depth 0, skipping strings and comments the same way extractFunction does. */
+function extractConstBlock(name){
+  const idx = appSrc.indexOf('const ' + name + ' = ');
+  if (idx === -1) return null;
+  let depth = 0, inStr = null, inLine = false, inBlock = false;
+  for (let i = idx; i < appSrc.length; i++){
+    const c = appSrc[i];
+    const next = appSrc[i + 1];
+    if (inLine){ if (c === '\n') inLine = false; continue; }
+    if (inBlock){ if (c === '*' && next === '/'){ inBlock = false; i++; } continue; }
+    if (inStr){
+      if (c === '\\'){ i++; continue; }
+      if (c === inStr) inStr = null;
+      continue;
+    }
+    if (c === '/' && next === '/'){ inLine = true; i++; continue; }
+    if (c === '/' && next === '*'){ inBlock = true; i++; continue; }
+    if (c === '\'' || c === '"' || c === '`'){ inStr = c; continue; }
+    if (c === '[' || c === '{' || c === '(') depth++;
+    else if (c === ']' || c === '}' || c === ')') depth--;
+    else if (c === ';' && depth === 0) return appSrc.slice(idx, i + 1);
+  }
+  return null;
+}
+
 const FUNCTION_TARGETS = [
   'kjrSafeId', 'kjrSafeString', '_isValidTicker',
   'isBrokerageAcct', 'cashMovementDelta', 'linkedTradeCurrencyMismatch',
@@ -122,9 +149,15 @@ const FUNCTION_TARGETS = [
   '_ymOf', '_cfMonthRollup', '_insuranceDueWithin', '_upcomingDividendRows', '_cryptoRow', 'isStale',
   // Hero chart (v2.71): the series and layout maths, the remembered range, and the markup builders
   '_pbHumanDate', '_heroRangeGet', 'setHeroRange', '_heroDay', '_heroSeries', '_heroNearest', '_heroNiceTicks', '_heroGeometry',
-  '_heroLiveValue', '_heroWithLive', '_heroAxisLabel', '_heroRangesHtml', '_heroPointText', '_heroChartHtml'
+  '_heroLiveValue', '_heroWithLive', '_heroAxisLabel', '_heroRangesHtml', '_heroPointText', '_heroChartHtml',
+  // Navigation shell (v2.72): group membership, the active area on the phone, sidebar counts, the + Add menu, and the sync row's age and phone dot
+  '_tabLabel', '_groupTabKeys', '_mobileGroupForTab', '_navCount', '_navCountLabel', '_addMenuModel',
+  '_navIcon', '_sideItemHtml', '_sheetNavRowHtml', '_sheetUtilityRowsHtml', 'renderSidebarNav', 'renderBottomBar', 'renderMoreSheet',
+  'updateNavCounts', '_syncNavActive', '_syncTopbarContext', 'navLink',
+  '_shellMenuItems', 'openShellMenu', 'closeShellMenus', 'toggleShellMenu', 'shellMenuKeydown', 'renderAddMenu', 'addMenuPick',
+  '_syncAgeText', '_paintSyncDot', '_refreshSyncAge'
 ];
-const CONST_TARGETS = ['APP_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState'];
+const CONST_TARGETS = ['APP_VERSION', 'APP_DISPLAY_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState'];
 
 const extractedFns = {};
 const missingFns = [];
@@ -132,6 +165,14 @@ FUNCTION_TARGETS.forEach(name => {
   const src = extractFunction(name);
   if (!src) missingFns.push(name);
   else extractedFns[name] = src;
+});
+// Multi-line navigation constants (v2.72), pulled out whole.
+const CONST_BLOCK_TARGETS = ['TABS', 'PHASE_2_TABS', 'NAV_GROUPS', 'MOBILE_GROUPS', 'NAV_COUNT_TABLES', 'ADD_MENU_ITEMS', 'MORE_SHEET_ICON', 'BOOK_ICON', 'TRADING_ICON', 'FOREX_ICON', 'THEME_ICONS', 'SHELL_MENUS'];
+const extractedConstBlocks = {};
+CONST_BLOCK_TARGETS.forEach(name => {
+  const src = extractConstBlock(name);
+  if (!src) missingFns.push(name + ' (const block)');
+  else extractedConstBlocks[name] = src;
 });
 const extractedConsts = {};
 const missingConsts = [];
@@ -156,6 +197,7 @@ if (missingFns.length || missingConsts.length){
 const COMBINED_SRC = [
   appSrc.match(/const _DIVERGENCE_TABLES = \[[\s\S]*?\];/)[0],
   ...CONST_TARGETS.map(n => extractedConsts[n]),
+  ...CONST_BLOCK_TARGETS.map(n => extractedConstBlocks[n]),
   ...FUNCTION_TARGETS.map(n => extractedFns[n])
 ].join('\n\n');
 
@@ -1745,14 +1787,18 @@ async function runTests(){
     assert.strictEqual(noLib.calls.layouts, 1);
   });
 
-  test('Explore - tab sits after Projections and before Settings, stays out of the mobile bottom bar, and routes through showPage, renderAll and the theme redraw', () => {
+  test('Explore - tab sits right after Projections in the sidebar order and the Overview group, sits in the phone More sheet (not a bottom-bar destination), and routes through showPage, renderAll and the theme redraw', () => {
     const tabsBlock = appSrc.slice(appSrc.indexOf('const TABS = ['), appSrc.indexOf('const PHASE_2_TABS'));
     const keys = Array.from(tabsBlock.matchAll(/key:'([a-z0-9]+)'/g)).map(m => m[1]);
     assert.strictEqual(keys[keys.indexOf('projections') + 1], 'explore');
-    assert.strictEqual(keys[keys.indexOf('explore') + 1], 'settings');
+    assert.strictEqual(keys[keys.length - 1], 'settings');
     assert.strictEqual(keys.filter(k => k === 'explore').length, 1);
-    const bottom = /const MOBILE_BOTTOM_TABS = \[([^\]]*)\]/.exec(appSrc)[1];
-    assert.strictEqual(bottom.includes('explore'), false);
+    // MOBILE_BOTTOM_TABS is gone: the bottom bar is five areas (MOBILE_GROUPS), and Explore lives in More
+    assert.strictEqual(appSrc.includes('MOBILE_BOTTOM_TABS'), false);
+    const sb = freshSandbox();
+    const overview = JSON.parse(JSON.stringify(vm.runInContext('NAV_GROUPS', sb))).find(g => g.key === 'overview');
+    assert.deepStrictEqual(overview.tabs, ['dashboard', 'projections', 'explore']);
+    assert.strictEqual(sb._mobileGroupForTab('explore'), 'more');
     assert.ok(extractFunction('showPage').includes("if (key === 'explore') renderExplore();"));
     assert.ok(extractFunction('renderAll').includes("if (_isPageActive('explore')) renderExplore();"));
     assert.ok(extractFunction('applyTheme').includes("_currentTab === 'explore'"));
@@ -2276,7 +2322,7 @@ async function runTests(){
     assert.ok(extractFunction('renderDividendTimeline').includes('_upcomingDividendRows(rows, today, cutoff)'));
   });
 
-  test('_cfMonthRollup - the P&L month definition: take-home, expenses (unconvertible ones count 0), net and savings rate', () => {
+  test('_cfMonthRollup - the Income & spending month definition: take-home, expenses (unconvertible ones count 0), net and savings rate', () => {
     const sb = freshSandbox({settings:{fxOverrides:{USDSGD:1.35},fxRates:{}}});
     const income = [{ date:'2026-09-30', gross:8000, net:6400 }, { date:'2026-09-10', gross:1000, employeeCPF:200 }, { date:'2026-08-31', gross:8000, net:6400 }];
     const expenses = [{ date:'2026-09-30', amount:3200, currency:'SGD' }, { date:'2026-09-15', amount:1000, currency:'JPY' }, { date:'2026-09-02', amount:100, currency:'USD' }];
@@ -2292,7 +2338,7 @@ async function runTests(){
     assert.strictEqual(sb._cfMonthRollup([], [{ date:'2026-09-30', amount:50, currency:'SGD' }], '2026-09').rate, null);  // expenses with no take-home: no rate
     assert.strictEqual(sb._cfMonthRollup([{ date:'2026-09-30', gross:0, net:0 }], [], '2026-09').rate, null);
     assert.strictEqual(sb._cfMonthRollup([{ date:'2026-09-30', net:100 }], [{ date:'2026-09-30', amount:150, currency:'SGD' }], '2026-09').rate, -50);
-    // one definition: the P&L monthly table and the dashboard tile both read it
+    // one definition: the Income & spending monthly table and the dashboard tile both read it
     assert.ok(extractFunction('renderCashflow').includes('_cfMonthRollup(income, expenses, ym)'));
     assert.ok(appSrc.includes('_cfMonthRollup(income, expenses, ym)'));
     assert.ok(appSrc.slice(appSrc.indexOf('function _savingsTile')).includes('_cfMonthRollup(income, expenses, ym)'));
@@ -2366,6 +2412,619 @@ async function runTests(){
     assert.strictEqual(new Set(icons.map(i => i[1])).size, icons.length, 'duplicate tab icon');
     const explore = icons.find(i => i[0] === 'explore')[1];
     assert.strictEqual(explore.includes('M3 17l6-6 4 4 8-8'), false);
+  });
+
+  /* ═══ Navigation shell (v2.72): sidebar groups, phone areas, counts, the + Add menu, the sync row, the rename ═══ */
+
+  const navPlain = x => JSON.parse(JSON.stringify(x));
+  const NAV_TAB_KEYS = ['dashboard', 'projections', 'explore', 'stocks', 'crypto', 'cash', 'cpf', 'realestate', 'insurance', 'cashflow', 'board', 'settings'];
+  const NAV_PHONE_AREA = { dashboard:'overview', projections:'plan', explore:'more', stocks:'assets', crypto:'assets', cash:'assets', cpf:'assets', realestate:'assets', insurance:'assets', cashflow:'money', board:'money', settings:'more' };
+  const navPark = (sb, keys) => vm.runInContext(keys.map(k => 'PHASE_2_TABS.add(' + JSON.stringify(k) + ')').join(';'), sb);
+
+  /* A small stand-in for the DOM nodes the navigation code touches: attributes, classes, hidden, focus and click. */
+  function fakeEl(attrs, extra){
+    const a = Object.assign({}, attrs);
+    const classes = new Set(String(a.class || '').split(/\s+/).filter(Boolean));
+    const el = Object.assign({
+      innerHTML: '', textContent: '', hidden: false, title: '', clicks: 0,
+      classList: {
+        add: (...names) => names.forEach(n => classes.add(n)), remove: (...names) => names.forEach(n => classes.delete(n)), contains: n => classes.has(n),
+        toggle: (n, on) => { const want = on === undefined ? !classes.has(n) : !!on; if (want) classes.add(n); else classes.delete(n); return want; }
+      },
+      getAttribute: n => (n in a ? a[n] : null),
+      setAttribute: (n, v) => { a[n] = String(v); },
+      removeAttribute: n => { delete a[n]; },
+      hasAttribute: n => n in a,
+      click(){ this.clicks++; }
+    }, extra || {});
+    el.attrs = a;
+    el.classes = classes;
+    return el;
+  }
+
+  test('nav groups - TABS is in display order, every tab sits in exactly one sidebar group (Settings aside) and one phone area', () => {
+    const sb = freshSandbox();
+    const tabs = navPlain(vm.runInContext('TABS', sb)).map(t => t.key);
+    const side = navPlain(vm.runInContext('NAV_GROUPS', sb));
+    const phone = navPlain(vm.runInContext('MOBILE_GROUPS', sb));
+    assert.deepStrictEqual(side.map(g => g.label), ['Overview', 'Assets', 'Money']);
+    assert.deepStrictEqual(phone.map(g => g.label), ['Overview', 'Assets', 'Money', 'Plan', 'More']);
+    // TABS lists the tabs in the order the sidebar shows them, Settings last
+    assert.deepStrictEqual(tabs, side.flatMap(g => g.tabs).concat('settings'));
+    assert.deepStrictEqual(tabs, NAV_TAB_KEYS);
+    const owners = (groups, key) => groups.filter(g => g.tabs.includes(key)).length;
+    tabs.forEach(key => {
+      assert.strictEqual(owners(phone, key), 1, key + ' phone areas');
+      assert.strictEqual(owners(side, key), key === 'settings' ? 0 : 1, key + ' sidebar groups');
+    });
+    // Overview and Plan go straight to a page, Assets, Money and More open a sheet, and only More always stays
+    assert.deepStrictEqual(phone.map(g => g.goes || ''), ['dashboard', '', '', 'projections', '']);
+    phone.filter(g => g.goes).forEach(g => assert.ok(g.tabs.includes(g.goes), g.key));
+    assert.deepStrictEqual(phone.filter(g => g.always).map(g => g.key), ['more']);
+  });
+
+  test('tab labels - the sidebar, sheets and top bar read Real estate, Watchlist and Income & spending', () => {
+    const sb = freshSandbox();
+    assert.deepStrictEqual(NAV_TAB_KEYS.map(k => sb._tabLabel(k)),
+      ['Dashboard', 'Projections', 'Explore', 'Stocks', 'Crypto', 'Cash', 'CPF', 'Real estate', 'Insurance', 'Income & spending', 'Watchlist', 'Settings']);
+    assert.strictEqual(sb._tabLabel('ghost'), 'ghost');
+  });
+
+  test('_groupTabKeys - keeps the group order and drops unknown and parked tabs', () => {
+    const sb = freshSandbox();
+    const assets = navPlain(vm.runInContext('NAV_GROUPS', sb)).find(g => g.key === 'assets');
+    assert.deepStrictEqual(arr(sb._groupTabKeys(assets)), ['stocks', 'crypto', 'cash', 'cpf', 'realestate', 'insurance']);
+    assert.deepStrictEqual(arr(sb._groupTabKeys({ tabs:['stocks', 'ghost', 'cash'] })), ['stocks', 'cash']);
+    assert.deepStrictEqual(arr(sb._groupTabKeys(null)), []);
+    assert.deepStrictEqual(arr(sb._groupTabKeys({})), []);
+    navPark(sb, ['crypto', 'insurance']);
+    assert.deepStrictEqual(arr(sb._groupTabKeys(assets)), ['stocks', 'cash', 'cpf', 'realestate']);
+  });
+
+  test('_mobileGroupForTab - the phone area that owns each page, empty for an unknown one', () => {
+    const sb = freshSandbox();
+    const owner = {};
+    NAV_TAB_KEYS.forEach(k => { owner[k] = sb._mobileGroupForTab(k); });
+    assert.deepStrictEqual(owner, NAV_PHONE_AREA);
+    assert.strictEqual(sb._mobileGroupForTab('ghost'), '');
+    assert.strictEqual(sb._mobileGroupForTab(undefined), '');
+  });
+
+  test('_navCount and _navCountLabel - a count for the five lists only, hidden at zero, deleted rows never counted', () => {
+    const sb = freshSandbox({ stocks:[{}, {}, {}], crypto:[{}], cash:[{}, {}], realestate:[], insurance:[{}], cpfHistory:[{}, {}], watchlist:[{}], trash:[{}, {}, {}, {}] });
+    assert.deepStrictEqual(['stocks', 'crypto', 'cash', 'realestate', 'insurance'].map(k => sb._navCount(k)), [3, 1, 2, 0, 1]);
+    // CPF has no list of its own, Watchlist and the rest carry no count, and the trash store is separate
+    ['cpf', 'board', 'cashflow', 'dashboard', 'projections', 'explore', 'settings'].forEach(k => assert.strictEqual(sb._navCount(k), 0, k));
+    assert.deepStrictEqual([0, 1, 12, 150, '7', 2.9, -3, NaN, null, undefined, 'x'].map(n => sb._navCountLabel(n)), ['', '1', '12', '150', '7', '2', '', '', '', '', '']);
+    sb.DB.stocks = null;
+    assert.strictEqual(sb._navCount('stocks'), 0);
+  });
+
+  test('updateNavCounts - fills each badge from its list, empties it at zero, and runs on every renderAll', () => {
+    const sb = freshSandbox({ stocks:[{}, {}], crypto:[], cash:[{}] });
+    const badges = ['stocks', 'crypto', 'cash', 'realestate', 'insurance'].map(k => fakeEl({ 'data-count-for':k }));
+    sb.document = { querySelectorAll: sel => (sel === '[data-count-for]' ? badges : []) };
+    sb.updateNavCounts();
+    assert.deepStrictEqual(badges.map(b => b.textContent), ['2', '', '1', '', '']);
+    sb.DB.crypto.push({}, {}, {});
+    sb.updateNavCounts();
+    assert.strictEqual(badges[1].textContent, '3');
+    assert.ok(extractFunction('renderAll').includes('updateNavCounts();'));
+  });
+
+  test('_addMenuModel - the eight existing flows in order, Record trade waits for a stock, a flow with no schema is left out', () => {
+    const sb = freshSandbox();
+    const tables = ['stocks', 'stockTxns', 'crypto', 'cash', 'realestate', 'insurance', 'income', 'expenses'];
+    sb.ENTITY_SCHEMAS = Object.fromEntries(tables.map(t => [t, { title:t, fields:[] }]));
+    const model = () => navPlain(sb._addMenuModel());
+    assert.deepStrictEqual(model().map(i => i.table), tables);
+    assert.deepStrictEqual(model().map(i => i.label), ['Add stock', 'Record trade', 'Add coin', 'Add cash account', 'Add property', 'Add policy', 'Add income', 'Add expense']);
+    assert.deepStrictEqual(model().map(i => i.group), ['assets', 'assets', 'assets', 'assets', 'assets', 'assets', 'money', 'money']);
+    assert.deepStrictEqual(model().filter(i => i.disabled).map(i => i.table), ['stockTxns']);
+    sb.DB.stocks = [{ id:'s1', symbol:'AAPL' }];
+    assert.deepStrictEqual(model().filter(i => i.disabled).map(i => i.table), []);
+    delete sb.ENTITY_SCHEMAS.crypto;
+    assert.strictEqual(model().length, 7);
+    assert.strictEqual(model().some(i => i.table === 'crypto'), false);
+    // a parked page takes its add flows with it: Stocks owns Add stock and Record trade, Income & spending owns both money flows
+    sb.ENTITY_SCHEMAS.crypto = {};
+    navPark(sb, ['stocks', 'cashflow']);
+    assert.deepStrictEqual(model().map(i => i.table), ['crypto', 'cash', 'realestate', 'insurance']);
+    navPark(sb, ['insurance']);
+    assert.deepStrictEqual(model().map(i => i.table), ['crypto', 'cash', 'realestate']);
+    // every flow the menu offers has a real schema in ENTITY_SCHEMAS
+    const schemas = appSrc.slice(appSrc.indexOf('const ENTITY_SCHEMAS = {'), appSrc.indexOf('function normaliseEntityRow'));
+    tables.forEach(t => assert.ok(new RegExp('^  ' + t + '\\s*:\\s*\\{', 'm').test(schemas), t + ' has no entity schema'));
+  });
+
+  test('renderAddMenu - menu items with roles, a divider between assets and money, Record trade disabled with its reason until a stock exists', () => {
+    const sb = freshSandbox();
+    sb.ENTITY_SCHEMAS = Object.fromEntries(['stocks', 'stockTxns', 'crypto', 'cash', 'realestate', 'insurance', 'income', 'expenses'].map(t => [t, {}]));
+    const menu = fakeEl({});
+    sb.document = { getElementById: id => (id === 'add-menu' ? menu : null) };
+    sb.renderAddMenu();
+    const html = menu.innerHTML;
+    assert.strictEqual((html.match(/role="menuitem"/g) || []).length, 8);
+    assert.strictEqual((html.match(/role="separator"/g) || []).length, 1);
+    assert.ok(html.indexOf('data-a0="insurance"') < html.indexOf('role="separator"') && html.indexOf('role="separator"') < html.indexOf('data-a0="income"'));
+    assert.ok(html.includes('data-a0="stockTxns" aria-disabled="true"><span>Record trade</span><span class="menu-hint">Add a stock first</span>'));
+    assert.strictEqual((html.match(/aria-disabled/g) || []).length, 1);
+    assert.strictEqual((html.match(/tabindex="-1"/g) || []).length, 8);
+    sb.DB.stocks = [{ id:'s1' }];
+    sb.renderAddMenu();
+    assert.strictEqual(menu.innerHTML.includes('aria-disabled'), false);
+    assert.strictEqual(/\son[a-z]+="/i.test(menu.innerHTML), false);
+  });
+
+  test('addMenuPick - opens only a flow the menu offers, after the menu closes and focus is back on + Add, and a trade without a stock explains itself', () => {
+    const sb = freshSandbox();
+    const calls = [];
+    sb.ENTITY_SCHEMAS = { stocks:{}, stockTxns:{}, income:{} };
+    sb.closeShellMenus = back => calls.push('close:' + back);
+    sb.openEntityModal = table => calls.push('open:' + table);
+    sb.showToast = (msg, kind) => calls.push('toast:' + kind);
+    sb.addMenuPick('stocks');
+    assert.deepStrictEqual(calls, ['close:true', 'open:stocks']);
+    calls.length = 0;
+    sb.addMenuPick('stockTxns');
+    assert.deepStrictEqual(calls, ['close:true', 'toast:error']);
+    calls.length = 0;
+    sb.DB.stocks = [{ id:'s1' }];
+    sb.addMenuPick('stockTxns');
+    assert.deepStrictEqual(calls, ['close:true', 'open:stockTxns']);
+    calls.length = 0;
+    sb.addMenuPick('cash');       // offered by the menu in the app, but this stub has no schema for it
+    sb.addMenuPick('cpfHistory'); // never on the menu
+    sb.addMenuPick('ghost');
+    sb.addMenuPick(undefined);
+    assert.deepStrictEqual(calls, []);
+  });
+
+  test('_navIcon and _sideItemHtml - a real link with a hidden icon, the label and a count slot only for the five counted tabs', () => {
+    const sb = freshSandbox();
+    sb.kjrEscape = v => '{' + v + '}';
+    const stocks = sb._sideItemHtml('stocks');
+    assert.ok(stocks.startsWith('<li><a class="side-item" href="#{stocks}" data-click="navLink" data-a0="{stocks}" data-tab="{stocks}"><svg aria-hidden="true" focusable="false" '));
+    assert.ok(stocks.includes('<span class="side-text">{Stocks}</span>'));
+    assert.ok(stocks.includes('<span class="side-count" data-count-for="{stocks}"></span>'));
+    assert.ok(stocks.endsWith('</a></li>'));
+    ['stocks', 'crypto', 'cash', 'realestate', 'insurance'].forEach(k => assert.ok(sb._sideItemHtml(k).includes('data-count-for'), k));
+    ['cpf', 'cashflow', 'board', 'dashboard', 'projections', 'explore'].forEach(k => assert.strictEqual(sb._sideItemHtml(k).includes('side-count'), false, k));
+    assert.ok(sb._sideItemHtml('cashflow').includes('<span class="side-text">{Income & spending}</span>'));
+    assert.strictEqual(sb._sideItemHtml('ghost'), '');
+    assert.strictEqual(sb._navIcon('ghost'), '');
+    assert.ok(sb._navIcon('cpf').startsWith('<svg aria-hidden="true" focusable="false" viewBox'));
+    assert.strictEqual(/\son[a-z]+="/i.test(stocks), false);
+  });
+
+  test('renderSidebarNav - three labelled groups in order, a parked page drops out, a group with none left disappears, Settings hides when parked', () => {
+    const sb = freshSandbox();
+    const host = fakeEl({});
+    const settings = fakeEl({ id:'side-settings' });
+    sb.document = { getElementById: id => (id === 'side-nav' ? host : (id === 'side-settings' ? settings : null)) };
+    sb.renderSidebarNav();
+    const labels = html => Array.from(html.matchAll(/class="side-label" id="[^"]+">([^<]+)</g)).map(m => m[1]);
+    const tabsOf = html => Array.from(html.matchAll(/data-tab="([a-z]+)"/g)).map(m => m[1]);
+    assert.deepStrictEqual(labels(host.innerHTML), ['Overview', 'Assets', 'Money']);
+    assert.deepStrictEqual(tabsOf(host.innerHTML), ['dashboard', 'projections', 'explore', 'stocks', 'crypto', 'cash', 'cpf', 'realestate', 'insurance', 'cashflow', 'board']);
+    assert.ok(host.innerHTML.includes('id="side-group-assets">Assets</p><ul class="side-list" aria-labelledby="side-group-assets">'));
+    assert.strictEqual(settings.hidden, false);
+    navPark(sb, ['cashflow', 'board', 'settings', 'crypto']);
+    sb.renderSidebarNav();
+    assert.deepStrictEqual(labels(host.innerHTML), ['Overview', 'Assets']);
+    assert.strictEqual(tabsOf(host.innerHTML).includes('crypto'), false);
+    assert.strictEqual(tabsOf(host.innerHTML).includes('cashflow'), false);
+    assert.strictEqual(settings.hidden, true);
+  });
+
+  test('renderBottomBar - five areas in order, Overview and Plan go straight to a page, the others open a sheet, a parked page removes its area but More stays', () => {
+    const sb = freshSandbox();
+    const host = fakeEl({});
+    sb.document = { getElementById: id => (id === 'bottom-nav' ? host : null) };
+    sb.renderBottomBar();
+    const rows = html => Array.from(html.matchAll(/<button type="button" class="bb-item" data-group="([a-z]+)" ([^>]*)><svg.*?<\/svg><span>([^<]+)<\/span><\/button>/g)).map(m => [m[1], m[3], m[2]]);
+    const bar = rows(host.innerHTML);
+    assert.deepStrictEqual(bar.map(r => r[0]), ['overview', 'assets', 'money', 'plan', 'more']);
+    assert.deepStrictEqual(bar.map(r => r[1]), ['Overview', 'Assets', 'Money', 'Plan', 'More']);
+    assert.strictEqual(bar[0][2], 'data-click="navigate" data-a0="dashboard"');
+    assert.strictEqual(bar[3][2], 'data-click="navigate" data-a0="projections"');
+    assert.strictEqual(bar[1][2], 'data-click="openMoreSheet" data-a0="assets" aria-haspopup="dialog"');
+    assert.strictEqual(bar[2][2], 'data-click="openMoreSheet" data-a0="money" aria-haspopup="dialog"');
+    assert.strictEqual(bar[4][2], 'data-click="openMoreSheet" data-a0="more" aria-haspopup="dialog"');
+    assert.strictEqual(/\son[a-z]+="/i.test(host.innerHTML), false);
+    navPark(sb, ['projections', 'cashflow', 'board', 'explore', 'settings']);
+    sb.renderBottomBar();
+    assert.deepStrictEqual(rows(host.innerHTML).map(r => r[0]), ['overview', 'assets', 'more']);
+    navPark(sb, ['dashboard']);
+    sb.renderBottomBar();
+    assert.deepStrictEqual(rows(host.innerHTML).map(r => r[0]), ['assets', 'more']);
+  });
+
+  test('_syncNavActive - one sidebar item and one phone area are current on every page, a sheet takes the highlight while aria-current keeps following the page', () => {
+    const sb = freshSandbox();
+    const side = NAV_TAB_KEYS.map(k => fakeEl({ 'data-tab':k }));
+    const bottom = navPlain(vm.runInContext('MOBILE_GROUPS', sb)).map(g => fakeEl(Object.assign({ 'data-group':g.key }, g.goes ? {} : { 'aria-haspopup':'dialog' })));
+    sb.document = { querySelectorAll: sel => (sel === '.side-item[data-tab]' ? side : (sel === '#bottom-nav .bb-item' ? bottom : [])) };
+    NAV_TAB_KEYS.forEach(key => {
+      sb._currentTab = key;
+      sb._syncNavActive(key);
+      assert.deepStrictEqual(side.filter(e => e.classes.has('active')).map(e => e.attrs['data-tab']), [key], key + ' sidebar active');
+      assert.deepStrictEqual(side.filter(e => e.attrs['aria-current']).map(e => e.attrs['data-tab'] + ':' + e.attrs['aria-current']), [key + ':page'], key + ' sidebar aria-current');
+      assert.deepStrictEqual(bottom.filter(e => e.classes.has('active')).map(e => e.attrs['data-group']), [NAV_PHONE_AREA[key]], key + ' phone area');
+      const current = bottom.filter(e => e.attrs['aria-current']);
+      assert.strictEqual(current.length, 1, key);
+      assert.strictEqual(current[0].attrs['data-group'], NAV_PHONE_AREA[key], key);
+      assert.strictEqual(current[0].attrs['aria-current'], current[0].hasAttribute('aria-haspopup') ? 'true' : 'page', key);
+    });
+    // Money's sheet open over Stocks: Money takes the tap highlight, aria-current still says Assets
+    sb._currentTab = 'stocks';
+    sb._syncNavActive('stocks', 'money');
+    assert.deepStrictEqual(bottom.filter(e => e.classes.has('active')).map(e => e.attrs['data-group']), ['money']);
+    assert.deepStrictEqual(bottom.filter(e => e.attrs['aria-current']).map(e => e.attrs['data-group']), ['assets']);
+    // no arguments: the current page decides
+    sb._currentTab = 'projections';
+    sb._syncNavActive();
+    assert.deepStrictEqual(bottom.filter(e => e.classes.has('active')).map(e => e.attrs['data-group']), ['plan']);
+    assert.deepStrictEqual(side.filter(e => e.classes.has('active')).map(e => e.attrs['data-tab']), ['projections']);
+  });
+
+  test('renderMoreSheet - Assets lists six pages with counts, Money two, More has Explore, Settings, the theme switch, the guide, Trading, Forex and the version', () => {
+    const sb = freshSandbox({ stocks:[{}, {}, {}, {}], crypto:[{}], cash:[{}, {}], realestate:[{}], insurance:[{}] });
+    const body = fakeEl({});
+    const title = fakeEl({});
+    sb.document = { getElementById: id => (id === 'more-sheet-body' ? body : (id === 'more-sheet-title' ? title : null)) };
+    let themeSynced = 0;
+    sb.updateThemeUI = () => { themeSynced++; };
+    sb._currentTab = 'cash';
+    const rows = html => Array.from(html.matchAll(/data-click="navigate" data-a0="([a-z]+)"[^>]*><svg.*?<\/svg><span class="msr-text">([^<]+)<\/span>(?:<span class="msr-count">(\d+)<\/span>)?/g)).map(m => [m[1], m[2], m[3] || '']);
+    sb.renderMoreSheet('assets');
+    assert.strictEqual(title.textContent, 'Assets');
+    assert.deepStrictEqual(rows(body.innerHTML), [['stocks', 'Stocks', '4'], ['crypto', 'Crypto', '1'], ['cash', 'Cash', '2'], ['cpf', 'CPF', ''], ['realestate', 'Real estate', '1'], ['insurance', 'Insurance', '1']]);
+    assert.ok(body.innerHTML.includes('class="btn more-sheet-row active" data-click="navigate" data-a0="cash" aria-current="page"'));
+    assert.strictEqual((body.innerHTML.match(/aria-current="page"/g) || []).length, 1);
+    assert.strictEqual(body.innerHTML.includes('sheet-version'), false);
+    sb.renderMoreSheet('money');
+    assert.strictEqual(title.textContent, 'Money');
+    assert.deepStrictEqual(rows(body.innerHTML), [['cashflow', 'Income & spending', ''], ['board', 'Watchlist', '']]);
+    assert.strictEqual(body.innerHTML.includes('aria-current'), false);
+    assert.strictEqual(themeSynced, 0);
+    sb.renderMoreSheet('more');
+    const more = body.innerHTML;
+    assert.strictEqual(title.textContent, 'More');
+    assert.deepStrictEqual(rows(more), [['explore', 'Explore', ''], ['settings', 'Settings', '']]);
+    assert.ok(more.includes('data-click="toggleTheme" data-theme-switch'));
+    assert.ok(more.includes('<span class="tt-light">Switch to light theme</span><span class="tt-dark">Switch to dark theme</span>'));
+    assert.ok(more.includes('href="https://kujira-journal.pages.dev" target="_blank" rel="noopener noreferrer"'));
+    assert.ok(more.includes('<span class="sr-only">(opens in a new tab)</span>'));
+    assert.ok(more.includes('href="../Trading/"') && more.includes('href="../Forex/"'));
+    assert.ok(more.includes('<p class="sheet-version">Portfolio ' + vm.runInContext('APP_DISPLAY_VERSION', sb) + '</p>'));
+    assert.strictEqual(themeSynced, 1);
+    assert.strictEqual(/\son[a-z]+="/i.test(more), false);
+    // parked pages leave the sheets, an unknown area opens More
+    navPark(sb, ['crypto', 'explore']);
+    sb.renderMoreSheet('assets');
+    assert.strictEqual(rows(body.innerHTML).some(r => r[0] === 'crypto'), false);
+    sb.renderMoreSheet('more');
+    assert.deepStrictEqual(rows(body.innerHTML), [['settings', 'Settings', '']]);
+    sb.renderMoreSheet('ghost');
+    assert.strictEqual(title.textContent, 'More');
+  });
+
+  test('shell menus - opening focuses the first item, arrows wrap, Escape returns focus to the button, Tab closes, one menu is open at a time', () => {
+    const sb = freshSandbox();
+    const focus = { on:null };
+    const el = (attrs, extra) => fakeEl(attrs, Object.assign({ focus(){ focus.on = this; } }, extra));
+    let addItems = [];
+    const wsItems = [0, 1, 2].map(() => el({ role:'menuitem' }));
+    const wsBtn = el({ id:'ws-btn', 'data-menu-btn':'ws' });
+    const addBtn = el({ id:'add-btn', 'data-menu-btn':'add' });
+    const wsMenu = el({ id:'ws-menu' }, { hidden:true, querySelectorAll: () => wsItems });
+    const addMenu = el({ id:'add-menu' }, { hidden:true, querySelectorAll: () => addItems });
+    sb.renderAddMenu = () => { addItems = [el({ role:'menuitem' }), el({ role:'menuitem' }), el({ role:'menuitem' })]; };
+    const byId = { 'ws-btn':wsBtn, 'ws-menu':wsMenu, 'add-btn':addBtn, 'add-menu':addMenu };
+    sb.document = { getElementById: id => byId[id] || null, get activeElement(){ return focus.on; } };
+    const press = (key, target) => { let prevented = false; sb.shellMenuKeydown({ key, target, preventDefault(){ prevented = true; } }); return prevented; };
+    const inside = menu => ({ closest: sel => (sel === '.shell-menu' ? menu : null) });
+    const onButton = btn => ({ closest: sel => (sel === '[data-menu-btn]' ? btn : null) });
+    // open: first item focused, the button says expanded
+    sb.openShellMenu('ws');
+    assert.strictEqual(wsMenu.hidden, false);
+    assert.strictEqual(wsBtn.attrs['aria-expanded'], 'true');
+    assert.strictEqual(focus.on, wsItems[0]);
+    // arrows wrap, Home and End jump
+    assert.strictEqual(press('ArrowDown', inside(wsMenu)), true);
+    assert.strictEqual(focus.on, wsItems[1]);
+    press('ArrowDown', inside(wsMenu)); press('ArrowDown', inside(wsMenu));
+    assert.strictEqual(focus.on, wsItems[0]);
+    press('ArrowUp', inside(wsMenu));
+    assert.strictEqual(focus.on, wsItems[2]);
+    press('Home', inside(wsMenu));
+    assert.strictEqual(focus.on, wsItems[0]);
+    press('End', inside(wsMenu));
+    assert.strictEqual(focus.on, wsItems[2]);
+    // Escape closes and returns focus to the button
+    assert.strictEqual(press('Escape', inside(wsMenu)), true);
+    assert.strictEqual(wsMenu.hidden, true);
+    assert.strictEqual(wsBtn.attrs['aria-expanded'], 'false');
+    assert.strictEqual(focus.on, wsBtn);
+    // one at a time: opening Add closes the switcher without stealing focus back
+    sb.openShellMenu('ws');
+    sb.openShellMenu('add');
+    assert.strictEqual(wsMenu.hidden, true);
+    assert.strictEqual(wsBtn.attrs['aria-expanded'], 'false');
+    assert.strictEqual(addMenu.hidden, false);
+    assert.strictEqual(addBtn.attrs['aria-expanded'], 'true');
+    assert.strictEqual(focus.on, addItems[0]);
+    // Tab closes the menu and puts focus on its button, so the browser carries on from there
+    press('Tab', inside(addMenu));
+    assert.strictEqual(addMenu.hidden, true);
+    assert.strictEqual(focus.on, addBtn);
+    // arrow keys on the button open it, ArrowUp lands on the last item
+    assert.strictEqual(press('ArrowUp', onButton(addBtn)), true);
+    assert.strictEqual(addMenu.hidden, false);
+    assert.strictEqual(focus.on, addItems[2]);
+    // Space on a link item follows it, a link ignores Space natively
+    addItems[2].tagName = 'A';
+    assert.strictEqual(press(' ', inside(addMenu)), true);
+    assert.strictEqual(addItems[2].clicks, 1);
+    // toggle closes and returns focus, then opens again
+    sb.toggleShellMenu('add');
+    assert.strictEqual(addMenu.hidden, true);
+    assert.strictEqual(focus.on, addBtn);
+    sb.toggleShellMenu('add');
+    assert.strictEqual(addMenu.hidden, false);
+    // Escape with the menu open but focus elsewhere (opened by mouse) still closes it
+    press('Escape', { closest: () => null });
+    assert.strictEqual(addMenu.hidden, true);
+    assert.strictEqual(focus.on, addBtn);
+    // an unknown menu name does nothing
+    sb.openShellMenu('ghost');
+    sb.toggleShellMenu('ghost');
+    assert.strictEqual(wsMenu.hidden && addMenu.hidden, true);
+  });
+
+  test('navLink - a plain click routes inside the app, a modified click is left to the browser', () => {
+    const sb = freshSandbox();
+    const routed = [];
+    sb.navigate = key => routed.push(key);
+    const link = fakeEl({ 'data-a0':'stocks' });
+    let prevented = 0;
+    const click = mods => Object.assign({ preventDefault(){ prevented++; } }, mods);
+    sb.navLink(link, click({}));
+    assert.deepStrictEqual(routed, ['stocks']);
+    assert.strictEqual(prevented, 1);
+    ['metaKey', 'ctrlKey', 'shiftKey', 'altKey'].forEach(m => sb.navLink(link, click({ [m]:true })));
+    assert.deepStrictEqual(routed, ['stocks']);
+    assert.strictEqual(prevented, 1);
+    sb.navLink(link);
+    assert.deepStrictEqual(routed, ['stocks', 'stocks']);
+  });
+
+  test('_syncTopbarContext - the top bar shows the TABS label and the page\'s own status or sub line', () => {
+    const sb = freshSandbox();
+    const title = fakeEl({});
+    const sub = fakeEl({});
+    const pages = {
+      'page-dashboard': { querySelector: sel => (sel.includes('.page-status') ? { textContent:'  Thursday 8 October · prices just now  ' } : null) },
+      'page-stocks': { querySelector: () => null },
+      'page-cashflow': { querySelector: () => ({ textContent:'Monthly income, per-transaction expenses, savings rate.' }) }
+    };
+    sb.document = { getElementById: id => (id === 'tb-title' ? title : (id === 'tb-sub' ? sub : (pages[id] || null))) };
+    sb._currentTab = 'dashboard';
+    sb._syncTopbarContext();
+    assert.strictEqual(title.textContent, 'Dashboard');
+    assert.strictEqual(sub.textContent, 'Thursday 8 October · prices just now');
+    sb._currentTab = 'stocks';
+    sb._syncTopbarContext();
+    assert.deepStrictEqual([title.textContent, sub.textContent], ['Stocks', '']);
+    sb._currentTab = 'cashflow';
+    sb._syncTopbarContext();
+    assert.deepStrictEqual([title.textContent, sub.textContent], ['Income & spending', 'Monthly income, per-transaction expenses, savings rate.']);
+    sb._currentTab = 'cpf';   // a page missing from the DOM leaves the line empty
+    sb._syncTopbarContext();
+    assert.deepStrictEqual([title.textContent, sub.textContent], ['CPF', '']);
+    // the line is read from the page head's own text block, never from a card further down
+    assert.ok(extractFunction('_syncTopbarContext').includes("'.page-head .ph-text .page-status, .page-head .ph-text .page-sub'"));
+    // the dashboard hands its live status line over each time it redraws it
+    assert.ok(extractFunction('renderDashboard').includes('_syncTopbarContext();'));
+    assert.ok(extractFunction('showPage').includes('_syncTopbarContext();'));
+  });
+
+  test('sync row - Synced shows its age in words, the phone dot mirrors the state, and no other state shows an age', () => {
+    const sb = freshSandbox();
+    const ui = installSyncStatusDom(sb);
+    const age = fakeEl({});
+    const dot = fakeEl({ id:'sync-dot', class:'icon-btn sync-dot s-local' });
+    const words = fakeEl({});
+    const base = sb.document.getElementById;
+    sb.document.getElementById = id => (id === 'sync-pill-age' ? age : (id === 'sync-dot' ? dot : (id === 'sync-dot-label' ? words : base(id))));
+    sb.relTime = () => '2m ago';
+    const stamp = '2026-10-08T10:00:00.000Z';
+    sb.localStorage.setItem('kjr-pf-sync-ts-v1', stamp);
+    sb.localStorage.setItem('kjr-pf-sync-confirmed-ts-v1', stamp);
+    sb.updateSyncStatusPill();
+    assert.strictEqual(ui.label.textContent, 'Synced');
+    assert.strictEqual(age.textContent, '2m ago');
+    assert.strictEqual(ui.pill.attrs['aria-label'], 'Sync status: Synced, 2m ago');
+    assert.strictEqual(words.textContent, 'Sync status: Synced, 2m ago');
+    assert.strictEqual(dot.classes.has('s-synced'), true);
+    assert.strictEqual(dot.classes.has('s-local'), false);
+    // an unconfirmed time: the word alone, no invented age
+    sb.localStorage.removeItem('kjr-pf-sync-confirmed-ts-v1');
+    sb.updateSyncStatusPill();
+    assert.strictEqual(ui.label.textContent, 'Synced');
+    assert.strictEqual(age.textContent, '');
+    assert.strictEqual(ui.pill.attrs['aria-label'], 'Sync status: Synced');
+    // other states never carry an age, the dot follows them in words too
+    sb.localStorage.setItem('kjr-pf-sync-confirmed-ts-v1', stamp);
+    sb._recordSyncFailure('read', 'read_failed');
+    sb.updateSyncStatusPill();
+    assert.strictEqual(ui.label.textContent, 'Sync failed');
+    assert.strictEqual(age.textContent, '');
+    assert.strictEqual(ui.pill.attrs['aria-label'], 'Sync status: Sync failed');
+    assert.strictEqual(words.textContent, 'Sync status: Sync failed');
+    assert.strictEqual(dot.classes.has('s-failed'), true);
+    assert.strictEqual(dot.classes.has('s-synced'), false);
+  });
+
+  test('_syncAgeText and _refreshSyncAge - the age comes from the server-confirmed time, none in NAS mode, and the minute tick never repaints another state as synced', () => {
+    const sb = freshSandbox();
+    const ui = installSyncStatusDom(sb);
+    const age = fakeEl({});
+    const words = fakeEl({});
+    const base = sb.document.getElementById;
+    sb.document.getElementById = id => (id === 'sync-pill-age' ? age : (id === 'sync-dot-label' ? words : base(id)));
+    sb.relTime = () => '5m ago';
+    assert.strictEqual(sb._syncAgeText(), '');
+    sb.localStorage.setItem('kjr-pf-sync-confirmed-ts-v1', 'not-a-timestamp');
+    assert.strictEqual(sb._syncAgeText(), '');
+    const stamp = '2026-10-08T10:00:00.000Z';
+    sb.localStorage.setItem('kjr-pf-sync-confirmed-ts-v1', stamp);
+    assert.strictEqual(sb._syncAgeText(), '5m ago');
+    sb.isNasMode = () => true;
+    assert.strictEqual(sb._syncAgeText(), '');
+    sb.isNasMode = () => false;
+    ui.classes.add('s-failed');
+    sb._refreshSyncAge();
+    assert.strictEqual(age.textContent, '');
+    assert.strictEqual(ui.pill.attrs['aria-label'], undefined);
+    ui.classes.delete('s-failed');
+    ui.classes.add('s-synced');
+    sb._refreshSyncAge();
+    assert.strictEqual(age.textContent, '5m ago');
+    assert.strictEqual(ui.pill.attrs['aria-label'], 'Sync status: Synced, 5m ago');
+    assert.strictEqual(words.textContent, 'Sync status: Synced, 5m ago');
+    sb.relTime = () => '6m ago';
+    sb._refreshSyncAge();
+    assert.strictEqual(age.textContent, '6m ago');
+    // boot starts the once-a-minute tick
+    assert.ok(extractFunction('boot').includes('setInterval(_refreshSyncAge, 60000)'));
+  });
+
+  test('shell markup - skeleton, switcher links, + Add, sync row and phone dot are in place and wired through data-click, the old nav is gone', () => {
+    ['class="shell"', 'class="sidebar" id="sidebar"', 'id="side-nav"', 'aria-label="Portfolio"', 'class="side-foot"', 'class="content-col"', 'class="topbar" id="topbar"',
+      'id="tb-title"', 'id="tb-sub"', 'id="bottom-nav"', 'id="more-sheet-title"', 'id="logo-version"', 'id="privacy-toggle"', 'class="ccy-toggle"', 'id="side-settings"', 'id="main"'
+    ].forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+    // the switcher: a menu button and real links, Portfolio marked current
+    const ws = indexSrc.slice(indexSrc.indexOf('id="ws-btn"'), indexSrc.indexOf('id="side-nav"'));
+    assert.ok(ws.includes('aria-haspopup="menu" aria-expanded="false" aria-controls="ws-menu"'));
+    assert.ok(ws.includes('role="menu"') && ws.includes('hidden'));
+    assert.deepStrictEqual(Array.from(ws.matchAll(/<a class="menu-item"[^>]*href="([^"]+)"/g)).map(m => m[1]), ['../Trading/', '../Forex/', './']);
+    assert.strictEqual((ws.match(/aria-current="page"/g) || []).length, 1);
+    assert.ok(/<a class="menu-item"[^>]*href="\.\/" aria-current="page">Portfolio/.test(ws));
+    // + Add
+    assert.ok(indexSrc.includes('id="add-btn" data-menu-btn="add" data-click="toggleShellMenu" data-a0="add" aria-haspopup="menu" aria-expanded="false" aria-controls="add-menu"'));
+    assert.ok(indexSrc.includes('id="add-menu" role="menu" aria-label="Add" hidden'));
+    // the sync row keeps the three ids the status code reads, and the phone dot has its own
+    ['id="sync-pill"', 'id="sync-pill-label"', 'id="sync-pill-age"', 'id="sync-dot"', 'id="sync-dot-label"'].forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+    assert.ok(indexSrc.includes('id="sync-pill" class="sync-pill s-local" data-click="openSyncDetails"'));
+    assert.ok(indexSrc.includes('id="sync-dot" class="icon-btn sync-dot s-local" data-click="openSyncDetails"'));
+    // theme switch has an accessible name, the guide link points at the Journal
+    assert.ok(indexSrc.includes('data-click="toggleTheme" data-theme-switch title="Switch to light theme" aria-label="Switch to light theme"'));
+    assert.ok(indexSrc.includes('<a class="icon-btn docs-link" href="https://kujira-journal.pages.dev" target="_blank" rel="noopener noreferrer"'));
+    // no inline handlers anywhere in the shell (CSP)
+    const shell = indexSrc.slice(indexSrc.indexOf('<div class="shell">'), indexSrc.indexOf('<main class="main"'));
+    assert.strictEqual(/\son[a-z]+="/i.test(shell), false);
+    // the old strip, dropdown, switcher pill and logo block are gone from markup, styles and code
+    ['nav-host', 'nav-more', 'tb-tab', 'topbar-actions', 'icon-btn-group', 'logo-whale', 'logo-name', 'nav-btn', 'phase-chip-mini'].forEach(name => assert.strictEqual(indexSrc.includes(name), false, name + ' in index.html'));
+    ['_layoutDesktopNav', 'toggleNavMore', 'openNavMore', 'closeNavMore', '_updateNavMoreActive', 'nav-more', 'nav-host', 'MOBILE_BOTTOM_TABS', '_phase2LabelFor'].forEach(name => assert.strictEqual(appSrc.includes(name), false, name + ' in app.js'));
+    // the delegated actions
+    const actions = extractFunction('installEventDelegation');
+    ['navLink:', 'toggleShellMenu:', 'addMenuPick:', 'openMoreSheet:       (el) => openMoreSheet(A(el)[0])'].forEach(frag => assert.ok(actions.includes(frag), frag));
+    assert.strictEqual(actions.includes('toggleNavMore'), false);
+    assert.ok(actions.includes("document.addEventListener('keydown', shellMenuKeydown);"));
+    assert.ok(actions.includes("if (!e.target.closest('.menu-wrap')) closeShellMenus(false);"));
+    // showPage no longer lays out a strip, it marks the current page, closes menus and the sheet, and fills the top bar
+    const page = extractFunction('showPage');
+    ['closeMoreSheet();', 'closeShellMenus(false);', '_syncNavActive(key);', '_syncTopbarContext();'].forEach(frag => assert.ok(page.includes(frag), frag));
+  });
+
+  test('shell styles - the --sidebar token in both themes, a solid sidebar with a hairline, the 224px column, and the 768px split', () => {
+    assert.ok(indexSrc.includes('--sidebar:#EFECE4;'));
+    assert.ok(indexSrc.includes('--sidebar:#080D19;'));
+    assert.ok(/html\.dark\{[^}]*--sidebar:#080D19;/.test(indexSrc));
+    assert.ok(indexSrc.includes('.shell{display:grid;grid-template-columns:224px minmax(0,1fr)'));
+    assert.ok(/\.sidebar\{[^}]*background:var\(--sidebar\);border-right:1px solid var\(--border\)\}/.test(indexSrc));
+    assert.strictEqual(/\.sidebar\{[^}]*backdrop-filter/.test(indexSrc), false);   // the sidebar is solid, glass is for floating elements
+    assert.ok(indexSrc.includes('.side-label{margin:0;padding:12px 10px 6px;font-size:11px;line-height:14px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--sidebar-dim)}'));
+    assert.ok(indexSrc.includes('.side-item.active{background:var(--accent-soft);color:var(--accent);font-weight:700}'));
+    assert.ok(indexSrc.includes('@media (min-width:769px){\n  .page-head .ph-text{position:absolute'));
+    assert.ok(indexSrc.includes('@media (max-width: 768px){\n  .shell{display:block}\n  .sidebar{display:none}'));
+    assert.ok(indexSrc.includes('.icon-btn{width:44px;height:44px}'));
+    assert.ok(indexSrc.includes('.bb-item{flex:1 1 0;min-width:0;min-height:44px;'));
+  });
+
+  test('shell contrast - --sidebar-dim exists in both themes and carries the sidebar small text, and every small text on the shell clears 4.5:1 on its own surface', () => {
+    const block = start => { const i = indexSrc.indexOf(start); assert.ok(i > -1, start); return indexSrc.slice(i, indexSrc.indexOf('\n}', i)); };
+    const light = block(':root{');
+    const dark = block('html.dark{');
+    const token = (blk, name) => {
+      const m = new RegExp('--' + name + ':([^;]+);').exec(blk);
+      assert.ok(m, '--' + name + ' missing');
+      const ref = /^var\(--([a-z0-9-]+)\)$/.exec(m[1].trim());
+      return ref ? token(blk, ref[1]) : m[1].trim();
+    };
+    // the token is declared per theme, light steps up to --text2, dark keeps --text3
+    assert.ok(/--sidebar-dim:var\(--text2\);/.test(light));
+    assert.ok(/--sidebar-dim:var\(--text3\);/.test(dark));
+    // the sidebar's small text uses it, and none of it still reaches for --text3 directly
+    const rule = sel => {
+      const m = new RegExp('(?:^|\\n)' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\{([^}]*)\\}').exec(indexSrc);
+      assert.ok(m, sel + ' rule missing');
+      return m[1];
+    };
+    ['.ws-sub', '.side-label', '.side-count', '.side-version', '.sync-age'].forEach(sel => {
+      assert.ok(rule(sel).includes('color:var(--sidebar-dim)'), sel + ' must use --sidebar-dim');
+      assert.strictEqual(rule(sel).includes('--text3'), false, sel + ' still uses --text3');
+    });
+    // the top bar status line, the idle currency segment and the sheet counts move to --text2, the version is --text2 in dark and --text in light
+    ['.tb-sub', '.ccy-toggle button', '.more-sheet-row .msr-count,.more-sheet-row .msr-ext', '.sheet-version'].forEach(sel => assert.ok(rule(sel).includes('color:var(--text2)'), sel));
+    assert.ok(rule('html:not(.dark) .sheet-version').includes('color:var(--text)'));
+    // hovered or open, the 6 to 7% tint under the dim text lowers its contrast, so the count, the sub and the age follow their label to --text
+    ['.side-item:hover .side-count{color:var(--text)}', '.sync-pill:hover .sync-age{color:var(--text)}', '.ws-btn:hover .ws-sub{color:var(--text)}', '.ws-btn[aria-expanded="true"] .ws-sub{color:var(--text)}']
+      .forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+    // WCAG ratios from the declared tokens, composited the way the browser stacks them
+    const rgb = h => { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); };
+    const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const lum = c => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+    const ratio = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+    const over = (top, alpha, bottom) => top.map((v, i) => v * alpha + bottom[i] * (1 - alpha));
+    const rgba = v => { const m = /rgba\((\d+),(\d+),(\d+),([\d.]+)\)/.exec(v); assert.ok(m, v); return { c:[+m[1], +m[2], +m[3]], a:+m[4] }; };
+    const scrim = +/\.overlay\{[^}]*background:rgba\(0,0,0,([\d.]+)\)/.exec(indexSrc)[1];
+    [['light', light, 'text2'], ['dark', dark, 'text2']].forEach(([name, blk, textToken]) => {
+      const t2 = rgb(token(blk, textToken)), dim = rgb(token(blk, 'sidebar-dim')), sidebar = rgb(token(blk, 'sidebar'));
+      assert.ok(ratio(dim, sidebar) >= 4.5, name + ' --sidebar-dim on --sidebar ' + ratio(dim, sidebar).toFixed(2));
+      const tint = over(rgb(token(blk, 'text')), 0.07, sidebar);
+      assert.ok(ratio(rgb(token(blk, 'text')), tint) >= 4.5, name + ' --text on the 7% hover tint ' + ratio(rgb(token(blk, 'text')), tint).toFixed(2));
+      // the glass top bar over the page background and over a card, the two surfaces that scroll behind it
+      const glass = rgba(token(blk, 'glass'));
+      [['--bg', rgb(token(blk, 'bg'))], ['--bg2', rgb(token(blk, 'bg2'))]].forEach(([surface, base]) => {
+        const bar = over(glass.c, glass.a, base);
+        assert.ok(ratio(t2, bar) >= 4.5, name + ' top bar status line over ' + surface + ' ' + ratio(t2, bar).toFixed(2));
+      });
+      // the sheet is glass over a dark scrim: rows are one glass layer above the sheet surface
+      const sheet = over(rgba(token(blk, 'glass-strong')).c, rgba(token(blk, 'glass-strong')).a, over([0, 0, 0], scrim, rgb(token(blk, 'bg'))));
+      const row = over(glass.c, glass.a, sheet);
+      assert.ok(ratio(t2, row) >= 4.5, name + ' sheet counts on a row ' + ratio(t2, row).toFixed(2));
+      const versionInk = name === 'light' ? rgb(token(blk, 'text')) : t2;
+      assert.ok(ratio(versionInk, sheet) >= 4.5, name + ' sheet version on the sheet ' + ratio(versionInk, sheet).toFixed(2));
+    });
+  });
+
+  test('Income & spending - the cashflow tab carries the new name where it is shown, the Stocks P&L columns and the CSV export keep theirs', () => {
+    const sb = freshSandbox();
+    assert.strictEqual(sb._tabLabel('cashflow'), 'Income & spending');
+    assert.ok(indexSrc.includes('<h2 class="page-title">Income &amp; spending</h2>'));
+    assert.ok(indexSrc.includes('(holdings, cash, CPF, Income &amp; spending, settings)'));
+    assert.ok(extractFunction('renderCashflow').includes('No income or spending data yet'));
+    assert.ok(extractFunction('_savingsTile').includes('Add income on Income &amp; spending'));
+    assert.ok(appSrc.includes('Log income on the Income &amp; spending tab') && appSrc.includes('Log expenses on the Income &amp; spending tab'));
+    assert.ok(appSrc.includes('Phase 1 focus is Stocks, Real estate, Cash, CPF, Income &amp; spending, and Settings.'));
+    ['No P&L data yet', 'Add income on P&amp;L', 'on the P&amp;L tab', 'CPF, P&amp;L, and Settings'].forEach(old => assert.strictEqual(appSrc.includes(old), false, old));
+    assert.strictEqual(/key:'cashflow',\s+label:'P&L'/.test(appSrc), false);
+    assert.strictEqual(indexSrc.includes('page-title">P&amp;L'), false);
+    // the Stocks and Crypto columns, the holdings CSV header and the Chart Builder fields are a different P&L and keep their names
+    ['label:dc=>`Realised P&L (${dc})`', "label:()=>'P&L %'", "'Market Value (SGD)','P&L (SGD)','P&L %'", "unrealPnl:  { label:'Unrealised P&L'"].forEach(keep => assert.ok(appSrc.includes(keep), keep));
   });
 
   test('Monogram and money markup - symbols and sectors reach the dashboard only through kjrEscape', () => {

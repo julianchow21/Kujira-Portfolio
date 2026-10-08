@@ -41,10 +41,10 @@ The fixtures intentionally have no transactions, salary, CPF history or snapshot
 
 | ID | Requirement and done-when condition | Evidence class |
 |---|---|---|
-| QA-NAV-01 | Dashboard, Stocks, Watchlist+, Crypto, Real Estate, Insurance, Cash, CPF, P&L, Projections and Settings open from the live navigation. Each has a populated and an empty-state check | INFERRED |
+| QA-NAV-01 | Dashboard, Stocks, Watchlist+, Crypto, Real Estate, Insurance, Cash, CPF, Income & spending, Projections and Settings open from the live navigation. Each has a populated and an empty-state check | INFERRED |
 | QA-FORM-02 | Create and edit forms reject required-field omissions, negative values where the schema forbids them, invalid IDs and calendar-impossible dates. A valid saved row re-renders with the entered values | INFERRED and EXPLICIT date invariant |
 | QA-PRICE-03 | Importing each fixture updates every quote-dependent holding, stock summary, crypto summary, dashboard class, current net worth, allocation surface and current holdings chart according to the oracle below. Shares, cost basis, annual dividend, yield-on-cost, cash, CPF, property and insurance stay unchanged | INFERRED |
-| QA-FX-04 | Stocks and Watchlist+ convert USD and SGD consistently at 1.25 when their display toggle changes. Dashboard, Cash, CPF, P&L, Real Estate, Insurance, Crypto, Projections and Settings remain SGD surfaces | INFERRED |
+| QA-FX-04 | Stocks and Watchlist+ convert USD and SGD consistently at 1.25 when their display toggle changes. Dashboard, Cash, CPF, Income & spending, Real Estate, Insurance, Crypto, Projections and Settings remain SGD surfaces | INFERRED |
 | QA-PERSIST-05 | A saved create or edit survives reload with vault off and on. Synthetic quotes can restore only from the separate local price cache, never from the canonical exported or synced DB | EXPLICIT and INFERRED |
 | QA-IMPORT-06 | A valid JSON import restores recognised records. Invalid JSON and an object with no recognised portfolio key are rejected. Exported data can be re-imported without losing canonical records | INFERRED |
 | QA-SYNC-07 | A dedicated disposable Sheet test proves initial seed protection, pull, push, a server-stamp conflict, recovery or strict-conflict handling, and no preview write. It must never use Julian's live Sheet | EXPLICIT and INFERRED |

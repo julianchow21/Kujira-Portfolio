@@ -43,7 +43,7 @@ DB = mergeDefaults(seed); saveLocal(); runSalaryEngine({}); renderAll(); })()
 
 4. **Assert numbers, do not eyeball.** Pull computed values via eval and check them against
    the invariant table below. Screenshots are for layout, not for accuracy.
-5. **Walk every tab**: Dashboard, Stocks, Crypto, Real Estate, Insurance, Cash, CPF, P&L, Projections, Settings. Check
+5. **Walk every tab**: Dashboard, Stocks, Crypto, Real Estate, Insurance, Cash, CPF, Income & spending, Projections, Settings. Check
    golden path + empty state + both themes (dark default, warm light opt-in) + both currencies
    (SGD/USD) + mobile widths (430, 390, 375).
 6. **Check the console on every tab.** Zero errors is the bar.
@@ -111,8 +111,8 @@ These are the checks that catch finance bugs. Add a new one whenever a feature a
   03/07/2026, it always included real estate so "Liquid" was misleading, maths unchanged).
 - Mobile: absolute sort glyphs do not overlap clipped headers; cell font sizes consistent.
 - At 430/390/375px: no horizontal scroll (`document.documentElement.scrollWidth === clientWidth`),
-  Settings cog reachable, bottom bar shows 5 fixed tabs (Dashboard, Stocks, Cash, P&L, More)
-  with the rest behind "More".
+  Settings reachable (More sheet), bottom bar shows 5 areas (Overview, Assets, Money, Plan, More),
+  Assets, Money and More open a sheet and the area holding the current page is highlighted.
 
 ## Storage / data-safety invariants
 

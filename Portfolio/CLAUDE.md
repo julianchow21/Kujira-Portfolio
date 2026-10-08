@@ -21,18 +21,20 @@ Chart.js 4.4.1 (CDN, SRI-pinned). Backend is Google Apps Script + Google Sheets 
 |---|---|---|
 | Dashboard | `dashboard` | Live |
 | Stocks | `stocks` | Live |
-| Watchlist+ | `board` | Live |
+| Watchlist | `board` | Live (page title Watchlist+) |
 | Crypto | `crypto` | Live (v2.47, CoinGecko via Apps Script) |
-| Real Estate | `realestate` | Live |
+| Real estate | `realestate` | Live |
 | Insurance | `insurance` | Live (merged from the standalone module, v2.43) |
 | Cash | `cash` | Live |
 | CPF | `cpf` | Live |
-| P&L | `cashflow` | Live |
+| Income & spending | `cashflow` | Live (renamed from P&L in v2.72) |
 | Projections | `projections` | Live (v2.45, FIRE + CPF trajectory in today's dollars) |
 | Explore | `explore` | Live (v2.70, Chart Builder and the saved charts list) |
 | Settings | `settings` | Live |
 
 `PHASE_2_TABS` is currently empty. To park a future tab without deleting its markup, add its key to this set. Remove the key when the tab is ready to return to the live navigation.
+
+**Navigation (v2.72):** above 768 px a 224 px left sidebar (`--sidebar` surface) holds the workspace switcher (Trading and Forex as real anchors), the `NAV_GROUPS` (Overview, Assets with counts from `NAV_COUNT_TABLES`, Money) and a footer with Settings, the sync row, the guide link, the theme switch and the version badge. A compact top bar shows the page title and status, the per-tab currency switch, Hide amounts and the `+ Add` menu (`ADD_MENU_ITEMS`). At 768 px and below, a header plus a five-item bottom bar (`MOBILE_GROUPS`: Overview, Assets, Money, Plan, More) opens one shared sheet. Every renderer honours `PHASE_2_TABS`.
 
 ## Data layer
 
@@ -46,13 +48,13 @@ Chart.js 4.4.1 (CDN, SRI-pinned). Backend is Google Apps Script + Google Sheets 
 
 ## Key constants
 
-- `APP_VERSION` and `APP_DISPLAY_VERSION`, bump together on every deploy, the display value is shown in the topbar badge
+- `APP_VERSION` and `APP_DISPLAY_VERSION`, bump together on every deploy, the display value is shown in the sidebar footer on desktop and in the More sheet on mobile
 - `PHASE_2_TABS`, currently empty, tab keys placed here are hidden behind the Phase 2 gate
 - `ENTITY_SCHEMAS`, field definitions used by CRUD helpers and validation
 
 ## Design tokens
 
-Dark theme default (`--bg:#0B1120`, `--accent:#2dd4bf` teal). Warm light opt-in (`--bg:#F6F4EE`, `--accent:#0F6E56` deep teal). Base tokens: `--bg/bg2/bg3/bg4`, `--text/text2/text3`, `--red/green/blue/amber/purple`, `--radius/radius-lg`.
+Dark theme default (`--bg:#0B1120`, `--accent:#2dd4bf` teal). Warm light opt-in (`--bg:#F6F4EE`, `--accent:#0F6E56` deep teal). Base tokens: `--bg/bg2/bg3/bg4`, `--text/text2/text3`, `--red/green/blue/amber/purple`, `--radius/radius-lg`. Shell tokens: `--sidebar` (slightly darker than `--bg`) and `--sidebar-dim` for small text on it (light uses `--text2`, because `--text3` misses 4.5:1 on that surface).
 
 Glass layer (both themes): `--glass`, `--glass-strong`, `--glass-border`, `--glass-hi`, `--glass-blur`, `--glass-shadow`, `--surface-solid` (opaque backing for dense tables), `--glow1/--glow2`, `--tx/--tx2/--tx3` (text aliases). Since the v2.39 restyle, glass is reserved for floating elements only (topbar, modals, toasts, bottom tab bar, sync pill, currency and theme toggles). In-flow cards (`.card`, `.metric`, `.stat-box`, `.dash-hero`, `.h-summary`, `.bucket`, `.hint-block`, `.freshness`) are solid `--bg2` with a `--border` hairline and the `--shadow-card` token. Dense table cells and sticky columns use `--surface-solid`. `@supports not (backdrop-filter)` falls back to `--surface-solid` for the floating elements only.
 

@@ -76,6 +76,10 @@
   --glass-blur:12px;--glass-shadow:0 6px 18px rgba(60,50,40,0.10);
   --shadow-card:0 1px 3px rgba(60,50,40,0.07);
   --surface-solid:#ffffff;
+  /* The sidebar surface, a step darker than --bg so the page reads as the main plane. */
+  --sidebar:#EFECE4;
+  /* Small dim text on the sidebar. Light --text3 is only 3.83:1 on --sidebar, so light uses --text2 (4.82:1). Dark --text3 is 5.39:1 and stays. */
+  --sidebar-dim:var(--text2);
   --glow1:transparent;--glow2:transparent;
   --font-display:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,system-ui,sans-serif;
   --tx:var(--text);--tx2:var(--text2);--tx3:var(--text3);
@@ -99,6 +103,8 @@ html.dark{
   --glass-blur:14px;--glass-shadow:0 8px 22px rgba(0,0,0,0.35);
   --shadow-card:0 1px 3px rgba(0,0,0,0.25);
   --surface-solid:rgba(17,26,46,0.94);
+  --sidebar:#080D19;
+  --sidebar-dim:var(--text3);
   --glow1:transparent;--glow2:transparent;
   --tx:var(--text);--tx2:var(--text2);--tx3:var(--text3);
 }
@@ -111,83 +117,113 @@ a{color:var(--blue);text-decoration:none}
 /* Visually-hidden but still in the accessibility tree (screen-reader-only). */
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
-/* FOCUS-VISIBLE, shared ring for topbar/chrome controls that .btn's own rule
-   (below) doesn't cover. Inset, not outset: several of these controls sit
-   inside an overflow:hidden parent (.icon-btn-group, .ccy-toggle,
-   .theme-toggle, .nav's own scroll clipping), and an outset box-shadow or the
-   UA default outline gets silently clipped there. Inset never does. */
-.icon-btn:focus,.nav-btn:focus,.ccy-toggle button:focus,.theme-toggle button:focus,.sync-pill:focus,.logo:focus,.tb-tab:focus{outline:none}
-.icon-btn:focus-visible,.nav-btn:focus-visible,.ccy-toggle button:focus-visible,.theme-toggle button:focus-visible,.sync-pill:focus-visible,.logo:focus-visible,.tb-tab:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
+/* FOCUS-VISIBLE, shared ring for the chrome controls. Inset, not outset: several sit inside
+   an overflow:hidden parent (.ccy-toggle, .theme-toggle) or a scrolling list (.side-nav), where
+   an outset box-shadow or the UA default outline gets silently clipped. Inset never does. */
+.icon-btn:focus,.ccy-toggle button:focus,.theme-toggle button:focus{outline:none}
+.icon-btn:focus-visible,.ccy-toggle button:focus-visible,.theme-toggle button:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
+.ws-btn:focus-visible,.side-item:focus-visible,.sync-pill:focus-visible,.menu-item:focus-visible,.bb-item:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 
-/* TOPBAR */
-.topbar{background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border-bottom:1px solid var(--glass-border);padding:env(safe-area-inset-top) 24px 0;display:flex;align-items:center;gap:0;height:56px;height:calc(56px + env(safe-area-inset-top));position:sticky;top:0;z-index:100}
-.logo{font-weight:800;font-size:16px;letter-spacing:0.2px;margin-right:32px;display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);cursor:pointer;background:none;border:none;padding:0;font-family:inherit;text-align:left}
-.logo:hover,.logo:focus{text-decoration:none;outline:none}
-.logo-whale{height:44px;width:44px;flex-shrink:0;border-radius:8px;object-fit:cover}
-.logo-name{display:flex;flex-direction:column;line-height:1.1}
-.logo-name span:first-child{font-family:var(--font-display);font-size:14px;font-weight:800;letter-spacing:0.5px;color:var(--text)}
-.logo-name span:last-child{font-family:var(--font-display);font-size:12px;font-weight:400;letter-spacing:0.3px;text-transform:none;color:var(--text3);-webkit-text-fill-color:var(--text3);opacity:0.85;white-space:nowrap}
-.nav{display:flex;gap:2px;flex:1 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none;position:relative}
-.nav::-webkit-scrollbar{display:none}
-/* Fade tints the topbar's own glass backdrop (not the opaque page --bg, which
-   sat one shade off and made the last visible label look chopped off rather
-   than "more to scroll"). Same colour-mix trick as the mobile scroll hints. */
-.nav::after{content:'';position:sticky;right:0;align-self:stretch;flex:0 0 24px;margin-left:-24px;pointer-events:none;background:linear-gradient(to right,transparent,color-mix(in srgb,var(--glass) 100%,var(--bg) 60%))}
-.nav-btn{padding:8px 14px;border-radius:var(--radius);border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--text2);transition:all 0.15s;font-family:var(--font-display);display:flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0}
-@media (hover:hover){.nav-btn:hover{background:var(--glass-strong);color:var(--text)}}
-.nav-btn.active{background:var(--accent-soft);color:var(--accent);font-weight:500}
-.nav-btn svg{width:15px;height:15px;flex-shrink:0}
-/* Desktop nav overflow (F1): tabs that don't fit the topbar strip move into
-   this dropdown instead of being scrolled off-screen with no affordance.
-   Floating element attached to the topbar, glass per the restyle rules. */
-.nav-more-wrap{position:relative;flex-shrink:0}
-.nav-more-btn{padding:8px 12px;border-radius:var(--radius);border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--text2);transition:all 0.15s;font-family:inherit;display:flex;align-items:center;gap:4px;white-space:nowrap}
-@media (hover:hover){.nav-more-btn:hover{background:var(--glass-strong);color:var(--text)}}
-.nav-more-btn.active{background:var(--accent-soft);color:var(--accent);font-weight:500}
-.nav-more-btn .caret{width:10px;height:10px;flex-shrink:0;transition:transform 0.15s}
-.nav-more-wrap.open .nav-more-btn .caret{transform:rotate(180deg)}
-.nav-more-menu{display:none;position:absolute;top:calc(100% + 6px);left:0;min-width:180px;background:var(--glass-strong);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);box-shadow:var(--glass-shadow),inset 0 1px 0 var(--glass-hi);padding:6px;z-index:110;flex-direction:column;gap:1px}
-.nav-more-wrap.open .nav-more-menu{display:flex}
-.nav-more-menu .nav-btn{width:100%;justify-content:flex-start}
-@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
-  .nav-more-menu{background:var(--surface-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
-}
-.topbar-actions{display:flex;align-items:center;gap:8px;margin-left:12px;flex-shrink:0}
-/* Icon buttons grouped into one bordered cluster (see markup): container owns
-   the border/radius/background, buttons inside are borderless with dividers. */
-.icon-btn-group{display:flex;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2);overflow:hidden;flex-shrink:0}
-.icon-btn-group .icon-btn{border:none;border-right:1px solid var(--border);border-radius:0;background:transparent}
-.icon-btn-group .icon-btn:last-child{border-right:none}
+/* APP SHELL (v1). Trading and Forex copy this block with their own page content.
+   769px and up: a 224px sidebar beside the content column, a compact glass top bar over the page.
+   768px and below: no sidebar, a compact header on top (whale, page name, sync dot, Hide amounts)
+   and a five-area bar at the bottom. The sidebar is solid (--sidebar), glass stays on floating
+   elements. Markup: .shell > .sidebar + .content-col > (.topbar, banner, main). */
+.shell{display:grid;grid-template-columns:224px minmax(0,1fr);min-height:100vh;min-height:100dvh}
+.content-col{min-width:0}
+.sidebar{position:sticky;top:0;align-self:start;height:100vh;height:100dvh;display:flex;flex-direction:column;padding:14px 12px 12px;background:var(--sidebar);border-right:1px solid var(--border)}
+
+/* Workspace switcher: this app's mark and name, a menu of links to the sibling apps. */
+.ws{flex:none}
+.ws-btn{display:flex;align-items:center;gap:10px;width:100%;padding:6px 8px;border:0;border-radius:var(--radius);background:none;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.ws-btn[aria-expanded="true"]{background:color-mix(in srgb,var(--text) 7%,transparent)}
+@media (hover:hover){.ws-btn:hover{background:color-mix(in srgb,var(--text) 7%,transparent)}}
+/* The 6 to 7% hover and open tint takes light --sidebar-dim down to about 4.3:1, so the small text follows its label to --text while hovered or open. */
+.ws-btn[aria-expanded="true"] .ws-sub{color:var(--text)}
+@media (hover:hover){.ws-btn:hover .ws-sub{color:var(--text)}}
+.ws-mark{width:32px;height:32px;flex:none;border-radius:9px;background:var(--accent-soft);object-fit:contain;padding:2px}
+.ws-text{display:flex;flex-direction:column;min-width:0}
+.ws-name{font-size:14px;line-height:18px;font-weight:700;letter-spacing:0.02em}
+.ws-sub{display:flex;align-items:center;gap:4px;font-size:12px;line-height:16px;font-weight:500;color:var(--sidebar-dim)}
+.ws-caret{width:11px;height:11px;flex:none;transition:transform 0.15s ease-out}
+.ws-btn[aria-expanded="true"] .ws-caret{transform:rotate(180deg)}
+@media (prefers-reduced-motion:reduce){.ws-caret{transition:none}}
+
+/* Navigation: three groups, each a small label over a list of links. Only this list scrolls, so the
+   switcher and the footer stay put on a short window. */
+.side-nav{flex:1 1 auto;min-height:0;margin:4px -4px 0;padding:0 4px 8px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.side-group + .side-group{margin-top:2px}
+.side-label{margin:0;padding:12px 10px 6px;font-size:11px;line-height:14px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--sidebar-dim)}
+.side-list{list-style:none;display:grid;gap:2px}
+.side-item{display:flex;align-items:center;gap:10px;min-height:34px;padding:6px 10px;border-radius:var(--radius);color:var(--text2);font-size:14px;line-height:20px;font-weight:500;text-decoration:none;cursor:pointer;transition:background 0.15s ease-out,color 0.15s ease-out}
+.side-item[hidden]{display:none}
+.side-item svg{width:16px;height:16px;flex:none}
+.side-text{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.side-count{flex:none;font-size:12px;line-height:16px;font-weight:600;color:var(--sidebar-dim);font-variant-numeric:tabular-nums}
+.side-count:empty{display:none}
+@media (hover:hover){.side-item:hover{background:color-mix(in srgb,var(--text) 6%,transparent);color:var(--text);text-decoration:none}.side-item:hover .side-count{color:var(--text)}}
+/* The current page: soft accent fill, accent text and heavier weight, plus aria-current set by script. */
+.side-item.active{background:var(--accent-soft);color:var(--accent);font-weight:700}
+.side-item.active .side-count{color:inherit}
+@media (prefers-reduced-motion:reduce){.side-item{transition:none}}
+
+/* Footer: Settings, the sync row, then the version with the guide link and the theme switch. */
+.side-foot{flex:none;display:grid;gap:2px;margin-top:6px;padding-top:8px;border-top:1px solid var(--border)}
+.side-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 2px 0 10px}
+.side-version{font-size:12px;line-height:16px;font-weight:500;color:var(--sidebar-dim);white-space:nowrap}
+.side-tools{display:flex;gap:2px}
+.side-tools .icon-btn{width:32px;height:32px;border-color:transparent;background:none}
+@media (hover:hover){.side-tools .icon-btn:hover{background:color-mix(in srgb,var(--text) 8%,transparent)}}
+
+/* Theme switches ship both icons and both labels, the theme class on html shows the one that offers the other theme. */
+.ti{display:inline-flex}
+html.dark .ti-moon,html:not(.dark) .ti-sun{display:none}
+html:not(.dark) .tt-light,html.dark .tt-dark{display:none}
+
+/* TOPBAR, the page title and its status line on the left, page-level controls on the right. */
+.topbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;min-height:60px;padding-block:10px;padding-inline:max(24px,calc((100% - 1400px) / 2 + 24px));background:var(--glass);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border-bottom:1px solid var(--glass-border)}
+.tb-head{display:flex;align-items:center;gap:10px;flex:1 1 220px;min-width:0}
+.tb-whale{display:none;width:32px;height:32px;flex:none;border-radius:9px;background:var(--accent-soft);object-fit:contain;padding:2px}
+.tb-text{min-width:0}
+.tb-title{margin:0;font-size:17px;line-height:22px;font-weight:700;letter-spacing:-0.01em;overflow-wrap:anywhere}
+/* --text2, not --text3: the glass bar sits over whatever scrolls behind it, and --text3 measures 4.35:1 (light) and 4.22:1 (dark, over a card). */
+.tb-sub{margin:0;font-size:12px;line-height:16px;color:var(--text2);overflow-wrap:anywhere}
+.tb-sub:empty{display:none}
+.tb-actions{display:flex;align-items:center;gap:8px;flex:none;margin-left:auto}
+.tb-add{min-height:36px;padding:7px 14px 7px 12px}
+.tb-add svg{width:14px;height:14px;flex:none}
+
+/* Popup menus (workspace switcher, + Add). Solid, because a blurred layer inside the glass top bar cannot see the page behind it. */
+.menu-wrap{position:relative}
+.shell-menu{position:absolute;z-index:110;top:calc(100% + 6px);min-width:220px;display:flex;flex-direction:column;gap:1px;padding:6px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius-lg);box-shadow:var(--glass-shadow)}
+.shell-menu[hidden]{display:none}
+.ws-menu{left:0;right:0;min-width:0}
+.add-menu{right:0}
+.menu-item{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-height:36px;padding:8px 10px;border:0;border-radius:var(--radius);background:none;color:var(--text);font:inherit;font-size:13px;line-height:20px;font-weight:500;text-align:left;text-decoration:none;cursor:pointer}
+@media (hover:hover){.menu-item:hover{background:color-mix(in srgb,var(--text) 8%,transparent);text-decoration:none}}
+.menu-item[aria-current="page"]{color:var(--accent);font-weight:700}
+.menu-item[aria-disabled="true"]{cursor:not-allowed}
+.menu-item[aria-disabled="true"] > span:first-child{color:var(--text2)}
+.menu-check{width:14px;height:14px;flex:none}
+.menu-hint{font-size:12px;font-weight:500;color:var(--text2)}
+.menu-sep{height:1px;margin:4px 6px;background:var(--border)}
+
+/* Icon buttons (Hide amounts, the sidebar tools, the phone sync dot). */
 .icon-btn{width:36px;height:36px;border-radius:var(--radius);border:1px solid var(--glass-border);background:var(--glass);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text2);transition:all 0.15s;flex-shrink:0}
 @media (hover:hover){.icon-btn:hover{background:var(--glass-strong);color:var(--text)}}
-.icon-btn-group .icon-btn:hover{background:var(--bg3)}
 .icon-btn svg{width:15px;height:15px}
 .icon-btn[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
-/* Touch devices keep a 44px effective target even though the visual box is
-   36px on desktop: an invisible padding pad rather than resizing the chip. */
-@media (hover:none){
-  .icon-btn-group .icon-btn{width:44px;height:44px}
-}
-
-/* CROSS-APP SWITCHER, three-way segmented pill matching Trading/Forex's
-   .tb-tabs component (see AGENTS.md, Cross-app linkage), restyled on
-   Portfolio's own tokens rather than Forex's raw values. Hidden below 768px:
-   the bottom tab bar's More sheet already offers Trading/Forex there. */
-.tb-tabs{display:flex;gap:2px;background:var(--bg3);border:1px solid var(--border);border-radius:999px;padding:3px;flex-shrink:0;margin-left:8px}
-.tb-tab{padding:5px 12px;border-radius:999px;font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;border:none;background:none;text-decoration:none;white-space:nowrap;font-family:inherit}
-@media (hover:hover){.tb-tab:hover{color:var(--text);text-decoration:none}}
-.tb-tab.active{background:var(--accent);color:var(--on-accent)}
-@media (max-width:1300px){.tb-tab{padding:5px 9px}}
 
 /* TOUCH PRESS STATES, coarse-pointer devices get no :hover feedback today
    (every hover rule above is gated behind (hover:hover)), so taps on .btn/
-   .nav-btn/.icon-btn look inert until the click actually lands. Give them a
+   .icon-btn/nav items look inert until the click actually lands. Give them a
    visible press state instead, scoped to (hover:none) so desktop is untouched. */
 @media (hover:none){
-  .btn:active,.nav-btn:active,.icon-btn:active,.sync-pill:active{background:var(--glass-strong)}
+  .btn:active,.icon-btn:active{background:var(--glass-strong)}
   .btn-primary:active{background:var(--accent2);border-color:var(--accent2)}
+  .side-item:active,.sync-pill:active,.menu-item:active,.bb-item:active{background:color-mix(in srgb,var(--text) 8%,transparent)}
   @media (prefers-reduced-motion:no-preference){
-    .btn:active,.nav-btn:active,.icon-btn:active{transform:scale(0.97)}
+    .btn:active,.icon-btn:active,.bb-item:active{transform:scale(0.97)}
   }
 }
 
@@ -208,39 +244,55 @@ html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user
   html.privacy td.num:hover{filter:none;-webkit-user-select:auto;user-select:auto}
 }
 
-/* SYNC PILL, a compact text status control in the topbar on every width. The
-   details modal carries timestamps and bounded technical context, while the
-   pill stays reachable and clickable from every tab. */
-.sync-pill{display:inline-flex;align-items:center;gap:6px;padding:7px 9px;border-radius:999px;border:1px solid var(--glass-border);background:var(--glass);font-size:12px;font-weight:600;color:var(--text2);font-family:inherit;cursor:pointer;transition:all 0.15s;white-space:nowrap}
-/* Keep a short text state beside the dot at every width. Details such as
-   timestamps and safe technical codes live in the accessible modal. */
-#sync-pill-label{display:inline;min-width:0;max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-@media (hover:hover){.sync-pill:hover{background:var(--glass-strong);color:var(--text)}}
-.sync-pill::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--text3);flex-shrink:0}
+/* SYNC STATE. Two places show it: a row in the sidebar footer (a coloured dot and the words, "Synced 2m ago"),
+   and on the phone a dot in the header with the words visually hidden. Colour is never the only signal, the
+   row carries the state in text and the dot adds a glyph per state. Both open the sync details modal. */
+.sync-pill{display:flex;align-items:center;gap:10px;width:100%;min-height:36px;padding:7px 10px;border:0;border-radius:var(--radius);background:none;color:var(--text2);font:inherit;font-size:13px;line-height:18px;font-weight:600;text-align:left;cursor:pointer;transition:background 0.15s ease-out}
+@media (hover:hover){.sync-pill:hover{background:color-mix(in srgb,var(--text) 6%,transparent);color:var(--text)}.sync-pill:hover .sync-age{color:var(--text)}}
+.sync-pill::before{content:'';width:8px;height:8px;margin-inline:4px;border-radius:50%;background:var(--text3);flex:none}
+.sync-text{display:flex;flex-wrap:wrap;gap:0 6px;min-width:0}
+#sync-pill-label{min-width:0;overflow-wrap:anywhere}
+.sync-age{font-weight:500;color:var(--sidebar-dim);white-space:nowrap}
+.sync-age:empty{display:none}
 .sync-pill.s-local::before{background:var(--text3)}
 .sync-pill.s-syncing::before{background:var(--amber);animation:pulse 1.2s ease-in-out infinite}
 .sync-pill.s-synced::before{background:var(--green)}
-.sync-pill.s-failed::before{background:var(--red)}
-.sync-pill.s-syncing{color:var(--amber)}
-.sync-pill.s-synced{color:var(--green);border-color:var(--green-border)}
-.sync-pill.s-failed{color:var(--red);border-color:var(--red-border)}
-.sync-pill.s-queued{color:var(--amber);border-color:var(--amber-border)}
-.sync-pill.s-conflict{color:var(--red);border-color:var(--red-border)}
-/* Never colour-alone: a distinct glyph per state alongside the dot, so the
-   state also reads by shape for colour-blind/greyscale viewing. */
-.sync-pill::after{font-size:10px;line-height:1;flex-shrink:0}
-.sync-pill.s-local::after{content:'\2013'}
-.sync-pill.s-syncing::after{content:'\21bb'}
-.sync-pill.s-synced::after{content:'\2713'}
-.sync-pill.s-failed::after{content:'\2715'}
-.sync-pill.s-queued::after{content:'\21bb'}
-.sync-pill.s-conflict::after{content:'\26a0'}
+.sync-pill.s-queued::before{background:var(--amber)}
+.sync-pill.s-failed::before,.sync-pill.s-conflict::before{background:var(--red)}
+.sync-pill.s-failed,.sync-pill.s-conflict{color:var(--red)}
+.sync-dot{display:none;gap:4px}
+.sync-dot::before{content:'';width:9px;height:9px;border-radius:50%;background:var(--text3);flex:none}
+.sync-dot.s-syncing::before{background:var(--amber);animation:pulse 1.2s ease-in-out infinite}
+.sync-dot.s-synced::before{background:var(--green)}
+.sync-dot.s-queued::before{background:var(--amber)}
+.sync-dot.s-failed::before,.sync-dot.s-conflict::before{background:var(--red)}
+.sync-dot::after{font-size:11px;line-height:1;font-weight:700;color:var(--text2);flex:none}
+.sync-dot.s-local::after{content:'\2013'}
+.sync-dot.s-syncing::after,.sync-dot.s-queued::after{content:'\21bb'}
+.sync-dot.s-synced::after{content:'\2713'}
+.sync-dot.s-failed::after{content:'\2715'}
+.sync-dot.s-conflict::after{content:'\26a0'}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+@media (prefers-reduced-motion:reduce){.sync-pill{transition:none}.sync-pill::before,.sync-dot::before{animation:none}}
+
+/* Touch screens keep 44px targets on the desktop layout too (a tablet held upright is wider than 768px). */
+@media (hover:none) and (min-width:769px){
+  .icon-btn,.side-tools .icon-btn{width:44px;height:44px}
+  .ccy-toggle button,.tb-add,.side-item,.sync-pill,.menu-item{min-height:44px}
+}
 
 /* MAIN */
 .main{padding:24px;max-width:1400px;margin:0 auto;padding-bottom:80px}
 .page{display:none}.page.active{display:block}
 .page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+/* Above 768px the top bar shows the page title and its status line, so the in-page copy (.ph-text) is visually
+   hidden but stays in the DOM for screen readers. The page's own buttons stay, pushed to the right. A head with
+   nothing left (no buttons) gives its space back. */
+@media (min-width:769px){
+  .page-head .ph-text{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .page-head{justify-content:flex-end}
+  .page-head:not(:has(> :not(.ph-text))){margin-bottom:0}
+}
 .page-title{font-size:22px;line-height:28px;font-weight:700;letter-spacing:-0.01em}
 .page-sub{font-size:12px;color:var(--text3);margin-top:2px}
 
@@ -338,6 +390,7 @@ textarea.fi{resize:vertical;min-height:70px}
 #vault-gate{z-index:300}
 .backend-banner{display:none;margin:0 auto 14px;max-width:1200px;padding:10px 14px;border:1px solid var(--amber-border);border-radius:var(--radius);background:var(--amber-soft);color:var(--amber);font-size:13px;line-height:1.45}
 .backend-banner[hidden]{display:none}
+.content-col > .backend-banner{margin:14px auto 0;width:calc(100% - 48px)}
 .backend-banner-readonly{border-color:var(--red-border);background:var(--red-soft);color:var(--red);font-weight:600}
 .backend-banner-nas{border-color:var(--accent-border);background:var(--accent-soft);color:var(--accent)}
 .nas-secret{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;user-select:text}
@@ -372,6 +425,14 @@ textarea.fi{resize:vertical;min-height:70px}
 .more-sheet-row{width:100%;justify-content:flex-start;padding:12px 14px;margin-bottom:6px;font-size:14px;min-height:44px}
 .more-sheet-row:last-child{margin-bottom:0}
 .more-sheet-row svg{width:18px;height:18px;flex-shrink:0}
+.more-sheet-row .msr-text{flex:1 1 auto;min-width:0;text-align:left}
+/* The sheet is glass over a dark scrim, so its surfaces are grey in light (rows #efefef, sheet #d7d7d7) and --text3 fails there: counts and the arrow use --text2 (3.93:1 became 4.95:1 light, 4.41:1 became 6.34:1 dark), the version uses --text in light (--text2 is only 3.95:1 on the sheet). */
+.more-sheet-row .msr-count,.more-sheet-row .msr-ext{flex:none;font-size:12px;font-weight:600;color:var(--text2)}
+.more-sheet-row.active{background:var(--accent-soft);border-color:var(--accent-border);color:var(--accent);font-weight:600}
+.more-sheet-row.active .msr-count{color:inherit}
+.msr-sep{height:1px;margin:8px 0 10px;background:var(--border)}
+.sheet-version{margin:12px 0 0;text-align:center;font-size:12px;line-height:16px;color:var(--text2)}
+html:not(.dark) .sheet-version{color:var(--text)}
 
 /* TOAST */
 #toast-host{position:fixed;bottom:24px;right:24px;display:flex;flex-direction:column;gap:8px;z-index:300;pointer-events:none}
@@ -382,9 +443,8 @@ textarea.fi{resize:vertical;min-height:70px}
 
 /* PHASE CHIP */
 .phase-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;background:var(--accent-soft);border:1px solid var(--accent-border);color:var(--accent);font-size:12px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase}
-.phase-chip-mini{display:inline-block;padding:1px 5px;border-radius:var(--radius);background:var(--accent-soft);border:1px solid var(--accent-border);color:var(--accent);font-size:12px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase;margin-left:4px;line-height:1.2}
 .ccy-toggle{display:inline-flex;border:1px solid var(--glass-border);border-radius:999px;overflow:hidden;background:var(--glass)}
-.ccy-toggle button{padding:5px 11px;border:none;background:transparent;color:var(--text3);font-size:12px;font-weight:700;letter-spacing:0.3px;cursor:pointer;font-family:inherit;transition:all 0.15s}
+.ccy-toggle button{padding:5px 11px;border:none;background:transparent;color:var(--text2);font-size:12px;font-weight:700;letter-spacing:0.3px;cursor:pointer;font-family:inherit;transition:all 0.15s}
 @media (hover:hover){.ccy-toggle button:hover{color:var(--text)}}
 .ccy-toggle button.active{background:var(--accent);color:var(--on-accent)}
 /* THEME TOGGLE (settings), mirrors the currency toggle */
@@ -777,31 +837,39 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 .px-chip.up .px-chg{color:var(--gain)}
 .px-chip.dn .px-chg{color:var(--loss)}
 
-/* MOBILE BOTTOM TABS */
+/* MOBILE (768px and below): no sidebar. A compact header (whale, page name, currency switch on the pages that
+   have one, sync dot, Hide amounts) and a bottom bar of five areas, Overview, Assets, Money, Plan, More. */
 .bottom-tab-bar{display:none}
 @media (max-width: 768px){
-  .topbar{padding:env(safe-area-inset-top) 10px 0}
-  .logo-name{display:none}
-  .logo{margin-right:8px}
-  .logo-whale{height:34px;width:34px}
-  .nav{display:none}
-  .topbar-actions{margin-left:auto;gap:6px}
-  .docs-link{display:none}  /* topbar too tight on mobile; docs link lives in Settings instead */
-  /* Cross-app switcher moves into the More sheet (B2) below this width, so
-     drop it from the topbar entirely, the bottom tab bar is already full. */
-  .tb-tabs{display:none}
-  .ccy-toggle button{padding:5px 9px}
-  .main{padding:14px;padding-bottom:88px}
+  .shell{display:block}
+  .sidebar{display:none}
+  .topbar{flex-wrap:nowrap;gap:8px;min-height:calc(56px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 12px 0}
+  .tb-head{flex:1 1 auto}
+  .tb-whale{display:block}
+  .tb-title{font-size:15px;line-height:20px}
+  .tb-sub{display:none}
+  .tb-actions{gap:6px}
+  .tb-add-wrap{display:none}
+  .sync-dot{display:flex}
+  /* Minimum 44px tap targets on touch screens. */
+  .icon-btn{width:44px;height:44px}
+  .ccy-toggle button{padding:5px 10px;min-height:44px}
+  .main{padding:14px;padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+  /* The header already names the page, so the in-page title is visually hidden here too (screen readers still get it).
+     The status or sub line under it stays. A head left with nothing visible gives its space back. */
+  .page-head .page-title{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .page-head:not(:has(> :not(.ph-text))):not(:has(.ph-text > :not(.page-title))){margin-bottom:0}
+  .content-col > .backend-banner{margin:10px 14px 0;width:auto}
   /* Opaque backing (F-report: scrolling page text was bleeding through behind
      the tab labels at 375px on the translucent --glass background). */
   .bottom-tab-bar{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--surface-solid);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border-top:1px solid var(--glass-border);padding:6px 4px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;z-index:90}
-  .bottom-tab-bar .nav-btn{flex-direction:column;gap:2px;font-size:12px;padding:6px 8px;min-width:0;flex:1}
-  .bottom-tab-bar .nav-btn svg{width:18px;height:18px}
+  .bb-item{flex:1 1 0;min-width:0;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:4px 2px;border:0;border-radius:var(--radius);background:none;color:var(--text2);font:inherit;font-size:12px;line-height:16px;font-weight:500;cursor:pointer}
+  .bb-item svg{width:20px;height:20px;flex:none}
+  /* The area that holds the current page: soft accent fill, accent text and heavier weight. */
+  .bb-item.active{background:var(--accent-soft);color:var(--accent);font-weight:700}
   /* iOS zoom trap: inputs under 16px make Safari auto-zoom on focus. */
   input.fi,select.fi,textarea.fi{font-size:16px}
-  /* Minimum 44px tap targets on touch screens. */
   .btn-sm{min-height:44px}
-  .nav-btn{min-height:44px}
   /* Toast spans the bottom centre so long messages are not squished at the edge. */
   #toast-host{left:16px;right:16px;bottom:calc(24px + env(safe-area-inset-bottom));align-items:center}
   /* Horizontal-scroll affordance on tables (F5): the fade signals more
@@ -817,7 +885,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
    (.card/.metric/.stat-box/.dash-hero/.h-summary/.bucket/.hint-block/
    .freshness went solid var(--bg2) in the restyle, so they no longer need it). */
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
-  .topbar,.modal,.toast,.bottom-tab-bar,.icon-btn,.sync-pill,.ccy-toggle,.theme-toggle{background:var(--surface-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
+  .topbar,.modal,.toast,.bottom-tab-bar,.icon-btn,.ccy-toggle,.theme-toggle{background:var(--surface-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
 }
 
 /* ── Custom Chart Builder (Explore page) ── */
@@ -890,78 +958,106 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 .dash-arranging #dash-stack > [data-wid] .btn{pointer-events:none;opacity:.4}
 .kjr-sortable-dragging{box-shadow:0 14px 40px rgba(0,0,0,.5);border-radius:12px;transform:scale(1.01)}
 .kjr-sortable-placeholder{background:color-mix(in srgb,var(--accent) 12%,transparent);border:2px dashed var(--accent);border-radius:12px}
-/* Below 400px the SGD/USD toggle, sync pill and icon group no longer fit beside
-   the logo on Stocks and Watchlist+ (the page laid out at 389px). Tighten the
-   spacing rather than shrink the 44px icon tap targets. */
+/* Below 400px the SGD/USD switch, the sync dot and Hide amounts crowd the page name on Stocks and
+   Watchlist. Tighten the gaps rather than shrink the 44px tap targets, and below 360px drop the whale. */
 @media (max-width:400px){
-  .logo{margin-right:4px}
-  .topbar-actions{gap:4px}
-  .ccy-toggle button{padding:5px 6px}
-  .sync-pill{padding-inline:7px}
+  .topbar{padding-inline:8px;gap:6px}
+  .tb-actions{gap:4px}
 }
+@media (max-width:360px){.tb-whale{display:none}}
 </style>
 </head>
 <body>
 
 <h1 class="sr-only">Kujira Portfolio</h1>
 
-<!-- TOPBAR -->
-<header class="topbar">
-  <button type="button" class="logo" data-click="navigate" data-a0="dashboard">
-    <img class="logo-whale" src="Worker/whale-icon.png" alt="Kujira">
-    <div class="logo-name">
-      <span>KUJIRA</span>
-      <span>Portfolio</span>
-      <span id="logo-version"></span>
+<!-- APP SHELL (v1). 769px and up: a 224px sidebar beside the content column. 768px and below: no sidebar,
+     a compact header on top (whale, page name, sync dot, Hide amounts) and a five-area bar at the bottom.
+     Structure: .shell > .sidebar (.ws, .side-nav, .side-foot) + .content-col (.topbar, banner, main).
+     The sidebar groups and the bottom bar are built by renderNav() in Worker/app.js from NAV_GROUPS and MOBILE_GROUPS. -->
+<div class="shell">
+
+  <div class="sidebar" id="sidebar">
+    <!-- Workspace switcher: this app's mark and name, a menu of real links to the sibling apps -->
+    <div class="ws menu-wrap">
+      <button type="button" class="ws-btn" id="ws-btn" data-menu-btn="ws" data-click="toggleShellMenu" data-a0="ws" aria-haspopup="menu" aria-expanded="false" aria-controls="ws-menu">
+        <img class="ws-mark" src="Worker/whale-icon.png" alt="" width="32" height="32">
+        <span class="ws-text">
+          <span class="ws-name">Kujira</span>
+          <span class="ws-sub">Portfolio <svg class="ws-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg></span>
+        </span>
+      </button>
+      <div class="shell-menu ws-menu" id="ws-menu" role="menu" aria-label="Switch app" hidden>
+        <a class="menu-item" role="menuitem" tabindex="-1" href="../Trading/">Trading</a>
+        <a class="menu-item" role="menuitem" tabindex="-1" href="../Forex/">Forex</a>
+        <a class="menu-item" role="menuitem" tabindex="-1" href="./" aria-current="page">Portfolio <svg class="menu-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true" focusable="false"><path d="M5 12l5 5 9-10"/></svg></a>
+      </div>
     </div>
-  </button>
-  <nav class="nav" id="nav-host" aria-label="Primary navigation">
-    <!-- nav buttons injected by JS -->
-  </nav>
-  <div class="nav-more-wrap" id="nav-more-wrap" style="display:none">
-    <button type="button" class="nav-more-btn" id="nav-more-btn" data-click="toggleNavMore" aria-haspopup="true" aria-expanded="false">
-      <span>More</span><svg class="caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
-    </button>
-    <div class="nav-more-menu" id="nav-more-menu"><!-- overflow tabs injected by JS --></div>
-  </div>
-  <nav class="tb-tabs" aria-label="Switch app">
-    <a class="tb-tab" href="../Trading/">Trading</a>
-    <a class="tb-tab" href="../Forex/">Forex</a>
-    <a class="tb-tab active" href="./" aria-current="page">Portfolio</a>
-  </nav>
-  <div class="topbar-actions">
-    <div class="ccy-toggle" role="group" aria-label="Display currency">
-      <button type="button" data-ccy="SGD" data-click="setDisplayCcy" data-a0="SGD">SGD</button>
-      <button type="button" data-ccy="USD" data-click="setDisplayCcy" data-a0="USD">USD</button>
-    </div>
-    <button id="sync-pill" class="sync-pill s-local" data-click="openSyncDetails" title="Open sync details" aria-haspopup="dialog" aria-controls="sync-details-modal" aria-expanded="false"><span id="sync-pill-label">Local only</span></button>
-    <div class="icon-btn-group">
-      <a class="icon-btn docs-link" href="https://kujira-journal.pages.dev" target="_blank" rel="noopener noreferrer" title="How it works (Journal docs)" aria-label="How it works">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+
+    <nav class="side-nav" id="side-nav" aria-label="Portfolio"><!-- groups injected by renderSidebarNav() --></nav>
+
+    <div class="side-foot">
+      <a class="side-item" id="side-settings" href="#settings" data-click="navLink" data-a0="settings" data-tab="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span class="side-text">Settings</span>
       </a>
-      <button id="privacy-toggle" class="icon-btn" data-click="togglePrivacy" title="Hide amounts" aria-label="Hide amounts" aria-pressed="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
-      </button>
-      <button class="icon-btn" data-click="toggleTheme" title="Toggle theme" aria-label="Toggle theme">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-      </button>
-      <button class="icon-btn" data-click="navigate" data-a0="settings" title="Settings" aria-label="Settings">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      </button>
+      <!-- The sync row: state dot (CSS) and the words. Opens the sync details. Ids are read by setSyncStatus(). -->
+      <button id="sync-pill" class="sync-pill s-local" data-click="openSyncDetails" title="Open sync details" aria-haspopup="dialog" aria-controls="sync-details-modal" aria-expanded="false"><span class="sync-text"><span id="sync-pill-label">Local only</span> <span id="sync-pill-age" class="sync-age"></span></span></button>
+      <div class="side-meta">
+        <span id="logo-version" class="side-version"></span>
+        <span class="side-tools">
+          <a class="icon-btn docs-link" href="https://kujira-journal.pages.dev" target="_blank" rel="noopener noreferrer" title="How it works (Journal guide, opens in a new tab)" aria-label="How it works, opens the Journal guide in a new tab">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          </a>
+          <button type="button" class="icon-btn" data-click="toggleTheme" data-theme-switch title="Switch to light theme" aria-label="Switch to light theme">
+            <span class="ti ti-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg></span>
+            <span class="ti ti-moon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></span>
+          </button>
+        </span>
+      </div>
     </div>
   </div>
-</header>
 
-<div id="backend-banner" class="backend-banner" role="status" aria-live="polite" hidden>
-  <span id="backend-banner-copy"></span>
-</div>
+  <div class="content-col">
 
-<!-- MAIN -->
-<main class="main">
+    <header class="topbar" id="topbar">
+      <div class="tb-head">
+        <img class="tb-whale" src="Worker/whale-icon.png" alt="" width="32" height="32">
+        <!-- Mirror of the page's own title and status line (_syncTopbarContext). The in-page copy stays in the DOM for screen readers. -->
+        <div class="tb-text" aria-hidden="true">
+          <p class="tb-title" id="tb-title"></p>
+          <p class="tb-sub" id="tb-sub"></p>
+        </div>
+      </div>
+      <div class="tb-actions">
+        <div class="ccy-toggle" role="group" aria-label="Display currency">
+          <button type="button" data-ccy="SGD" data-click="setDisplayCcy" data-a0="SGD">SGD</button>
+          <button type="button" data-ccy="USD" data-click="setDisplayCcy" data-a0="USD">USD</button>
+        </div>
+        <!-- Phone only: the sidebar sync row is not there, so a dot opens the same details. -->
+        <button type="button" id="sync-dot" class="icon-btn sync-dot s-local" data-click="openSyncDetails" title="Open sync details" aria-haspopup="dialog" aria-controls="sync-details-modal" aria-expanded="false"><span class="sr-only" id="sync-dot-label">Sync status: Local only</span></button>
+        <button id="privacy-toggle" class="icon-btn" data-click="togglePrivacy" title="Hide amounts" aria-label="Hide amounts" aria-pressed="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+        <div class="tb-add-wrap menu-wrap">
+          <button type="button" class="btn btn-primary tb-add" id="add-btn" data-menu-btn="add" data-click="toggleShellMenu" data-a0="add" aria-haspopup="menu" aria-expanded="false" aria-controls="add-menu">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>Add
+          </button>
+          <div class="shell-menu add-menu" id="add-menu" role="menu" aria-label="Add" hidden><!-- items built by renderAddMenu() --></div>
+        </div>
+      </div>
+    </header>
+
+    <div id="backend-banner" class="backend-banner" role="status" aria-live="polite" hidden>
+      <span id="backend-banner-copy"></span>
+    </div>
+
+    <!-- MAIN -->
+    <main class="main" id="main">
 
   <!-- DASHBOARD -->
   <section class="page" id="page-dashboard">
-    <div class="page-head"><div><h2 class="page-title">Dashboard</h2><p class="page-status" id="dash-status"></p></div><div style="display:flex;align-items:center;gap:10px"><button id="dash-arrange-btn" class="btn btn-sm btn-ghost" data-click="toggleArrange" aria-pressed="false" aria-describedby="dash-arrange-instructions" style="display:none">Arrange</button></div></div>
+    <div class="page-head"><div class="ph-text"><h2 class="page-title">Dashboard</h2><p class="page-status" id="dash-status"></p></div><div style="display:flex;align-items:center;gap:10px"><button id="dash-arrange-btn" class="btn btn-sm btn-ghost" data-click="toggleArrange" aria-pressed="false" aria-describedby="dash-arrange-instructions" style="display:none">Arrange</button></div></div>
     <div id="dash-integrity"></div>
     <p id="dash-arrange-instructions" class="sr-only">Arrange mode provides a drag handle and Move up or Move down buttons for each dashboard card.</p>
     <div id="dash-arrange-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -976,7 +1072,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- STOCKS -->
   <section class="page" id="page-stocks">
     <div class="page-head">
-      <div><h2 class="page-title">Stocks</h2></div>
+      <div class="ph-text"><h2 class="page-title">Stocks</h2></div>
     </div>
     <div id="stocks-summary"></div>
     <div id="stocks-body"></div>
@@ -988,7 +1084,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- WATCHLIST+ BOARD, Yahoo-style customisable view over the watchlist tickers -->
   <section class="page" id="page-board">
     <div class="page-head">
-      <div><h2 class="page-title">Watchlist+</h2><div class="page-sub">Your watchlist tickers in a customisable board. Pick and reorder columns with ⚙ Columns.</div></div>
+      <div class="ph-text"><h2 class="page-title">Watchlist+</h2><div class="page-sub">Your watchlist tickers in a customisable board. Pick and reorder columns with ⚙ Columns.</div></div>
       <div class="h-toolbar">
         <button class="btn" data-click="refreshStockPrices">↻ Refresh prices</button>
         <button class="btn" data-click="openColumns" data-a0="board" id="btn-board-cols">⚙ Columns</button>
@@ -1000,7 +1096,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- CRYPTO -->
   <section class="page" id="page-crypto">
     <div class="page-head">
-      <div><h2 class="page-title">Crypto</h2><div class="page-sub">Coin holdings priced in SGD via CoinGecko.</div></div>
+      <div class="ph-text"><h2 class="page-title">Crypto</h2><div class="page-sub">Coin holdings priced in SGD via CoinGecko.</div></div>
       <div class="h-toolbar">
         <button class="btn btn-primary" data-click="openEntity" data-a0="crypto">＋ Add coin</button>
         <button class="btn" data-click="refreshCryptoPrices" id="btn-refresh-crypto">↻ Refresh prices</button>
@@ -1015,7 +1111,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- REAL ESTATE -->
   <section class="page" id="page-realestate">
     <div class="page-head">
-      <div><h2 class="page-title">Real Estate</h2><div class="page-sub">Lump values, manual updates.</div></div>
+      <div class="ph-text"><h2 class="page-title">Real estate</h2><div class="page-sub">Lump values, manual updates.</div></div>
       <div class="h-toolbar">
         <button class="btn btn-primary" data-click="openEntity" data-a0="realestate">＋ Add property</button>
       </div>
@@ -1027,7 +1123,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- INSURANCE -->
   <section class="page" id="page-insurance">
     <div class="page-head">
-      <div><h2 class="page-title">Insurance</h2><div class="page-sub">Life, health, and general policies, plus a protection adequacy check.</div></div>
+      <div class="ph-text"><h2 class="page-title">Insurance</h2><div class="page-sub">Life, health, and general policies, plus a protection adequacy check.</div></div>
     </div>
     <div id="insurance-root"></div>
   </section>
@@ -1035,7 +1131,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- CASH -->
   <section class="page" id="page-cash">
     <div class="page-head">
-      <div><h2 class="page-title">Cash</h2><div class="page-sub">Bank accounts, fixed deposits, foreign currency.</div></div>
+      <div class="ph-text"><h2 class="page-title">Cash</h2><div class="page-sub">Bank accounts, fixed deposits, foreign currency.</div></div>
       <div class="h-toolbar">
         <button class="btn btn-primary" data-click="openEntity" data-a0="cash">＋ Add account</button>
         <button class="btn" data-click="refreshFx" id="btn-refresh-fx">↻ Refresh FX</button>
@@ -1050,7 +1146,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- CPF -->
   <section class="page" id="page-cpf">
     <div class="page-head">
-      <div><h2 class="page-title">CPF</h2><div class="page-sub">OA, SA, MA, RA balances with full transaction history.</div></div>
+      <div class="ph-text"><h2 class="page-title">CPF</h2><div class="page-sub">OA, SA, MA, RA balances with full transaction history.</div></div>
     </div>
     <div id="cpf-balances"></div>
     <div class="hint" id="cpf-balances-meta" style="margin:-4px 2px 14px"></div>
@@ -1082,7 +1178,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   <!-- CASHFLOW -->
   <section class="page" id="page-cashflow">
     <div class="page-head">
-      <div><h2 class="page-title">P&amp;L</h2><div class="page-sub">Monthly income, per-transaction expenses, savings rate.</div></div>
+      <div class="ph-text"><h2 class="page-title">Income &amp; spending</h2><div class="page-sub">Monthly income, per-transaction expenses, savings rate.</div></div>
       <div class="h-toolbar">
         <select class="fi" id="cf-filter-year" style="padding:5px 9px;font-size:12px;width:auto;min-width:90px" data-change="renderCashflow" aria-label="Filter by year"></select>
         <button class="btn btn-primary" data-click="openEntity" data-a0="income">＋ Add income</button>
@@ -1124,14 +1220,14 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
   <!-- PROJECTIONS -->
   <section class="page" id="page-projections">
-    <div class="page-head"><div><h2 class="page-title">Projections</h2><div class="page-sub">FIRE number, retirement readiness, CPF growth. Figures in today's dollars.</div></div></div>
+    <div class="page-head"><div class="ph-text"><h2 class="page-title">Projections</h2><div class="page-sub">FIRE number, retirement readiness, CPF growth. Figures in today's dollars.</div></div></div>
     <div id="projections-root"></div>
   </section>
 
   <!-- EXPLORE, the Chart Builder and the saved charts list (the dashboard only shows saved charts that are switched on) -->
   <section class="page" id="page-explore">
     <div class="page-head">
-      <div><h2 class="page-title">Explore</h2><p class="page-status">Build charts from your holdings and history</p></div>
+      <div class="ph-text"><h2 class="page-title">Explore</h2><p class="page-status">Build charts from your holdings and history</p></div>
       <div style="display:flex;align-items:center;gap:10px"><button type="button" class="switch" id="explore-cpf-switch" role="switch" aria-checked="false" data-click="toggleDashCpf"><span class="switch-track" aria-hidden="true"></span>Include CPF</button></div>
     </div>
     <div id="explore-chart-note" hidden></div>
@@ -1142,7 +1238,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 
   <!-- SETTINGS -->
   <section class="page" id="page-settings">
-    <div class="page-head"><div><h2 class="page-title">Settings</h2><div class="page-sub">Sync, assumptions, theme.</div></div></div>
+    <div class="page-head"><div class="ph-text"><h2 class="page-title">Settings</h2><div class="page-sub">Sync, assumptions, theme.</div></div></div>
 
     <div class="settings-grid">
 
@@ -1290,7 +1386,7 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     <div class="card">
       <div class="card-head"><h3>Backup &amp; restore</h3><span class="hint">Download a full copy, or load one back.</span></div>
       <div class="card-body">
-        <p class="hint" style="margin-bottom:12px">Export saves everything (holdings, cash, CPF, P&amp;L, settings) to a JSON file on your device. Keep it somewhere safe. Import replaces all current data with a backup file, so export first if you are unsure.</p>
+        <p class="hint" style="margin-bottom:12px">Export saves everything (holdings, cash, CPF, Income &amp; spending, settings) to a JSON file on your device. Keep it somewhere safe. Import replaces all current data with a backup file, so export first if you are unsure.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <button class="btn btn-primary" data-click="exportBackup">Export backup</button>
           <button class="btn" data-click="clickImportFile">Import backup</button>
@@ -1593,7 +1689,10 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
     </div><!-- /settings-grid -->
   </section>
 
-</main>
+    </main>
+
+  </div><!-- /content-col -->
+</div><!-- /shell -->
 
 <!-- MOBILE BOTTOM TAB BAR -->
 <nav class="bottom-tab-bar" id="bottom-nav" aria-label="Primary navigation (mobile)"></nav>
@@ -1815,12 +1914,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.71"></script>
-<script src="Worker/kjr-sortable.js?v=2.71"></script>
-<script src="Worker/kjr-vault.js?v=2.71"></script>
-<script src="Worker/kjr-migration.js?v=2.71"></script>
-<script src="Worker/supabase.js?v=2.71"></script>
-<script src="Worker/kjr-nas.js?v=2.71"></script>
-<script src="Worker/app.js?v=2.71"></script>
+<script src="Worker/kjr-core.js?v=2.72"></script>
+<script src="Worker/kjr-sortable.js?v=2.72"></script>
+<script src="Worker/kjr-vault.js?v=2.72"></script>
+<script src="Worker/kjr-migration.js?v=2.72"></script>
+<script src="Worker/supabase.js?v=2.72"></script>
+<script src="Worker/kjr-nas.js?v=2.72"></script>
+<script src="Worker/app.js?v=2.72"></script>
 </body>
 </html>
