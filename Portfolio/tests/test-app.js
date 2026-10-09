@@ -155,9 +155,19 @@ const FUNCTION_TARGETS = [
   '_navIcon', '_sideItemHtml', '_sheetNavRowHtml', '_sheetUtilityRowsHtml', 'renderSidebarNav', 'renderBottomBar', 'renderMoreSheet',
   'updateNavCounts', '_syncNavActive', '_syncTopbarContext', 'navLink',
   '_shellMenuItems', 'openShellMenu', 'closeShellMenus', 'toggleShellMenu', 'shellMenuKeydown', 'renderAddMenu', 'addMenuPick',
-  '_syncAgeText', '_paintSyncDot', '_refreshSyncAge'
+  '_syncAgeText', '_paintSyncDot', '_refreshSyncAge',
+  // Mobile list rows and chip filters (v2.73): the row models and markup, the routing, the More menus, the Sort chip and the CPF chip mirror,
+  // plus the formatters the table cells use, so a test can hold the list against the table
+  '_plainText', '_finiteNum', '_returnCell', '_listMoney', '_stockListModel', '_cryptoListModel', '_holdingLabel', 'openHoldingDetail',
+  '_holdingRowHtml', '_holdingTotalHtml', '_holdingsListHtml', '_cashListModel', '_cashRowHtml', '_cashListHtml',
+  '_cashTxnView', '_ledgerRowHtml', '_cashTxnRowHtml', '_cpfRowView', '_cpfRowHtml',
+  'moreMenuPick', '_moreMenuHtml', '_chipSelectHtml', '_stockSortChipOptions', 'setStockSortTo', 'stocksSortPick',
+  '_chipKeep', '_chipRestore', 'cpfChipFilter', 'cpfClearFilters', '_syncCpfChips',
+  'fmtSgdOrNative', '_nativeMoneyText', 'fmtPct', '_plArrow', '_moneyHtml', 'fmtDateSG', '_parseDateOnlyLocal', 'cpfTypeLabel',
+  'buildStockChartRows', 'renderStocks', 'renderCrypto', 'renderCash', 'renderCashTxns', 'renderCpf',
+  'fxMissingFor', 'projectedMonthlyInterest', 'hasCashActivity'
 ];
-const CONST_TARGETS = ['APP_VERSION', 'APP_DISPLAY_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState'];
+const CONST_TARGETS = ['APP_VERSION', 'APP_DISPLAY_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'LIST_DASH', 'CPF_TYPE_LABEL', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState'];
 
 const extractedFns = {};
 const missingFns = [];
@@ -167,7 +177,8 @@ FUNCTION_TARGETS.forEach(name => {
   else extractedFns[name] = src;
 });
 // Multi-line navigation constants (v2.72), pulled out whole.
-const CONST_BLOCK_TARGETS = ['TABS', 'PHASE_2_TABS', 'NAV_GROUPS', 'MOBILE_GROUPS', 'NAV_COUNT_TABLES', 'ADD_MENU_ITEMS', 'MORE_SHEET_ICON', 'BOOK_ICON', 'TRADING_ICON', 'FOREX_ICON', 'THEME_ICONS', 'SHELL_MENUS'];
+const CONST_BLOCK_TARGETS = ['TABS', 'PHASE_2_TABS', 'NAV_GROUPS', 'MOBILE_GROUPS', 'NAV_COUNT_TABLES', 'ADD_MENU_ITEMS', 'MORE_SHEET_ICON', 'BOOK_ICON', 'TRADING_ICON', 'FOREX_ICON', 'THEME_ICONS', 'SHELL_MENUS',
+  'CASH_TYPE_LABEL', 'MORE_MENU_ACTIONS', 'STOCK_SORT_CHIPS', 'STOCK_SORT_VALS', 'STOCK_COL_LABEL', 'STOCK_COLUMNS', 'GICS_SECTOR_OPTIONS'];
 const extractedConstBlocks = {};
 CONST_BLOCK_TARGETS.forEach(name => {
   const src = extractConstBlock(name);
@@ -4300,6 +4311,796 @@ async function runTests(){
     release();
     assert.strictEqual(await first, false);
     assert.strictEqual(sb._hasLocalUnsaved(), true);
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     v2.73 mobile list rows, chip filters and More menus.
+     The phone list and the desktop table must read the same rows, so most of
+     these run the REAL render functions against a small fake DOM and hold the
+     list's text against the table's cells and against the column registry.
+     ═══════════════════════════════════════════════════════════════════════ */
+  const DASH = '–';
+  const TODAY_ISO = new Date().toISOString();
+
+  /* A fresh sandbox with the real formatter (fmt and toDisplay) and the real kjrEscape in place of the identity stubs,
+     a fixed USDSGD of 1.25 and a chosen render currency. */
+  function listSandbox(db, ccy){
+    const base = Object.assign({ settings:{ fxOverrides:{ USDSGD:1.25 }, fxRates:{} } }, db || {});
+    const sb = realEscape(freshSandbox(base));
+    vm.runInContext(extractFunction('fmt') + '\n' + extractFunction('toDisplay'), sb);
+    sb.displayCcy = () => ccy || 'SGD';
+    sb.coinIdFor = id => String(id).toLowerCase();
+    return sb;
+  }
+
+  /* Fake elements by id (innerHTML, textContent and value are plain properties) and the stubs every render function needs. */
+  function renderBox(sb, ids){
+    const els = {};
+    ids.forEach(id => {
+      els[id] = { id, innerHTML:'', textContent:'', value:'', className:'', hidden:false, querySelector: () => null, contains: () => false,
+        classList:{ on:new Set(), toggle(n, force){ if (force) this.on.add(n); else this.on.delete(n); return !!force; }, add(n){ this.on.add(n); }, remove(n){ this.on.delete(n); }, contains(n){ return this.on.has(n); } } };
+    });
+    sb.document = { getElementById: id => els[id] || null, activeElement:null };
+    sb.setRenderCcy = () => {};
+    sb.renderSummary = () => '';
+    sb._emptyIcon = () => '';
+    sb.priceFreshnessText = () => 'Prices just now';
+    sb.fxFreshnessText = () => 'FX just now';
+    sb.relTime = () => 'just now';
+    return els;
+  }
+
+  function stocksBox(sb){
+    const els = renderBox(sb, ['stocks-body', 'stocks-summary']);
+    vm.runInContext("var _stocksFilter = { sector:'', market:'' }; var _stocksPage = 0; var STOCKS_PAGE_SIZE = 50; var _sfText = ''; var _sfCls = ''; var _lastStockRows = []; var _stockChartRows = [];", sb);
+    sb.renderSectorAllocation = () => '';
+    sb._infoTip = () => '';
+    sb.renderWatchlist = () => {}; sb.renderBoard = () => {}; sb.renderDividendTimeline = () => {}; sb.renderStockTxns = () => {};
+    sb.orderedStockCols = () => vm.runInContext('STOCK_COLUMNS', sb).map(c => Object.assign({}, c, { visible: !!c.defVis }));
+    return els;
+  }
+
+  const stockCols = sb => { const cols = {}; vm.runInContext('STOCK_COLUMNS', sb).forEach(c => { cols[c.key] = c; }); return cols; };
+  const listRowsOf = html => Array.from(html.matchAll(/<button type="button" class="dash-hrow hl-row"[^>]*>[\s\S]*?<\/button>/g)).map(m => m[0]);
+  const stockFixture = () => ({
+    stocks:[
+      { id:'s_aapl', symbol:'AAPL', market:'US', sector:'Information Technology', shares:10, avgCost:80, currency:'USD' },
+      { id:'s_d05', symbol:'D05', market:'SGX', sector:'Financials', shares:100, avgCost:30, currency:'SGD' },
+      { id:'s_nopx', symbol:'NOPX', market:'US', shares:5, avgCost:10, currency:'USD' },
+      { id:'s_o39', symbol:'O39', market:'SGX', sector:'Financials', shares:200, avgCost:12, currency:'SGD' }
+    ],
+    _priceCache:{
+      AAPL:{ price:100, currency:'USD', fetchedAt:TODAY_ISO },
+      D05:{ price:35, currency:'SGD', fetchedAt:TODAY_ISO },
+      O39:{ price:9, currency:'SGD', fetchedAt:TODAY_ISO }
+    }
+  });
+
+  test('_plainText - the words of a formatter result, tags dropped and the five escapes undone once', () => {
+    const sb = freshSandbox();
+    assert.strictEqual(sb._plainText('<span class="price-stale">SGD 5,240 · FX missing</span>'), 'SGD 5,240 · FX missing');
+    assert.strictEqual(sb._plainText('A &amp; B &lt;b&gt; &quot;q&quot; &#39;s&#39;'), 'A & B <b> "q" \'s\'');
+    assert.strictEqual(sb._plainText('&amp;lt;'), '&lt;');
+    assert.strictEqual(sb._plainText(null), '');
+    assert.strictEqual(sb._plainText(undefined), '');
+    assert.strictEqual(sb._plainText(12), '12');
+  });
+
+  test('_returnCell - percentage over amount, the arrow and sign on the percentage, an amount with no percentage carries its own arrow, nothing known gives dashes', () => {
+    const sb = freshSandbox();
+    const cell = (...a) => navPlain(sb._returnCell(...a));
+    assert.deepStrictEqual(cell(12, 5.5, '+S$12'), { dir:'up', pct:'▲ +5.50%', amount:'+S$12' });
+    assert.deepStrictEqual(cell(-3, -2, '-S$3'), { dir:'down', pct:'▼ -2.00%', amount:'-S$3' });
+    assert.deepStrictEqual(cell(0, 0, 'S$0'), { dir:'up', pct:'+0.00%', amount:'S$0' });          // zero reads as the table does: gain colour, no arrow
+    assert.deepStrictEqual(cell(null, null, ''), { dir:'', pct:DASH, amount:'' });
+    assert.deepStrictEqual(cell(50, null, '+S$50'), { dir:'up', pct:DASH, amount:'▲ +S$50' });   // a cost of zero has no percentage
+    assert.deepStrictEqual(cell(-50, null, '-S$50'), { dir:'down', pct:DASH, amount:'▼ -S$50' });
+  });
+
+  test('_stockListModel - the phone row reads the same figures as the table cells (value, return, share), a missing price shows dashes', () => {
+    const sb = listSandbox(stockFixture(), 'USD');
+    const rows = sb.buildStockChartRows();
+    const cols = stockCols(sb);
+    assert.strictEqual(rows.length, 4);
+    rows.forEach(r => {
+      const m = navPlain(sb._stockListModel(r));
+      assert.strictEqual(m.table, 'stocks'); assert.strictEqual(m.id, r.s.id); assert.strictEqual(m.sym, r.s.symbol); assert.strictEqual(m.cls, 'stocks');
+      assert.strictEqual(m.sub, [r.s.market, r.s.sector].filter(Boolean).join(' · '));
+      // value, return percentage and share: the very strings the table's Market value, P&L %, and Weight % cells print
+      assert.strictEqual(m.value, r.mv != null ? cols.mv.render(r) : DASH, r.s.symbol + ' value');
+      assert.strictEqual(m.pct, r.plPct != null ? sb._plainText(cols.plPct.render(r)) : DASH, r.s.symbol + ' return %');
+      assert.strictEqual(m.share, r.weight != null ? cols.weight.render(r) : DASH, r.s.symbol + ' share');
+      // the amount: the P&L cell is arrow plus amount, the list keeps the arrow on the percentage
+      if (r.pl != null) assert.strictEqual(sb._plainText(cols.pl.render(r)), sb._plArrow(r.pl) + sb._plainText(m.amount), r.s.symbol + ' return amount');
+      else assert.strictEqual(m.amount, '');
+      assert.strictEqual(m.dir, r.pl == null ? '' : (r.pl >= 0 ? 'up' : 'down'));
+      assert.strictEqual(m.fx, false);
+    });
+    const aapl = navPlain(sb._stockListModel(rows[0]));
+    assert.ok(aapl.value.startsWith('US$'), aapl.value);                       // the Stocks tab shows US$ by default
+    assert.ok(aapl.pct.startsWith('▲ +') && aapl.pct.endsWith('%'));
+    assert.strictEqual(aapl.shareOf, 'of stocks');
+    // a holding with no price: dashes everywhere, never NaN or undefined
+    const nopx = navPlain(sb._stockListModel(rows[2]));
+    assert.deepStrictEqual({ value:nopx.value, share:nopx.share, pct:nopx.pct, amount:nopx.amount, dir:nopx.dir }, { value:DASH, share:DASH, pct:DASH, amount:'', dir:'' });
+    // the shares of all four add to 100
+    const total = rows.reduce((s, r) => s + (r.weight || 0), 0);
+    assert.ok(Math.abs(total - 100) < 1e-9);
+  });
+
+  test('_stockListModel - a figure with no FX rate keeps its native amount without the long tail, and the row says FX missing once', () => {
+    const sb = listSandbox(Object.assign(stockFixture(), { settings:{ fxOverrides:{}, fxRates:{} } }), 'USD');   // SGD to USD has no rate
+    const rows = sb.buildStockChartRows();
+    const d05 = rows.find(r => r.s.symbol === 'D05');
+    assert.strictEqual(d05.mv, 3500);
+    const m = navPlain(sb._stockListModel(d05));
+    assert.strictEqual(m.fx, true);
+    assert.strictEqual(m.value, '<span class="price-stale">SGD 3,500</span>');
+    assert.strictEqual(sb._plainText(m.amount), 'SGD +500');
+    assert.ok(!m.value.includes('FX missing') && !m.amount.includes('FX missing'));
+    // the table still says it in full, in every cell
+    assert.ok(stockCols(sb).mv.render(d05).includes('FX missing'));
+    const html = sb._holdingRowHtml(m);
+    assert.strictEqual((html.match(/FX missing/g) || []).length, 1);
+    assert.ok(html.includes('<span class="dash-sub"><span class="price-stale">FX missing</span></span>'));
+    assert.ok(sb._holdingLabel(m).includes('FX rate missing'));
+    // the AAPL row cannot price at all without USDSGD, so it is dashes
+    assert.strictEqual(navPlain(sb._stockListModel(rows[0])).value, DASH);
+  });
+
+  test('_cryptoListModel - value, return and share read the same figures as the Crypto table, the share is of the coin list', () => {
+    const sb = listSandbox({ crypto:[
+      { id:'c_btc', symbol:'BTC', coingeckoId:'bitcoin', amount:0.25, avgCost:60000, currency:'USD' },
+      { id:'c_eth', symbol:'ETH', coingeckoId:'ethereum', amount:2, avgCost:2000, currency:'USD' },
+      { id:'c_foo', symbol:'FOO', amount:5, avgCost:10, currency:'USD' }
+    ], _priceCache:{ bitcoin:{ sgd:152000, change24h:1.8, fetchedAt:TODAY_ISO }, ethereum:{ sgd:4000, change24h:-0.5, fetchedAt:TODAY_ISO } } });
+    const rows = sb.DB.crypto.map(c => sb._cryptoRow(c));
+    const totMv = rows.reduce((s, r) => s + (r.mv || 0), 0);
+    assert.strictEqual(totMv, 38000 + 8000);
+    const btc = navPlain(sb._cryptoListModel(rows[0], totMv));
+    assert.deepStrictEqual({ table:btc.table, id:btc.id, sym:btc.sym, cls:btc.cls, sub:btc.sub }, { table:'crypto', id:'c_btc', sym:'BTC', cls:'crypto', sub:'Crypto' });
+    assert.strictEqual(btc.value, sb.fmt(rows[0].mv, { dp:0 }));
+    assert.strictEqual(btc.share, (38000 / 46000 * 100).toFixed(1) + '%');
+    assert.strictEqual(btc.shareOf, 'of coins');
+    assert.strictEqual(btc.pct, sb.fmtPct(rows[0].plPct));
+    assert.strictEqual(btc.amount, sb.fmt(rows[0].pl, { dp:0, signed:true }));
+    assert.strictEqual(btc.dir, 'up');
+    const none = navPlain(sb._cryptoListModel(rows[2], totMv));
+    assert.deepStrictEqual({ value:none.value, share:none.share, pct:none.pct, amount:none.amount, dir:none.dir }, { value:DASH, share:DASH, pct:DASH, amount:'', dir:'' });
+    // an empty coin list has no share to give
+    assert.strictEqual(navPlain(sb._cryptoListModel(rows[0], 0)).share, DASH);
+  });
+
+  test('_holdingRowHtml - one button per holding, routed through openHolding, a monogram, amounts in .money-chip, no inline handlers', () => {
+    const sb = listSandbox(stockFixture(), 'USD');
+    const r = sb.buildStockChartRows()[0];
+    const html = sb._holdingRowHtml(sb._stockListModel(r));
+    assert.ok(html.startsWith('<button type="button" class="dash-hrow hl-row" data-click="openHolding" data-a0="stocks" data-a1="s_aapl" aria-haspopup="dialog" aria-label="AAPL, US · Information Technology, value US$'));
+    assert.ok(html.endsWith('</button>'));
+    assert.ok(html.includes('class="mono" style="background:var(--c-stocks-soft);color:var(--c-stocks-ink)" aria-hidden="true">A</span>'));
+    assert.ok(html.includes('<b>AAPL</b><span>US · Information Technology</span>'));
+    assert.strictEqual((html.match(/money-chip/g) || []).length, 2);              // the value and the return amount
+    assert.ok(html.includes('<span class="dash-chg up">▲ +'));                  // percentage: arrow, sign, gain class
+    assert.ok(/<span class="hl-of"> of stocks<\/span>/.test(html));
+    assert.strictEqual(/\son[a-z]+="/i.test(html), false);
+    assert.strictEqual((html.match(/<button/g) || []).length, 1);
+    // a loss reads ▼ and the loss class
+    r.pl = -30; r.plPct = -3.5;
+    const down = sb._holdingRowHtml(sb._stockListModel(r));
+    assert.ok(down.includes('<span class="dash-chg down">▼ -3.50%</span>'));
+    assert.ok(/aria-label="[^"]*return -3\.50%/.test(down));
+    // a crypto row says Crypto and opens the crypto record
+    const coin = sb._holdingRowHtml({ table:'crypto', id:'c_btc', sym:'BTC', cls:'crypto', sub:'Crypto', value:'S$38,000', share:'82.6%', shareOf:'of coins', fx:false, dir:'up', pct:'▲ +87.65%', amount:'+S$17,750' });
+    assert.ok(coin.includes('data-a0="crypto" data-a1="c_btc"') && coin.includes('>₿</span>') && coin.includes('<span>Crypto</span>'));
+  });
+
+  test('_holdingLabel - the spoken form: name, market and sector, value, share, return in words without arrows', () => {
+    const sb = freshSandbox();
+    const m = { sym:'AAPL', sub:'US · Information Technology', value:'US$1,000', share:'26.3%', shareOf:'of stocks', pct:'▲ +25.00%', amount:'+US$200', fx:false };
+    assert.strictEqual(sb._holdingLabel(m), 'AAPL, US · Information Technology, value US$1,000, 26.3% of stocks, return +25.00% +US$200');
+    assert.strictEqual(sb._holdingLabel(Object.assign({}, m, { pct:'▼ -2.00%', amount:'-US$5' })), 'AAPL, US · Information Technology, value US$1,000, 26.3% of stocks, return -2.00% -US$5');
+    assert.strictEqual(sb._holdingLabel({ sym:'NOPX', sub:'US', value:DASH, share:DASH, shareOf:'of stocks', pct:DASH, amount:'', fx:false }), 'NOPX, US, value not available, return not available');
+    assert.ok(sb._holdingLabel(Object.assign({}, m, { value:'<span class="price-stale">SGD 3,500</span>', fx:true })).endsWith('FX rate missing'));
+    assert.strictEqual(sb._holdingLabel({ sym:'X', sub:'', value:DASH, share:DASH, shareOf:'', pct:DASH, amount:'+S$4', fx:false }), 'X, value not available, return +S$4');
+  });
+
+  test('openHoldingDetail - the one place a holding row goes, today the edit form, only for a stock or a coin with a safe id', () => {
+    const sb = freshSandbox();
+    const calls = [];
+    sb.openEntityModal = (table, id) => calls.push(['open', table, id]);
+    sb.showToast = (msg, kind) => calls.push(['toast', kind]);
+    assert.strictEqual(sb.openHoldingDetail('stocks', 'stock_seed_aapl'), true);
+    assert.strictEqual(sb.openHoldingDetail('crypto', 'c-btc_1'), true);
+    assert.deepStrictEqual(calls, [['open', 'stocks', 'stock_seed_aapl'], ['open', 'crypto', 'c-btc_1']]);
+    calls.length = 0;
+    ['cash', 'cpfHistory', 'realestate', '', null, undefined, 'constructor', '__proto__'].forEach(t => assert.strictEqual(sb.openHoldingDetail(t, 'x1'), false, String(t)));
+    assert.deepStrictEqual(calls, []);
+    ['', null, undefined, 'a b', 'x"y', '<img>', 'a'.repeat(65)].forEach(id => assert.strictEqual(sb.openHoldingDetail('stocks', id), false, String(id)));
+    assert.deepStrictEqual(calls.map(c => c[0] + ':' + c[1]), Array(7).fill('toast:error'));
+    // the rows and the delegated action go through it, nothing else opens a holding
+    const actions = extractFunction('installEventDelegation');
+    assert.ok(actions.includes('openHolding:         (el) => { const [a0, a1] = A(el); openHoldingDetail(a0, a1); },'));
+    assert.ok(extractFunction('_holdingRowHtml').includes('data-click="openHolding"'));
+    assert.ok(extractFunction('openHoldingDetail').includes('openEntityModal(table, id)'));
+  });
+
+  test('renderStocks - the phone list and the desktop table come from the same rows: same symbols in the same order, same values, same totals, under a filter and a sort', () => {
+    const sb = listSandbox(stockFixture(), 'USD');
+    const els = stocksBox(sb);
+    const cols = stockCols(sb);
+    const run = () => { sb.renderStocks(); return els['stocks-body'].innerHTML; };
+    const tableSyms = html => Array.from(html.matchAll(/cell-sym sticky-col">([^<]*)</g)).map(m => m[1]);
+    const listSyms = html => listRowsOf(html).map(r => /<b>([^<]*)<\/b>/.exec(r)[1]);
+    const parity = (html, label) => {
+      assert.deepStrictEqual(listSyms(html), tableSyms(html), label + ' order');
+      const rows = vm.runInContext('_lastStockRows', sb);
+      assert.strictEqual(listRowsOf(html).length, rows.length, label + ' count');
+      rows.forEach((r, i) => {
+        const rowHtml = listRowsOf(html)[i];
+        if (r.mv != null){
+          assert.ok(html.includes('<td class="num">' + cols.mv.render(r) + '</td>'), label + ' table value ' + r.s.symbol);
+          assert.ok(rowHtml.includes(sb._moneyHtml(cols.mv.render(r))), label + ' list value ' + r.s.symbol);
+        } else {
+          assert.ok(rowHtml.includes('<span class="dash-hval money-chip">' + DASH + '</span>'), label + ' list dash ' + r.s.symbol);
+        }
+        if (r.plPct != null) {
+          assert.ok(html.includes(cols.plPct.render(r)), label + ' table return % ' + r.s.symbol);
+          assert.ok(rowHtml.includes('>' + sb._plainText(cols.plPct.render(r)) + '</span>'), label + ' list return % ' + r.s.symbol);
+        }
+        assert.ok(rowHtml.includes('data-a1="' + r.s.id + '"'));
+      });
+      // the totals line is the footer row's figure, for the filtered set
+      const foot = /<tfoot>[\s\S]*<\/tfoot>/.exec(html)[0];
+      const fMv = rows.filter(r => r.mv != null).reduce((s, r) => s + r.mv, 0);
+      if (rows.some(r => r.mv != null)) {
+        const text = sb.fmtSgdOrNative(sb.roundMoney(fMv), 'SGD', { dp:0 });
+        assert.ok(foot.includes('<td class="num">' + text + '</td>'), label + ' footer total');
+        assert.ok(/<div class="hl-total">[\s\S]*<\/div>/.exec(html)[0].includes(sb._moneyHtml(text)), label + ' list total');
+      }
+    };
+    let html = run();
+    assert.deepStrictEqual(tableSyms(html), ['AAPL', 'D05', 'NOPX', 'O39']);
+    parity(html, 'default');
+    // a sort, set the way the table headers set it
+    sb.DB.settings.stocksSort = { key:'mv', dir:'desc' };
+    html = run();
+    assert.deepStrictEqual(listSyms(html), ['D05', 'O39', 'AAPL', 'NOPX']);        // no price sorts last
+    parity(html, 'sorted');
+    sb.DB.settings.stocksSort = { key:'symbol', dir:'asc' };
+    parity(run(), 'by symbol');
+    // a filter, the way the market select sets it
+    vm.runInContext("_stocksFilter.market = 'SGX'", sb);
+    html = run();
+    assert.deepStrictEqual(listSyms(html), tableSyms(html));
+    assert.deepStrictEqual(tableSyms(html), ['O39', 'D05'].sort((a, b) => a.localeCompare(b)));
+    parity(html, 'filtered');
+    // a filter with nothing in it keeps the chips and Clear on the empty state
+    vm.runInContext("_stocksFilter.market = 'SGX'; _stocksFilter.sector = 'Energy'", sb);
+    html = run();
+    assert.ok(html.includes('No holdings match your filter.') && html.includes('id="sfm-clear"') && html.includes('class="chip-row"') && html.includes('class="m-actions"'));
+    assert.strictEqual(listRowsOf(html).length, 0);
+  });
+
+  test('renderStocks - the phone controls: chips bound to the same handlers and state, Clear first while a filter is on, + Add and a More menu, the desktop controls untouched', () => {
+    const sb = listSandbox(stockFixture(), 'USD');
+    const els = stocksBox(sb);
+    sb.renderStocks();
+    let html = els['stocks-body'].innerHTML;
+    // desktop controls: the same ids, handlers and labels as before, now inside .hd-actions
+    assert.ok(html.includes('<div class="hd-actions">'));
+    ['id="sf-market" class="fi fi-sm" data-change="stocksFilterMarket" aria-label="Filter stocks by market"', 'id="sf-sector" class="fi fi-sm" data-change="stocksFilterSector" aria-label="Filter stocks by sector"',
+      'data-click="exportHoldingsCSV">Export CSV', 'data-click="refreshStockPrices" id="btn-refresh-stocks">↻ Refresh prices', 'data-click="openStockColumns" id="btn-stock-cols">⚙ Columns', 'id="freshness-stocks"']
+      .forEach(frag => assert.ok(html.includes(frag), frag));
+    assert.strictEqual(/<div class="card-head"><h3>Holdings[^]*?style="display:flex/.test(html), false);   // the inline flex style became the class
+    // chips: a native select each, the same ACTIONS the desktop selects use, and a Sort chip on its own action
+    assert.ok(html.includes('<div class="chip-row" role="group" aria-label="Filter and sort holdings">'));
+    assert.ok(html.includes('<select id="sfm-market" class="chip-sel" data-change="stocksFilterMarket" aria-label="Filter stocks by market">'));
+    assert.ok(html.includes('<select id="sfm-sector" class="chip-sel chip-sector" data-change="stocksFilterSector" aria-label="Filter stocks by sector">'));
+    assert.ok(html.includes('<select id="sfm-sort" class="chip-sel" data-change="stocksSortPick" aria-label="Sort holdings">'));
+    assert.strictEqual(html.includes('id="sfm-clear"'), false);                    // no filter, no Clear
+    assert.strictEqual((html.match(/ is-on/g) || []).length, 0);
+    // + Add and More: the menu holds Export CSV then Refresh prices, wired through moreMenuPick
+    assert.ok(html.includes('<button type="button" class="btn btn-primary m-act" data-click="openEntity" data-a0="stocks"><span>＋ Add<span class="add-sfx"> stock</span></span></button>'));
+    assert.ok(html.includes('id="more-btn-stocks" data-menu-btn="more-stocks" data-click="toggleShellMenu" data-a0="more-stocks" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu-stocks" aria-label="More actions"'));
+    assert.ok(html.indexOf('data-a0="exportHoldingsCSV"') < html.indexOf('data-a0="refreshStockPrices"') && html.includes('id="more-menu-stocks" role="menu" aria-label="More actions" hidden'));
+    assert.strictEqual((html.match(/data-click="moreMenuPick"/g) || []).length, 2);
+    // a filter and a sort light their chips and bring Clear in first
+    vm.runInContext("_stocksFilter.market = 'US'; _stocksFilter.sector = 'Information Technology'", sb);
+    sb.DB.settings.stocksSort = { key:'plPct', dir:'desc' };
+    sb.renderStocks();
+    html = els['stocks-body'].innerHTML;
+    assert.ok(html.indexOf('id="sfm-clear"') > -1 && html.indexOf('id="sfm-clear"') < html.indexOf('id="sfm-market"'));
+    assert.ok(html.includes('<button type="button" class="chip-btn" id="sfm-clear" data-click="stocksClearFilter" aria-label="Clear filters">Clear</button>'));
+    assert.strictEqual((html.match(/chip-sel[^"]* is-on/g) || []).length, 3);
+    assert.ok(html.includes('<option value="US" selected>US</option>') && html.includes('<option value="plPct:desc" selected>Sort: Return, high to low</option>'));
+    // no inline handlers, and the chips and the list reach the page only through data attributes
+    assert.strictEqual(/\son[a-z]+="/i.test(html), false);
+  });
+
+  test('renderStocks - 120 holdings page together: the list shows the same 50 rows as the table, then the next 50 and the last 20', () => {
+    const many = { stocks:[], _priceCache:{} };
+    for (let i = 0; i < 120; i++){
+      many.stocks.push({ id:'s_' + i, symbol:'T' + String(i).padStart(3, '0'), market:'US', shares:1, avgCost:1, currency:'USD' });
+      many._priceCache['T' + String(i).padStart(3, '0')] = { price:2 + i, currency:'USD', fetchedAt:TODAY_ISO };
+    }
+    const sb = listSandbox(many, 'USD');
+    const els = stocksBox(sb);
+    const tableSyms = html => Array.from(html.matchAll(/cell-sym sticky-col">([^<]*)</g)).map(m => m[1]);
+    const listSyms = html => listRowsOf(html).map(r => /<b>([^<]*)<\/b>/.exec(r)[1]);
+    [[0, 50], [1, 50], [2, 20]].forEach(([page, count]) => {
+      vm.runInContext('_stocksPage = ' + page, sb);
+      sb.renderStocks();
+      const html = els['stocks-body'].innerHTML;
+      assert.strictEqual(listRowsOf(html).length, count, 'page ' + page);
+      assert.deepStrictEqual(listSyms(html), tableSyms(html), 'page ' + page + ' order');
+      assert.ok(html.includes('Page ' + (page + 1) + ' of 3 · showing ' + count + ' of 120'));
+      assert.strictEqual(listSyms(html)[0], 'T' + String(page * 50).padStart(3, '0'));
+    });
+    // the pager sits after both, so it drives the list as it drives the table
+    const html = els['stocks-body'].innerHTML;
+    assert.ok(html.indexOf('class="hl"') < html.indexOf('class="tbl-pager"'));
+  });
+
+  test('renderStocks - hostile symbols, sectors and long names reach the page only as escaped text, in the row, its label and the chips', () => {
+    const evil = '<img src=x onerror="window.__x=1">';
+    const sb = listSandbox({ stocks:[
+      { id:'s_evil', symbol:evil, market:'US', sector:'"><script>alert(1)</script>', shares:1, avgCost:1, currency:'USD' },
+      { id:'s_long', symbol:'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', market:'SGX', sector:'Financials', shares:1, avgCost:1, currency:'SGD' },
+      { id:'s_"><b>x</b>', symbol:'IDX', market:'US', sector:'Financials', shares:1, avgCost:1, currency:'USD' }
+    ], _priceCache:{ [evil]:{ price:5, currency:'USD', fetchedAt:TODAY_ISO } } }, 'USD');
+    const els = stocksBox(sb);
+    sb.renderStocks();
+    const list = listRowsOf(els['stocks-body'].innerHTML).join('');
+    assert.strictEqual(/<img|<script/i.test(list), false, 'raw markup in the list');
+    assert.ok(list.includes('&lt;img src=x onerror=&quot;window.__x=1&quot;&gt;'));
+    assert.ok(list.includes('&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;'));
+    // an attribute can not be broken out of: every aria-label stays one quoted value
+    listRowsOf(els['stocks-body'].innerHTML).forEach(r => assert.strictEqual(/aria-label="[^"]*"[^>]*aria-label=/.test(r), false));
+    assert.ok(list.includes('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'));
+    // the monogram takes the first character, escaped
+    assert.ok(list.includes('>&lt;</span>'));
+    // an id with markup in it stays inside its attribute (and the click handler would refuse it, see openHoldingDetail)
+    assert.ok(list.includes('data-a1="s_&quot;&gt;&lt;b&gt;x&lt;/b&gt;"'));
+    assert.strictEqual(list.includes('<b>x</b>'), false);
+  });
+
+  test('row builders never print NaN, undefined, null or Infinity, whatever the row holds', () => {
+    const sb = listSandbox({}, 'SGD');
+    const odd = [null, undefined, NaN, Infinity, -Infinity, 0, 5, -5];
+    const stockSyms = [{ id:'s1', symbol:'AAA', market:'US', sector:'' }, { id:'s1' }, { id:'s1', symbol:null, market:undefined, sector:undefined }];
+    let n = 0;
+    stockSyms.forEach(s => odd.forEach(mv => odd.forEach(pl => odd.forEach(pct => [null, NaN, 0, 55.5].forEach(weight => {
+      const html = sb._holdingRowHtml(sb._stockListModel({ s, mv, pl, plPct:pct, weight }));
+      assert.strictEqual(/NaN|undefined|null|Infinity/.test(html), false, JSON.stringify({ s, mv, pl, pct, weight }) + ' -> ' + html);
+      n++;
+    })))));
+    assert.ok(n > 1000);
+    const coinSyms = [{ id:'c1', symbol:'BTC' }, { id:'c1' }];
+    coinSyms.forEach(c => odd.forEach(mv => odd.forEach(pl => odd.forEach(pct => [0, 10, NaN, undefined].forEach(tot => {
+      const html = sb._holdingRowHtml(sb._cryptoListModel({ c, mv, pl, plPct:pct }, tot));
+      assert.strictEqual(/NaN|undefined|null|Infinity/.test(html), false, JSON.stringify({ c, mv, pl, pct, tot }) + ' -> ' + html);
+    })))));
+    odd.forEach(v => {
+      assert.strictEqual(/NaN|undefined|null|Infinity/.test(sb._cashRowHtml(sb._cashListModel({ c:{ id:'a1' }, ccy:'USD', sgd:v, bal:v, apy:v }))), false, 'cash ' + v);
+      assert.strictEqual(/NaN|undefined|null|Infinity/.test(sb._cpfRowHtml(sb._cpfRowView({ id:'h1', amount:v }))), false, 'cpf ' + v);
+      assert.strictEqual(/NaN|undefined|null|Infinity/.test(sb._cashTxnRowHtml(sb._cashTxnView({ id:'t1', type:'deposit', amount:v }, () => undefined, () => 'SGD'))), false, 'txn ' + v);
+    });
+    // _finiteNum is the one test: only a real number counts
+    assert.deepStrictEqual([0, 1, -1, 2.5, NaN, Infinity, -Infinity, null, undefined, '5', '', {}, []].map(v => sb._finiteNum(v)), [true, true, true, true, false, false, false, false, false, false, false, false, false]);
+  });
+
+  test('renderCrypto - the list and the table read the same coins: same order, value, return and share, a coin with no price is dashes in both', () => {
+    const sb = listSandbox({ crypto:[
+      { id:'c_btc', symbol:'BTC', coingeckoId:'bitcoin', amount:0.25, avgCost:60000, currency:'USD' },
+      { id:'c_foo', symbol:'FOO', amount:5, avgCost:10, currency:'USD' },
+      { id:'c_eth', symbol:'ETH', coingeckoId:'ethereum', amount:2, avgCost:5000, currency:'USD' }
+    ], _priceCache:{ bitcoin:{ sgd:152000, change24h:1.8, fetchedAt:TODAY_ISO }, ethereum:{ sgd:4000, change24h:-0.5, fetchedAt:TODAY_ISO } } });
+    const els = renderBox(sb, ['crypto-body', 'crypto-summary', 'freshness-crypto']);
+    sb.renderCrypto();
+    const html = els['crypto-body'].innerHTML;
+    const tableSyms = Array.from(html.matchAll(/<td class="tl cell-sym">([^<]*)</g)).map(m => m[1]);
+    const rows = listRowsOf(html);
+    assert.deepStrictEqual(tableSyms, ['BTC', 'FOO', 'ETH']);
+    assert.deepStrictEqual(rows.map(r => /<b>([^<]*)<\/b>/.exec(r)[1]), tableSyms);
+    const coinRows = sb.DB.crypto.map(c => sb._cryptoRow(c));
+    coinRows.forEach((r, i) => {
+      if (r.mv != null){
+        assert.ok(html.includes('<td class="num">' + sb.fmt(r.mv, { dp:0 }) + '</td>'), 'table value ' + i);
+        assert.ok(rows[i].includes(sb._moneyHtml(sb.fmt(r.mv, { dp:0 }))), 'list value ' + i);
+        assert.ok(html.includes(sb.fmtPct(r.plPct)) && rows[i].includes(sb.fmtPct(r.plPct)), 'return % ' + i);
+        assert.ok(html.includes(sb._plArrow(r.pl) + sb.fmt(r.pl, { dp:0, signed:true })) && rows[i].includes(sb.fmt(r.pl, { dp:0, signed:true })), 'return amount ' + i);
+      } else {
+        assert.ok(rows[i].includes('<span class="dash-hval money-chip">' + DASH + '</span>') && rows[i].includes('<span class="dash-chg">' + DASH + '</span>'));
+      }
+    });
+    // BTC is 152000 x 0.25 = 38000 of 46000
+    assert.ok(rows[0].includes('82.6%<span class="hl-of"> of coins</span>'));
+    assert.ok(html.includes('class="tbl-wrap hd-only"') && html.includes('<div class="hl" role="group" aria-label="Coins">'));
+    // the empty state is the one it was, no list, no table
+    sb.DB.crypto = [];
+    sb.renderCrypto();
+    assert.ok(els['crypto-body'].innerHTML.includes('No coins yet') && !els['crypto-body'].innerHTML.includes('hl-row'));
+  });
+
+  test('renderCash - the account list reads the same rows as the table: S$ value, native balance for a foreign account, APY when set, FX missing without a rate', () => {
+    const sb = listSandbox({ cash:[
+      { id:'a_dbs', name:'DBS Multiplier', account:'Savings', amount:20000, asOf:'2025-12-31', currency:'SGD', apy:1.8 },
+      { id:'a_ibkr', name:'IBKR USD', account:'Brokerage', amount:2895, currency:'USD' },
+      { id:'a_jpy', name:'Yen jar', account:'Cash', amount:100000, currency:'JPY' },
+      { id:'a_neg', name:'Card', account:'Credit', amount:-250.5, currency:'SGD' }
+    ], cashTxns:[], stockTxns:[] });
+    const els = renderBox(sb, ['cash-body', 'cash-summary', 'freshness-fx', 'cash-ledger']);
+    sb.renderCash();
+    const html = els['cash-body'].innerHTML;
+    const rows = listRowsOf(html);
+    assert.strictEqual(rows.length, 4);
+    const tableNames = Array.from(html.matchAll(/class="name-clamp-inner">([^<]*)</g)).map(m => m[1]);
+    assert.deepStrictEqual(rows.map(r => /<span class="hl-t">([^<]*)</.exec(r)[1]), tableNames);
+    // the S$ value is the table's, to the cent
+    assert.ok(html.includes('<td class="num ">S$20,000.00</td>') && rows[0].includes('S$20,000.00'));
+    assert.ok(rows[0].includes('<span class="hl-s">Savings · SGD · 1.80% APY</span>'));
+    assert.strictEqual(rows[0].includes('dash-sub'), false);                     // a Singapore account has no native line
+    assert.ok(html.includes('S$3,618.75') && rows[1].includes('S$3,618.75'));      // 2895 x 1.25
+    assert.ok(rows[1].includes('<span class="dash-sub money-chip">USD 2,895</span>') && rows[1].includes('Brokerage · USD'));
+    assert.ok(html.includes('— FX missing') && rows[2].includes('<span class="price-stale">' + DASH + ' FX missing</span>') && rows[2].includes('JPY 100,000'));
+    // an overdrawn account shows its minus and the loss class
+    assert.ok(html.includes('<td class="num neg">-S$250.50</td>') && rows[3].includes('class="hl-amt money-chip down">-S$250.50<'));
+    // the row edits the account, as the table's Edit button does
+    assert.ok(rows[0].includes('data-edit-table="cash" data-edit-id="a_dbs"') && rows[0].includes('aria-label="Edit DBS Multiplier, Savings · SGD · 1.80% APY, balance S$20,000.00"'));
+    assert.ok(html.includes('class="tbl-wrap hd-only"') && html.includes('<div class="hl hl-2" role="group" aria-label="Cash accounts">'));
+  });
+
+  test('renderCashTxns - the movements list reads the same view as the ledger table: date, account and type over the note, a signed amount, a transfer keeps both legs', () => {
+    const sb = listSandbox({ cash:[
+      { id:'a_sgd', name:'DBS', currency:'SGD' }, { id:'a_usd', name:'IBKR USD', currency:'USD' }
+    ], cashTxns:[
+      { id:'t1', type:'deposit', cashAccountId:'a_sgd', date:'2026-09-30', amount:3200, notes:'Salary' },
+      { id:'t2', type:'withdrawal', cashAccountId:'a_sgd', date:'2026-09-15', amount:120.5, notes:'' },
+      { id:'t3', type:'transfer', fromAccountId:'a_sgd', cashAccountId:'a_usd', date:'2026-09-10', amount:2700, amountIn:2000, notes:'Top up' },
+      { id:'t4', type:'transfer', fromAccountId:'a_sgd', cashAccountId:'a_sgd', date:'2026-09-09', amount:50, notes:'' },
+      { id:'t5', type:'deposit', cashAccountId:'a_sgd', date:'2026-09-01', amount:1, notes:'<b>x</b> "q" & co' }
+    ], stockTxns:[] });
+    const els = renderBox(sb, ['cash-ledger']);
+    sb.renderCashTxns();
+    const html = els['cash-ledger'].innerHTML;
+    const rows = listRowsOf(html);
+    assert.strictEqual(rows.length, 5);
+    const tableDates = Array.from(html.matchAll(/<tr>\s*<td class="tl">([^<]*)</g)).map(m => m[1]);
+    assert.deepStrictEqual(tableDates, ['30/09/2026', '15/09/2026', '10/09/2026', '09/09/2026', '01/09/2026']);
+    rows.forEach((r, i) => assert.ok(r.includes(tableDates[i]), 'date in row ' + i));
+    // deposit and withdrawal: the signed S$ effect, arrow and sign, gain and loss class
+    assert.ok(html.includes('<td class="num pos">+S$3,200.00</td>') && rows[0].includes('class="hl-amt money-chip up">▲ +S$3,200.00<'));
+    assert.ok(html.includes('<td class="num neg">-S$120.50</td>') && rows[1].includes('class="hl-amt money-chip down">▼ -S$120.50<'));
+    assert.ok(rows[0].includes('<span class="hl-t">DBS <span class="hl-k">· Deposit</span></span><span class="hl-s">30/09/2026 · Salary</span>'));
+    // a cross-currency transfer shows both legs, native, in the table and as two lines in the list
+    assert.ok(html.includes('<td class="num">S$2,700.00 → US$2,000.00</td>'));
+    assert.ok(rows[2].includes('class="hl-amt money-chip">S$2,700.00<') && rows[2].includes('<span class="dash-sub money-chip">→ US$2,000.00</span>'));
+    assert.ok(rows[2].includes('DBS → IBKR USD <span class="hl-k">· Transfer</span>'));
+    // a same-currency transfer is one amount
+    assert.ok(html.includes('<td class="num">S$50.00</td>') && rows[3].includes('S$50.00') && !rows[3].includes('→ S$'));
+    // notes are escaped
+    assert.ok(rows[4].includes('&lt;b&gt;x&lt;/b&gt; &quot;q&quot; &amp; co'));
+    assert.strictEqual(/<b>x<\/b>/.test(rows[4]), false);
+    assert.ok(rows[0].includes('data-edit-table="cashTxns" data-edit-id="t1"') && html.includes('class="tbl-wrap hd-only"'));
+    // the table rows are exactly what they were: one Edit button per row, the same column order
+    assert.strictEqual((html.match(/class="btn btn-sm btn-ghost btn-edit" data-edit-table="cashTxns"/g) || []).length, 5);
+    assert.ok(html.includes('<th class="tl">Date</th><th class="tl">Account</th><th class="tl">Type</th><th>Amount</th><th class="tl">Notes</th>'));
+    // no movements: the empty state, no list
+    sb.DB.cashTxns = [];
+    sb.renderCashTxns();
+    assert.ok(els['cash-ledger'].innerHTML.includes('No cash movements') && !els['cash-ledger'].innerHTML.includes('hl-row'));
+  });
+
+  test('_cashTxnView - one definition of a movement for the table and the list, an unknown account is blank not "undefined", an unconvertible currency code is escaped', () => {
+    const sb = listSandbox({ cash:[] });
+    const nameOf = id => ({ a:'Alpha', b:'<i>Beta</i>' })[id];
+    const ccyOf = id => ({ a:'SGD', b:'<b>XXX' })[id] || 'SGD';
+    const t = sb._cashTxnView({ id:'t', type:'transfer', fromAccountId:'a', cashAccountId:'b', amount:10, amountIn:20, date:'2026-01-02' }, nameOf, ccyOf);
+    assert.strictEqual(t.title, 'Alpha → <i>Beta</i>');                            // raw, escaped at the point of printing
+    assert.strictEqual(/<b>XXX/.test(t.amtTxt), false);                               // fmt() prints a code it can not format as typed, so the view escapes it
+    assert.ok(t.amtTxt.includes('&lt;b&gt;XXX 20.00'));
+    const lost = sb._cashTxnView({ id:'t', type:'deposit', cashAccountId:'zzz', amount:5, date:'2026-01-02' }, nameOf, ccyOf);
+    assert.strictEqual(lost.title, '');
+    assert.strictEqual(lost.kind, 'Deposit');
+    assert.strictEqual(sb._cashTxnView({ id:'t', type:'mystery', cashAccountId:'a', amount:5 }, nameOf, ccyOf).kind, 'mystery');
+    assert.strictEqual(sb._cashTxnView({ id:'t', type:'withdrawal', cashAccountId:'a', amount:5 }, nameOf, ccyOf).cls, 'neg');
+  });
+
+  test('renderCpf - the history list reads the same filtered entries as the table, and the phone chips mirror the three selects that hold the filter', () => {
+    const sb = listSandbox({ cpfBalances:{ OA:1000, SA:500, MA:300, RA:0, anchorDate:'2025-01-01' }, cpfHistory:[
+      { id:'h1', date:'2026-09-30', type:'contribution', account:'OA', amount:1840.23, source:'Acme', notes:'Sep' },
+      { id:'h2', date:'2026-09-30', type:'contribution', account:'SA', amount:479.82, source:'Acme', notes:'' },
+      { id:'h3', date:'2025-12-31', type:'interest', account:'OA', amount:123.45, source:'CPF Board', notes:'Year-end' },
+      { id:'h4', date:'2025-06-15', type:'withdrawal', account:'MA', amount:-500, source:'', notes:'' }
+    ] });
+    sb.DB.settings.cpfRates = { OA:2.5, SA:4, MA:4, RA:4 };
+    const els = renderBox(sb, ['cpf-balances', 'cpf-history-body', 'cpf-balances-meta', 'cpf-filter-year', 'cpf-filter-type', 'cpf-filter-account', 'cpf-chips', 'cpfm-filter-year', 'cpfm-filter-type', 'cpfm-filter-account', 'cpfm-clear']);
+    sb.loadCpfBalancesForm = () => {};
+    const run = () => { sb.renderCpf(); return els['cpf-history-body'].innerHTML; };
+    const tableDates = html => Array.from(html.matchAll(/<tr>\s*<td class="tl">([^<]*)</g)).map(m => m[1]);
+    const listDates = html => listRowsOf(html).map(r => /<span class="hl-s">(\d\d\/\d\d\/\d{4})/.exec(r)[1]);
+    let html = run();
+    assert.deepStrictEqual(tableDates(html), ['30/09/2026', '30/09/2026', '31/12/2025', '15/06/2025']);
+    assert.deepStrictEqual(listDates(html), tableDates(html));
+    assert.ok(html.includes('<td class="num pos">+S$1,840.23</td>') && listRowsOf(html)[0].includes('▲ +S$1,840.23'));
+    assert.ok(html.includes('<td class="num neg">-S$500.00</td>') && listRowsOf(html)[3].includes('▼ -S$500.00'));
+    assert.ok(listRowsOf(html)[0].includes('<span class="hl-t">OA <span class="hl-k">· Contribution</span></span><span class="hl-s">30/09/2026 · Acme · Sep</span>'));
+    assert.ok(listRowsOf(html)[0].includes('data-edit-table="cpfHistory" data-edit-id="h1"'));
+    // chips start on All, no Clear, the row visible because there is history
+    assert.strictEqual(els['cpfm-filter-year'].value, '');
+    assert.strictEqual(els['cpfm-clear'].hidden, true);
+    assert.strictEqual(els['cpf-chips'].hidden, false);
+    assert.ok(els['cpfm-filter-year'].innerHTML.includes('<option value="2026">2026</option><option value="2025">2025</option>'));
+    // a filter set on the desktop select reaches the chips, the list and the table together
+    els['cpf-filter-year'].value = '2025'; els['cpf-filter-type'].value = 'interest';
+    html = run();
+    assert.deepStrictEqual(tableDates(html), ['31/12/2025']);
+    assert.deepStrictEqual(listDates(html), ['31/12/2025']);
+    assert.strictEqual(els['cpfm-filter-year'].value, '2025'); assert.strictEqual(els['cpfm-filter-type'].value, 'interest'); assert.strictEqual(els['cpfm-filter-account'].value, '');
+    assert.strictEqual(els['cpfm-filter-year'].classList.contains('is-on'), true);
+    assert.strictEqual(els['cpfm-filter-account'].classList.contains('is-on'), false);
+    assert.strictEqual(els['cpfm-clear'].hidden, false);
+    // a chip writes its twin and repaints, Clear empties all three
+    els['cpfm-filter-account'] = Object.assign(els['cpfm-filter-account'], { value:'OA' });
+    assert.strictEqual(sb.cpfChipFilter(els['cpfm-filter-account']), true);
+    assert.strictEqual(els['cpf-filter-account'].value, 'OA');
+    assert.deepStrictEqual(tableDates(els['cpf-history-body'].innerHTML), ['31/12/2025']);
+    sb.cpfClearFilters();
+    assert.deepStrictEqual(['cpf-filter-year', 'cpf-filter-type', 'cpf-filter-account'].map(id => els[id].value), ['', '', '']);
+    assert.strictEqual(tableDates(els['cpf-history-body'].innerHTML).length, 4);
+    assert.strictEqual(els['cpfm-clear'].hidden, true);
+    // a chip that is not one of ours, or whose twin is missing, does nothing
+    assert.strictEqual(sb.cpfChipFilter({ id:'evil', value:'x' }), false);
+    assert.strictEqual(sb.cpfChipFilter(null), false);
+    assert.strictEqual(sb.cpfChipFilter({ id:'cpfm-filter-ghost', value:'x' }), false);
+    // no history at all: the empty state and no chip row
+    sb.DB.cpfHistory = [];
+    html = run();
+    assert.ok(html.includes('No history yet') && listRowsOf(html).length === 0);
+    assert.strictEqual(els['cpf-chips'].hidden, true);
+  });
+
+  test('renderCpf - hostile account, source and note text is escaped in the list and the table', () => {
+    const sb = listSandbox({ cpfBalances:{ OA:0, SA:0, MA:0, RA:0 }, cpfHistory:[
+      { id:'h1', date:'2026-01-02', type:'<b>t</b>', account:'<img src=x onerror=window.__x=1>', amount:-1, source:'<script>1</script>', notes:'"quote" & more' }
+    ] });
+    sb.DB.settings.cpfRates = { OA:2.5, SA:4, MA:4, RA:4 };
+    const els = renderBox(sb, ['cpf-balances', 'cpf-history-body', 'cpf-balances-meta', 'cpf-filter-year', 'cpf-filter-type', 'cpf-filter-account', 'cpf-chips', 'cpfm-filter-year', 'cpfm-filter-type', 'cpfm-filter-account', 'cpfm-clear']);
+    sb.loadCpfBalancesForm = () => {};
+    sb.renderCpf();
+    const html = els['cpf-history-body'].innerHTML;
+    assert.strictEqual(/<img|<script|<b>t/i.test(html), false);
+    assert.ok(html.includes('&lt;img src=x onerror=window.__x=1&gt;') && html.includes('&lt;script&gt;1&lt;/script&gt;') && html.includes('&quot;quote&quot; &amp; more'));
+    assert.strictEqual(/aria-label="[^"]*"[^>]*aria-label=/.test(listRowsOf(html)[0]), false);
+  });
+
+  test('moreMenuPick - runs only a whitelisted action, closes the menu first so focus is back on More, and ignores anything else', () => {
+    const sb = freshSandbox();
+    const calls = [];
+    sb.closeShellMenus = back => calls.push('close:' + back);
+    sb.exportHoldingsCSV = () => calls.push('export holdings');
+    sb.refreshStockPrices = () => calls.push('refresh stocks');
+    sb.refreshCryptoPrices = () => calls.push('refresh crypto');
+    sb.exportCryptoCSV = () => calls.push('export crypto');
+    sb.refreshFx = () => calls.push('refresh fx');
+    ['exportHoldingsCSV', 'refreshStockPrices', 'refreshCryptoPrices', 'exportCryptoCSV', 'refreshFx'].forEach(name => sb.moreMenuPick(name));
+    assert.deepStrictEqual(calls, ['close:true', 'export holdings', 'close:true', 'refresh stocks', 'close:true', 'refresh crypto', 'close:true', 'export crypto', 'close:true', 'refresh fx']);
+    calls.length = 0;
+    ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'openEntity', 'exportBackup', '', null, undefined, 42].forEach(name => sb.moreMenuPick(name));
+    assert.deepStrictEqual(calls, Array(10).fill('close:true'));                  // the menu still closes, nothing runs
+    assert.deepStrictEqual(Object.keys(vm.runInContext('MORE_MENU_ACTIONS', sb)).sort(), ['exportCryptoCSV', 'exportHoldingsCSV', 'refreshCryptoPrices', 'refreshFx', 'refreshStockPrices']);
+  });
+
+  test('More menus - Stocks builds one, Crypto and Cash carry the same markup in index.html, every item is a whitelisted action and every menu is registered with the shell menu code', () => {
+    const sb = realEscape(freshSandbox());
+    const built = sb._moreMenuHtml('stocks', [{ label:'Export CSV', action:'exportHoldingsCSV' }, { label:'Refresh <prices>', action:'refreshStockPrices' }]);
+    assert.ok(built.startsWith('<div class="menu-wrap"><button type="button" class="btn m-act" id="more-btn-stocks" data-menu-btn="more-stocks" data-click="toggleShellMenu" data-a0="more-stocks" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu-stocks" aria-label="More actions"><span aria-hidden="true">⋯</span> More</button>'));
+    assert.ok(built.includes('<div class="shell-menu more-menu" id="more-menu-stocks" role="menu" aria-label="More actions" hidden>'));
+    assert.ok(built.includes('role="menuitem" tabindex="-1" data-click="moreMenuPick" data-a0="exportHoldingsCSV"><span>Export CSV</span>'));
+    assert.ok(built.includes('<span>Refresh &lt;prices&gt;</span>'));
+    // the registry the open, close and Escape code reads
+    const menus = navPlain(vm.runInContext('SHELL_MENUS', sb));
+    assert.deepStrictEqual(menus['more-stocks'], ['more-btn-stocks', 'more-menu-stocks']);
+    assert.deepStrictEqual(menus['more-crypto'], ['more-btn-crypto', 'more-menu-crypto']);
+    assert.deepStrictEqual(menus['more-cash'], ['more-btn-cash', 'more-menu-cash']);
+    assert.deepStrictEqual(menus.ws, ['ws-btn', 'ws-menu']); assert.deepStrictEqual(menus.add, ['add-btn', 'add-menu']);
+    // the static ones: ids, roles, a hidden menu, and items that name an action the whitelist holds
+    const allowed = Object.keys(vm.runInContext('MORE_MENU_ACTIONS', sb));
+    const expected = { crypto:['refreshCryptoPrices', 'exportCryptoCSV'], cash:['refreshFx'] };
+    Object.keys(expected).forEach(page => {
+      const menu = new RegExp('<div class="shell-menu more-menu" id="more-menu-' + page + '" role="menu" aria-label="More actions" hidden>([\\s\\S]*?)</div>').exec(indexSrc);
+      assert.ok(menu, page + ' menu');
+      assert.deepStrictEqual(Array.from(menu[1].matchAll(/data-click="moreMenuPick" data-a0="([A-Za-z]+)"/g)).map(m => m[1]), expected[page]);
+      expected[page].forEach(a => assert.ok(allowed.includes(a), a));
+      assert.ok(indexSrc.includes('id="more-btn-' + page + '" data-menu-btn="more-' + page + '" data-click="toggleShellMenu" data-a0="more-' + page + '" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu-' + page + '" aria-label="More actions"'));
+    });
+    // the desktop buttons are still there, marked as the part the phone hides, with their ids and handlers
+    ['<button class="btn hd-only" data-click="refreshCryptoPrices" id="btn-refresh-crypto">↻ Refresh prices</button>', '<button class="btn btn-sm hd-only" data-click="exportCryptoCSV">Export CSV</button>',
+      '<button class="btn hd-only" data-click="refreshFx" id="btn-refresh-fx">↻ Refresh FX</button>'].forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+    // the Add buttons keep their full label for screen readers and desktop, and read "+ Add" on the phone
+    ['coin', 'account', 'entry'].forEach(w => assert.ok(indexSrc.includes('<span>＋ Add<span class="add-sfx"> ' + w + '</span></span>'), w));
+    // the menu code is the shared one: the keyboard model is registered once and covers every menu
+    assert.ok(extractFunction('closeShellMenus').includes('Object.keys(SHELL_MENUS).forEach'));
+  });
+
+  test('Sort chip - it writes the state the sortable headers write, validates the key and the direction, saves and repaints once, and shows a desktop-set sort it has no choice for', () => {
+    const sb = realEscape(freshSandbox({ settings:{ stocksSort:{ key:null, dir:null } } }));
+    const calls = [];
+    sb.saveData = () => { calls.push('save'); return true; };
+    sb.renderStocks = () => calls.push('render');
+    vm.runInContext('var _stocksPage = 3;', sb);
+    assert.strictEqual(sb.stocksSortPick('mv:desc'), true);
+    assert.deepStrictEqual(navPlain(sb.DB.settings.stocksSort), { key:'mv', dir:'desc' });
+    assert.deepStrictEqual(calls, ['save', 'render']);
+    assert.strictEqual(vm.runInContext('_stocksPage', sb), 0);
+    calls.length = 0;
+    assert.strictEqual(sb.stocksSortPick('mv:desc'), false);                       // no change, no save
+    assert.deepStrictEqual(calls, []);
+    assert.strictEqual(sb.stocksSortPick('plPct:asc'), true);
+    assert.deepStrictEqual(navPlain(sb.DB.settings.stocksSort), { key:'plPct', dir:'asc' });
+    calls.length = 0;
+    // anything else clears: the empty choice, an unknown key, a bad direction, an inherited name
+    ['', 'nonsense:asc', 'mv', 'mv:sideways', 'constructor:asc', '__proto__:desc', ':asc'].forEach(v => {
+      sb.DB.settings.stocksSort = { key:'mv', dir:'desc' };
+      assert.strictEqual(sb.stocksSortPick(v), true, v);
+      assert.deepStrictEqual(navPlain(sb.DB.settings.stocksSort), { key:null, dir:null }, v);
+    });
+    assert.strictEqual(sb.stocksSortPick(undefined), false);                       // already clear
+    // every choice on the chip is a key the table sorts by, in a direction it understands
+    const chips = navPlain(vm.runInContext('STOCK_SORT_CHIPS', sb));
+    const sortKeys = Object.keys(navPlain(Object.fromEntries(Object.keys(vm.runInContext('STOCK_SORT_VALS', sb)).map(k => [k, 1]))));
+    chips.forEach(([value]) => { if (value) { const [k, d] = value.split(':'); assert.ok(sortKeys.includes(k) && (d === 'asc' || d === 'desc'), value); } });
+    assert.strictEqual(chips[0][0], '');
+    assert.strictEqual(new Set(chips.map(c => c[0])).size, chips.length);
+    // the options: the current choice selected, a sort the chip has no choice for gets its own, named from the column
+    const opts = pref => sb._stockSortChipOptions(pref);
+    assert.strictEqual(opts({ key:null, dir:null }).cur, '');
+    assert.ok(opts({ key:null, dir:null }).html.includes('<option value="" selected>Sort: Default</option>'));
+    assert.ok(opts({ key:'mv', dir:'desc' }).html.includes('<option value="mv:desc" selected>Sort: Value, high to low</option>'));
+    const odd = opts({ key:'volume', dir:'asc' });
+    assert.strictEqual(odd.cur, 'volume:asc');
+    assert.ok(odd.html.includes('<option value="volume:asc" selected>Sort: Volume, ascending</option>'));
+    assert.strictEqual((odd.html.match(/selected/g) || []).length, 1);
+    assert.strictEqual(opts({ key:'constructor', dir:'asc' }).cur, '');
+    assert.strictEqual(opts({ key:'mv', dir:'sideways' }).cur, '');
+    assert.strictEqual(opts(undefined).cur, '');
+    assert.ok(opts({ key:'mv', dir:'desc' }).html.includes('Sort: P&amp;L, high to low'));          // escaped on the way out
+  });
+
+  test('chip focus - a repaint keeps the chip in use focused and the row where it was scrolled, and only for our own controls', () => {
+    const sb = freshSandbox();
+    const focused = [];
+    const row = { scrollLeft:120, getBoundingClientRect: () => ({ left:0, right:300 }) };
+    const mk = id => ({ id, focus: opts => focused.push([id, opts && opts.preventScroll]), getBoundingClientRect: () => ({ left:310, right:420 }) });
+    const host = { querySelector: sel => (sel === '.chip-row' ? row : null), contains: el => el.inHost === true };
+    const sort = Object.assign(mk('sfm-sort'), { inHost:true });
+    sb.document = { activeElement:sort, getElementById: id => (id === 'sfm-sort' ? sort : null) };
+    assert.deepStrictEqual(navPlain(sb._chipKeep(host)), { id:'sfm-sort', left:120 });
+    row.scrollLeft = 0;
+    sb._chipRestore(host, { id:'sfm-sort', left:120 });
+    assert.deepStrictEqual(focused, [['sfm-sort', true]]);
+    assert.strictEqual(row.scrollLeft, 120 + (420 - 300) + 18);                     // nudged back inside, sideways only
+    // More keeps focus too, anything else does not
+    sb.document.activeElement = Object.assign(mk('more-btn-stocks'), { inHost:true });
+    assert.strictEqual(sb._chipKeep(host).id, 'more-btn-stocks');
+    sb.document.activeElement = Object.assign(mk('sf-market'), { inHost:true });
+    assert.strictEqual(sb._chipKeep(host).id, '');
+    sb.document.activeElement = Object.assign(mk('sfm-market'), { inHost:false });   // focus outside this body
+    assert.strictEqual(sb._chipKeep(host).id, '');
+    sb.document.activeElement = null;
+    assert.deepStrictEqual(navPlain(sb._chipKeep(host)), { id:'', left:120 + 138 });
+    // nothing to restore: a missing element or no chip row never throws
+    sb._chipRestore({ querySelector: () => null }, { id:'sfm-gone', left:0 });
+    sb._chipRestore(host, { id:'', left:0 });
+    assert.ok(extractFunction('renderStocks').includes('const keepUi = _chipKeep(bodyEl);') && extractFunction('renderStocks').includes('_chipRestore(bodyEl, keepUi);'));
+  });
+
+  test('mobile list markup - the table stays in the page marked hd-only, the list and chips sit beside it, and there are no inline handlers', () => {
+    // every table the list replaces is wrapped as the part the phone hides
+    const hidden = (appSrc.match(/<div class="tbl-wrap hd-only">/g) || []).length;
+    assert.strictEqual(hidden, 5);                                                 // Stocks, Crypto, Cash accounts, Cash movements, CPF history
+    ['renderStocks', 'renderCrypto', 'renderCash', 'renderCashTxns', 'renderCpf'].forEach(fn => {
+      const src = extractFunction(fn);
+      assert.ok(src.includes('tbl-wrap hd-only'), fn);
+      assert.ok(/_holdingsListHtml|_cashListHtml|class="hl hl-2"/.test(src), fn + ' builds the list');
+      assert.strictEqual(/\son[a-z]+="/i.test(src.replace(/\bon[A-Z]\w+\s*=/g, '')), false, fn + ' has an inline handler');
+    });
+    // the renderers keep the calls the older tests and the CSV export depend on
+    assert.ok(extractFunction('renderCrypto').includes('_cryptoRow(c)'));
+    assert.ok(extractFunction('renderStocks').includes('buildStockChartRows()') && extractFunction('renderStocks').includes('_lastStockRows = filteredRows;'));
+    // the new static markup (Crypto, Cash, CPF heads and the CPF chips) has no inline handler either
+    const pages = indexSrc.slice(indexSrc.indexOf('<section class="page" id="page-crypto">'), indexSrc.indexOf('<section class="page" id="page-cashflow">'));
+    assert.strictEqual(/\son[a-z]+="/i.test(pages), false);
+    ['id="cpf-chips" role="group" aria-label="Filter transaction history" hidden', 'id="cpfm-filter-year" data-change="cpfChipFilter" aria-label="Filter by year"',
+      'id="cpfm-filter-type" data-change="cpfChipFilter" aria-label="Filter by transaction type"', 'id="cpfm-filter-account" data-change="cpfChipFilter" aria-label="Filter by CPF account"',
+      'id="cpfm-clear" data-click="cpfClearFilters" hidden>Clear</button>', '<div class="cpf-tools">'].forEach(frag => assert.ok(pages.includes(frag), frag));
+    // the three desktop CPF selects still hold the filter state, with the labels and handlers they had
+    ['id="cpf-filter-year"', 'id="cpf-filter-type"', 'id="cpf-filter-account"'].forEach(frag => assert.ok(pages.includes(frag), frag));
+    assert.strictEqual((pages.match(/data-change="renderCpf"/g) || []).length, 3);
+    // the delegated actions
+    const actions = extractFunction('installEventDelegation');
+    ['stocksSortPick:      (el) => stocksSortPick(el.value),', 'cpfChipFilter:       (el) => cpfChipFilter(el),', 'cpfClearFilters:     () => cpfClearFilters(),', 'moreMenuPick:        (el) => moreMenuPick(A(el)[0]),']
+      .forEach(frag => assert.ok(actions.includes(frag), frag));
+  });
+
+  test('mobile list styles - one 640px block that hides the desktop pieces, builds the chip row and the list grid, and fixes the 320px sector card', () => {
+    const start = indexSrc.indexOf('/* MOBILE LIST ROWS, CHIP FILTERS AND ACTIONS (v2.73)');
+    assert.ok(start > -1);
+    const css = indexSrc.slice(start, indexSrc.indexOf('</style>', start));
+    // above 640px the phone pieces are off and the desktop controls keep the layout they had as inline styles
+    assert.ok(css.includes('.hd-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}'));
+    assert.ok(css.includes('.cpf-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}'));
+    assert.ok(css.includes('.m-actions,.m-more,.chip-row,.hl,.m-fresh{display:none}'));
+    assert.ok(css.includes('@media (max-width:640px){'));
+    const phone = css.slice(css.indexOf('@media (max-width:640px){'));
+    assert.ok(phone.includes('.hd-only,.hd-actions,.cpf-tools{display:none}'));
+    // the sector card no longer overflows at 320px
+    assert.ok(phone.includes('.sum-row .alloc-card{flex:1 1 100%;min-width:0;max-width:none}'));
+    // the chip row scrolls inside itself with no visible scrollbar, chips are 44px, 16px text so iOS does not zoom on focus
+    const row = /\.chip-row\{([^}]*)\}/.exec(phone)[1];
+    assert.ok(row.includes('overflow-x:auto') && row.includes('scrollbar-width:none'));
+    assert.ok(phone.includes('.chip-row::-webkit-scrollbar{display:none}'));
+    const chip = /\.chip-sel,\.chip-btn\{([^}]*)\}/.exec(phone)[1];
+    assert.ok(chip.includes('min-height:44px') && chip.includes('font-size:16px') && chip.includes('border-radius:999px'));
+    assert.ok(/\.chip-sel\.is-on\{[^}]*color:var\(--accent\)/.test(phone));
+    assert.ok(phone.includes('.chip-row[hidden],.chip-btn[hidden]{display:none}'));
+    // the list is a grid with subgrid rows (the value and return columns line up), a plain-grid fallback, 56px rows
+    assert.ok(phone.includes('.hl{display:grid;grid-template-columns:minmax(0,1fr) auto auto;'));
+    assert.ok(phone.includes('@supports (grid-template-columns:subgrid){.hl > *{grid-template-columns:subgrid}}'));
+    assert.ok(phone.includes('.hl-row{min-height:56px;padding:8px}'));
+    // the share loses its words at 360px and below, the table's own rules stay where they were
+    const narrow = css.slice(css.indexOf('@media (max-width:360px){\n  .hl-of{display:none}'));
+    assert.ok(narrow.includes('@media (max-width:360px){\n  .hl-of{display:none}'));
+    assert.ok(narrow.includes('#page-crypto .h-toolbar .freshness,#page-cash .h-toolbar .freshness{order:3;flex:0 0 100%;justify-content:center}'));
+    assert.ok(indexSrc.includes('table.holdings td.name-clamp{min-width:150px;max-width:180px}') && indexSrc.includes('.sum-row .alloc-card{flex-shrink:0;min-width:220px;max-width:320px;margin-bottom:0}'));
+    // tokens only: no raw colour anywhere in the new block
+    assert.strictEqual(/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(css), false);
+    // the block is last in the stylesheet, so its equal-specificity rules win
+    assert.strictEqual(indexSrc.slice(start).includes('\n.btn{'), false);
+  });
+
+  test('mobile list contrast - the dim row text, the accent chip and the hover colour clear 4.5:1 in both themes', () => {
+    const block = s => { const i = indexSrc.indexOf(s); assert.ok(i > -1, s); return indexSrc.slice(i, indexSrc.indexOf('\n}', i)); };
+    const light = block(':root{'), dark = block('html.dark{');
+    const token = (blk, name) => {
+      const m = new RegExp('--' + name + ':([^;]+);').exec(blk);
+      assert.ok(m, '--' + name + ' missing');
+      const ref = /^var\(--([a-z0-9-]+)\)$/.exec(m[1].trim());
+      return ref ? token(blk, ref[1]) : m[1].trim();
+    };
+    const rgb = h => { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); };
+    const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const lum = c => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+    const ratio = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+    const over = (top, alpha, bottom) => top.map((v, i) => v * alpha + bottom[i] * (1 - alpha));
+    [['light', light], ['dark', dark]].forEach(([name, blk]) => {
+      const bg2 = rgb(token(blk, 'bg2')), bg3 = rgb(token(blk, 'bg3')), t2 = rgb(token(blk, 'text2')), t3 = rgb(token(blk, 'text3')), text = rgb(token(blk, 'text'));
+      const accent = rgb(token(blk, 'accent'));
+      const soft = token(blk, 'accent-soft');
+      // the dim text of a row (--text3) on the card, and --text2 on the hover tint that replaces it
+      assert.ok(ratio(t3, bg2) >= 4.5, name + ' --text3 on --bg2 ' + ratio(t3, bg2).toFixed(2));
+      assert.ok(ratio(t2, bg3) >= 4.5, name + ' --text2 on --bg3 (hover) ' + ratio(t2, bg3).toFixed(2));
+      assert.ok(ratio(text, bg3) >= 4.5, name + ' --text on a chip (--bg3) ' + ratio(text, bg3).toFixed(2));
+      assert.ok(ratio(accent, rgb(soft)) >= 4.5, name + ' --accent on --accent-soft ' + ratio(accent, rgb(soft)).toFixed(2));
+      ['gain', 'loss'].forEach(t => assert.ok(ratio(rgb(token(blk, t)), bg2) >= 4.5, name + ' --' + t + ' on --bg2 ' + ratio(rgb(token(blk, t)), bg2).toFixed(2)));
+      ['stocks', 'crypto'].forEach(c => {
+        const ink = rgb(token(blk, 'c-' + c + '-ink'));
+        const tint = over(rgb(token(blk, 'c-' + c)), 0.16, bg2);
+        assert.ok(ratio(ink, tint) >= 4.5, name + ' --c-' + c + '-ink monogram letter on its tint ' + ratio(ink, tint).toFixed(2));
+      });
+    });
+    // the hover rule really moves the dim text up a step
+    assert.ok(indexSrc.includes('@media (hover:hover){.hl-row:hover .dash-sub,.hl-row:hover .dash-who-t span,.hl-row:hover .hl-s,.hl-row:hover .price-stale{color:var(--text2)}}'));
+  });
+
+  test('v2.73 release strings - the display version, the cache name and every script tag agree', () => {
+    assert.strictEqual(vm.runInContext('APP_VERSION', freshSandbox()), 'v2.73');
+    assert.strictEqual(vm.runInContext('APP_DISPLAY_VERSION', freshSandbox()), 'v2.73 (09 Oct)');
+    const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.73';"));
+    assert.strictEqual((indexSrc.match(/\.js\?v=2\.73"/g) || []).length, 7);
+    assert.strictEqual((sw.match(/\.js\?v=2\.73'/g) || []).length, 7);
+    assert.strictEqual(/\?v=2\.72/.test(indexSrc + sw), false);
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

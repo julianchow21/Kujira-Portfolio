@@ -36,6 +36,8 @@ Chart.js 4.4.1 (CDN, SRI-pinned). Backend is Google Apps Script + Google Sheets 
 
 **Navigation (v2.72):** above 768 px a 224 px left sidebar (`--sidebar` surface) holds the workspace switcher (Trading and Forex as real anchors), the `NAV_GROUPS` (Overview, Assets with counts from `NAV_COUNT_TABLES`, Money) and a footer with Settings, the sync row, the guide link, the theme switch and the version badge. A compact top bar shows the page title and status, the per-tab currency switch, Hide amounts and the `+ Add` menu (`ADD_MENU_ITEMS`). At 768 px and below, a header plus a five-item bottom bar (`MOBILE_GROUPS`: Overview, Assets, Money, Plan, More) opens one shared sheet. Every renderer honours `PHASE_2_TABS`.
 
+**Mobile lists (v2.73):** at 640 px and below, Stocks, Crypto, Cash (accounts and ledger) and CPF history swap their tables for list rows built from the same row models in the same render pass (`_stockListModel`, `_cryptoListModel`, `_cashListModel`, `_cashTxnView`, `_cpfRowView`), so the list and the desktop table can never disagree. Filters become a scrolling chip row of native selects bound to the desktop state, and actions become one + Add plus a More menu (`MORE_MENU_ACTIONS` whitelist). Holding rows open through `openHoldingDetail(table, id)`. Desktop tables, sorting and Columns are unchanged.
+
 ## Data layer
 
 `freshDB()` returns the canonical empty DB shape. `ENTITY_SCHEMAS` defines per-table field types and validation. Conflict modal fires when a cloud write is attempted over a newer remote version. `kjr-core.js:looksPopulated()` guards against seeding a non-empty cloud sheet.

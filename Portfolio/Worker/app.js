@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.72';
-const APP_DISPLAY_VERSION = 'v2.72 (09 Oct)';
+const APP_VERSION = 'v2.73';
+const APP_DISPLAY_VERSION = 'v2.73 (09 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -5361,7 +5361,9 @@ function navLink(el, ev){
    One menu is open at a time. Enter, Space or an arrow key on the button opens it with focus on an item.
    Arrow keys, Home and End move between items, Escape closes it and returns focus to the button, Tab closes
    it and carries on from the button, and a click outside closes it. */
-const SHELL_MENUS = { ws:['ws-btn', 'ws-menu'], add:['add-btn', 'add-menu'] };
+/* v2.73 adds the phone More menus of Stocks, Crypto and Cash (see moreMenuPick). They are keyed 'more-<page>' and use the same open and close rules. */
+const SHELL_MENUS = { ws:['ws-btn', 'ws-menu'], add:['add-btn', 'add-menu'],
+  'more-stocks':['more-btn-stocks', 'more-menu-stocks'], 'more-crypto':['more-btn-crypto', 'more-menu-crypto'], 'more-cash':['more-btn-cash', 'more-menu-cash'] };
 
 function _shellMenuItems(menu){
   return Array.from(menu.querySelectorAll('[role="menuitem"]'));
@@ -7193,6 +7195,295 @@ let _sfCls  = '';
 let _lastStockRows = [];  // cache for CSV export — always reflects what's on screen
 let _ledgerView    = 'flat'; // 'flat' or 'by-stock'
 
+/* ═══════════════════════════════════════════════════════════════════════
+   MOBILE LIST ROWS AND CHIP FILTERS (v2.73)
+   At 640px and below the Stocks, Crypto, Cash and CPF tables are hidden by CSS and these list rows take
+   their place. Both are built from the SAME row objects in the SAME render pass, and every figure goes
+   through the formatter the table cell uses, so the two can not disagree. Presentation only: no money
+   maths lives here. A row is a button with an accessible name. Amounts sit in .money-chip so Hide
+   amounts blurs them, a gain or loss carries an arrow and a sign, a missing figure shows an en dash
+   (never NaN), and every user-typed value goes through kjrEscape.
+   ═══════════════════════════════════════════════════════════════════════ */
+const LIST_DASH = '–';
+
+/* The words of a formatter's HTML result, for an aria-label: tags dropped, the five escapes undone. */
+function _plainText(html){
+  return String(html == null ? '' : html).replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+}
+
+/* A figure a phone row may print: a real, finite number. null, undefined, NaN and Infinity all read as missing, so a row shows a dash, never "NaN". */
+function _finiteNum(v){ return typeof v === 'number' && isFinite(v); }
+
+/* The Return cell of a holding row: a percentage over an amount. The percentage carries the arrow and sign (fmtPct),
+   an amount with no percentage (a cost of zero) carries its own arrow. dir picks the gain or loss colour, as the table does. */
+function _returnCell(pl, plPct, amountText){
+  const known = _finiteNum(pl), hasPct = _finiteNum(plPct);
+  const dir = !known ? '' : (pl >= 0 ? 'up' : 'down');
+  const pct = hasPct ? fmtPct(plPct) : LIST_DASH;
+  const amount = (amountText == null || amountText === '') ? '' : (hasPct ? '' : _plArrow(pl)) + amountText;
+  return { dir, pct, amount };
+}
+
+/* A money figure for a phone row: the table's own formatter, except that a figure with no FX rate keeps its native amount without
+   the long "FX missing" tail (the row says it once), so the row stays narrow. fx tells the caller to add that note. */
+function _listMoney(amount, currency, opts){
+  const text = fmtSgdOrNative(amount, currency, opts);
+  if (text.indexOf('price-stale') === -1) return { text, fx:false };
+  return { text:'<span class="price-stale">' + _nativeMoneyText(amount, currency, opts) + '</span>', fx:true };
+}
+
+/* One Stocks row for the phone list, from a buildStockChartRows row. The value, return and share use the table's own formatters. */
+function _stockListModel(r){
+  const sym = String(r.s.symbol || '?');
+  const sub = [r.s.market, r.s.sector].filter(Boolean).join(' · ');
+  const mv = _finiteNum(r.mv) ? _listMoney(r.mv, 'SGD', {dp:0}) : null;
+  const pl = _finiteNum(r.pl) ? _listMoney(r.pl, 'SGD', {dp:0, signed:true}) : null;
+  const share = _finiteNum(r.weight) ? r.weight.toFixed(1) + '%' : LIST_DASH;
+  const ret = _returnCell(r.pl, r.plPct, pl ? pl.text : '');
+  return { table:'stocks', id:r.s.id, sym, cls:'stocks', sub, value: mv ? mv.text : LIST_DASH, share, shareOf:'of stocks', fx: !!((mv && mv.fx) || (pl && pl.fx)),
+    dir:ret.dir, pct:ret.pct, amount:ret.amount };
+}
+
+/* One Crypto row for the phone list, from a _cryptoRow row. totMv is the whole coin list's value, the share is of that. */
+function _cryptoListModel(r, totMv){
+  const sym = String(r.c.symbol || '?');
+  const value = _finiteNum(r.mv) ? fmt(r.mv, {dp:0}) : LIST_DASH;
+  const weight = _finiteNum(r.mv) ? safeRatio(r.mv, totMv) : null;
+  const share = _finiteNum(weight) ? weight.toFixed(1) + '%' : LIST_DASH;
+  const ret = _returnCell(r.pl, r.plPct, _finiteNum(r.pl) ? fmt(r.pl, {dp:0, signed:true}) : '');
+  return { table:'crypto', id:r.c.id, sym, cls:'crypto', sub:'Crypto', value, share, shareOf:'of coins', fx:false, dir:ret.dir, pct:ret.pct, amount:ret.amount };
+}
+
+/* The spoken form of a holding row, so a screen reader hears the name, the value and the return in words. */
+function _holdingLabel(m){
+  const pct = m.pct === LIST_DASH ? '' : m.pct.replace(/^[▲▼]\s*/, '');
+  const shown = m.value === LIST_DASH ? 'value not available' : 'value ' + _plainText(m.value);
+  const share = m.share === LIST_DASH ? '' : m.share + ' ' + m.shareOf;
+  const ret = pct || m.amount ? 'return ' + [pct, _plainText(m.amount)].filter(Boolean).join(' ') : 'return not available';
+  return [m.sym, m.sub, shown, share, ret, m.fx ? 'FX rate missing' : ''].filter(Boolean).join(', ');
+}
+
+/* A holding row opens the holding. Step 8 swaps the edit form for a side panel, so every row routes through here. */
+function openHoldingDetail(table, id){
+  if (table !== 'stocks' && table !== 'crypto') return false;
+  if (!kjrSafeId(id)){ showToast('Invalid entry id', 'error'); return false; }
+  openEntityModal(table, id);
+  return true;
+}
+
+function _holdingRowHtml(m){
+  return '<button type="button" class="dash-hrow hl-row" data-click="openHolding" data-a0="' + kjrEscape(m.table) + '" data-a1="' + kjrEscape(m.id) + '" aria-haspopup="dialog" aria-label="' + kjrEscape(_holdingLabel(m)) + '">'
+    + '<span class="dash-who">' + _monogram(m.sym, m.cls) + '<span class="dash-who-t"><b>' + kjrEscape(m.sym) + '</b><span>' + kjrEscape(m.sub) + '</span></span></span>'
+    + '<span class="dash-hcell"><span class="dash-hval money-chip">' + _moneyHtml(m.value) + '</span><span class="dash-sub">'
+    + (m.fx ? '<span class="price-stale">FX missing</span>' : kjrEscape(m.share) + (m.share === LIST_DASH ? '' : '<span class="hl-of"> ' + kjrEscape(m.shareOf) + '</span>')) + '</span></span>'
+    + '<span class="dash-hcell"><span class="dash-chg' + (m.dir ? ' ' + m.dir : '') + '">' + m.pct + '</span><span class="dash-sub money-chip">' + (m.amount || '&nbsp;') + '</span></span>'
+    + '</button>';
+}
+
+/* The totals line under a holdings list: the same figures the desktop totals row shows. */
+function _holdingTotalHtml(t){
+  return '<div class="hl-total"><span>' + kjrEscape(t.label) + '</span>'
+    + '<span class="dash-hcell"><span class="dash-hval money-chip">' + _moneyHtml(t.value) + '</span><span class="dash-sub">' + (t.fx ? '<span class="price-stale">FX missing</span>' : '&nbsp;') + '</span></span>'
+    + '<span class="dash-hcell"><span class="dash-chg' + (t.dir ? ' ' + t.dir : '') + '">' + t.pct + '</span><span class="dash-sub money-chip">' + (t.amount || '&nbsp;') + '</span></span></div>';
+}
+
+function _holdingsListHtml(models, total, label){
+  return '<div class="hl" role="group" aria-label="' + kjrEscape(label) + '">'
+    + '<div class="dash-hrow dash-hhead hl-head" aria-hidden="true"><span>Asset</span><span>Value</span><span>Return</span></div>'
+    + models.map(_holdingRowHtml).join('') + (total ? _holdingTotalHtml(total) : '') + '</div>';
+}
+
+/* One Cash account for the phone list, from a renderCash row. The S$ value and the native balance use the table's own formatting. */
+function _cashListModel(r){
+  const name = String(r.c.name || '').trim() || 'Unnamed account';
+  const apy = _finiteNum(r.apy) && r.apy > 0 ? r.apy.toFixed(2) + '% APY' : '';
+  const sub = [r.c.account, r.ccy, apy].filter(Boolean).join(' · ');
+  const value = _finiteNum(r.sgd) ? fmt(r.sgd) : '<span class="price-stale">' + LIST_DASH + ' FX missing</span>';
+  const native = r.ccy !== 'SGD' && _finiteNum(r.bal) ? kjrEscape(r.ccy) + ' ' + r.bal.toLocaleString('en-SG', {maximumFractionDigits:2}) : '';
+  const label = [name, sub, 'balance ' + _plainText(value), native ? _plainText(native) : ''].filter(Boolean).join(', ');
+  return { id:r.c.id, name, sub, value, native, neg:r.bal < -0.005, label };
+}
+
+function _cashRowHtml(m){
+  return '<button type="button" class="dash-hrow hl-row" data-edit-table="cash" data-edit-id="' + kjrEscape(m.id) + '" aria-haspopup="dialog" aria-label="' + kjrEscape('Edit ' + m.label) + '">'
+    + '<span class="hl-main"><span class="hl-t">' + kjrEscape(m.name) + '</span><span class="hl-s">' + kjrEscape(m.sub) + '</span></span>'
+    + '<span class="hl-end"><span class="hl-amt money-chip' + (m.neg ? ' down' : '') + '">' + m.value + '</span>' + (m.native ? '<span class="dash-sub money-chip">' + m.native + '</span>' : '') + '</span></button>';
+}
+
+function _cashListHtml(rows){
+  return '<div class="hl hl-2" role="group" aria-label="Cash accounts">' + rows.map(r => _cashRowHtml(_cashListModel(r))).join('') + '</div>';
+}
+
+/* One Cash movement, read by both the ledger table and the phone list. A transfer shows native amounts (so the FX leg is
+   visible, S$27,000 to US$20,000), any other movement shows its signed S$ effect. */
+const CASH_TYPE_LABEL = { deposit:'Deposit', withdrawal:'Withdrawal', transfer:'Transfer', dividend:'Dividend', interest:'Interest', fee:'Fee', adjustment:'Adjustment' };
+function _cashTxnView(t, nameOf, ccyOf){
+  const nm = id => { const n = nameOf(id); return n == null ? '' : String(n); };
+  if (t.type === 'transfer'){
+    const outCcy = ccyOf(t.fromAccountId), inCcy = ccyOf(t.cashAccountId);
+    const outAmt = Math.abs(Number(t.amount) || 0), inAmt = transferInAmount(t);
+    const sameCcy = outCcy === inCcy && outAmt === inAmt;
+    // fmt() prints a currency code it cannot format as typed, and an account's currency is user data, so these two are escaped
+    const outText = kjrEscape(fmt(outAmt, { currency: outCcy }));
+    const inText = kjrEscape(fmt(inAmt, { currency: inCcy }));
+    return { id:t.id, transfer:true, title:nm(t.fromAccountId) + ' → ' + nm(t.cashAccountId), kind:'Transfer', amtTxt: sameCcy ? outText : outText + ' → ' + inText,
+      outText, inText: sameCcy ? '' : inText, delta:null, cls:'', dateText:fmtDateSG(t.date), notes:t.notes || '' };
+  }
+  const ccy = ccyOf(t.cashAccountId);
+  const delta = cashMovementDelta(t);
+  return { id:t.id, transfer:false, title:nm(t.cashAccountId), kind:CASH_TYPE_LABEL[t.type] || t.type, amtTxt:fmt(toSGD(delta, ccy), { signed:true }),
+    outText:'', inText:'', delta, cls: delta >= 0 ? 'pos' : 'neg', dateText:fmtDateSG(t.date), notes:t.notes || '' };
+}
+
+/* The shared shape of a ledger row for the phone: title and kind over date and note, a signed amount on the right. */
+function _ledgerRowHtml(m){
+  const label = [m.title, m.kind, m.dateText, m.notes, 'amount ' + _plainText(m.amount), m.amountSub ? _plainText(m.amountSub) : ''].filter(Boolean).join(', ');
+  return '<button type="button" class="dash-hrow hl-row" data-edit-table="' + kjrEscape(m.table) + '" data-edit-id="' + kjrEscape(m.id) + '" aria-haspopup="dialog" aria-label="' + kjrEscape('Edit ' + label) + '">'
+    + '<span class="hl-main"><span class="hl-t">' + kjrEscape(m.title) + ' <span class="hl-k">· ' + kjrEscape(m.kind) + '</span></span>'
+    + '<span class="hl-s">' + kjrEscape([m.dateText, m.notes].filter(Boolean).join(' · ')) + '</span></span>'
+    + '<span class="hl-end"><span class="hl-amt money-chip' + (m.dir ? ' ' + m.dir : '') + '">' + m.amount + '</span>' + (m.amountSub ? '<span class="dash-sub money-chip">' + m.amountSub + '</span>' : '') + '</span></button>';
+}
+
+function _cashTxnRowHtml(v){
+  return _ledgerRowHtml({ table:'cashTxns', id:v.id, title:v.title, kind:v.kind, dateText:v.dateText, notes:v.notes,
+    amount: v.transfer ? v.outText : _plArrow(v.delta) + v.amtTxt, amountSub: v.transfer && v.inText ? '→ ' + v.inText : '',
+    dir: v.transfer ? '' : (v.delta >= 0 ? 'up' : 'down') });
+}
+
+/* One CPF history entry, read by both the history table and the phone list. */
+function _cpfRowView(h){
+  const amt = Number(h.amount) || 0;
+  return { id:h.id, date:fmtDateSG(h.date), type:cpfTypeLabel(h.type), account:h.account, amtTxt:fmt(amt, { signed:true }), amt, cls: amt >= 0 ? 'pos' : 'neg', source:h.source || '', notes:h.notes || '' };
+}
+
+function _cpfRowHtml(v){
+  return _ledgerRowHtml({ table:'cpfHistory', id:v.id, title:String(v.account == null ? '' : v.account), kind:v.type, dateText:v.date,
+    notes:[v.source, v.notes].filter(Boolean).join(' · '), amount:_plArrow(v.amt) + v.amtTxt, amountSub:'', dir: v.amt >= 0 ? 'up' : 'down' });
+}
+
+/* The phone's More menu: a shell menu of the page's secondary actions. Each item names a whitelisted action, so a stray value in
+   the markup can never run anything else. Stocks builds it here, Crypto and Cash carry the same markup in index.html. */
+const MORE_MENU_ACTIONS = {
+  exportHoldingsCSV:   () => exportHoldingsCSV(),
+  refreshStockPrices:  () => refreshStockPrices(),
+  refreshCryptoPrices: () => refreshCryptoPrices(),
+  exportCryptoCSV:     () => exportCryptoCSV(),
+  refreshFx:           () => refreshFx()
+};
+function moreMenuPick(name){
+  const run = Object.prototype.hasOwnProperty.call(MORE_MENU_ACTIONS, name) ? MORE_MENU_ACTIONS[name] : null;
+  closeShellMenus(true);   // focus goes back to More before the action runs
+  if (run) run();
+}
+
+function _moreMenuHtml(key, items){
+  const k = kjrEscape(key);
+  return '<div class="menu-wrap">'
+    + '<button type="button" class="btn m-act" id="more-btn-' + k + '" data-menu-btn="more-' + k + '" data-click="toggleShellMenu" data-a0="more-' + k + '" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu-' + k + '" aria-label="More actions"><span aria-hidden="true">⋯</span> More</button>'
+    + '<div class="shell-menu more-menu" id="more-menu-' + k + '" role="menu" aria-label="More actions" hidden>'
+    + items.map(it => '<button type="button" class="menu-item" role="menuitem" tabindex="-1" data-click="moreMenuPick" data-a0="' + kjrEscape(it.action) + '"><span>' + kjrEscape(it.label) + '</span></button>').join('')
+    + '</div></div>';
+}
+
+/* A chip is a native select, so it keeps its keyboard and screen reader behaviour, styled as a pill. on = it is changing the list. */
+function _chipSelectHtml(id, label, action, optionsHtml, on, extraClass){
+  return '<select id="' + id + '" class="chip-sel' + (extraClass ? ' ' + extraClass : '') + (on ? ' is-on' : '') + '" data-change="' + action + '" aria-label="' + kjrEscape(label) + '">' + optionsHtml + '</select>';
+}
+
+/* The Sort chip's choices. Each is a column key and a direction, the same state the sortable table headers write
+   (DB.settings.stocksSort). A sort set from a desktop header that is not in this list gets a choice of its own so the chip never lies. */
+const STOCK_SORT_CHIPS = [
+  ['', 'Sort: Default'],
+  ['symbol:asc', 'Sort: Symbol A to Z'],
+  ['symbol:desc', 'Sort: Symbol Z to A'],
+  ['mv:desc', 'Sort: Value, high to low'],
+  ['mv:asc', 'Sort: Value, low to high'],
+  ['plPct:desc', 'Sort: Return, high to low'],
+  ['plPct:asc', 'Sort: Return, low to high'],
+  ['pl:desc', 'Sort: P&L, high to low'],
+  ['pl:asc', 'Sort: P&L, low to high']
+];
+function _stockSortChipOptions(pref){
+  const key = pref && pref.key, dir = pref && pref.dir;
+  const known = !!(key && dir && Object.prototype.hasOwnProperty.call(STOCK_SORT_VALS, key) && (dir === 'asc' || dir === 'desc'));
+  const cur = known ? key + ':' + dir : '';
+  const opts = STOCK_SORT_CHIPS.slice();
+  if (cur && !opts.some(o => o[0] === cur)) opts.push([cur, 'Sort: ' + (STOCK_COL_LABEL[key] || key) + ', ' + (dir === 'asc' ? 'ascending' : 'descending')]);
+  return { cur, html: opts.map(o => '<option value="' + kjrEscape(o[0]) + '"' + (o[0] === cur ? ' selected' : '') + '>' + kjrEscape(o[1]) + '</option>').join('') };
+}
+
+/* The Sort chip writes the state the sortable headers write. A key the sort table does not know, or a direction that is not
+   asc or desc, clears the sort. Same save and repaint as setStockSort, and back to page one. */
+function setStockSortTo(key, dir){
+  const valid = !!(key && Object.prototype.hasOwnProperty.call(STOCK_SORT_VALS, key) && (dir === 'asc' || dir === 'desc'));
+  const next = valid ? { key, dir } : { key:null, dir:null };
+  const cur = DB.settings.stocksSort || {};
+  if (cur.key === next.key && cur.dir === next.dir) return false;
+  DB.settings.stocksSort = next;
+  _stocksPage = 0; saveData(); renderStocks();
+  return true;
+}
+function stocksSortPick(value){
+  const parts = String(value == null ? '' : value).split(':');
+  return setStockSortTo(parts[0], parts[1]);
+}
+
+/* A repaint replaces the chip row, so the chip in use keeps focus and the row keeps its scroll position. */
+function _chipKeep(host){
+  const a = document.activeElement;
+  const row = host.querySelector('.chip-row');
+  const id = (a && a.id && /^(sfm-|more-btn-)/.test(a.id) && host.contains(a)) ? a.id : '';
+  return { id, left: row ? row.scrollLeft : 0 };
+}
+function _chipRestore(host, keep){
+  const row = host.querySelector('.chip-row');
+  if (row && keep.left) row.scrollLeft = keep.left;
+  if (keep.id){
+    const el = document.getElementById(keep.id);
+    if (el && el.focus){
+      el.focus({ preventScroll:true });
+      // Clear coming or going moves the chips along the row, so nudge the one in use back inside it (sideways only, the page stays put).
+      if (row && el.getBoundingClientRect){
+        const a = el.getBoundingClientRect(), b = row.getBoundingClientRect();
+        if (a.right > b.right) row.scrollLeft += a.right - b.right + 18;
+        else if (a.left < b.left) row.scrollLeft -= b.left - a.left + 18;
+      }
+    }
+  }
+}
+
+/* The CPF chips mirror the three selects in the page head, which stay the one place the filter is held (renderCpf reads them).
+   A change on a chip is written to its twin and the history repaints, and every repaint writes the twins back to the chips. */
+function cpfChipFilter(el){
+  const id = el && el.id ? String(el.id) : '';
+  if (id.indexOf('cpfm-filter-') !== 0) return false;
+  const main = document.getElementById(id.replace(/^cpfm-/, 'cpf-'));
+  if (!main) return false;
+  main.value = el.value;
+  renderCpf();
+  return true;
+}
+function cpfClearFilters(){
+  ['cpf-filter-year', 'cpf-filter-type', 'cpf-filter-account'].forEach(id => { const s = document.getElementById(id); if (s) s.value = ''; });
+  renderCpf();
+}
+function _syncCpfChips(years, fYear, fType, fAcc, hasHistory){
+  const row = document.getElementById('cpf-chips');
+  const yr = document.getElementById('cpfm-filter-year');
+  const ty = document.getElementById('cpfm-filter-type');
+  const ac = document.getElementById('cpfm-filter-account');
+  const clear = document.getElementById('cpfm-clear');
+  if (yr){
+    yr.innerHTML = '<option value="">All years</option>' + years.map(y => '<option value="' + kjrEscape(y) + '">' + kjrEscape(y) + '</option>').join('');
+    yr.value = fYear;
+  }
+  if (ty) ty.value = fType;
+  if (ac) ac.value = fAcc;
+  [[yr, fYear], [ty, fType], [ac, fAcc]].forEach(pair => { if (pair[0]) pair[0].classList.toggle('is-on', !!pair[1]); });
+  if (clear) clear.hidden = !(fYear || fType || fAcc);
+  if (row) row.hidden = !hasHistory;
+}
+
 
 /* ─── CSV helpers ─────────────────────────────────────────────────────── */
 function downloadCSV(filename, headers, rows){
@@ -7938,7 +8229,8 @@ function renderStocks(){
   _sfText = priceFreshnessText('stocks');
 
   // Combined card-head right: filters + action buttons + freshness — shared by all table states.
-  const cardHeadRight = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+  // (v2.73: .hd-actions is the former inline flex style, and is the part the phone layout hides.)
+  const cardHeadRight = `<div class="hd-actions">
     <select id="sf-market" class="fi fi-sm" data-change="stocksFilterMarket" aria-label="Filter stocks by market">
       <option value="">All markets</option>
       <option value="SGX"${_stocksFilter.market==='SGX'?' selected':''}>SGX</option>
@@ -7956,10 +8248,25 @@ function renderStocks(){
     <span class="freshness${_sfCls}" id="freshness-stocks">${kjrEscape(_sfText)}</span>
   </div>`;
 
+  // Phone controls (640px and below), built from the same state the desktop controls read: market, sector and
+  // sort chips, Clear while a filter is on, one + Add and the More menu. The desktop controls above are hidden there.
+  const sortChip = _stockSortChipOptions(sortPref);
+  const marketOpts = `<option value="">All markets</option><option value="SGX"${_stocksFilter.market==='SGX'?' selected':''}>SGX</option><option value="US"${_stocksFilter.market==='US'?' selected':''}>US</option>`;
+  const phoneActions = `<div class="m-actions"><button type="button" class="btn btn-primary m-act" data-click="openEntity" data-a0="stocks"><span>＋ Add<span class="add-sfx"> stock</span></span></button>${_moreMenuHtml('stocks', [{ label:'Export CSV', action:'exportHoldingsCSV' }, { label:'Refresh prices', action:'refreshStockPrices' }])}</div>`;
+  const phoneChips = `<div class="chip-row" role="group" aria-label="Filter and sort holdings">
+      ${anyFilter ? '<button type="button" class="chip-btn" id="sfm-clear" data-click="stocksClearFilter" aria-label="Clear filters">Clear</button>' : ''}
+      ${_chipSelectHtml('sfm-market', 'Filter stocks by market', 'stocksFilterMarket', marketOpts, !!_stocksFilter.market)}
+      ${_chipSelectHtml('sfm-sector', 'Filter stocks by sector', 'stocksFilterSector', '<option value="">All sectors</option>' + sectorOpts, !!_stocksFilter.sector, 'chip-sector')}
+      ${_chipSelectHtml('sfm-sort', 'Sort holdings', 'stocksSortPick', sortChip.html, !!sortChip.cur)}
+    </div>
+    <div class="m-fresh"><span class="freshness${_sfCls}">${kjrEscape(_sfText)}</span></div>`;
+  const keepUi = _chipKeep(bodyEl);   // a repaint replaces the chips, the one in use keeps focus and the row its scroll
+
   // Empty filtered state — show a designed empty state so Clear is reachable.
   if (!filteredRows.length){
     bodyEl.innerHTML = `<div class="card">
-      <div class="card-head"><h3>Holdings</h3>${cardHeadRight}</div>
+      <div class="card-head"><h3>Holdings</h3>${cardHeadRight}${phoneActions}</div>
+      ${phoneChips}
       <div class="card-body"><div class="empty">
         <div class="empty-title">No holdings match your filter.</div>
       </div></div></div>`;
@@ -7977,10 +8284,19 @@ function renderStocks(){
       }
     }).join('');
 
+    // The phone list: the same page of rows, through the same formatters, and the same filtered totals the footer shows.
+    const plKnown = fAnyMv && !fAnyPriceMissing && !fAnyCostMissing;
+    const tMv = fAnyMv ? _listMoney(fTotMv, 'SGD', {dp:0}) : null;
+    const tPl = plKnown ? _listMoney(fTotPl, 'SGD', {dp:0, signed:true}) : null;
+    const totalRet = _returnCell(plKnown ? fTotPl : null, plKnown ? fTotPlPct : null, tPl ? tPl.text : '');
+    const listHtml = _holdingsListHtml(pageRows.map(_stockListModel),
+      { label:'Total', value: tMv ? tMv.text : LIST_DASH, fx: !!((tMv && tMv.fx) || (tPl && tPl.fx)), dir:totalRet.dir, pct:totalRet.pct, amount:totalRet.amount }, 'Holdings');
+
     bodyEl.innerHTML = `
       <div class="card">
-        <div class="card-head"><h3>Holdings${_infoTip('stocks-cost-tip', 'How cost is calculated', 'Cost basis and average cost use the weighted-average method, not FIFO.')}</h3>${cardHeadRight}</div>
-        <div class="tbl-wrap"><table class="holdings"><thead><tr>
+        <div class="card-head"><h3>Holdings${_infoTip('stocks-cost-tip', 'How cost is calculated', 'Cost basis and average cost use the weighted-average method, not FIFO.')}</h3>${cardHeadRight}${phoneActions}</div>
+        ${phoneChips}
+        <div class="tbl-wrap hd-only"><table class="holdings"><thead><tr>
         ${thSort('symbol', 'Symbol', ' tl sticky-col')}${headCells}<th></th>
       </tr></thead><tbody>
         ${pageRows.map(r => {
@@ -7998,6 +8314,7 @@ function renderStocks(){
       </tbody><tfoot><tr class="totals-row">
         <td class="tl sticky-col"><strong>Total</strong></td>${totCells}<td></td>
       </tr></tfoot></table></div>
+        ${listHtml}
         ${pageCount > 1 ? `<div class="tbl-pager">
           <button class="btn btn-sm" ${_stocksPage <= 0 ? 'disabled' : ''} data-click="stocksPrevPage">‹ Prev</button>
           <span class="hint">Page ${_stocksPage + 1} of ${pageCount} · showing ${pageRows.length} of ${totalRows}</span>
@@ -8006,6 +8323,7 @@ function renderStocks(){
       </div>
     `;
   }
+  _chipRestore(bodyEl, keepUi);
 
   renderWatchlist();
   renderBoard();     // Watchlist+ board mirrors the same tickers
@@ -10097,8 +10415,10 @@ function renderCrypto(){
   ]);
 
   const dc = displayCcy();
+  // The phone list reads the same rows as the table, and the share is each coin's value over the whole list's (totMv above).
+  const listHtml = _holdingsListHtml(rows.map(r => _cryptoListModel(r, totMv)), null, 'Coins');
   bodyEl.innerHTML = `
-    <div class="card"><div class="tbl-wrap"><table class="holdings"><thead><tr>
+    <div class="card"><div class="tbl-wrap hd-only"><table class="holdings"><thead><tr>
       <th class="tl">Symbol</th><th class="tl">CoinGecko ID</th><th>Amount</th><th>Avg cost</th>
       <th>Price (${dc})</th><th>24h</th><th>Market value (${dc})</th><th>P&L (${dc})</th><th>P&L %</th><th>Updated</th><th></th>
     </tr></thead><tbody>
@@ -10123,7 +10443,7 @@ function renderCrypto(){
           <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="crypto" data-edit-id="${kjrEscape(r.c.id)}">Edit</button></td>
         </tr>`;
       }).join('')}
-    </tbody></table></div></div>
+    </tbody></table></div>${listHtml}</div>
   `;
 
   if (fresh){
@@ -11047,7 +11367,7 @@ function renderCash(){
   sumEl.innerHTML = renderSummary(summaryCards);
 
   bodyEl.innerHTML = `
-    <div class="card"><div class="tbl-wrap"><table class="holdings"><thead><tr>
+    <div class="card"><div class="tbl-wrap hd-only"><table class="holdings"><thead><tr>
       <th class="tl">Account</th><th class="tl">Type</th><th>Balance</th><th>Currency</th><th>${displayCcy()} value</th>
       ${showApy ? '<th>APY %</th><th>Monthly interest</th>' : ''}
       <th class="tl">Notes</th><th></th>
@@ -11062,7 +11382,7 @@ function renderCash(){
         <td class="tl muted">${kjrEscape(r.c.notes || '')}</td>
         <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cash" data-edit-id="${kjrEscape(r.c.id)}">Edit</button></td>
       </tr>`).join('')}
-    </tbody></table></div></div>
+    </tbody></table></div>${_cashListHtml(rows)}</div>
   `;
 
   renderCashTxns();
@@ -11093,49 +11413,40 @@ function renderCashTxns(){
         <button class="btn btn-primary btn-sm" data-click="openEntity" data-a0="cashTxns">＋ Add movement</button>
       </div>`;
 
-  const TYPE_LABEL = { deposit:'Deposit', withdrawal:'Withdrawal', transfer:'Transfer', dividend:'Dividend', interest:'Interest', fee:'Fee', adjustment:'Adjustment' };
-
   if (!txns.length){
     el.innerHTML = head + `<div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('cash')}</div><div class="empty-title">No cash movements</div><div class="empty-sub">Log deposits, withdrawals, transfers, dividends, and interest here. Account balances are calculated from these plus any trades funded from them.</div></div></div></div>`;
     return;
   }
 
+  // One view per movement (_cashTxnView), read by the table below and by the phone list, so the two never disagree.
+  // Transfers show native amounts (not the display currency) so the FX leg is visible, e.g. S$27,000 → US$20,000.
+  const views = txns.map(t => ({ t, v:_cashTxnView(t, nameOf, ccyOf) }));
   el.innerHTML = head + `
-    <div class="tbl-wrap"><table class="holdings"><thead><tr>
+    <div class="tbl-wrap hd-only"><table class="holdings"><thead><tr>
       <th class="tl">Date</th><th class="tl">Account</th><th class="tl">Type</th><th>Amount</th><th class="tl">Notes</th><th></th>
     </tr></thead><tbody>
-      ${txns.map(t => {
-        if (t.type === 'transfer'){
-          const outCcy = ccyOf(t.fromAccountId), inCcy = ccyOf(t.cashAccountId);
-          const outAmt = Math.abs(Number(t.amount) || 0), inAmt = transferInAmount(t);
-          const sameCcy = outCcy === inCcy && outAmt === inAmt;
-          // Transfers show native amounts (not the display currency) so the
-          // FX leg is visible, e.g. S$27,000 → US$20,000.
-          const amtTxt = sameCcy
-            ? fmt(outAmt, { currency: outCcy })
-            : `${fmt(outAmt, { currency: outCcy })} → ${fmt(inAmt, { currency: inCcy })}`;
+      ${views.map(({ t, v }) => {
+        if (v.transfer){
           return `<tr>
-            <td class="tl">${fmtDateSG(t.date)}</td>
-            <td class="tl cell-sym">${kjrEscape(nameOf(t.fromAccountId))} → ${kjrEscape(nameOf(t.cashAccountId))}</td>
-            <td class="tl"><span class="txn-kind">Transfer</span></td>
-            <td class="num">${amtTxt}</td>
+            <td class="tl">${v.dateText}</td>
+            <td class="tl cell-sym">${kjrEscape(v.title)}</td>
+            <td class="tl"><span class="txn-kind">${kjrEscape(v.kind)}</span></td>
+            <td class="num">${v.amtTxt}</td>
             <td class="tl muted">${kjrEscape(t.notes || '')}</td>
             <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cashTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
           </tr>`;
         }
-        const ccy = ccyOf(t.cashAccountId);
-        const delta = cashMovementDelta(t);
-        const cls = delta >= 0 ? 'pos' : 'neg';
         return `<tr>
-          <td class="tl">${fmtDateSG(t.date)}</td>
-          <td class="tl cell-sym">${kjrEscape(nameOf(t.cashAccountId))}</td>
-          <td class="tl"><span class="txn-kind">${kjrEscape(TYPE_LABEL[t.type] || t.type)}</span></td>
-          <td class="num ${cls}">${fmt(toSGD(delta, ccy), { signed:true })}</td>
+          <td class="tl">${v.dateText}</td>
+          <td class="tl cell-sym">${kjrEscape(v.title)}</td>
+          <td class="tl"><span class="txn-kind">${kjrEscape(v.kind)}</span></td>
+          <td class="num ${v.cls}">${v.amtTxt}</td>
           <td class="tl muted">${kjrEscape(t.notes || '')}</td>
           <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cashTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
         </tr>`;
       }).join('')}
-    </tbody></table></div></div>`;
+    </tbody></table></div>
+    <div class="hl hl-2" role="group" aria-label="Cash movements">${views.map(({ v }) => _cashTxnRowHtml(v)).join('')}</div></div>`;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -11280,6 +11591,7 @@ function renderCpf(){
   const fYear = (yrSel && yrSel.value) || '';
   const fType = document.getElementById('cpf-filter-type')?.value || '';
   const fAcc  = document.getElementById('cpf-filter-account')?.value || '';
+  _syncCpfChips(years, fYear, fType, fAcc, all.length > 0);   // the phone chips mirror the three selects above
   const filtered = all.filter(h => {
     if (fYear && String(h.date || '').slice(0,4) !== fYear) return false;
     if (fType && h.type !== fType) return false;
@@ -11300,6 +11612,7 @@ function renderCpf(){
   const subBy = { OA:0, SA:0, MA:0, RA:0 };
   filtered.forEach(h => { if (subBy[h.account] != null) subBy[h.account] += Number(h.amount) || 0; });
   const subTotal = subBy.OA + subBy.SA + subBy.MA + subBy.RA;
+  const views = filtered.map(_cpfRowView);   // read by the table and by the phone list below
 
   histEl.innerHTML = `
     <div class="h-summary" style="margin-bottom:14px">
@@ -11310,22 +11623,20 @@ function renderCpf(){
       <div class="h-summary-item"><div class="h-summary-label">MA</div><div class="h-summary-value">${_moneyHtml(fmt(subBy.MA,{dp:0}))}</div></div>
       <div class="h-summary-item"><div class="h-summary-label">RA</div><div class="h-summary-value">${_moneyHtml(fmt(subBy.RA,{dp:0}))}</div></div>
     </div>
-    <div class="tbl-wrap"><table class="holdings"><thead><tr>
+    <div class="tbl-wrap hd-only"><table class="holdings"><thead><tr>
       <th class="tl">Date</th><th class="tl">Type</th><th class="tl">Account</th><th>Amount</th><th class="tl">Source</th><th class="tl">Notes</th><th></th>
     </tr></thead><tbody>
-      ${filtered.map(h => {
-        const cls = (Number(h.amount) || 0) >= 0 ? 'pos' : 'neg';
-        return `<tr>
-          <td class="tl">${fmtDateSG(h.date)}</td>
-          <td class="tl"><span class="txn-kind">${kjrEscape(cpfTypeLabel(h.type))}</span></td>
-          <td class="tl"><span class="tag">${kjrEscape(h.account)}</span></td>
-          <td class="num ${cls}">${fmt(Number(h.amount) || 0, { signed:true })}</td>
-          <td class="tl muted">${kjrEscape(h.source || '')}</td>
-          <td class="tl muted">${kjrEscape(h.notes || '')}</td>
-          <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cpfHistory" data-edit-id="${kjrEscape(h.id)}">Edit</button></td>
-        </tr>`;
-      }).join('')}
+      ${views.map(v => `<tr>
+          <td class="tl">${v.date}</td>
+          <td class="tl"><span class="txn-kind">${kjrEscape(v.type)}</span></td>
+          <td class="tl"><span class="tag">${kjrEscape(v.account)}</span></td>
+          <td class="num ${v.cls}">${v.amtTxt}</td>
+          <td class="tl muted">${kjrEscape(v.source)}</td>
+          <td class="tl muted">${kjrEscape(v.notes)}</td>
+          <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cpfHistory" data-edit-id="${kjrEscape(v.id)}">Edit</button></td>
+        </tr>`).join('')}
     </tbody></table></div>
+    <div class="hl hl-2" role="group" aria-label="CPF transactions">${views.map(_cpfRowHtml).join('')}</div>
   `;
 }
 
@@ -13205,6 +13516,12 @@ function installEventDelegation(){
     stocksClearFilter:   () => { _stocksFilter = { sector:'', market:'' }; _stocksPage = 0; renderStocks(); },
     stocksFilterSector:  (el) => { _stocksFilter.sector = el.value; _stocksPage = 0; renderStocks(); },
     stocksFilterMarket:  (el) => { _stocksFilter.market = el.value; _stocksPage = 0; renderStocks(); },
+    // phone list rows, chips and More menus (v2.73)
+    openHolding:         (el) => { const [a0, a1] = A(el); openHoldingDetail(a0, a1); },
+    stocksSortPick:      (el) => stocksSortPick(el.value),
+    cpfChipFilter:       (el) => cpfChipFilter(el),
+    cpfClearFilters:     () => cpfClearFilters(),
+    moreMenuPick:        (el) => moreMenuPick(A(el)[0]),
     ledgerViewFlat:      () => { _ledgerView = 'flat'; renderStockTxns(); },
     ledgerViewByStock:   () => { _ledgerView = 'by-stock'; renderStockTxns(); },
     // dashboard
