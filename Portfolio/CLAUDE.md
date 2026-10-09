@@ -38,6 +38,8 @@ Chart.js 4.4.1 (CDN, SRI-pinned). Backend is Google Apps Script + Google Sheets 
 
 **Mobile lists (v2.73):** at 640 px and below, Stocks, Crypto, Cash (accounts and ledger) and CPF history swap their tables for list rows built from the same row models in the same render pass (`_stockListModel`, `_cryptoListModel`, `_cashListModel`, `_cashTxnView`, `_cpfRowView`), so the list and the desktop table can never disagree. Filters become a scrolling chip row of native selects bound to the desktop state, and actions become one + Add plus a More menu (`MORE_MENU_ACTIONS` whitelist). Holding rows open through `openHoldingDetail(table, id)`. Desktop tables, sorting and Columns are unchanged.
 
+**Holding panel and palette (v2.74):** `openHoldingDetail(table, id)` opens the holding side panel (`#holding-panel`, built by `_holdingPanelModel`, with a 3-month chart from `fetchStockHistory` using the key `THREE_MONTHS`, never the bare string `3mo`). ⌘K or Ctrl+K opens the command palette (`_paletteResults` is pure), and the shortcut stays blocked while the vault or NAS gate, any open overlay or the panel is up.
+
 ## Data layer
 
 `freshDB()` returns the canonical empty DB shape. `ENTITY_SCHEMAS` defines per-table field types and validation. Conflict modal fires when a cloud write is attempted over a newer remote version. `kjr-core.js:looksPopulated()` guards against seeding a non-empty cloud sheet.

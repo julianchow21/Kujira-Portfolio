@@ -966,6 +966,131 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 }
 @media (max-width:360px){.tb-whale{display:none}}
 
+/* HOLDING SIDE PANEL, COMMAND PALETTE AND THEIR TRIGGERS (Step 8a). Both overlays are floating, so they sit on --surface-solid, a solid backing that keeps
+   the dim text above 4.5:1 in both themes. The dark --surface-solid is 94% opaque, so an opaque --bg goes under it and the page behind never shows through
+   as ghost text. Each overlay is its own scrim and a click on it closes it. The panel slides in over 280ms and the palette fades in over
+   150ms, neither moves under prefers-reduced-motion. A closed overlay is visibility:hidden, not display:none, so the close can animate, and it is neither focusable
+   nor announced while hidden. */
+.hp-overlay,.cp-overlay{position:fixed;inset:0;z-index:200;visibility:hidden;pointer-events:none;transition:visibility 0s linear 0.28s}
+.hp-overlay.open,.cp-overlay.open{visibility:visible;pointer-events:auto;transition-delay:0s}
+.hp-overlay:focus,.cp-overlay:focus{outline:none}
+.hp-overlay::before{content:'';position:absolute;inset:0;background:rgba(0,0,0,0.5);opacity:0;transition:opacity 0.2s ease-out}
+.hp-overlay.hp-in::before{opacity:1}
+.hp-panel{position:absolute;top:0;right:0;bottom:0;display:flex;flex-direction:column;width:min(400px,100%);background:linear-gradient(var(--surface-solid),var(--surface-solid)),var(--bg);border-left:1px solid var(--border2);box-shadow:var(--glass-shadow);transform:translateX(102%);transition:transform 0.28s cubic-bezier(.2,.8,.2,1)}
+.hp-overlay.hp-in .hp-panel{transform:none}
+.hp-head{flex:none;display:flex;align-items:center;gap:12px;padding:calc(16px + env(safe-area-inset-top)) 16px 14px 20px;border-bottom:1px solid var(--border)}
+.hp-id{flex:1 1 auto;min-width:0}
+.hp-title{font-size:16px;line-height:22px;font-weight:700;letter-spacing:-0.01em;overflow-wrap:anywhere}
+.hp-sub{overflow:hidden;font-size:12px;line-height:16px;color:var(--text3);text-overflow:ellipsis;white-space:nowrap}
+.hp-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:18px;padding:18px 20px;overflow-y:auto;overscroll-behavior:contain}
+/* No block squeezes to fit: the body scrolls instead (a block with overflow set has a zero automatic minimum size and would give way). */
+.hp-body > *{flex:none}
+.hp-px{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 10px}
+.hp-px-v{font-size:30px;line-height:1.15;font-weight:300;letter-spacing:-0.03em;font-variant-numeric:tabular-nums}
+.hp-px-s{font-size:13px;line-height:18px;font-weight:500;color:var(--text3)}
+.hp-day{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin-top:8px;min-height:24px}
+.hp-when{font-size:12.5px;line-height:18px;color:var(--text3)}
+/* The chart reuses the hero chart's classes (grid, plot, ticks, end dot, gain and loss colour), at 160px and with no bleed to the panel edge. */
+.hp-chart.hero-chart{height:160px;margin:0}
+@media (max-width:640px){.hp-chart.hero-chart{height:160px;margin-left:0;margin-right:0;--hc-r:14px;--hc-edge:0px}}
+.hp-caption{display:flex;justify-content:space-between;gap:10px;margin:6px 0 0;font-size:12px;line-height:16px;color:var(--text3)}
+.hp-res{font-weight:600}
+.hp-res.up{color:var(--gain)}
+.hp-res.down{color:var(--loss)}
+.hp-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:128px;padding:16px;border:1px dashed var(--border2);border-radius:12px;text-align:center;font-size:13px;line-height:18px;color:var(--text3)}
+.hp-empty p{margin:0;max-width:260px}
+.hp-empty-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:var(--bg3);color:var(--text3)}
+.hp-empty-icon svg{width:18px;height:18px}
+.hp-loading{min-height:160px;border-color:transparent}
+.hp-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.hp-stat{min-width:0;padding:10px 12px;border-top:1px solid var(--border)}
+.hp-stat:nth-child(odd){border-right:1px solid var(--border)}
+.hp-stat:nth-child(-n+2){border-top:0}
+.hp-stat:last-child:nth-child(odd){grid-column:1/-1;border-right:0}
+.hp-stat dt{font-size:11.5px;line-height:16px;color:var(--text3)}
+.hp-stat dd{margin:2px 0 0;font-size:14px;line-height:20px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.hp-stat-note{display:block;font-size:11.5px;line-height:16px;font-weight:500;color:var(--text3)}
+.hp-ret{display:flex;flex-direction:column}
+.hp-ret.up{color:var(--gain)}
+.hp-ret.down{color:var(--loss)}
+.hp-ret-amt{font-size:12.5px;line-height:18px}
+.hp-sect{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:20px}
+.hp-h{font-size:11px;line-height:14px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text3)}
+.hp-none{margin:6px 0 0;font-size:13px;line-height:18px;color:var(--text3)}
+.hp-trades{list-style:none;margin:2px 0 0;padding:0}
+.hp-trade{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;align-items:center;padding:10px 0}
+.hp-trade + .hp-trade{border-top:1px solid var(--border)}
+.hp-trade-t{font-size:13px;line-height:18px;font-weight:600;overflow-wrap:anywhere}
+.hp-trade-s{grid-column:1;font-size:12px;line-height:16px;color:var(--text3)}
+.hp-trade-v{grid-column:2;grid-row:1 / span 2;font-size:13px;line-height:18px;font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
+.hp-foot{flex:none;display:flex;gap:8px;padding:12px 20px calc(14px + env(safe-area-inset-bottom));border-top:1px solid var(--border)}
+.hp-foot .btn{flex:1 1 0;justify-content:center;min-height:40px}
+/* The secondary button gets a tint and a clearer edge, a glass button on the white panel is hard to tell from it in the light theme. */
+.hp-foot .btn:not(.btn-primary){background:var(--bg3);border-color:var(--border2)}
+@media (hover:hover){.hp-foot .btn:not(.btn-primary):hover{background:var(--bg4)}}
+@media (max-width:768px){
+  .hp-panel{width:100%;border-left:0}
+  .hp-foot .btn{min-height:44px}
+}
+
+/* Command palette: a centred dialog. Its top is placed so the full-height dialog would sit in the middle of the window, so the field stays put while the list grows and shrinks. */
+.cp-overlay{display:flex;align-items:flex-start;justify-content:center;padding:max(48px,calc(50vh - 260px)) 16px 16px;background:rgba(0,0,0,0.5);opacity:0;transition:opacity 0.15s ease-out,visibility 0s linear 0.15s}
+.cp-overlay.open{opacity:1}
+.cp{display:flex;flex-direction:column;width:100%;max-width:560px;max-height:min(70vh,520px);overflow:hidden;background:linear-gradient(var(--surface-solid),var(--surface-solid)),var(--bg);border:1px solid var(--border2);border-radius:var(--radius-lg);box-shadow:var(--glass-shadow)}
+.cp-field{flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--border)}
+.cp-field:focus-within{box-shadow:inset 0 -2px 0 var(--accent)}
+.cp-field > svg{width:16px;height:16px;flex:none;color:var(--text3)}
+.cp-input{flex:1 1 auto;min-width:0;height:52px;padding:0;border:0;outline:0;background:transparent;color:var(--text);font:inherit;font-size:15px}
+.cp-input::placeholder{color:var(--text3);opacity:1}
+.cp-esc,.cp-foot kbd{padding:1px 6px;border:1px solid var(--border2);border-radius:5px;font:inherit;font-size:11px;line-height:16px;font-weight:600;color:var(--text2)}
+.cp-x{display:none}
+.cp-list{flex:1 1 auto;min-height:0;padding:6px;overflow-y:auto;overscroll-behavior:contain}
+.cp-list[hidden],.cp-empty[hidden]{display:none}
+.cp-label{padding:10px 10px 4px;font-size:11px;line-height:14px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text3)}
+.cp-opt{display:flex;align-items:center;gap:12px;min-height:44px;padding:6px 10px;border-radius:var(--radius);cursor:pointer}
+.cp-opt[aria-selected="true"]{background:var(--bg3);box-shadow:inset 2px 0 0 var(--accent)}
+.cp-opt[aria-disabled="true"] .cp-t{color:var(--text2);font-weight:500}
+.cp-ico{display:grid;place-items:center;width:32px;height:32px;flex:none;color:var(--text2)}
+.cp-ico svg{width:16px;height:16px}
+.cp-main{display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
+.cp-t{overflow:hidden;font-size:13.5px;line-height:1.35;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.cp-s{overflow:hidden;font-size:12px;line-height:1.4;color:var(--text3);text-overflow:ellipsis;white-space:nowrap}
+/* Over the active row's tint the dim text moves up a step, --text3 is under 4.5:1 on --bg3 in the light theme. */
+.cp-opt[aria-selected="true"] .cp-s{color:var(--text2)}
+.cp-mark{background:none;color:var(--accent);font-weight:800}
+.cp-empty{margin:0;padding:28px 16px;text-align:center;font-size:13px;line-height:18px;color:var(--text3)}
+.cp-foot{flex:none;display:flex;gap:16px;padding:8px 14px;border-top:1px solid var(--border);font-size:12px;line-height:16px;color:var(--text3)}
+@media (max-width:640px){
+  .cp-overlay{padding:max(12px,env(safe-area-inset-top)) 12px 12px}
+  .cp{max-height:min(75vh,520px)}
+  .cp-input{font-size:16px}
+  .cp-esc,.cp-foot{display:none}
+  .cp-x{display:flex}
+}
+@media (hover:none){.cp-foot{display:none}}
+@media (prefers-reduced-motion:reduce){
+  .hp-overlay,.hp-overlay::before,.hp-panel,.cp-overlay{transition:none}
+}
+
+/* The trigger. A field-styled button in the top bar above 768px (--text2, not --text3: the glass bar sits over whatever scrolls behind it), a 44px icon button in the phone header. */
+.tb-search{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:6px 10px;border:1px solid var(--glass-border);border-radius:var(--radius);background:var(--glass);color:var(--text2);font:inherit;font-size:12.5px;line-height:18px;font-weight:500;white-space:nowrap;cursor:pointer;transition:background 0.15s ease-out,color 0.15s ease-out}
+.tb-search svg{width:14px;height:14px;flex:none}
+.tb-search:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (hover:hover){.tb-search:hover{background:var(--glass-strong);color:var(--text)}}
+.tb-kbd{margin-left:8px;padding:1px 6px;border:1px solid var(--border2);border-radius:5px;font:inherit;font-size:11px;line-height:16px;font-weight:600;color:var(--text2)}
+.tb-search-m{display:none}
+@media (hover:none) and (min-width:769px){.tb-search{min-height:44px}}
+/* From 769px to 940px the bar has no room for the field beside the currency switch (the Stocks and Watchlist bars would wrap to a second line), so it shrinks to its icon. The name stays on aria-label and title. */
+@media (min-width:769px) and (max-width:940px){.tb-search-lbl,.tb-kbd{display:none}.tb-search{padding:6px 9px}}
+@media (max-width:768px){.tb-search{display:none}.tb-search-m{display:flex}}
+/* At 360px and below the search icon takes 48px of the header. On Stocks and Watchlist the currency switch gives back 16px of padding, so the title keeps its word whole at 320px. */
+@media (max-width:360px){.ccy-toggle button{padding-inline:6px}}
+@media (prefers-reduced-motion:reduce){.tb-search{transition:none}}
+/* A holding's symbol in the Stocks and Crypto tables opens the side panel. It reads as the text it was, with a hover and focus cue. */
+.sym-btn{padding:0;border:0;border-radius:4px;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+@media (hover:hover){.sym-btn:hover{color:var(--accent);text-decoration:underline}}
+.sym-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
 /* MOBILE LIST ROWS, CHIP FILTERS AND ACTIONS (v2.73). At 640px and below the Stocks, Crypto, Cash and CPF tables give way to list rows
    built from the same row data (the table stays in the page and is only hidden), the filters become one scrolling row of chips, and
    each page's buttons fold into one + Add and a More menu. Above 640px every block marked for the phone stays hidden and none of the
@@ -1105,12 +1230,22 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
         </div>
       </div>
       <div class="tb-actions">
+        <!-- Command palette trigger (Step 8a). A field-styled button above 768px, its shortcut hint is set by _syncPaletteHint() (Cmd K on a Mac, Ctrl K elsewhere). -->
+        <button type="button" class="tb-search" id="cp-trigger" data-click="openCommandPalette" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K" aria-label="Search or jump to" title="Search or jump to">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <span class="tb-search-lbl">Search or jump to</span>
+          <kbd class="tb-kbd" id="cp-kbd" aria-hidden="true">Ctrl K</kbd>
+        </button>
         <div class="ccy-toggle" role="group" aria-label="Display currency">
           <button type="button" data-ccy="SGD" data-click="setDisplayCcy" data-a0="SGD">SGD</button>
           <button type="button" data-ccy="USD" data-click="setDisplayCcy" data-a0="USD">USD</button>
         </div>
         <!-- Phone only: the sidebar sync row is not there, so a dot opens the same details. -->
         <button type="button" id="sync-dot" class="icon-btn sync-dot s-local" data-click="openSyncDetails" title="Open sync details" aria-haspopup="dialog" aria-controls="sync-details-modal" aria-expanded="false"><span class="sr-only" id="sync-dot-label">Sync status: Local only</span></button>
+        <!-- Phone only: the search field above is hidden, this icon opens the same palette. -->
+        <button type="button" id="cp-trigger-m" class="icon-btn tb-search-m" data-click="openCommandPalette" aria-haspopup="dialog" aria-label="Search or jump to" title="Search or jump to">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        </button>
         <button id="privacy-toggle" class="icon-btn" data-click="togglePrivacy" title="Hide amounts" aria-label="Hide amounts" aria-pressed="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
         </button>
@@ -2016,6 +2151,28 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
   </div>
 </div>
 
+<!-- HOLDING SIDE PANEL (Step 8a). The overlay is the dialog and its own scrim, the panel is built by openHoldingPanel() from the holding's row.
+     Esc, a click on the scrim and the close button close it, openModalFocus traps focus and returns it to the opener. -->
+<div class="hp-overlay" id="holding-panel" role="dialog" aria-modal="true" aria-labelledby="hp-title" tabindex="-1">
+  <div class="hp-panel" id="hp-panel"></div>
+</div>
+
+<!-- COMMAND PALETTE (Step 8a). A combobox that keeps focus in its field and points at the active option, over a listbox of results built by _paletteHtml(). -->
+<div class="cp-overlay" id="cmd-palette" role="dialog" aria-modal="true" aria-label="Search or jump to" tabindex="-1">
+  <div class="cp">
+    <div class="cp-field">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input type="text" class="cp-input" id="cp-input" role="combobox" aria-expanded="false" aria-controls="cp-list" aria-autocomplete="list" aria-activedescendant="" aria-label="Search or jump to" placeholder="Search or jump to" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="80" data-input="paletteInput">
+      <kbd class="cp-esc" aria-hidden="true">Esc</kbd>
+      <button type="button" class="icon-btn cp-x" data-click="closeCommandPalette" aria-label="Close search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="cp-list" id="cp-list" role="listbox" aria-label="Results" hidden></div>
+    <p class="cp-empty" id="cp-empty" hidden>No matches</p>
+    <p class="sr-only" id="cp-status" role="status" aria-live="polite"></p>
+    <div class="cp-foot" aria-hidden="true"><span><kbd>↑</kbd> <kbd>↓</kbd> to move</span><span><kbd>↵</kbd> to open</span><span><kbd>Esc</kbd> to close</span></div>
+  </div>
+</div>
+
 <!-- TOAST HOST -->
 <div id="toast-host" aria-live="polite" role="status"></div>
 
@@ -2024,12 +2181,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.73"></script>
-<script src="Worker/kjr-sortable.js?v=2.73"></script>
-<script src="Worker/kjr-vault.js?v=2.73"></script>
-<script src="Worker/kjr-migration.js?v=2.73"></script>
-<script src="Worker/supabase.js?v=2.73"></script>
-<script src="Worker/kjr-nas.js?v=2.73"></script>
-<script src="Worker/app.js?v=2.73"></script>
+<script src="Worker/kjr-core.js?v=2.74"></script>
+<script src="Worker/kjr-sortable.js?v=2.74"></script>
+<script src="Worker/kjr-vault.js?v=2.74"></script>
+<script src="Worker/kjr-migration.js?v=2.74"></script>
+<script src="Worker/supabase.js?v=2.74"></script>
+<script src="Worker/kjr-nas.js?v=2.74"></script>
+<script src="Worker/app.js?v=2.74"></script>
 </body>
 </html>

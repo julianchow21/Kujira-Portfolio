@@ -165,9 +165,20 @@ const FUNCTION_TARGETS = [
   '_chipKeep', '_chipRestore', 'cpfChipFilter', 'cpfClearFilters', '_syncCpfChips',
   'fmtSgdOrNative', '_nativeMoneyText', 'fmtPct', '_plArrow', '_moneyHtml', 'fmtDateSG', '_parseDateOnlyLocal', 'cpfTypeLabel',
   'buildStockChartRows', 'renderStocks', 'renderCrypto', 'renderCash', 'renderCashTxns', 'renderCpf',
-  'fxMissingFor', 'projectedMonthlyInterest', 'hasCashActivity'
+  'fxMissingFor', 'projectedMonthlyInterest', 'hasCashActivity',
+  // Holding side panel and command palette (Step 8a): the model and markup builders, the open, close and repaint of the panel, the history start, the
+  // palette's model, matching and markup, its keys and shortcut, and the dashboard Holdings card that now opens the panel
+  '_hpMoney', '_hpDp', '_hpQty', '_hpShare', '_hpShareText', '_hpNetWorth', '_hpDay', '_hpTrades', '_hpStockModel', '_hpCryptoModel', '_holdingPanelModel',
+  '_hpSeries', '_hpCcySym', '_hpAxisDp', '_hpScale', '_hpAxisLabel', '_hpAmountHtml', '_hpHeadHtml', '_hpPriceHtml', '_hpSeriesHtml', '_hpChartHtml', '_hpStatHtml',
+  '_hpTradeHtml', '_hpTradesHtml', '_hpFootHtml', '_holdingPanelHtml', '_hpRender', '_hpStartHistory', 'openHoldingPanel', '_hpRestoreFocus', 'closeHoldingPanel',
+  'refreshHoldingPanel', 'holdingPanelAction', '_emptyIcon', '_modalFocusElement',
+  '_isApplePlatform', '_paletteHint', '_syncPaletteHint', '_paletteModel', '_paletteRank', '_paletteResults', '_paletteMark', '_paletteActionIcon',
+  '_paletteOptHtml', '_paletteHtml', '_paletteSyncActive', '_paletteRender', '_commandPaletteBlocked', 'openCommandPalette', 'closeCommandPalette',
+  'paletteQuery', '_paletteMove', '_paletteIndex', 'paletteHover', '_paletteRunAction', 'runPaletteItem', 'paletteKeydown', '_isPaletteShortcut', 'paletteShortcut',
+  '_dashHoldingRows', '_dashHoldings'
 ];
-const CONST_TARGETS = ['APP_VERSION', 'APP_DISPLAY_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'LIST_DASH', 'CPF_TYPE_LABEL', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState'];
+const CONST_TARGETS = ['APP_VERSION', 'APP_DISPLAY_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'LIST_DASH', 'CPF_TYPE_LABEL', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState',
+  'HP_HISTORY_RANGE', 'HP_TRADES_SHOWN', 'HP_ACTIONS', 'PALETTE_CAP', 'PALETTE_GROUPS', 'CP_PLUS_ICON', 'CP_REFRESH_ICON', 'EYE_SVG', 'EYE_OFF_SVG'];
 
 const extractedFns = {};
 const missingFns = [];
@@ -4504,14 +4515,21 @@ async function runTests(){
     assert.strictEqual(sb._holdingLabel({ sym:'X', sub:'', value:DASH, share:DASH, shareOf:'', pct:DASH, amount:'+S$4', fx:false }), 'X, value not available, return +S$4');
   });
 
-  test('openHoldingDetail - the one place a holding row goes, today the edit form, only for a stock or a coin with a safe id', () => {
+  /* Step 8a changed this test: openHoldingDetail used to open the edit modal (the v2.73 stand-in) and now opens the side panel, which holds Edit holding. The
+     routing guards, the toasts and the delegated action line are asserted exactly as before. */
+  test('openHoldingDetail - the one place a holding row goes, now the side panel, only for a stock or a coin with a safe id', () => {
     const sb = freshSandbox();
     const calls = [];
-    sb.openEntityModal = (table, id) => calls.push(['open', table, id]);
+    sb.openHoldingPanel = (table, id) => { calls.push(['panel', table, id]); return true; };
+    sb.openEntityModal = (table, id) => calls.push(['modal', table, id]);   // a row no longer opens the edit form itself
     sb.showToast = (msg, kind) => calls.push(['toast', kind]);
     assert.strictEqual(sb.openHoldingDetail('stocks', 'stock_seed_aapl'), true);
     assert.strictEqual(sb.openHoldingDetail('crypto', 'c-btc_1'), true);
-    assert.deepStrictEqual(calls, [['open', 'stocks', 'stock_seed_aapl'], ['open', 'crypto', 'c-btc_1']]);
+    assert.deepStrictEqual(calls, [['panel', 'stocks', 'stock_seed_aapl'], ['panel', 'crypto', 'c-btc_1']]);
+    // a holding that is gone (the panel says so and returns false) is not reported as opened
+    sb.openHoldingPanel = () => false;
+    assert.strictEqual(sb.openHoldingDetail('stocks', 'stock_gone'), false);
+    sb.openHoldingPanel = (table, id) => { calls.push(['panel', table, id]); return true; };
     calls.length = 0;
     ['cash', 'cpfHistory', 'realestate', '', null, undefined, 'constructor', '__proto__'].forEach(t => assert.strictEqual(sb.openHoldingDetail(t, 'x1'), false, String(t)));
     assert.deepStrictEqual(calls, []);
@@ -4521,7 +4539,8 @@ async function runTests(){
     const actions = extractFunction('installEventDelegation');
     assert.ok(actions.includes('openHolding:         (el) => { const [a0, a1] = A(el); openHoldingDetail(a0, a1); },'));
     assert.ok(extractFunction('_holdingRowHtml').includes('data-click="openHolding"'));
-    assert.ok(extractFunction('openHoldingDetail').includes('openEntityModal(table, id)'));
+    assert.ok(extractFunction('openHoldingDetail').includes('openHoldingPanel(table, id)'));   // was openEntityModal(table, id)
+    assert.strictEqual(extractFunction('openHoldingDetail').includes('openEntityModal'), false);
   });
 
   test('renderStocks - the phone list and the desktop table come from the same rows: same symbols in the same order, same values, same totals, under a filter and a sort', () => {
@@ -4529,7 +4548,8 @@ async function runTests(){
     const els = stocksBox(sb);
     const cols = stockCols(sb);
     const run = () => { sb.renderStocks(); return els['stocks-body'].innerHTML; };
-    const tableSyms = html => Array.from(html.matchAll(/cell-sym sticky-col">([^<]*)</g)).map(m => m[1]);
+    // Step 8a: the symbol cell holds a button that opens the side panel, so the symbol is the button's text (this helper read the cell's own text before)
+    const tableSyms = html => Array.from(html.matchAll(/cell-sym sticky-col"><button[^>]*>([^<]*)</g)).map(m => m[1]);
     const listSyms = html => listRowsOf(html).map(r => /<b>([^<]*)<\/b>/.exec(r)[1]);
     const parity = (html, label) => {
       assert.deepStrictEqual(listSyms(html), tableSyms(html), label + ' order');
@@ -4625,7 +4645,8 @@ async function runTests(){
     }
     const sb = listSandbox(many, 'USD');
     const els = stocksBox(sb);
-    const tableSyms = html => Array.from(html.matchAll(/cell-sym sticky-col">([^<]*)</g)).map(m => m[1]);
+    // Step 8a: the symbol cell holds a button that opens the side panel, so the symbol is the button's text (this helper read the cell's own text before)
+    const tableSyms = html => Array.from(html.matchAll(/cell-sym sticky-col"><button[^>]*>([^<]*)</g)).map(m => m[1]);
     const listSyms = html => listRowsOf(html).map(r => /<b>([^<]*)<\/b>/.exec(r)[1]);
     [[0, 50], [1, 50], [2, 20]].forEach(([page, count]) => {
       vm.runInContext('_stocksPage = ' + page, sb);
@@ -4698,7 +4719,8 @@ async function runTests(){
     const els = renderBox(sb, ['crypto-body', 'crypto-summary', 'freshness-crypto']);
     sb.renderCrypto();
     const html = els['crypto-body'].innerHTML;
-    const tableSyms = Array.from(html.matchAll(/<td class="tl cell-sym">([^<]*)</g)).map(m => m[1]);
+    // Step 8a: the coin's symbol cell holds a button that opens the side panel, the symbol is the button's text
+    const tableSyms = Array.from(html.matchAll(/<td class="tl cell-sym"><button[^>]*>([^<]*)</g)).map(m => m[1]);
     const rows = listRowsOf(html);
     assert.deepStrictEqual(tableSyms, ['BTC', 'FOO', 'ETH']);
     assert.deepStrictEqual(rows.map(r => /<b>([^<]*)<\/b>/.exec(r)[1]), tableSyms);
@@ -5093,14 +5115,1241 @@ async function runTests(){
     assert.ok(indexSrc.includes('@media (hover:hover){.hl-row:hover .dash-sub,.hl-row:hover .dash-who-t span,.hl-row:hover .hl-s,.hl-row:hover .price-stale{color:var(--text2)}}'));
   });
 
-  test('v2.73 release strings - the display version, the cache name and every script tag agree', () => {
-    assert.strictEqual(vm.runInContext('APP_VERSION', freshSandbox()), 'v2.73');
-    assert.strictEqual(vm.runInContext('APP_DISPLAY_VERSION', freshSandbox()), 'v2.73 (09 Oct)');
+  test('release strings - the display version, the cache name and every script tag agree', () => {
+    const ver = vm.runInContext('APP_VERSION', freshSandbox());
+    assert.ok(/^v\d+\.\d+$/.test(ver));
+    const num = ver.slice(1).replace('.', '\\.');
+    assert.ok(new RegExp('^' + ver.replace('.', '\\.') + ' \\(\\d{2} [A-Z][a-z]{2}\\)$').test(vm.runInContext('APP_DISPLAY_VERSION', freshSandbox())));
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.73';"));
-    assert.strictEqual((indexSrc.match(/\.js\?v=2\.73"/g) || []).length, 7);
-    assert.strictEqual((sw.match(/\.js\?v=2\.73'/g) || []).length, 7);
-    assert.strictEqual(/\?v=2\.72/.test(indexSrc + sw), false);
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-" + ver + "';"));
+    assert.strictEqual((indexSrc.match(new RegExp('\\.js\\?v=' + num + '"', 'g')) || []).length, 7);
+    assert.strictEqual((sw.match(new RegExp('\\.js\\?v=' + num + "'", 'g')) || []).length, 7);
+    assert.strictEqual((indexSrc.match(/\.js\?v=[\d.]+"/g) || []).length, 7);
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Step 8a: the holding side panel and the command palette.
+     The model and markup builders are pure, so they run on the list sandbox (real fmt and kjrEscape) with a fixed net worth. The overlays (open, close,
+     repaint, focus) run against a very small fake DOM.
+     ═══════════════════════════════════════════════════════════════════════ */
+  const NET_CLASSES = { stocks:6550, cash:10000, cpf:5000, realestate:0, crypto:0, insurance:0 };   // 21,550 with CPF, 16,550 without
+
+  /* The list sandbox plus the state the new code reads, a fixed net worth and a quiet clock. */
+  function panelSandbox(db, ccy){
+    const sb = listSandbox(db, ccy || 'SGD');
+    vm.runInContext('var _hp = null; var _hpHistSeq = 0; var _cp = null; var _dashShowCpf = false; var _stockChartRows = [];', sb);
+    sb._netWorthValueInfo = () => ({ classes:Object.assign({}, NET_CLASSES), total:21550, incomplete:false });
+    sb.relTime = () => '3d ago';
+    sb.kjrFmtAxis = core.kjrFmtAxis;
+    return sb;
+  }
+
+  /* The stock fixture with what the panel shows: AAPL pays US$2 a share, has a name and a day move (100 against a close of 98), and the coin BTC. */
+  function panelFixture(){
+    const f = stockFixture();
+    f.stocks[0].divPerShare = 2;
+    f._priceCache.AAPL = { price:100, currency:'USD', fetchedAt:TODAY_ISO, shortName:'Apple Inc', previousClose:98, change:2, changePct:2.0408163265306123 };
+    f.crypto = [{ id:'c_btc', symbol:'BTC', coingeckoId:'bitcoin', amount:0.25, avgCost:60000, currency:'USD' }];
+    f._priceCache.bitcoin = { sgd:152000, usd:112600, change24h:1.8, fetchedAt:TODAY_ISO };
+    return f;
+  }
+
+  /* A very small fake DOM for the overlays: elements by id with a class list, attributes, an innerHTML that counts its writes (and a fresh .hp-body after each,
+     as a real repaint gives), focus() and contains(), and a document that finds them. */
+  function fakeDom(ids){
+    const doc = { els:{}, activeElement:null, body:{ tagName:'BODY' }, openOverlay:null, found:{},
+      getElementById(id){ return this.els[id] || null; },
+      querySelector(sel){ return sel === '.overlay.open' ? this.openOverlay : null; },
+      querySelectorAll(sel){ return this.found[sel] || []; } };
+    ids.forEach(id => {
+      const el = { id, tagName:'DIV', attrs:{}, kids:[], writes:0, _html:'', hidden:false, value:'', title:'', textContent:'', body:{ scrollTop:0 },
+        classList:{ on:new Set(), add(...n){ n.forEach(x => this.on.add(x)); }, remove(...n){ n.forEach(x => this.on.delete(x)); }, contains(n){ return this.on.has(n); } },
+        setAttribute(k, v){ this.attrs[k] = String(v); }, getAttribute(k){ return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; },
+        removeAttribute(k){ delete this.attrs[k]; }, focus(){ doc.activeElement = this; }, blur(){ if (doc.activeElement === this) doc.activeElement = doc.body; },
+        contains(n){ return n === this || this.kids.indexOf(n) !== -1; },
+        querySelector(sel){ return sel === '.hp-body' ? this.body : null; }, querySelectorAll(){ return []; } };
+      // a repaint removes what had focus, as the real DOM does, and hands out a fresh scroll body
+      Object.defineProperty(el, 'innerHTML', { get(){ return this._html; }, set(v){ this._html = v; this.writes++; this.body = { scrollTop:0 }; if (this.contains(doc.activeElement) && doc.activeElement !== this) doc.activeElement = doc.body; } });
+      doc.els[id] = el;
+    });
+    return doc;
+  }
+
+  /* The panel sandbox on a fake DOM, with the modal helpers, toasts and entity modal recorded into calls. No sync connection unless a test sets one. */
+  function overlaySandbox(db){
+    const sb = panelSandbox(db, 'SGD');
+    const doc = fakeDom(['holding-panel', 'hp-panel', 'hp-close', 'hp-record', 'hp-edit', 'hp-retry', 'hp-trades-toggle', 'cmd-palette', 'cp-input', 'cp-list', 'cp-empty', 'cp-status',
+      'cp-trigger', 'cp-trigger-m', 'cp-kbd', 'vault-gate', 'nas-auth-gate']);
+    const calls = [];
+    // the panel's controls sit inside the panel, as they do once it is painted
+    doc.els['hp-panel'].kids = ['hp-close', 'hp-record', 'hp-edit', 'hp-retry', 'hp-trades-toggle'].map(id => doc.els[id]);
+    sb.document = doc;
+    sb.console = { error(){} };   // the sandbox has no console, refreshHoldingPanel logs a failed repaint
+    sb.openModalFocus = (overlay, fn) => calls.push(['trap', overlay.id, typeof fn === 'function' ? fn.name : null]);
+    sb.closeModalFocus = overlay => calls.push(['release', overlay.id]);
+    sb._modalFocusVisible = el => !!(el && el.visible);
+    sb.closeShellMenus = () => {};
+    sb.showToast = (msg, kind) => calls.push(['toast', msg, kind || '']);
+    sb.openEntityModal = (table, id, defaults) => calls.push(['modal', table, id === undefined ? null : id, defaults ? plain(defaults) : null]);
+    sb.getSyncUrl = () => '';
+    return { sb, doc, calls };
+  }
+
+  test('panel figures - decimals follow the value, quantities drop trailing zeros, a share is a percentage that never prints NaN', () => {
+    const sb = panelSandbox();
+    // two decimals from 1 up, below 1 as many as the value needs (a penny price keeps its third digit), six at most
+    [[152.3456, 2], [1, 2], [0.215, 3], [0.2, 2], [0.0425, 4], [0.123456789, 6], [0, 2], [NaN, 2], [-3.5, 2]].forEach(([n, dp]) => assert.strictEqual(sb._hpDp(n), dp, String(n)));
+    [[10, 4, '10'], [12.5, 4, '12.5'], [0.25, 8, '0.25'], [1234.5678, 4, '1,234.5678'], [0.123456789, 8, '0.12345679'], ['x', 4, DASH], [undefined, 4, DASH], [Infinity, 4, DASH]]
+      .forEach(([n, dp, text]) => assert.strictEqual(sb._hpQty(n, dp), text, String(n)));
+    assert.ok(Math.abs(sb._hpShare(1250, 16550) - 7.5528700906) < 1e-6);
+    [[null, 100], [100, 0], [100, -5], [100, NaN], [NaN, 100], [undefined, 100], ['5', 100]].forEach(([mv, net]) => assert.strictEqual(sb._hpShare(mv, net), null, mv + ' of ' + net));
+    assert.deepStrictEqual([7.5529, null, 0.03, 0, 100, 0.05, undefined, NaN].map(p => sb._hpShareText(p)), ['7.6%', DASH, '<0.1%', '0.0%', '100.0%', '0.1%', DASH, DASH]);
+    // an amount in a stated currency is printed as given, never converted (the figure is already in that currency)
+    assert.strictEqual(sb._hpMoney(100, 'usd', { dp:2 }), 'US$100.00');
+    assert.strictEqual(sb._hpMoney(1250, 'SGD', { dp:0 }), 'S$1,250');
+    assert.strictEqual(sb._hpMoney(250, 'SGD', { dp:0, signed:true }), '+S$250');
+    assert.strictEqual(sb._hpMoney(-250, 'SGD', { dp:0, signed:true }), '-S$250');
+    assert.deepStrictEqual([null, undefined, NaN, Infinity, '5'].map(v => sb._hpMoney(v, 'SGD')), Array(5).fill(DASH));
+  });
+
+  test('_hpNetWorth - the figure the dashboard hero shows with Include CPF respected, and a known subtotal flagged', () => {
+    const sb = panelSandbox();
+    assert.deepStrictEqual(plain(sb._hpNetWorth()), { displayNet:16550, incomplete:false });   // CPF off: stocks and cash
+    vm.runInContext('_dashShowCpf = true;', sb);
+    assert.deepStrictEqual(plain(sb._hpNetWorth()), { displayNet:21550, incomplete:false });   // CPF on: the CPF class joins
+    sb._netWorthValueInfo = () => ({ classes:Object.assign({}, NET_CLASSES), total:21550, incomplete:true });
+    assert.strictEqual(sb._hpNetWorth().incomplete, true);
+    // the same call the hero makes
+    assert.ok(extractFunction('renderDashboard').includes('_allocationData(valuation.classes, _dashShowCpf)'));
+    assert.ok(extractFunction('_hpNetWorth').includes('_allocationData(valuation.classes, _dashShowCpf)'));
+  });
+
+  test('_holdingPanelModel - a stock: its price in its own currency with the S$ beside it, the day move, and the stats from the row the table reads (CPF off and on)', () => {
+    const sb = panelSandbox(panelFixture(), 'USD');   // the Stocks tab on USD must not change the panel
+    const row = sb.buildStockChartRows()[0];
+    const m = navPlain(sb._holdingPanelModel('stocks', 's_aapl', sb._hpNetWorth()));
+    assert.deepStrictEqual({ table:m.table, id:m.id, cls:m.cls, sym:m.sym, sub:m.sub, ysym:m.ysym, ccy:m.ccy, canTrade:m.canTrade }, { table:'stocks', id:'s_aapl', cls:'stocks', sym:'AAPL', sub:'Apple Inc · US', ysym:'AAPL', ccy:'USD', canTrade:true });
+    assert.deepStrictEqual(m.price, { has:true, nativeText:'US$100.00', sgdText:'S$125.00', fxMissing:false, staleText:'' });
+    // the day: the quote's own percentage (the pill carries an arrow and a sign), and the position's S$ move from the row
+    assert.deepStrictEqual(m.day, { dir:'up', pctText:'▲ +2.04%', when:'today', sgdText:'+S$25' });
+    assert.strictEqual(row.changeSgd, 25);
+    const stat = key => m.stats.find(s => s.key === key);
+    assert.deepStrictEqual(m.stats.map(s => s.key), ['holding', 'avgCost', 'value', 'unrealised', 'dividends', 'share']);
+    assert.strictEqual(stat('holding').text, '10 shares');
+    assert.strictEqual(stat('avgCost').text, 'US$80.00');                 // per share, in the stock's own currency
+    assert.strictEqual(stat('value').text, 'S$1,250'); assert.strictEqual(row.mv, 1250);
+    assert.deepStrictEqual(stat('unrealised').ret, { dir:'up', pct:'▲ +25.00%', amount:'+S$250' });   // the percentage carries the arrow, the amount only its sign
+    assert.strictEqual(row.pl, 250); assert.strictEqual(row.plPct, 25);
+    assert.strictEqual(stat('dividends').text, 'S$25');                   // US$2 a share on 10 shares at 1.25
+    assert.strictEqual(row.divAnnualSgd, 25);
+    // share of net worth: 1,250 over the hero's figure, 16,550 with CPF off and 21,550 with it on
+    assert.strictEqual(stat('share').text, '7.6%');
+    vm.runInContext('_dashShowCpf = true;', sb);
+    assert.strictEqual(navPlain(sb._holdingPanelModel('stocks', 's_aapl', sb._hpNetWorth())).stats.find(s => s.key === 'share').text, '5.8%');
+    // an unknown or unsafe id, and a table that is not a holding, give no model
+    ['s_gone', '', null, undefined, 'a b', '<img>'].forEach(id => assert.strictEqual(sb._holdingPanelModel('stocks', id, {}), null, String(id)));
+    ['cash', 'cpfHistory', '', null, 'constructor', '__proto__'].forEach(t => assert.strictEqual(sb._holdingPanelModel(t, 's_aapl', {}), null, String(t)));
+  });
+
+  test('_holdingPanelModel - an SGD stock shows no second price line, a stock without a dividend has no Dividends stat, a stale price says how old it is', () => {
+    const f = panelFixture();
+    f._priceCache.D05 = { price:35, currency:'SGD', fetchedAt:new Date(Date.now() - 3 * 86400000).toISOString() };
+    const sb = panelSandbox(f);
+    const m = navPlain(sb._holdingPanelModel('stocks', 's_d05', sb._hpNetWorth()));
+    assert.deepStrictEqual(m.price, { has:true, nativeText:'S$35.00', sgdText:'', fxMissing:false, staleText:'Last updated 3d ago' });
+    assert.strictEqual(m.sub, 'SGX · Financials');                        // no quote name, so the market and sector
+    assert.deepStrictEqual(m.stats.map(s => s.key), ['holding', 'avgCost', 'value', 'unrealised', 'share']);
+    assert.strictEqual(m.stats[0].text, '100 shares'); assert.strictEqual(m.stats[1].text, 'S$30.00');
+    assert.strictEqual(m.day, null);                                      // no day figure in the quote, no pill
+    assert.strictEqual(navPlain(sb._holdingPanelModel('stocks', 's_d05', sb._hpNetWorth())).trades.total, 0);
+    // a single share reads "1 share", a fractional holding keeps its decimals
+    f.stocks[1].shares = 1; assert.strictEqual(navPlain(panelSandbox(f)._holdingPanelModel('stocks', 's_d05', {})).stats[0].text, '1 share');
+    f.stocks[1].shares = 12.5; assert.strictEqual(navPlain(panelSandbox(f)._holdingPanelModel('stocks', 's_d05', {})).stats[0].text, '12.5 shares');
+  });
+
+  test('_holdingPanelModel - a missing price and a missing FX rate show dashes with the reason, never NaN, and what is known stays', () => {
+    const sb = panelSandbox(panelFixture());
+    const nopx = navPlain(sb._holdingPanelModel('stocks', 's_nopx', sb._hpNetWorth()));
+    assert.strictEqual(nopx.price.has, false);
+    assert.strictEqual(nopx.day, null);
+    const s = key => nopx.stats.find(x => x.key === key);
+    assert.deepStrictEqual({ v:s('value').text, n:s('value').note, share:s('share').text }, { v:DASH, n:'No price yet', share:DASH });
+    assert.deepStrictEqual(s('unrealised').ret, { dir:'', pct:DASH, amount:'' });
+    assert.strictEqual(s('unrealised').note, 'No price yet');
+    assert.strictEqual(s('avgCost').text, 'US$10.00');                    // the position itself is still known
+    // no USDSGD rate: a USD stock keeps its price and its average cost in US$, the S$ figures say why they are missing
+    const noFx = panelSandbox(Object.assign(panelFixture(), { settings:{ fxOverrides:{}, fxRates:{} } }));
+    const m = navPlain(noFx._holdingPanelModel('stocks', 's_aapl', noFx._hpNetWorth()));
+    assert.deepStrictEqual(m.price, { has:true, nativeText:'US$100.00', sgdText:'', fxMissing:true, staleText:'' });
+    const t = key => m.stats.find(x => x.key === key);
+    assert.strictEqual(t('avgCost').text, 'US$80.00');
+    assert.deepStrictEqual({ v:t('value').text, n:t('value').note }, { v:DASH, n:'FX rate missing' });
+    assert.deepStrictEqual({ pct:t('unrealised').ret.pct, n:t('unrealised').note }, { pct:DASH, n:'FX rate missing' });
+    assert.deepStrictEqual({ v:t('dividends').text, n:t('dividends').note }, { v:DASH, n:'FX rate missing' });   // there is a dividend, it can not be converted, so it is not hidden
+    assert.strictEqual(t('share').text, DASH);
+    // an SGD stock does not need the rate
+    const d05 = navPlain(noFx._holdingPanelModel('stocks', 's_d05', noFx._hpNetWorth()));
+    assert.strictEqual(d05.stats.find(x => x.key === 'value').text, 'S$3,500');
+    // an incomplete valuation flags the share as a share of a known total
+    const flagged = navPlain(sb._holdingPanelModel('stocks', 's_aapl', { displayNet:16550, incomplete:true }));
+    assert.strictEqual(flagged.stats.find(x => x.key === 'share').note, 'of the known total');
+    assert.strictEqual(navPlain(sb._holdingPanelModel('stocks', 's_aapl', { displayNet:16550, incomplete:false })).stats.find(x => x.key === 'share').note, '');
+  });
+
+  test('_holdingPanelModel - a coin: US$ first and S$ after for a USD coin, the 24 hour move, an amount in coins, no trades and no dividends', () => {
+    const sb = panelSandbox(panelFixture());
+    const m = navPlain(sb._holdingPanelModel('crypto', 'c_btc', { displayNet:50000, incomplete:false }));
+    assert.deepStrictEqual({ table:m.table, cls:m.cls, sym:m.sym, sub:m.sub, ysym:m.ysym, ccy:m.ccy, canTrade:m.canTrade, trades:m.trades }, { table:'crypto', cls:'crypto', sym:'BTC', sub:'Crypto', ysym:'', ccy:'USD', canTrade:false, trades:{ total:0, rows:[] } });
+    assert.deepStrictEqual(m.price, { has:true, nativeText:'US$112,600.00', sgdText:'S$152,000.00', fxMissing:false, staleText:'' });
+    assert.deepStrictEqual(m.day, { dir:'up', pctText:'▲ +1.80%', when:'past 24 hours', sgdText:'+S$672' });
+    assert.deepStrictEqual(m.stats.map(s => s.key), ['holding', 'avgCost', 'value', 'unrealised', 'share']);
+    const stat = key => m.stats.find(s => s.key === key);
+    assert.strictEqual(stat('holding').text, '0.25 BTC');
+    assert.strictEqual(stat('avgCost').text, 'US$60,000.00');
+    assert.strictEqual(stat('value').text, 'S$38,000');
+    assert.deepStrictEqual(stat('unrealised').ret, { dir:'up', pct:'▲ +102.67%', amount:'+S$19,250' });   // cost 0.25 x 60,000 x 1.25 = 18,750
+    assert.strictEqual(stat('share').text, '76.0%');
+    // an SGD coin shows S$ only, a coin with no price shows dashes with the reason, and an unset average cost is a dash
+    const f = panelFixture(); f.crypto[0].currency = 'SGD'; f.crypto.push({ id:'c_foo', symbol:'FOO', amount:5, currency:'USD' });
+    const sg = panelSandbox(f);
+    const sgd = navPlain(sg._holdingPanelModel('crypto', 'c_btc', {}));
+    assert.deepStrictEqual(sgd.price, { has:true, nativeText:'S$152,000.00', sgdText:'', fxMissing:false, staleText:'' });
+    assert.strictEqual(sgd.stats.find(s => s.key === 'avgCost').text, 'S$60,000.00');
+    const foo = navPlain(sg._holdingPanelModel('crypto', 'c_foo', { displayNet:50000 }));
+    assert.strictEqual(foo.price.has, false); assert.strictEqual(foo.day, null);
+    assert.deepStrictEqual({ avg:foo.stats[1].text, v:foo.stats[2].text, n:foo.stats[2].note, share:foo.stats[4].text }, { avg:DASH, v:DASH, n:'No price yet', share:DASH });
+    assert.strictEqual(sg._holdingPanelModel('crypto', 's_aapl', {}), null);   // a stock id is not a coin
+  });
+
+  test('trades - newest first, the entry that came later first on a tied date, an undated one last, fees in the value, in the stock\'s own currency', () => {
+    const f = panelFixture();
+    f.stockTxns = [
+      { id:'t1', stockId:'s_aapl', date:'2026-02-01', side:'buy', shares:10, price:150, fees:5 },
+      { id:'t2', stockId:'s_aapl', date:'2026-03-10', side:'sell', shares:4, price:160, fees:2 },
+      { id:'t3', stockId:'s_d05', date:'2026-03-11', side:'buy', shares:1, price:30, fees:0 },        // another stock's trade never shows
+      { id:'t4', stockId:'s_aapl', date:'2026-03-10', side:'buy', shares:1, price:0.215, fees:0 },    // the same date as t2, entered after it
+      { id:'t5', stockId:'s_aapl', side:'buy', shares:2, price:100, fees:1 }                           // no date
+    ];
+    const sb = panelSandbox(f);
+    const t = navPlain(sb._hpTrades('s_aapl', 'USD'));
+    assert.strictEqual(t.total, 4);
+    assert.deepStrictEqual(t.rows.map(r => r.id), ['t4', 't2', 't1', 't5']);
+    assert.deepStrictEqual(t.rows.map(r => r.dateText), ['10/03/2026', '10/03/2026', '01/02/2026', '']);
+    assert.deepStrictEqual(t.rows[1], { id:'t2', sell:true, sideText:'Sold', dateText:'10/03/2026', qtyText:'4', priceText:'US$160.00', valueText:'US$638.00', feesText:'US$2.00' });   // 4 x 160 less 2
+    assert.deepStrictEqual({ side:t.rows[2].sideText, value:t.rows[2].valueText, fees:t.rows[2].feesText }, { side:'Bought', value:'US$1,505.00', fees:'US$5.00' });   // 10 x 150 plus 5
+    assert.deepStrictEqual({ price:t.rows[0].priceText, value:t.rows[0].valueText, fees:t.rows[0].feesText }, { price:'US$0.215', value:'US$0.22', fees:'' });   // a penny price keeps its third digit
+    // the model carries the same list, an unknown stock has none, a coin has no ledger
+    assert.strictEqual(navPlain(sb._holdingPanelModel('stocks', 's_aapl', {})).trades.total, 4);
+    assert.deepStrictEqual(navPlain(sb._hpTrades('s_gone', 'USD')), { total:0, rows:[] });
+  });
+
+  test('_holdingPanelHtml - a stock: heading the dialog is labelled by, price and day pill, six stats, the empty trades line and both buttons, every holding amount in a .money-chip', () => {
+    const sb = panelSandbox(panelFixture());
+    const model = sb._holdingPanelModel('stocks', 's_aapl', sb._hpNetWorth());
+    const html = sb._holdingPanelHtml(model, { showAll:false, hist:{ state:'nosync' } });
+    assert.ok(html.startsWith('<div class="hp-head"><span class="mono" style="background:var(--c-stocks-soft);color:var(--c-stocks-ink)" aria-hidden="true">A</span>'));
+    assert.ok(html.includes('<h2 class="hp-title" id="hp-title">AAPL</h2><p class="hp-sub" title="Apple Inc · US">Apple Inc · US</p>'));
+    assert.ok(html.includes('id="hp-close" data-click="closeHoldingPanel" aria-label="Close holding details"'));
+    // price in its own currency with the S$ beside it (the prefix dimmed), the pill carries the arrow and the sign, the day move of the position is a chip
+    assert.ok(html.includes('<span class="hp-px-v"><span class="ccy">US$</span>100.00</span><span class="hp-px-s">S$125.00</span>'));
+    assert.ok(html.includes('<span class="dash-pill up">▲ +2.04%</span><span class="hp-when">today · <span class="money-chip">+S$25</span> on this holding</span>'));
+    // the stats grid: quantity, cost, value, unrealised (percentage with arrow over a signed amount) and dividends in chips, the share as a plain percentage
+    assert.ok(html.includes('<dl class="hp-stats">'));
+    assert.ok(html.includes('<div class="hp-stat"><dt>Holding</dt><dd><span class="money-chip">10 shares</span></dd></div>'));
+    assert.ok(html.includes('<div class="hp-stat"><dt>Average cost</dt><dd><span class="money-chip"><span class="ccy">US$</span>80.00</span></dd></div>'));
+    assert.ok(html.includes('<div class="hp-stat"><dt>Market value</dt><dd><span class="money-chip"><span class="ccy">S$</span>1,250</span></dd></div>'));
+    assert.ok(html.includes('<div class="hp-stat"><dt>Unrealised</dt><dd><span class="hp-ret up"><span class="hp-ret-pct">▲ +25.00%</span><span class="hp-ret-amt money-chip">+<span class="ccy">S$</span>250</span></span></dd></div>'));
+    assert.ok(html.includes('<div class="hp-stat"><dt>Dividends a year</dt><dd><span class="money-chip"><span class="ccy">S$</span>25</span></dd></div>'));
+    assert.ok(html.includes('<div class="hp-stat"><dt>Share of net worth</dt><dd>7.6%</dd></div>'));
+    assert.strictEqual((html.match(/money-chip/g) || []).length, 6);   // the day move, holding, cost, value, unrealised amount and dividends
+    // trades and the foot: Record trade is the primary action of a stock, Edit holding follows, both through the one delegated action
+    assert.ok(html.includes('<section aria-labelledby="hp-trades-h"><div class="hp-sect"><h3 class="hp-h" id="hp-trades-h">Trades</h3></div><p class="hp-none">No trades recorded yet.</p></section>'));
+    assert.ok(html.endsWith('<div class="hp-foot"><button type="button" class="btn btn-primary" id="hp-record" data-click="holdingPanelAction" data-a0="record">Record trade</button><button type="button" class="btn" id="hp-edit" data-click="holdingPanelAction" data-a0="edit">Edit holding</button></div>'));
+    assert.strictEqual(/\son[a-z]+="/i.test(html), false);   // CSP: no inline handler
+    // a stock without a price: a dash in place of the price and a reason, no pill, nothing blurred that is not the holder's
+    const nopx = sb._holdingPanelHtml(sb._holdingPanelModel('stocks', 's_nopx', sb._hpNetWorth()), { hist:{ state:'nosync' } });
+    assert.ok(nopx.includes('<span class="hp-px-v">' + DASH + '</span><span class="hp-px-s">No price yet, refresh prices</span>'));
+    assert.strictEqual(nopx.includes('dash-pill'), false);
+    assert.ok(nopx.includes('<dt>Market value</dt><dd><span class="money-chip">' + DASH + '</span><span class="hp-stat-note">No price yet</span></dd>'));
+  });
+
+  test('_holdingPanelHtml - a coin has no Record trade, no Trades section and says history is not there yet, its heading names Crypto', () => {
+    const sb = panelSandbox(panelFixture());
+    const html = sb._holdingPanelHtml(sb._holdingPanelModel('crypto', 'c_btc', { displayNet:50000 }), { hist:{ state:'coin' } });
+    assert.ok(html.includes('<h2 class="hp-title" id="hp-title">BTC</h2><p class="hp-sub" title="Crypto">Crypto</p>'));
+    assert.ok(html.includes('class="mono" style="background:var(--c-crypto-soft);color:var(--c-crypto-ink)" aria-hidden="true">₿</span>'));
+    assert.ok(html.includes('<span class="hp-px-v"><span class="ccy">US$</span>112,600.00</span><span class="hp-px-s">S$152,000.00</span>'));
+    assert.ok(html.includes('<span class="hp-when">past 24 hours · <span class="money-chip">+S$672</span> on this holding</span>'));
+    assert.ok(html.includes('Price history is not available for coins yet.'));
+    assert.strictEqual(html.includes('hp-record') || html.includes('Record trade') || html.includes('hp-trades') || html.includes('Trades'), false);
+    assert.ok(html.includes('id="hp-edit"') && html.includes('<dd><span class="money-chip">0.25 BTC</span></dd>'));
+    assert.ok(html.includes('<dd>76.0%</dd>'));
+  });
+
+  test('chart block - every history state has its own plain line and no emoji, Retry belongs to an error only, a coin never charts', () => {
+    const sb = panelSandbox(panelFixture());
+    const stock = sb._holdingPanelModel('stocks', 's_aapl', {}), coin = sb._holdingPanelModel('crypto', 'c_btc', {});
+    const text = h => h.replace(/<[^>]*>/g, '').trim();
+    assert.strictEqual(text(sb._hpChartHtml(stock, { state:'nosync' })), 'Price history needs your sync connection.');
+    assert.strictEqual(text(sb._hpChartHtml(stock, { state:'loading' })), 'Loading price history…');
+    assert.strictEqual(text(sb._hpChartHtml(stock, { state:'sparse' })), 'Not enough price history yet.');
+    const err = sb._hpChartHtml(stock, { state:'error' });
+    assert.strictEqual(text(err), 'Price history is unavailable right now.Retry');
+    assert.ok(err.includes('<button type="button" class="btn btn-sm" id="hp-retry" data-click="holdingPanelAction" data-a0="retry">Retry</button>'));
+    ['nosync', 'loading', 'sparse', 'ok'].forEach(s => assert.strictEqual(sb._hpChartHtml(stock, { state:s, series:[{ date:'2026-10-01', value:5 }, { date:'2026-10-02', value:6 }] }).includes('hp-retry'), false, s));
+    // an unknown or missing state reads as unavailable, never as a blank hole
+    [undefined, null, {}, { state:'weird' }].forEach(h => assert.ok(text(sb._hpChartHtml(stock, h)).startsWith('Price history is unavailable right now.'), JSON.stringify(h)));
+    // a coin says so whatever the state says, and a loading line is only a line (no icon tile)
+    ['nosync', 'loading', 'error', 'ok', 'coin'].forEach(s => assert.strictEqual(text(sb._hpChartHtml(coin, { state:s })), 'Price history is not available for coins yet.', s));
+    assert.strictEqual(sb._hpChartHtml(stock, { state:'loading' }).includes('hp-empty-icon'), false);
+    const all = ['nosync', 'loading', 'sparse', 'error'].map(s => sb._hpChartHtml(stock, { state:s })).join('') + sb._hpChartHtml(coin, { state:'coin' });
+    assert.strictEqual(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(all), false);   // line icons only, no emoji
+    assert.ok(all.includes('class="hp-empty-icon" aria-hidden="true"><svg'));
+  });
+
+  test('_hpSeries - one point per Singapore day (a later point of the day wins), oldest first, only real positive prices', () => {
+    const sb = panelSandbox();
+    const at = (iso, h) => Date.parse(iso + 'T' + h + ':00:00+08:00');
+    const out = navPlain(sb._hpSeries([
+      { t:at('2026-10-02', '10'), c:101 }, { t:at('2026-10-01', '10'), c:100 }, { t:at('2026-10-02', '15'), c:102 },
+      { t:at('2026-10-03', '10'), c:null }, { t:at('2026-10-04', '10'), c:'x' }, { t:at('2026-10-05', '10'), c:0 }, { t:at('2026-10-06', '10'), c:-4 },
+      { t:null, c:105 }, { t:'nope', c:106 }, { t:8.64e15 + 1, c:107 }, null, undefined, 'x', { c:5 },
+      { t:at('2026-10-07', '23'), c:103 }
+    ]));
+    assert.deepStrictEqual(out, [{ date:'2026-10-01', value:100 }, { date:'2026-10-02', value:102 }, { date:'2026-10-07', value:103 }]);
+    [null, undefined, {}, 'x', 5, []].forEach(v => assert.deepStrictEqual(navPlain(sb._hpSeries(v)), [], String(v)));
+    // a point just after midnight in Singapore is that day's, not the previous UTC day's
+    assert.deepStrictEqual(navPlain(sb._hpSeries([{ t:at('2026-10-08', '00'), c:9 }, { t:at('2026-10-09', '00'), c:10 }])), [{ date:'2026-10-08', value:9 }, { date:'2026-10-09', value:10 }]);
+  });
+
+  /* A daily series of `days` points ending on endIso, running from `from` to `to` in a straight line. */
+  const histSeries = (from, to, days, endIso) => Array.from({ length:days }, (_, i) => ({
+    date:new Date(Date.parse((endIso || '2026-10-09') + 'T00:00:00Z') - (days - 1 - i) * 86400000).toISOString().slice(0, 10),
+    value:+(from + (to - from) * i / (days - 1)).toFixed(4) }));
+
+  test('_hpAxisDp and _hpAxisLabel - labels carry the decimals the chart needs so each reads exactly, from 1,000 up the hero\'s compact form', () => {
+    const sb = panelSandbox();
+    const g = (...v) => v.map(value => ({ value }));
+    assert.deepStrictEqual([g(3.2, 3.3), g(100, 105), g(0.215, 0.22), g(2.5, 5), g(), g(0.0005, 0.001)].map(x => sb._hpAxisDp(x)), [1, 0, 3, 1, 0, 4]);
+    assert.strictEqual(sb._hpAxisLabel(3.3, 'S$', 1), 'S$3.3');
+    assert.strictEqual(sb._hpAxisLabel(105, 'US$', 0), 'US$105');
+    assert.strictEqual(sb._hpAxisLabel(-2, 'S$', 0), '-S$2');
+    assert.strictEqual(sb._hpAxisLabel(1250, 'US$', 0), 'US$1.3k');
+    assert.strictEqual(sb._hpAxisLabel(1250000, 'S$', 0), 'S$1.25M');   // the hero's own form, up to two decimals from a million
+    assert.deepStrictEqual(['USD', 'sgd', 'HKD', undefined, null].map(c => sb._hpCcySym(c)), ['US$', 'S$', 'HKD ', 'S$', 'S$']);
+  });
+
+  test('_hpSeriesHtml - the hero chart\'s geometry and classes at panel size: gain colour for a rise, labelled gridlines, human date ticks, an end dot, a result under it', () => {
+    const sb = panelSandbox();
+    const up = sb._hpSeriesHtml({ state:'ok', ccy:'USD', series:histSeries(100, 120, 64) });
+    assert.ok(up.startsWith('<div class="hero-chart hp-chart up" role="img" aria-label="Price over the past 3 months, up 20.0%">'));
+    assert.ok(up.includes('<div class="hero-grid" aria-hidden="true">') && up.includes('<div class="hero-ticks" aria-hidden="true">'));
+    const grid = Array.from(up.matchAll(/<i style="top:[^"]*"><b>([^<]*)<\/b><\/i>/g)).map(m => m[1]);
+    assert.deepStrictEqual(grid, ['US$100', 'US$105', 'US$110', 'US$115']);   // round numbers inside the padded range
+    const ticks = Array.from(up.matchAll(/<span style="left:[^"]*">([^<]*)<\/span>/g)).map(m => m[1]);
+    assert.deepStrictEqual([ticks.length, ticks[0], ticks[ticks.length - 1]], [5, '7 Aug', '9 Oct']);
+    assert.ok(up.includes('<defs><linearGradient id="hp-fill"') && up.includes('fill="url(#hp-fill)"') && up.includes('vector-effect="non-scaling-stroke"'));
+    assert.strictEqual(up.includes('hero-fill'), false);                    // the hero's own gradient id is not reused
+    assert.ok(/<i class="hero-dot end" style="left:100\.000%;top:[\d.]+%"><\/i>/.test(up));
+    assert.ok(up.endsWith('<p class="hp-caption"><span>3 months</span><span class="hp-res up">▲ +20.00%</span></p>'));
+    // a fall takes the loss colour and a sign, a level series is level (no arrow, no colour)
+    const down = sb._hpSeriesHtml({ state:'ok', ccy:'USD', series:histSeries(120, 100, 64) });
+    assert.ok(down.includes('class="hero-chart hp-chart down"') && down.includes('aria-label="Price over the past 3 months, down 16.7%"'));
+    assert.ok(down.endsWith('<span class="hp-res down">▼ -16.67%</span></p>'));
+    const flat = sb._hpSeriesHtml({ state:'ok', ccy:'USD', series:histSeries(50, 50, 30) });
+    assert.ok(flat.includes('class="hero-chart hp-chart up"') && flat.includes('aria-label="Price over the past 3 months, level"') && flat.endsWith('<span class="hp-res">+0.00%</span></p>'));
+    // a low-priced stock labels its gridlines to the tenth (the hero's own labels would all read S$3) and its line fills the plot, the hero's one-dollar floor
+    // on the padded range would have squeezed it into a third of the height
+    const small = sb._hpSeriesHtml({ state:'ok', ccy:'SGD', series:histSeries(3.2, 3.6, 40) });
+    assert.deepStrictEqual(Array.from(small.matchAll(/<i style="top:[^"]*"><b>([^<]*)<\/b><\/i>/g)).map(m => m[1]), ['S$3.2', 'S$3.3', 'S$3.4', 'S$3.5']);
+    const ys = Array.from(/<path d="(M[^"]*)L1000 300L0 300Z"/.exec(small)[1].matchAll(/L?[\d.]+ ([\d.]+)/g)).map(m => +m[1]);
+    assert.ok(Math.max.apply(null, ys) - Math.min.apply(null, ys) > 0.7 * 300, 'the line spans ' + (Math.max.apply(null, ys) - Math.min.apply(null, ys)));
+    // the same shape at a level of 100 or more is the hero's own geometry, unscaled
+    assert.deepStrictEqual([3.6, 0.215, 99.9, 100, 250, 0, NaN, Infinity].map(top => sb._hpScale([{ value:top }, { value:top / 2 }])), [100, 1000, 10, 1, 1, 1, 1, 1]);
+    // a long history labels its ticks by month, a hostile currency code reaches the page escaped
+    const long = sb._hpSeriesHtml({ state:'ok', ccy:'USD', series:histSeries(10, 20, 200) });
+    assert.ok(long.includes('class="hero-ticks month"'));
+    const evil = sb._hpSeriesHtml({ state:'ok', ccy:'<b>', series:histSeries(100, 120, 64) });
+    assert.strictEqual(evil.includes('<B>'), false);   // the markup's own label tags are lowercase <b>, an upper-case one could only be the currency code
+    assert.ok(evil.includes('<b>&lt;B&gt; 100</b>'));
+  });
+
+  test('the panel markup - a hostile symbol, name, sector and currency reach the page only as escaped text, in the heading, the title, the stats and the chart', () => {
+    const evil = '<img src=x onerror="window.__x=1">';
+    const sb = panelSandbox({
+      stocks:[{ id:'s_evil', symbol:evil, market:'US', sector:'"><script>alert(1)</script>', shares:1, avgCost:5, currency:'<i>', divPerShare:1 }],
+      crypto:[{ id:'c_evil', symbol:'<svg onload=1>', coingeckoId:'x', amount:2, avgCost:1, currency:'USD' }],
+      _priceCache:{ [evil]:{ price:5, currency:'USD', fetchedAt:TODAY_ISO, shortName:'<b onmouseover=alert(2)>Evil</b>', previousClose:4 }, x:{ sgd:3, usd:2, change24h:1, fetchedAt:TODAY_ISO } }
+    });
+    const stock = sb._holdingPanelHtml(sb._holdingPanelModel('stocks', 's_evil', sb._hpNetWorth()), { hist:{ state:'ok', ccy:'<i>', series:histSeries(4, 5, 30) } });
+    const coin = sb._holdingPanelHtml(sb._holdingPanelModel('crypto', 'c_evil', { displayNet:100 }), { hist:{ state:'coin' } });
+    [stock, coin].forEach(html => {
+      assert.strictEqual(/<img|<script|<svg onload|<b onmouseover|<i>|<I>/i.test(html.replace(/<svg viewBox[^>]*>/g, '')), false, 'raw markup');
+      assert.strictEqual(/\son[a-z]+="/i.test(html), false);
+    });
+    assert.ok(stock.includes('<h2 class="hp-title" id="hp-title">&lt;img src=x onerror=&quot;window.__x=1&quot;&gt;</h2>'));
+    assert.ok(stock.includes('title="&lt;b onmouseover=alert(2)&gt;Evil&lt;/b&gt; · US"'));            // an attribute can not be broken out of
+    assert.ok(stock.includes('class="mono"') && stock.includes('>&lt;</span>'));                              // the monogram letter
+    assert.ok(stock.includes('&lt;I&gt; 5.00'));                                                               // fmt prints a code it can not format as typed, the builder escapes it
+    assert.ok(coin.includes('<dd><span class="money-chip">2 &lt;svg onload=1&gt;</span></dd>'));
+    assert.ok(coin.includes('id="hp-title">&lt;svg onload=1&gt;</h2>'));
+  });
+
+  test('the panel markup never prints NaN, undefined, null or Infinity, whatever the holding or its quote holds', () => {
+    const odd = [null, undefined, NaN, Infinity, -Infinity, 0, -5, 5, '7', 'x'];
+    const sb = panelSandbox({ stocks:[{ id:'s_odd', symbol:'ODD', market:'US', sector:'', shares:1, avgCost:1, currency:'USD' }], crypto:[{ id:'c_odd', symbol:'ODD', coingeckoId:'odd', amount:1, avgCost:1, currency:'USD' }], _priceCache:{} });
+    let n = 0;
+    const bad = html => /NaN|undefined|null|Infinity/.test(html);
+    odd.forEach(shares => odd.forEach(avg => odd.forEach(price => odd.forEach(div => {
+      const s = sb.DB.stocks[0];
+      Object.assign(s, { shares, avgCost:avg, divPerShare:div });
+      sb.DB._priceCache.ODD = { price, currency:'USD', fetchedAt:TODAY_ISO, changePct:price, previousClose:avg, change:div };
+      const html = sb._holdingPanelHtml(sb._holdingPanelModel('stocks', 's_odd', sb._hpNetWorth()), { hist:{ state:'nosync' } });
+      assert.strictEqual(bad(html), false, JSON.stringify({ shares, avg, price, div }) + ' -> ' + html.replace(/<[^>]*>/g, ' '));
+      n++;
+    }))));
+    odd.forEach(amount => odd.forEach(avg => odd.forEach(sgd => odd.forEach(pct => {
+      Object.assign(sb.DB.crypto[0], { amount, avgCost:avg });
+      sb.DB._priceCache.odd = { sgd, usd:sgd, change24h:pct, fetchedAt:TODAY_ISO };
+      const html = sb._holdingPanelHtml(sb._holdingPanelModel('crypto', 'c_odd', { displayNet:pct }), { hist:{ state:'coin' } });
+      assert.strictEqual(bad(html), false, JSON.stringify({ amount, avg, sgd, pct }) + ' -> ' + html.replace(/<[^>]*>/g, ' '));
+      n++;
+    }))));
+    assert.ok(n >= 20000);
+  });
+
+  /* Price history points in the Apps Script's shape ({ t: ms epoch, c: close }), one a day ending today. */
+  const histPoints = (from, to, days) => Array.from({ length:days }, (_, i) => ({ t:Date.now() - (days - 1 - i) * 86400000, c:+(from + (to - from) * i / (days - 1)).toFixed(2) }));
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+
+  test('openHoldingPanel - paints the panel, opens the overlay, gives the focus trap to openModalFocus with Escape closing it, and asks for the 3 month history by its range key', () => {
+    const { sb, doc, calls } = overlaySandbox(panelFixture());
+    sb.getSyncUrl = () => 'https://example.invalid/sync';
+    const asked = [];
+    sb.fetchStockHistory = (syms, range) => { asked.push([syms, range]); return new Promise(() => {}); };   // never answers, the panel stays loading
+    assert.strictEqual(sb.openHoldingPanel('stocks', 's_aapl'), true);
+    const overlay = doc.els['holding-panel'], host = doc.els['hp-panel'];
+    assert.ok(overlay.classList.contains('open') && overlay.classList.contains('hp-in'));
+    assert.deepStrictEqual(calls.filter(c => c[0] === 'trap'), [['trap', 'holding-panel', 'closeHoldingPanel']]);
+    assert.ok(host.innerHTML.includes('id="hp-title">AAPL</h2>') && host.innerHTML.includes('Loading price history…'));
+    assert.deepStrictEqual(plain(asked), [[['AAPL'], 'THREE_MONTHS']]);
+    assert.strictEqual(vm.runInContext('_hp.hist.state', sb), 'loading');
+    // THREE_MONTHS is the PB_PERIODS key fetchStockHistory maps to 3mo. A bare '3mo' is not a key and would fall back to six months.
+    assert.strictEqual(vm.runInContext('HP_HISTORY_RANGE', sb), 'THREE_MONTHS');
+    assert.ok(appSrc.includes("THREE_MONTHS:'3mo'") && extractFunction('fetchStockHistory').includes("PB_PERIODS[range] || '6mo'"));
+    assert.ok(extractFunction('fetchStockHistory').includes('_pbHistCache[s][range]'));   // the cache is keyed by the same key
+  });
+
+  test('openHoldingPanel - a coin loads no history, no sync connection is its own state, a holding that is gone says so, and a bad id or table opens nothing', () => {
+    const { sb, doc, calls } = overlaySandbox(panelFixture());
+    let asked = 0;
+    sb.fetchStockHistory = () => { asked++; return new Promise(() => {}); };
+    assert.strictEqual(sb.openHoldingPanel('crypto', 'c_btc'), true);
+    assert.strictEqual(vm.runInContext('_hp.hist.state', sb), 'coin');
+    assert.ok(doc.els['hp-panel'].innerHTML.includes('Price history is not available for coins yet.'));
+    assert.strictEqual(sb.openHoldingPanel('stocks', 's_aapl'), true);   // getSyncUrl is '' here: nothing to ask
+    assert.strictEqual(vm.runInContext('_hp.hist.state', sb), 'nosync');
+    assert.ok(doc.els['hp-panel'].innerHTML.includes('Price history needs your sync connection.'));
+    assert.strictEqual(asked, 0);
+    // switching holding while the panel is open keeps one trap per call and the new content
+    assert.ok(doc.els['hp-panel'].innerHTML.includes('id="hp-title">AAPL</h2>'));
+    sb.closeHoldingPanel(); calls.length = 0;
+    const before = doc.els['hp-panel'].writes;
+    assert.strictEqual(sb.openHoldingPanel('stocks', 's_gone'), false);
+    assert.deepStrictEqual(calls, [['toast', 'That holding no longer exists, it may have been deleted elsewhere', 'error']]);
+    ['', null, undefined, 'a b', '<img>', 'x'.repeat(65)].forEach(id => assert.strictEqual(sb.openHoldingPanel('stocks', id), false, String(id)));
+    ['cash', 'watchlist', '', null, 'constructor'].forEach(t => assert.strictEqual(sb.openHoldingPanel(t, 's_aapl'), false, String(t)));
+    assert.strictEqual(doc.els['hp-panel'].writes, before);
+    assert.strictEqual(doc.els['holding-panel'].classList.contains('open'), false);
+    assert.strictEqual(vm.runInContext('_hp', sb), null);
+    // no overlay in the page (the markup is missing): false, not a throw
+    doc.els['holding-panel'] = null;
+    assert.strictEqual(sb.openHoldingPanel('stocks', 's_aapl'), false);
+  });
+
+  test('closeHoldingPanel - closes the overlay and releases the trap, a second close does nothing, and it empties nothing the page still needs', () => {
+    const { sb, doc, calls } = overlaySandbox(panelFixture());
+    assert.strictEqual(sb.closeHoldingPanel(), false);   // nothing open
+    sb.openHoldingPanel('stocks', 's_aapl'); calls.length = 0;
+    const overlay = doc.els['holding-panel'];
+    assert.strictEqual(sb.closeHoldingPanel(), true);
+    assert.strictEqual(overlay.classList.contains('open') || overlay.classList.contains('hp-in'), false);
+    assert.deepStrictEqual(calls, [['release', 'holding-panel']]);
+    assert.strictEqual(vm.runInContext('_hp', sb), null);
+    assert.strictEqual(sb.closeHoldingPanel(), false);
+    assert.deepStrictEqual(calls, [['release', 'holding-panel']]);
+    // the router closes it too, so Back or a hash change never leaves a panel over the next page
+    assert.ok(extractFunction('showPage').includes('closeHoldingPanel();'));
+  });
+
+  await testAsync('panel history - success draws the chart, a failure shows Retry and Retry asks again, a missing symbol is unavailable, under two days is sparse', async () => {
+    const { sb, doc } = overlaySandbox(panelFixture());
+    sb.getSyncUrl = () => 'https://example.invalid/sync';
+    const host = doc.els['hp-panel'];
+    const state = () => vm.runInContext('_hp.hist.state', sb);
+    const good = () => ({ AAPL:{ ccy:'USD', points:histPoints(231, 254.3, 64), fetchedAt:TODAY_ISO } });
+    let mode = 'reject', asked = 0;
+    sb.fetchStockHistory = async () => { asked++; if (mode === 'reject') throw new Error('boom'); if (mode === 'empty') return {}; if (mode === 'one') return { AAPL:{ ccy:'USD', points:histPoints(100, 100, 1), fetchedAt:TODAY_ISO } }; return good(); };
+    sb.openHoldingPanel('stocks', 's_aapl');
+    assert.strictEqual(state(), 'loading');
+    await flush();
+    assert.strictEqual(state(), 'error');
+    assert.ok(host.innerHTML.includes('Price history is unavailable right now.') && host.innerHTML.includes('id="hp-retry"'));
+    // Retry asks again (it is loading at once), and the answer replaces the error with the chart
+    mode = 'ok';
+    assert.strictEqual(sb.holdingPanelAction('retry'), true);
+    assert.strictEqual(state(), 'loading'); assert.ok(host.innerHTML.includes('Loading price history…'));
+    await flush();
+    assert.strictEqual(asked, 2); assert.strictEqual(state(), 'ok');
+    assert.ok(host.innerHTML.includes('class="hero-chart hp-chart up"') && host.innerHTML.includes('<span>3 months</span>') && !host.innerHTML.includes('hp-retry'));
+    // a quote the proxy has no history for, a single day, and a reply that is not usable are not charts
+    mode = 'empty'; sb.closeHoldingPanel(); sb.openHoldingPanel('stocks', 's_aapl'); await flush();
+    assert.strictEqual(state(), 'error');
+    mode = 'one'; sb.closeHoldingPanel(); sb.openHoldingPanel('stocks', 's_aapl'); await flush();
+    assert.strictEqual(state(), 'sparse'); assert.ok(host.innerHTML.includes('Not enough price history yet.'));
+    // Retry belongs to stocks, a coin has nothing to retry
+    sb.closeHoldingPanel(); sb.openHoldingPanel('crypto', 'c_btc');
+    assert.strictEqual(sb.holdingPanelAction('retry'), false);
+  });
+
+  await testAsync('panel history - an answer that arrives after the panel was closed, or reopened, paints nothing', async () => {
+    const { sb, doc } = overlaySandbox(panelFixture());
+    sb.getSyncUrl = () => 'https://example.invalid/sync';
+    const host = doc.els['hp-panel'];
+    const answers = [];
+    sb.fetchStockHistory = () => new Promise(resolve => answers.push(resolve));
+    const reply = () => ({ AAPL:{ ccy:'USD', points:histPoints(231, 254.3, 64), fetchedAt:TODAY_ISO }, D05:{ ccy:'SGD', points:histPoints(48, 52.4, 64), fetchedAt:TODAY_ISO } });
+    sb.openHoldingPanel('stocks', 's_aapl');            // request 1
+    sb.closeHoldingPanel();
+    const afterClose = host.writes;
+    answers[0](reply()); await flush();
+    assert.strictEqual(host.writes, afterClose);          // closed: the late answer is dropped
+    assert.strictEqual(vm.runInContext('_hp', sb), null);
+    sb.openHoldingPanel('stocks', 's_aapl');            // request 2
+    sb.closeHoldingPanel();
+    sb.openHoldingPanel('stocks', 's_d05');             // request 3, another stock
+    answers[1](reply()); await flush();
+    assert.strictEqual(vm.runInContext('_hp.hist.state', sb), 'loading');   // request 2's answer is not request 3's
+    assert.strictEqual(host.innerHTML.includes('hero-chart hp-chart'), false);
+    answers[2](reply()); await flush();
+    assert.strictEqual(vm.runInContext('_hp.hist.state', sb), 'ok');
+    assert.ok(host.innerHTML.includes('id="hp-title">D05</h2>') && host.innerHTML.includes('class="hero-chart hp-chart up"'));
+  });
+
+  test('refreshHoldingPanel - repaints the open panel in place, skips a repaint that would change nothing, keeps scroll and focus, and closes when the holding is gone', () => {
+    const { sb, doc, calls } = overlaySandbox(panelFixture());
+    assert.strictEqual(sb.refreshHoldingPanel(), false);     // nothing open, nothing to do
+    sb.openHoldingPanel('stocks', 's_aapl');
+    const host = doc.els['hp-panel'];
+    const first = host.writes;
+    assert.strictEqual(sb.refreshHoldingPanel(), true);       // nothing moved: not a single write, so focus and the chart are undisturbed
+    assert.strictEqual(host.writes, first);
+    // a new price repaints in place, the share and the figures follow
+    sb.DB._priceCache.AAPL.price = 110;
+    doc.activeElement = doc.els['hp-edit'];
+    host.body.scrollTop = 120;
+    assert.strictEqual(sb.refreshHoldingPanel(), true);
+    assert.strictEqual(host.writes, first + 1);
+    assert.ok(host.innerHTML.includes('<span class="ccy">US$</span>110.00') && host.innerHTML.includes('<span class="ccy">S$</span>1,375'));   // 10 x 110 x 1.25
+    assert.strictEqual(host.body.scrollTop, 120);             // the scroll position survives the repaint
+    assert.strictEqual(doc.activeElement, doc.els['hp-edit']); // and so does focus (the control has an id, it is found again)
+    // a focused control that is gone after the repaint hands focus to the dialog, so Escape and Tab keep working
+    doc.activeElement = doc.els['hp-retry']; doc.els['hp-retry'] = null;
+    sb.DB._priceCache.AAPL.price = 111;
+    sb.refreshHoldingPanel();
+    assert.strictEqual(doc.activeElement, doc.els['holding-panel']);
+    // the same call from every place data moves
+    assert.ok(extractFunction('renderAll').includes('refreshHoldingPanel();'));
+    // the two price refreshes (extractFunction can not read refreshStockPrices, its default parameter holds a brace) repaint the panel right after their own render
+    assert.ok(appSrc.includes('    renderStocks();\n    refreshHoldingPanel();   // an open holding panel takes the new price'));
+    assert.ok(appSrc.includes('    renderCrypto();\n    refreshHoldingPanel();   // an open holding panel takes the new price'));
+    // the holding deleted elsewhere: the panel closes, saying so
+    calls.length = 0;
+    sb.DB.stocks = sb.DB.stocks.filter(s => s.id !== 's_aapl');
+    assert.strictEqual(sb.refreshHoldingPanel(), false);
+    assert.strictEqual(vm.runInContext('_hp', sb), null);
+    assert.strictEqual(doc.els['holding-panel'].classList.contains('open'), false);
+    assert.deepStrictEqual(calls, [['release', 'holding-panel'], ['toast', 'This holding was removed, so its panel was closed', '']]);
+  });
+
+  test('refreshHoldingPanel - never throws into a render, whatever the data does', () => {
+    const { sb } = overlaySandbox(panelFixture());
+    sb.openHoldingPanel('stocks', 's_aapl');
+    sb._holdingPanelModel = () => { throw new Error('bad row'); };
+    assert.doesNotThrow(() => assert.strictEqual(sb.refreshHoldingPanel(), false));
+    assert.ok(vm.runInContext('_hp', sb) !== null);           // still open, the next repaint may recover
+  });
+
+  test('holdingPanelAction - Record trade and Edit holding close the panel first, then open the entity modal for this holding, and nothing else is accepted', () => {
+    const { sb, doc, calls } = overlaySandbox(panelFixture());
+    const rec = () => calls.filter(c => c[0] === 'modal' || c[0] === 'release' || c[0] === 'toast');
+    sb.openHoldingPanel('stocks', 's_aapl'); calls.length = 0;
+    assert.strictEqual(sb.holdingPanelAction('record'), true);
+    assert.deepStrictEqual(rec(), [['release', 'holding-panel'], ['modal', 'stockTxns', null, { stockId:'s_aapl' }]]);   // closed first, the trade is for this stock
+    assert.strictEqual(vm.runInContext('_hp', sb), null);
+    sb.openHoldingPanel('stocks', 's_d05'); calls.length = 0;
+    assert.strictEqual(sb.holdingPanelAction('edit'), true);
+    assert.deepStrictEqual(rec(), [['release', 'holding-panel'], ['modal', 'stocks', 's_d05', null]]);
+    sb.openHoldingPanel('crypto', 'c_btc'); calls.length = 0;
+    assert.strictEqual(sb.holdingPanelAction('record'), false);   // a coin has no trade ledger, the panel stays open
+    assert.deepStrictEqual(rec(), []); assert.ok(vm.runInContext('_hp', sb) !== null);
+    assert.strictEqual(sb.holdingPanelAction('edit'), true);
+    assert.deepStrictEqual(rec(), [['release', 'holding-panel'], ['modal', 'crypto', 'c_btc', null]]);
+    // the stock vanished between opening the panel and pressing Record trade: no form for a stock that is not there
+    sb.openHoldingPanel('stocks', 's_o39'); calls.length = 0;
+    sb.DB.stocks = sb.DB.stocks.filter(s => s.id !== 's_o39');
+    assert.strictEqual(sb.holdingPanelAction('record'), false);
+    assert.deepStrictEqual(rec(), [['release', 'holding-panel'], ['toast', 'That stock no longer exists, it may have been deleted elsewhere', 'error']]);
+    // only the four named actions run, and only while a panel is open
+    sb.openHoldingPanel('stocks', 's_d05'); calls.length = 0;
+    ['close', 'delete', 'x', '', null, undefined, '__proto__', 'constructor', 'toString'].forEach(a => assert.strictEqual(sb.holdingPanelAction(a), false, String(a)));
+    assert.deepStrictEqual(rec(), []);
+    sb.closeHoldingPanel();
+    ['record', 'edit', 'retry', 'trades'].forEach(a => assert.strictEqual(sb.holdingPanelAction(a), false, 'closed ' + a));
+    assert.deepStrictEqual(navPlain(vm.runInContext('HP_ACTIONS', sb)), ['record', 'edit', 'retry', 'trades']);
+  });
+
+  test('trades in the panel - the first 10 newest first, a Show all control with the count, every trade after it, and Show fewer to go back', () => {
+    const f = panelFixture();
+    f.stockTxns = Array.from({ length:14 }, (_, i) => ({ id:'t' + i, stockId:'s_aapl', date:'2026-03-' + String(i + 1).padStart(2, '0'), side: i % 2 ? 'sell' : 'buy', shares:1, price:100 + i, fees:0 }));
+    const { sb, doc } = overlaySandbox(f);
+    sb.openHoldingPanel('stocks', 's_aapl');
+    const host = doc.els['hp-panel'];
+    const rows = () => Array.from(host.innerHTML.matchAll(/<li class="hp-trade">[\s\S]*?<\/li>/g)).map(m => m[0]);
+    assert.strictEqual(rows().length, 10);
+    const dates = () => rows().map(r => /<div class="hp-trade-s">([^<]*)</.exec(r)[1]);
+    assert.deepStrictEqual(dates().slice(0, 3), ['14/03/2026', '13/03/2026', '12/03/2026']);   // newest first
+    assert.strictEqual(dates()[9], '05/03/2026');
+    assert.ok(host.innerHTML.includes('<button type="button" class="dash-link" id="hp-trades-toggle" data-click="holdingPanelAction" data-a0="trades" aria-expanded="false">Show all 14</button>'));
+    // a sell is worded Sold and a buy Bought, the figures are chips
+    assert.ok(rows()[0].includes('<span class="hp-side">Sold</span> <span class="money-chip">1 @ US$113.00</span>') && rows()[1].includes('<span class="hp-side">Bought</span>'));
+    assert.ok(rows()[0].includes('<div class="hp-trade-v money-chip"><span class="ccy">US$</span>113.00</div>'));
+    assert.strictEqual(sb.holdingPanelAction('trades'), true);
+    assert.strictEqual(rows().length, 14); assert.strictEqual(dates()[13], '01/03/2026');
+    assert.ok(host.innerHTML.includes('aria-expanded="true">Show fewer</button>'));
+    sb.holdingPanelAction('trades');
+    assert.strictEqual(rows().length, 10);
+    // exactly 10 trades need no control, and the empty state reads as a line
+    sb.DB.stockTxns = sb.DB.stockTxns.slice(0, 10); sb.refreshHoldingPanel();
+    assert.strictEqual(host.innerHTML.includes('hp-trades-toggle'), false); assert.strictEqual(rows().length, 10);
+    sb.DB.stockTxns = []; sb.refreshHoldingPanel();
+    assert.ok(host.innerHTML.includes('<p class="hp-none">No trades recorded yet.</p>') && rows().length === 0);
+    assert.strictEqual(vm.runInContext('HP_TRADES_SHOWN', sb), 10);
+  });
+
+  test('_hpRestoreFocus - when a repaint replaced the opener the same holding\'s control gets focus, and a focus already outside the panel is left alone', () => {
+    const { sb, doc } = overlaySandbox(panelFixture());
+    const overlay = doc.els['holding-panel'];
+    const st = { table:'stocks', id:'s_aapl' };
+    const visible = { id:'row', visible:true, focus(){ doc.activeElement = this; } };
+    const hidden = { id:'hidden-copy', visible:false, focus(){ throw new Error('a hidden control must not be focused'); } };
+    doc.found['[data-click="openHolding"][data-a0="stocks"][data-a1="s_aapl"]'] = [hidden, visible];   // the table and the phone list both carry one, only one is on screen
+    doc.activeElement = doc.body;
+    assert.strictEqual(sb._hpRestoreFocus(st, overlay), true);
+    assert.strictEqual(doc.activeElement, visible);
+    doc.activeElement = doc.els['hp-edit'];                   // still on the button that was pressed, inside the closing overlay
+    doc.els['holding-panel'].kids = [doc.els['hp-edit']];
+    assert.strictEqual(sb._hpRestoreFocus(st, overlay), true);
+    assert.strictEqual(doc.activeElement, visible);
+    const trigger = { id:'cp-trigger', visible:true, focus(){ doc.activeElement = this; } };
+    doc.activeElement = trigger;                              // opened from the palette: focus went back to the palette's opener already
+    assert.strictEqual(sb._hpRestoreFocus(st, overlay), false);
+    assert.strictEqual(doc.activeElement, trigger);
+    doc.found['[data-click="openHolding"][data-a0="stocks"][data-a1="s_aapl"]'] = [hidden];
+    doc.activeElement = doc.body;
+    assert.strictEqual(sb._hpRestoreFocus(st, overlay), false);   // no visible control for it: nothing to focus, no throw
+    // the holding is gone and focus is still on a control of the closing panel: it is dropped, so focus is never left on a hidden control
+    doc.activeElement = doc.els['hp-edit'];
+    assert.strictEqual(sb._hpRestoreFocus(st, overlay), false);
+    assert.strictEqual(doc.activeElement, doc.body);
+  });
+
+  /* A synthetic palette model, so the matcher is tested on its own, away from the app's data. */
+  const synthPalette = () => ({
+    pages:[{ key:'dashboard', label:'Dashboard', sub:'Overview' }, { key:'stocks', label:'Stocks', sub:'Assets' }, { key:'insurance', label:'Insurance', sub:'Assets' }, { key:'settings', label:'Settings', sub:'' }],
+    holdings:[
+      { table:'stocks', id:'h1', cls:'stocks', sym:'QAP', name:'', sector:'', sub:'US' },                                // substring in the symbol
+      { table:'stocks', id:'h2', cls:'stocks', sym:'APX', name:'Zeta', sector:'', sub:'US' },                           // prefix in the symbol
+      { table:'stocks', id:'h3', cls:'stocks', sym:'ZZZ', name:'Apple Inc', sector:'Retail', sub:'Apple Inc · US' },     // prefix in the name
+      { table:'stocks', id:'h4', cls:'stocks', sym:'WWW', name:'Maple', sector:'', sub:'US' },                           // substring in the name
+      { table:'stocks', id:'h5', cls:'stocks', sym:'VVV', name:'', sector:'Apparel', sub:'US · Apparel' },               // prefix in the sector
+      { table:'crypto', id:'h6', cls:'crypto', sym:'UUU', name:'', sector:'Retail Apps', sub:'Crypto' }                  // substring in the sector
+    ],
+    actions:[
+      { id:'add:stocks', op:'add', arg:'stocks', label:'Add stock', sub:'' },
+      { id:'add:stockTxns', op:'add', arg:'stockTxns', label:'Record trade', sub:'Add a stock first', disabled:true },
+      { id:'refresh', op:'refresh', label:'Refresh prices', sub:'' },
+      { id:'theme', op:'theme', label:'Switch to light theme', sub:'' }
+    ]
+  });
+  const ids = r => r.groups.map(g => g.items.map(i => i.id));
+
+  test('_paletteResults - case-insensitive substring, prefix matches first, and symbol before name before sector, then the model\'s own order', () => {
+    const sb = panelSandbox();
+    const r = navPlain(sb._paletteResults('ap', synthPalette()));
+    assert.deepStrictEqual(r.groups.map(g => g.key), ['holdings']);
+    // APX (symbol prefix), Apple Inc (name prefix), Apparel (sector prefix), then the substrings: QAP (symbol), Maple (name), Retail Apps (sector)
+    assert.deepStrictEqual(r.groups[0].items.map(i => i.label), ['APX', 'ZZZ', 'VVV', 'QAP', 'WWW', 'UUU']);
+    assert.strictEqual(r.query, 'ap'); assert.strictEqual(r.count, 6);
+    // the same results whatever the case, and the query is trimmed
+    ['AP', 'aP', '  ap  ', '\tAp\n'].forEach(q => assert.deepStrictEqual(ids(navPlain(sb._paletteResults(q, synthPalette()))), ids(r), JSON.stringify(q)));
+    // pages, holdings and actions rank on their own, and a group with no match is left out
+    const s = navPlain(sb._paletteResults('s', synthPalette()));
+    assert.deepStrictEqual(s.groups.map(g => g.key), ['pages', 'holdings', 'actions']);
+    assert.deepStrictEqual(s.groups[1].items.map(i => i.label), ['UUU']);   // only the sector Retail Apps holds an s
+    assert.deepStrictEqual(s.groups[0].items.map(i => i.label), ['Stocks', 'Settings', 'Dashboard', 'Insurance']);   // two prefixes in order, then the two substrings in order
+    assert.deepStrictEqual(s.groups[2].items.map(i => i.label), ['Switch to light theme', 'Add stock', 'Refresh prices']);   // the prefix first, then the substrings in order
+    // ties keep the model's order
+    const tie = synthPalette(); tie.holdings = ['A1', 'A2', 'A3'].map((sym, i) => ({ table:'stocks', id:'t' + i, cls:'stocks', sym, name:'', sector:'', sub:'' }));
+    assert.deepStrictEqual(navPlain(sb._paletteResults('a', tie)).groups.find(g => g.key === 'holdings').items.map(i => i.label), ['A1', 'A2', 'A3']);
+    // characters that mean something in a pattern are only characters here
+    ['.*', '(', '[', '\\', '^$', '+'].forEach(q => assert.doesNotThrow(() => sb._paletteResults(q, synthPalette()), q));
+    assert.strictEqual(sb._paletteResults('.', synthPalette()).count, 0);
+  });
+
+  test('_paletteResults - groups in the order Pages, Holdings, Actions, items carry what running them needs, no match leaves no group', () => {
+    const sb = panelSandbox();
+    const all = navPlain(sb._paletteResults('a', synthPalette()));
+    assert.deepStrictEqual(all.groups.map(g => [g.key, g.label]), [['pages', 'Pages'], ['holdings', 'Holdings'], ['actions', 'Actions']]);
+    assert.deepStrictEqual(all.groups[0].items[0], { id:'page:dashboard', kind:'page', key:'dashboard', label:'Dashboard', sub:'Overview' });
+    const hold = all.groups[1].items.find(i => i.id === 'holding:stocks:h2');
+    assert.deepStrictEqual(hold, { id:'holding:stocks:h2', kind:'holding', table:'stocks', hid:'h2', cls:'stocks', sym:'APX', label:'APX', sub:'US' });
+    assert.deepStrictEqual(all.groups[2].items.find(i => i.op === 'add' && i.arg === 'stockTxns'), { id:'action:add:stockTxns', kind:'action', op:'add', arg:'stockTxns', label:'Record trade', sub:'Add a stock first', disabled:true });
+    assert.deepStrictEqual(navPlain(sb._paletteResults('zzzzqq', synthPalette())), { query:'zzzzqq', groups:[], count:0 });
+    // a model with nothing in it, or none at all, gives an empty result, not a throw
+    [undefined, null, {}, { pages:[], holdings:[], actions:[] }].forEach(m => assert.deepStrictEqual(navPlain(sb._paletteResults('a', m)).groups, []));
+    [undefined, null, 5].forEach(q => assert.strictEqual(sb._paletteResults(q, synthPalette()).query, q === 5 ? '5' : ''));
+  });
+
+  test('_paletteResults - at most 8 a group for a typed query, an empty query lists every page and action (they are menus) and no holdings', () => {
+    const sb = panelSandbox();
+    const big = { pages:Array.from({ length:12 }, (_, i) => ({ key:'p' + i, label:'Page ' + i, sub:'' })),
+      holdings:Array.from({ length:12 }, (_, i) => ({ table:'stocks', id:'h' + i, cls:'stocks', sym:'A' + String(i).padStart(2, '0'), name:'', sector:'', sub:'' })),
+      actions:Array.from({ length:12 }, (_, i) => ({ id:'a' + i, op:'add', arg:'x', label:'Act ' + i, sub:'' })) };
+    const typed = navPlain(sb._paletteResults('a', big));
+    assert.deepStrictEqual(typed.groups.map(g => g.items.length), [8, 8, 8]);
+    assert.deepStrictEqual(typed.groups[1].items.map(i => i.label), ['A00', 'A01', 'A02', 'A03', 'A04', 'A05', 'A06', 'A07']);   // the first eight in order
+    assert.strictEqual(typed.count, 24);
+    assert.strictEqual(vm.runInContext('PALETTE_CAP', sb), 8);
+    const empty = navPlain(sb._paletteResults('', big));
+    assert.deepStrictEqual(empty.groups.map(g => [g.key, g.items.length]), [['pages', 12], ['actions', 12]]);
+    assert.strictEqual(empty.count, 24);
+    assert.deepStrictEqual(navPlain(sb._paletteResults('   ', big)).groups.map(g => g.key), ['pages', 'actions']);   // blanks are an empty query
+    assert.deepStrictEqual(navPlain(sb._paletteResults('', synthPalette())).groups.map(g => g.key), ['pages', 'actions']);
+  });
+
+  test('_paletteMark and _paletteHtml - the first match is marked, everything is escaped, options number across the groups and carry the combobox attributes', () => {
+    const sb = panelSandbox();
+    assert.strictEqual(sb._paletteMark('Dashboard', 'da'), '<mark class="cp-mark">Da</mark>shboard');
+    assert.strictEqual(sb._paletteMark('Dashboard', ''), 'Dashboard');
+    assert.strictEqual(sb._paletteMark('Dashboard', 'zz'), 'Dashboard');
+    assert.strictEqual(sb._paletteMark('<img src=x>', 'img'), '&lt;<mark class="cp-mark">img</mark> src=x&gt;');
+    assert.strictEqual(sb._paletteMark('A&B', 'a&b'), '<mark class="cp-mark">A&amp;B</mark>');
+    assert.strictEqual(sb._paletteMark('İstanbul', 'st'), 'İstanbul');    // a lower-case form of another length is left unmarked rather than cut in the wrong place
+    assert.strictEqual(sb._paletteMark(null, 'a'), '');
+    const r = sb._paletteResults('s', synthPalette());
+    const html = sb._paletteHtml(r, 1);
+    assert.ok(html.startsWith('<div class="cp-group" role="group" aria-labelledby="cp-g-pages"><div class="cp-label" id="cp-g-pages" role="presentation">Pages</div>'));
+    assert.ok(html.includes('<div class="cp-opt" role="option" id="cp-o-0" data-i="0" data-click="paletteRun" data-a0="0" aria-selected="false">'));
+    assert.ok(html.includes('<div class="cp-opt" role="option" id="cp-o-1" data-i="1" data-click="paletteRun" data-a0="1" aria-selected="true">'));
+    assert.strictEqual((html.match(/aria-selected="true"/g) || []).length, 1);
+    assert.ok(html.includes('<span class="cp-t"><mark class="cp-mark">S</mark>tocks</span><span class="cp-s">A<mark class="cp-mark">s</mark>sets</span>'));   // the sub text is marked too
+    assert.ok(html.includes('aria-labelledby="cp-g-actions"') && html.includes('id="cp-o-4"'));      // four pages, so the first action is the fifth option
+    assert.strictEqual(html.includes('aria-disabled'), false);                                          // Record trade holds no s, so no disabled option is in this list
+  });
+
+  test('_paletteHtml - a holding row has a monogram, a disabled action says so, add and refresh and the toggles have their own icon, nothing is a raw handler', () => {
+    const sb = panelSandbox();
+    sb.privacyOn = () => false;
+    const html = sb._paletteHtml(sb._paletteResults('', synthPalette()), 0);
+    assert.ok(html.includes('aria-disabled="true"') && html.includes('<span class="cp-s">Add a stock first</span>'));
+    assert.ok(html.includes(vm.runInContext('CP_PLUS_ICON', sb)) && html.includes(vm.runInContext('CP_REFRESH_ICON', sb)));
+    assert.ok(html.includes('class="cp-ico"><svg aria-hidden="true" focusable="false"'));             // a page uses its tab's line icon
+    const hold = sb._paletteHtml(sb._paletteResults('apx', synthPalette()), 0);
+    assert.ok(hold.includes('class="mono" style="background:var(--c-stocks-soft);color:var(--c-stocks-ink)" aria-hidden="true">A</span>'));
+    assert.ok(hold.includes('<span class="cp-t"><mark class="cp-mark">APX</mark></span><span class="cp-s">US</span>'));
+    assert.strictEqual(/\son[a-z]+="/i.test(html + hold), false);
+    // hostile text reaches the page only as escaped text, in the label, the sub text and the attributes
+    const evil = { pages:[{ key:'dashboard', label:'<img src=x onerror=1>', sub:'"><script>1</script>' }],
+      holdings:[{ table:'stocks', id:'h"1', cls:'stocks', sym:'<svg onload=1>', name:'<b>n</b>', sector:'', sub:'<i>sub</i>' }], actions:[{ id:'a1', op:'add', arg:'x', label:'<u>act</u>', sub:'' }] };
+    ['', 'img', 'svg', 'u'].forEach(q => {
+      const out = sb._paletteHtml(sb._paletteResults(q, evil), 0);
+      assert.strictEqual(/<img|<script|<svg onload|<b>|<i>|<u>/i.test(out.replace(/<svg viewBox[^>]*>/g, '')), false, 'raw markup for ' + JSON.stringify(q));
+    });
+    assert.ok(sb._paletteHtml(sb._paletteResults('img', evil), 0).includes('&lt;<mark class="cp-mark">img</mark> src=x onerror=1&gt;'));
+  });
+
+  test('_paletteModel - every live page under the sidebar\'s labels, every stock and coin, and actions named for what they will do now', () => {
+    const { sb } = overlaySandbox(panelFixture());
+    sb.ENTITY_SCHEMAS = { stocks:{}, stockTxns:{}, crypto:{}, cash:{}, realestate:{}, insurance:{}, income:{}, expenses:{} };
+    let privacy = false, theme = 'dark';
+    sb.privacyOn = () => privacy; sb.currentTheme = () => theme;
+    const m = navPlain(sb._paletteModel());
+    assert.deepStrictEqual(m.pages.map(p => p.label), ['Dashboard', 'Projections', 'Explore', 'Stocks', 'Crypto', 'Cash', 'CPF', 'Real estate', 'Insurance', 'Income & spending', 'Watchlist', 'Settings']);
+    assert.deepStrictEqual(m.pages.map(p => p.key), ['dashboard', 'projections', 'explore', 'stocks', 'crypto', 'cash', 'cpf', 'realestate', 'insurance', 'cashflow', 'board', 'settings']);
+    assert.deepStrictEqual(m.pages.map(p => p.sub), ['Overview', 'Overview', 'Overview', 'Assets', 'Assets', 'Assets', 'Assets', 'Assets', 'Assets', 'Money', 'Money', '']);
+    assert.deepStrictEqual(m.holdings.map(h => [h.table, h.id, h.sym, h.name, h.sector, h.sub]), [
+      ['stocks', 's_aapl', 'AAPL', 'Apple Inc', 'Information Technology', 'Apple Inc · US'],
+      ['stocks', 's_d05', 'D05', '', 'Financials', 'SGX · Financials'],
+      ['stocks', 's_nopx', 'NOPX', '', '', 'US'],
+      ['stocks', 's_o39', 'O39', '', 'Financials', 'SGX · Financials'],
+      ['crypto', 'c_btc', 'BTC', 'Bitcoin', 'Crypto', 'Bitcoin · Crypto']]);
+    // every + Add flow in the + Add menu's order, then the four actions
+    assert.deepStrictEqual(m.actions.map(a => a.label), ['Add stock', 'Record trade', 'Add coin', 'Add cash account', 'Add property', 'Add policy', 'Add income', 'Add expense',
+      'Refresh prices', 'Hide amounts', 'Switch to light theme', 'Include CPF']);
+    assert.deepStrictEqual(m.actions.slice(0, 8).map(a => a.arg), ['stocks', 'stockTxns', 'crypto', 'cash', 'realestate', 'insurance', 'income', 'expenses']);
+    assert.deepStrictEqual(m.actions.map(a => !!a.disabled), Array(12).fill(false));
+    // the toggles read what they will do
+    privacy = true; theme = 'light'; vm.runInContext('_dashShowCpf = true;', sb);
+    assert.deepStrictEqual(navPlain(sb._paletteModel()).actions.slice(8).map(a => a.label), ['Refresh prices', 'Show amounts', 'Switch to dark theme', 'Exclude CPF']);
+    // a trade needs a stock to belong to: with none, Record trade stays on the list, disabled, with the reason
+    sb.DB.stocks = [];
+    const bare = navPlain(sb._paletteModel());
+    const rec = bare.actions.find(a => a.arg === 'stockTxns');
+    assert.deepStrictEqual({ label:rec.label, disabled:rec.disabled, sub:rec.sub }, { label:'Record trade', disabled:true, sub:'Add a stock first' });
+    assert.deepStrictEqual(bare.holdings.map(h => h.sym), ['BTC']);
+  });
+
+  test('_paletteModel - a page parked in PHASE_2_TABS is left out of the pages, its holdings and its add flows', () => {
+    const { sb } = overlaySandbox(panelFixture());
+    sb.ENTITY_SCHEMAS = { stocks:{}, stockTxns:{}, crypto:{}, cash:{}, realestate:{}, insurance:{}, income:{}, expenses:{} };
+    sb.privacyOn = () => false; sb.currentTheme = () => 'dark';
+    vm.runInContext("PHASE_2_TABS.add('crypto'); PHASE_2_TABS.add('cpf');", sb);
+    let m = navPlain(sb._paletteModel());
+    assert.strictEqual(m.pages.some(p => p.key === 'crypto' || p.key === 'cpf'), false);
+    assert.strictEqual(m.pages.length, 10);
+    assert.strictEqual(m.holdings.some(h => h.table === 'crypto'), false);
+    assert.strictEqual(m.actions.some(a => a.arg === 'crypto'), false);
+    assert.strictEqual(sb._paletteResults('crypto', sb._paletteModel()).groups.some(g => g.items.some(i => i.key === 'crypto' || i.table === 'crypto' || i.arg === 'crypto')), false);
+    assert.strictEqual(sb._paletteResults('cpf', sb._paletteModel()).groups.filter(g => g.key === 'pages').length, 0);
+    vm.runInContext("PHASE_2_TABS.add('stocks');", sb);
+    m = navPlain(sb._paletteModel());
+    assert.strictEqual(m.holdings.length, 0);
+    assert.strictEqual(m.actions.some(a => a.arg === 'stocks' || a.arg === 'stockTxns'), false);
+    assert.deepStrictEqual(m.actions.map(a => a.label).slice(-4), ['Refresh prices', 'Hide amounts', 'Switch to light theme', 'Include CPF']);
+  });
+
+  /* The overlay sandbox with the palette's collaborators recorded, and a listbox that finds its options in the markup it was given (aria-selected is read back from them). */
+  function paletteSandbox(db){
+    const o = overlaySandbox(db || panelFixture());
+    const { sb, doc, calls } = o;
+    sb.ENTITY_SCHEMAS = { stocks:{}, stockTxns:{}, crypto:{}, cash:{}, realestate:{}, insurance:{}, income:{}, expenses:{} };
+    sb.privacyOn = () => false; sb.currentTheme = () => 'dark';
+    sb.navigate = key => calls.push(['navigate', key]);
+    sb.openHoldingDetail = (table, id) => calls.push(['holding', table, id]);
+    sb.addMenuPick = table => calls.push(['add', table]);
+    sb.refreshDashPrices = () => calls.push(['refresh']);
+    sb.togglePrivacy = () => calls.push(['privacy']);
+    sb.toggleTheme = () => calls.push(['theme']);
+    sb.toggleDashCpf = () => { calls.push(['cpf']); vm.runInContext('_dashShowCpf = !_dashShowCpf;', sb); };
+    doc.els['cmd-palette'].kids = [doc.els['cp-input']];   // the field sits inside the palette, as it does in the page
+    const opts = {}, scrolled = [];
+    const list = doc.els['cp-list'];
+    list.querySelectorAll = sel => sel === '.cp-opt'
+      ? Array.from(list.innerHTML.matchAll(/id="cp-o-(\d+)"/g)).map(m => (opts[m[1]] = opts[m[1]] || { id:'cp-o-' + m[1], attrs:{}, setAttribute(k, v){ this.attrs[k] = v; }, scrollIntoView(){ scrolled.push(this.id); } }))
+      : [];
+    return Object.assign(o, { opts, scrolled, input:doc.els['cp-input'], list, empty:doc.els['cp-empty'], status:doc.els['cp-status'], overlay:doc.els['cmd-palette'] });
+  }
+  const cpState = sb => navPlain(vm.runInContext('({ query:_cp.query, active:_cp.active, n:_cp.items.length })', sb));
+
+  test('openCommandPalette - opens the dialog on an empty query, focus in the field, the trap on the overlay with Escape closing it, and the combobox pointing at the first result', () => {
+    const { sb, doc, calls, input, list, overlay, status, empty } = paletteSandbox();
+    input.value = 'left over';
+    assert.strictEqual(sb.openCommandPalette(), true);
+    assert.ok(overlay.classList.contains('open'));
+    assert.deepStrictEqual(calls.filter(c => c[0] === 'trap'), [['trap', 'cmd-palette', 'closeCommandPalette']]);
+    assert.strictEqual(input.value, '');
+    assert.strictEqual(doc.activeElement, input);                       // focused now, not a frame later
+    assert.strictEqual(input.getAttribute('aria-expanded'), 'true');
+    assert.strictEqual(input.getAttribute('aria-activedescendant'), 'cp-o-0');
+    assert.strictEqual(list.hidden, false); assert.strictEqual(empty.hidden, true);
+    assert.deepStrictEqual(cpState(sb), { query:'', active:0, n:24 });   // 12 pages and 12 actions on an empty query
+    assert.strictEqual(status.textContent, '24 results');
+    assert.ok(list.innerHTML.includes('id="cp-g-pages"') && list.innerHTML.includes('id="cp-g-actions"') && !list.innerHTML.includes('id="cp-g-holdings"'));
+    // already open: a second open does nothing
+    calls.length = 0;
+    assert.strictEqual(sb.openCommandPalette(), false);
+    assert.deepStrictEqual(calls, []);
+    // the field and the phone icon both reach it through the one delegated action
+    const wiring = extractFunction('installEventDelegation');
+    assert.ok(wiring.includes('openCommandPalette:  () => openCommandPalette(),') && wiring.includes('closeCommandPalette: () => closeCommandPalette(),'));
+  });
+
+  test('closeCommandPalette - closes, releases the trap (focus returns to the opener), and a second close does nothing', () => {
+    const { sb, calls, overlay } = paletteSandbox();
+    assert.strictEqual(sb.closeCommandPalette(), false);
+    sb.openCommandPalette(); calls.length = 0;
+    assert.strictEqual(sb.closeCommandPalette(), true);
+    assert.strictEqual(overlay.classList.contains('open'), false);
+    assert.deepStrictEqual(calls, [['release', 'cmd-palette']]);
+    assert.strictEqual(vm.runInContext('_cp', sb), null);
+    assert.strictEqual(sb.closeCommandPalette(), false);
+  });
+
+  test('closeCommandPalette - focus goes back to the opener when it can take it, and is never left on the hidden field when it cannot', () => {
+    const { sb, doc, input } = paletteSandbox();
+    const opener = { id:'cp-trigger', visible:true, focus(){ doc.activeElement = this; } };
+    // an opener that is still on the page: closeModalFocus returns focus to it, and it is left there
+    sb.closeModalFocus = () => opener.focus();
+    sb.openCommandPalette(); assert.strictEqual(doc.activeElement, input);
+    sb.closeCommandPalette(); assert.strictEqual(doc.activeElement, opener);
+    // an opener that is gone (a repaint replaced it, its page was hidden): the field is not left holding focus inside the hidden palette
+    sb.closeModalFocus = () => {};
+    sb.openCommandPalette(); assert.strictEqual(doc.activeElement, input);
+    sb.closeCommandPalette(); assert.strictEqual(doc.activeElement, doc.body);
+  });
+
+  test('paletteQuery - searches again from the top, the combobox follows, no match shows a No matches state and Enter then does nothing', () => {
+    const { sb, input, list, empty, status, calls } = paletteSandbox();
+    sb.openCommandPalette();
+    assert.strictEqual(sb.paletteQuery('aap'), true);
+    assert.deepStrictEqual(cpState(sb), { query:'aap', active:0, n:1 });
+    assert.ok(list.innerHTML.includes('id="cp-g-holdings"') && list.innerHTML.includes('<mark class="cp-mark">AAP</mark>L'));
+    assert.strictEqual(status.textContent, '1 result');
+    assert.strictEqual(input.getAttribute('aria-activedescendant'), 'cp-o-0');
+    // typing moves the active result back to the top
+    sb.paletteQuery('a'); sb._paletteMove(2);
+    assert.strictEqual(cpState(sb).active, 2);
+    sb.paletteQuery('ap'); assert.strictEqual(cpState(sb).active, 0);
+    // nothing matches
+    sb.paletteQuery('zzzzqq');
+    assert.deepStrictEqual(cpState(sb), { query:'zzzzqq', active:0, n:0 });
+    assert.strictEqual(list.hidden, true); assert.strictEqual(empty.hidden, false); assert.strictEqual(status.textContent, 'No matches');
+    assert.strictEqual(input.getAttribute('aria-expanded'), 'false'); assert.strictEqual(input.getAttribute('aria-activedescendant'), '');
+    calls.length = 0;
+    const key = { key:'Enter', preventDefault(){ this.prevented = true; } };
+    assert.strictEqual(sb.paletteKeydown(key), true);                   // Enter is taken, and it runs nothing
+    assert.strictEqual(key.prevented, true);
+    assert.deepStrictEqual(calls, []); assert.ok(vm.runInContext('_cp', sb) !== null);
+    // clearing the field shows the menus again
+    sb.paletteQuery(''); assert.strictEqual(cpState(sb).n, 24); assert.strictEqual(empty.hidden, true);
+    // a long paste is cut at 80 characters, and a closed palette ignores the call
+    sb.paletteQuery('x'.repeat(200)); assert.strictEqual(cpState(sb).query.length, 80);
+    sb.closeCommandPalette(); assert.strictEqual(sb.paletteQuery('a'), false);
+  });
+
+  test('palette keys - Arrow Down and Up move through every result and wrap at both ends, Enter runs the active one, other keys and IME composition are left alone', () => {
+    const { sb, input, opts, scrolled, calls } = paletteSandbox();
+    sb.openCommandPalette();
+    const press = (key, extra) => { const e = Object.assign({ key, prevented:false, preventDefault(){ this.prevented = true; } }, extra || {}); return [sb.paletteKeydown(e), e.prevented]; };
+    assert.deepStrictEqual(press('ArrowDown'), [true, true]);
+    assert.strictEqual(cpState(sb).active, 1);
+    assert.strictEqual(input.getAttribute('aria-activedescendant'), 'cp-o-1');
+    assert.strictEqual(opts[1].attrs['aria-selected'], 'true'); assert.strictEqual(opts[0].attrs['aria-selected'], 'false');   // exactly one is selected
+    assert.ok(scrolled.includes('cp-o-1'));                                                                                  // and it is scrolled into view
+    assert.deepStrictEqual(press('ArrowUp'), [true, true]);
+    assert.deepStrictEqual(press('ArrowUp'), [true, true]);               // from the first, up wraps to the last
+    assert.strictEqual(cpState(sb).active, 23); assert.strictEqual(input.getAttribute('aria-activedescendant'), 'cp-o-23');
+    assert.deepStrictEqual(press('ArrowDown'), [true, true]);              // and down from the last wraps to the first
+    assert.strictEqual(cpState(sb).active, 0);
+    const selected = Object.keys(opts).filter(k => opts[k].attrs['aria-selected'] === 'true');
+    assert.deepStrictEqual(selected, ['0']);
+    // keys that are not the palette's are not taken (Home and End move the caret, letters type)
+    ['Home', 'End', 'a', 'Tab', 'Escape', 'PageDown', 'Backspace'].forEach(k => assert.deepStrictEqual(press(k), [false, false], k));
+    // IME composition: the browser's own Enter picks a candidate, the palette must not run a result
+    calls.length = 0;
+    assert.deepStrictEqual(press('Enter', { isComposing:true }), [false, false]); assert.deepStrictEqual(calls, []);
+    // Enter runs the active result (the palette closes first), and only while it is open
+    sb._paletteMove(3);
+    assert.deepStrictEqual(press('Enter'), [true, true]);
+    assert.deepStrictEqual(calls, [['release', 'cmd-palette'], ['navigate', 'stocks']]);   // the fourth page, Stocks
+    assert.deepStrictEqual(press('ArrowDown'), [false, false]);
+  });
+
+  test('palette hover - the pointer makes a result active (one active result, never two), out of range or on the active one it does nothing', () => {
+    const { sb, input, opts } = paletteSandbox();
+    sb.openCommandPalette();
+    assert.strictEqual(sb.paletteHover('5'), true);
+    assert.strictEqual(cpState(sb).active, 5); assert.strictEqual(input.getAttribute('aria-activedescendant'), 'cp-o-5');
+    assert.strictEqual(opts[5].attrs['aria-selected'], 'true'); assert.strictEqual(opts[0].attrs['aria-selected'], 'false');
+    assert.strictEqual(sb.paletteHover(5), false);      // already the active one
+    [-1, 24, 99, 'x', null, undefined, 1.5, NaN, '', ' 5', '5.5', '-1', '1e1', '+2', {}, [3]].forEach(i => assert.strictEqual(sb.paletteHover(i), false, String(i)));   // a missing data attribute is not result 0
+    assert.strictEqual(cpState(sb).active, 5);
+    sb.closeCommandPalette(); assert.strictEqual(sb.paletteHover(1), false);
+  });
+
+  test('runPaletteItem - the palette closes first, then a page navigates, a holding opens its panel, and every action runs its own function', () => {
+    const { sb, calls } = paletteSandbox();
+    const run = (query, id) => {
+      sb.openCommandPalette(); sb.paletteQuery(query);
+      const at = vm.runInContext('_cp.items', sb).findIndex(i => i.id === id);
+      assert.ok(at >= 0, id + ' for ' + JSON.stringify(query)); calls.length = 0;
+      assert.strictEqual(sb.runPaletteItem(at), true);
+      return calls.slice();
+    };
+    assert.deepStrictEqual(run('', 'page:cashflow'), [['release', 'cmd-palette'], ['navigate', 'cashflow']]);
+    assert.deepStrictEqual(run('aap', 'holding:stocks:s_aapl'), [['release', 'cmd-palette'], ['holding', 'stocks', 's_aapl']]);
+    assert.deepStrictEqual(run('btc', 'holding:crypto:c_btc'), [['release', 'cmd-palette'], ['holding', 'crypto', 'c_btc']]);
+    assert.deepStrictEqual(run('add coin', 'action:add:crypto'), [['release', 'cmd-palette'], ['add', 'crypto']]);
+    assert.deepStrictEqual(run('record', 'action:add:stockTxns'), [['release', 'cmd-palette'], ['add', 'stockTxns']]);   // addMenuPick says "Add a stock first" itself when there is none
+    assert.deepStrictEqual(run('refresh', 'action:refresh'), [['release', 'cmd-palette'], ['refresh']]);
+    assert.deepStrictEqual(run('hide', 'action:privacy'), [['release', 'cmd-palette'], ['privacy']]);
+    assert.deepStrictEqual(run('theme', 'action:theme'), [['release', 'cmd-palette'], ['theme']]);
+    // Include CPF flips the switch and says what it did (the dashboard may not be on screen)
+    assert.deepStrictEqual(run('cpf', 'action:cpf'), [['release', 'cmd-palette'], ['cpf'], ['toast', 'CPF included in net worth', '']]);
+    assert.deepStrictEqual(run('cpf', 'action:cpf'), [['release', 'cmd-palette'], ['cpf'], ['toast', 'CPF left out of net worth', '']]);
+    // an index that is not a result runs nothing and leaves the palette open
+    sb.openCommandPalette(); calls.length = 0;
+    [-1, 99, NaN, 1.5, 'x', undefined, null, '', '1e1', '-1', ' 2', {}, [1]].forEach(i => assert.strictEqual(sb.runPaletteItem(i), false, String(i)));
+    assert.deepStrictEqual(calls, []); assert.ok(vm.runInContext('_cp', sb) !== null);
+    sb.closeCommandPalette(); assert.strictEqual(sb.runPaletteItem(0), false);
+    // the click on an option goes through the delegated action with its number
+    const wiring = extractFunction('installEventDelegation');
+    assert.ok(wiring.includes('paletteRun:          (el) => runPaletteItem(A(el)[0]),') && wiring.includes('paletteInput:        (el) => paletteQuery(el.value),'));
+    assert.deepStrictEqual(['3', 3, '0', '12'].map(v => sb._paletteIndex(v)), [3, 3, 0, 12]);
+  });
+
+  test('the shortcut - Cmd+K and Ctrl+K open the palette from anywhere, with no Shift or Alt, and a second press closes it', () => {
+    const { sb, calls } = paletteSandbox();
+    const press = e => { const ev = Object.assign({ prevented:0, preventDefault(){ this.prevented++; } }, e); return [sb.paletteShortcut(ev), ev.prevented]; };
+    assert.deepStrictEqual(press({ key:'k', metaKey:true }), [true, 1]);
+    assert.ok(vm.runInContext('_cp', sb) !== null);
+    assert.deepStrictEqual(press({ key:'k', metaKey:true }), [true, 1]);      // Cmd+K again closes it
+    assert.strictEqual(vm.runInContext('_cp', sb), null);
+    assert.deepStrictEqual(press({ key:'k', ctrlKey:true }), [true, 1]);
+    assert.ok(vm.runInContext('_cp', sb) !== null);
+    sb.closeCommandPalette();
+    assert.deepStrictEqual(press({ key:'K', ctrlKey:true }), [true, 1]);      // caps lock
+    sb.closeCommandPalette();
+    // anything else is not the shortcut and is left to the browser: no open, no preventDefault
+    [{ key:'k' }, { key:'k', shiftKey:true, metaKey:true }, { key:'k', altKey:true, ctrlKey:true }, { key:'j', metaKey:true }, { key:'Enter', ctrlKey:true }, { key:undefined, metaKey:true }, { key:12, ctrlKey:true }, { key:'k', metaKey:false, ctrlKey:false }]
+      .forEach(e => assert.deepStrictEqual(press(e), [false, 0], JSON.stringify(e)));
+    assert.strictEqual(vm.runInContext('_cp', sb), null);
+    assert.strictEqual(sb._isPaletteShortcut(null), false); assert.strictEqual(sb._isPaletteShortcut(undefined), false);
+    // the listener runs it for every keydown, ahead of the field's own keys
+    const wiring = extractFunction('installEventDelegation');
+    assert.ok(wiring.includes("if (paletteShortcut(e)) return;\n    if (e.target && e.target.id === 'cp-input') paletteKeydown(e);"));
+    assert.deepStrictEqual(calls.filter(c => c[0] === 'toast'), []);
+  });
+
+  test('the shortcut - ignored while the unlock gate is up, while any modal or sheet is open, and while the side panel is open', () => {
+    const { sb, doc } = paletteSandbox();
+    const press = (e) => { const ev = Object.assign({ key:'k', metaKey:true, prevented:0, preventDefault(){ this.prevented++; } }, e); return [sb.paletteShortcut(ev), ev.prevented, vm.runInContext('_cp', sb) !== null]; };
+    const ignored = [false, 0, false];            // not handled, the browser keeps the key, no palette
+    assert.strictEqual(sb._commandPaletteBlocked(), false);
+    // the vault unlock gate and the NAS sign-in gate (both are .overlay.open)
+    doc.els['vault-gate'].classList.add('open');
+    assert.strictEqual(sb._commandPaletteBlocked(), true);
+    assert.deepStrictEqual(press({}), ignored); assert.deepStrictEqual(press({ ctrlKey:true, metaKey:false }), ignored);
+    doc.els['vault-gate'].classList.remove('open');
+    doc.els['nas-auth-gate'].classList.add('open');
+    assert.deepStrictEqual(press({}), ignored);
+    doc.els['nas-auth-gate'].classList.remove('open');
+    // a vault that is on and locked has nothing to search, even before its gate paints
+    sb._vaultManager = { isEnabled:() => true, isUnlocked:() => false };
+    assert.deepStrictEqual(press({}), ignored);
+    sb._vaultManager = { isEnabled:() => true, isUnlocked:() => true };
+    assert.strictEqual(sb._commandPaletteBlocked(), false);
+    sb._vaultManager = { isEnabled:() => false, isUnlocked:() => false };
+    assert.strictEqual(sb._commandPaletteBlocked(), false);
+    sb._vaultManager = null;
+    // any open modal: the entity form, the sync details, the More sheet, the conflict dialog, the setup wizard (all are .overlay.open)
+    ['entity-modal', 'sync-details-modal', 'more-sheet', 'conflict-modal', 'setup-wizard'].forEach(id => {
+      doc.openOverlay = { id, classList:{ contains: n => n === 'open' } };
+      assert.strictEqual(sb._commandPaletteBlocked(), true, id);
+      assert.deepStrictEqual(press({}), ignored, id);
+    });
+    doc.openOverlay = null;
+    // the side panel, by its state and by its class
+    sb.openHoldingPanel('stocks', 's_aapl');
+    assert.strictEqual(sb._commandPaletteBlocked(), true);
+    assert.deepStrictEqual(press({}), ignored);
+    assert.strictEqual(sb.openCommandPalette(), false);       // the field button and the phone icon are blocked the same way
+    sb.closeHoldingPanel();
+    doc.els['holding-panel'].classList.add('open'); vm.runInContext('_hp = null;', sb);
+    assert.strictEqual(sb._commandPaletteBlocked(), true);
+    doc.els['holding-panel'].classList.remove('open');
+    // all clear: it opens
+    assert.deepStrictEqual(press({}), [true, 1, true]);
+    // and the check reads the live DOM each time, not a remembered answer
+    sb.closeCommandPalette(); doc.els['vault-gate'].classList.add('open');
+    assert.strictEqual(sb.openCommandPalette(), false);
+  });
+
+  test('palette hint - Cmd K on a Mac, an iPhone or an iPad, Ctrl K elsewhere, set on the field, its title and the phone icon at boot', () => {
+    const sb = panelSandbox();
+    [[{ platform:'MacIntel' }, true], [{ userAgentData:{ platform:'macOS' }, platform:'Win32' }, true], [{ platform:'iPhone' }, true], [{ platform:'iPad' }, true], [{ userAgent:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' }, true],
+      [{ platform:'Win32' }, false], [{ platform:'Linux x86_64' }, false], [{ userAgent:'Mozilla/5.0 (Linux; Android 14; Pixel 8)' }, false], [{ userAgentData:{ platform:'Windows' } }, false], [{}, false]]
+      .forEach(([nav, apple]) => { assert.strictEqual(sb._isApplePlatform(nav), apple, JSON.stringify(nav)); assert.strictEqual(sb._paletteHint(nav), apple ? '⌘K' : 'Ctrl K'); });
+    assert.strictEqual(sb._isApplePlatform(), false);   // no navigator at all (the sandbox has none)
+    const { sb: ov, doc } = overlaySandbox(panelFixture());
+    ov.navigator = { platform:'MacIntel' };
+    ov._syncPaletteHint();
+    assert.strictEqual(doc.els['cp-kbd'].textContent, '⌘K');
+    assert.strictEqual(doc.els['cp-trigger'].title, 'Search or jump to (⌘K)'); assert.strictEqual(doc.els['cp-trigger-m'].title, 'Search or jump to (⌘K)');
+    ov.navigator = { platform:'Win32' }; ov._syncPaletteHint();
+    assert.strictEqual(doc.els['cp-kbd'].textContent, 'Ctrl K'); assert.strictEqual(doc.els['cp-trigger'].title, 'Search or jump to (Ctrl K)');
+    assert.ok(extractFunction('boot').includes('_syncPaletteHint();'));
+  });
+
+  test('the dashboard Holdings card - every row is one button that opens the holding\'s side panel, a row with no safe id falls back to its tab', () => {
+    const sb = panelSandbox(panelFixture(), 'SGD');
+    const rows = sb._dashHoldingRows(sb.buildStockChartRows());
+    assert.deepStrictEqual(navPlain(rows.map(r => [r.table, r.id, r.nav])), [['stocks', 's_aapl', 'stocks'], ['stocks', 's_d05', 'stocks'], ['stocks', 's_nopx', 'stocks'], ['stocks', 's_o39', 'stocks'], ['crypto', 'c_btc', 'crypto']]);
+    const html = sb._dashHoldings(rows, 16550);
+    const buttons = Array.from(html.matchAll(/<button type="button" class="dash-hrow"[^>]*>/g)).map(m => m[0]);
+    assert.strictEqual(buttons.length, 5);
+    assert.ok(buttons.includes('<button type="button" class="dash-hrow" data-click="openHolding" data-a0="stocks" data-a1="s_aapl" aria-haspopup="dialog">'));
+    assert.ok(buttons.includes('<button type="button" class="dash-hrow" data-click="openHolding" data-a0="crypto" data-a1="c_btc" aria-haspopup="dialog">'));
+    assert.strictEqual(html.includes('data-click="navigate"'), false);   // a row no longer only opens its tab
+    assert.strictEqual(/\son[a-z]+="/i.test(html), false);
+    assert.ok(html.includes('class="dash-hval money-chip"') && html.includes('<b>AAPL</b>'));
+    // an id that is not safe never reaches the action: the row opens its tab as before, and a hostile id stays out of the markup
+    const odd = rows.slice(0, 2).map(r => Object.assign({}, r));
+    odd[0].id = '"><b>x</b>'; odd[1].id = undefined;
+    const fallback = sb._dashHoldings(odd, 16550);
+    assert.strictEqual((fallback.match(/data-click="navigate" data-a0="stocks"/g) || []).length, 2);
+    assert.strictEqual(fallback.includes('openHolding') || fallback.includes('<b>x</b>'), false);
+    // the empty card is unchanged
+    assert.ok(sb._dashHoldings([], 0).includes('No holdings yet'));
+  });
+
+  test('the Stocks and Crypto tables - the symbol cell is a button that opens the side panel, Edit and Analyse are untouched, hostile text stays escaped', () => {
+    const sb = listSandbox(stockFixture(), 'USD');
+    const els = stocksBox(sb);
+    sb.renderStocks();
+    const html = els['stocks-body'].innerHTML;
+    assert.ok(html.includes('<td class="tl cell-sym sticky-col"><button type="button" class="sym-btn" data-click="openHolding" data-a0="stocks" data-a1="s_aapl" aria-haspopup="dialog" aria-label="Open AAPL details">AAPL</button></td>'));
+    assert.strictEqual((html.match(/class="sym-btn"/g) || []).length, 4);
+    assert.ok(html.includes('<button class="btn btn-sm btn-ghost btn-edit" data-edit-table="stocks" data-edit-id="s_aapl">Edit</button>'));
+    assert.ok(html.includes('target="_blank" rel="noopener" title="Open chart analysis for AAPL">Analyse</a>'));
+    // the phone rows already opened the holding through the same action
+    assert.strictEqual((html.match(/data-click="openHolding" data-a0="stocks"/g) || []).length, 8);   // four buttons in the table, four rows in the list
+    // a hostile symbol and id stay inside their attributes and text
+    const evil = '<img src=x onerror="window.__x=1">';
+    const bad = listSandbox({ stocks:[{ id:'s_"><b>x</b>', symbol:evil, market:'US', shares:1, avgCost:1, currency:'USD' }], _priceCache:{} }, 'USD');
+    const badEls = stocksBox(bad); bad.renderStocks();
+    const cell = /<td class="tl cell-sym sticky-col">[\s\S]*?<\/td>/.exec(badEls['stocks-body'].innerHTML)[0];
+    assert.strictEqual(/<img|<b>/.test(cell), false);
+    assert.ok(cell.includes('data-a1="s_&quot;&gt;&lt;b&gt;x&lt;/b&gt;"') && cell.includes('aria-label="Open &lt;img src=x onerror=&quot;window.__x=1&quot;&gt; details">&lt;img src=x onerror=&quot;window.__x=1&quot;&gt;</button>'));
+    // Crypto: the same cell, and the coin's Edit button as before
+    const cs = listSandbox({ crypto:[{ id:'c_btc', symbol:'BTC', coingeckoId:'bitcoin', amount:0.25, avgCost:60000, currency:'USD' }], _priceCache:{ bitcoin:{ sgd:152000, change24h:1.8, fetchedAt:TODAY_ISO } } });
+    const cEls = renderBox(cs, ['crypto-body', 'crypto-summary', 'freshness-crypto']);
+    cs.renderCrypto();
+    const cHtml = cEls['crypto-body'].innerHTML;
+    assert.ok(cHtml.includes('<td class="tl cell-sym"><button type="button" class="sym-btn" data-click="openHolding" data-a0="crypto" data-a1="c_btc" aria-haspopup="dialog" aria-label="Open BTC details">BTC</button></td>'));
+    assert.ok(cHtml.includes('<button class="btn btn-sm btn-ghost btn-edit" data-edit-table="crypto" data-edit-id="c_btc">Edit</button>'));
+  });
+
+  test('Step 8a markup - the panel and the palette are labelled dialogs, the combobox carries its attributes, the triggers sit in the top bar, nothing is an inline handler', () => {
+    assert.ok(indexSrc.includes('<div class="hp-overlay" id="holding-panel" role="dialog" aria-modal="true" aria-labelledby="hp-title" tabindex="-1">\n  <div class="hp-panel" id="hp-panel"></div>\n</div>'));
+    assert.ok(indexSrc.includes('<div class="cp-overlay" id="cmd-palette" role="dialog" aria-modal="true" aria-label="Search or jump to" tabindex="-1">'));
+    const input = /<input type="text" class="cp-input"[^>]*>/.exec(indexSrc)[0];
+    ['id="cp-input"', 'role="combobox"', 'aria-expanded="false"', 'aria-controls="cp-list"', 'aria-autocomplete="list"', 'aria-activedescendant=""', 'aria-label="Search or jump to"', 'placeholder="Search or jump to"',
+      'autocomplete="off"', 'spellcheck="false"', 'maxlength="80"', 'data-input="paletteInput"'].forEach(a => assert.ok(input.includes(a), a));
+    assert.ok(indexSrc.includes('<div class="cp-list" id="cp-list" role="listbox" aria-label="Results" hidden></div>'));
+    assert.ok(indexSrc.includes('<p class="cp-empty" id="cp-empty" hidden>No matches</p>'));
+    assert.ok(indexSrc.includes('<p class="sr-only" id="cp-status" role="status" aria-live="polite"></p>'));
+    assert.ok(indexSrc.includes('<button type="button" class="icon-btn cp-x" data-click="closeCommandPalette" aria-label="Close search">'));
+    // after the other overlays, before the toast host (a toast stays above them)
+    assert.ok(indexSrc.indexOf('id="sync-details-modal"') < indexSrc.indexOf('id="holding-panel"') && indexSrc.indexOf('id="holding-panel"') < indexSrc.indexOf('id="cmd-palette"') && indexSrc.indexOf('id="cmd-palette"') < indexSrc.indexOf('id="toast-host"'));
+    // the top bar: the field first, then the currency switch, the phone dot, the phone icon, Hide amounts and + Add
+    const bar = indexSrc.slice(indexSrc.indexOf('<div class="tb-actions">'), indexSrc.indexOf('</header>'));
+    const order = ['id="cp-trigger"', 'class="ccy-toggle"', 'id="sync-dot"', 'id="cp-trigger-m"', 'id="privacy-toggle"', 'id="add-btn"'].map(k => bar.indexOf(k));
+    assert.ok(order.every((v, i) => v > -1 && (i === 0 || v > order[i - 1])), JSON.stringify(order));
+    ['class="tb-search" id="cp-trigger" data-click="openCommandPalette" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K" aria-label="Search or jump to" title="Search or jump to"',
+      '<span class="tb-search-lbl">Search or jump to</span>', '<kbd class="tb-kbd" id="cp-kbd" aria-hidden="true">Ctrl K</kbd>',
+      'id="cp-trigger-m" class="icon-btn tb-search-m" data-click="openCommandPalette" aria-haspopup="dialog" aria-label="Search or jump to" title="Search or jump to"'].forEach(f => assert.ok(bar.includes(f), f));
+    // CSP: no inline handler in any of it
+    const fresh = bar + indexSrc.slice(indexSrc.indexOf('<!-- HOLDING SIDE PANEL (Step 8a)'), indexSrc.indexOf('<!-- TOAST HOST -->'));
+    assert.strictEqual(/\son[a-z]+="/i.test(fresh), false);
+    // every data-click in the new markup and in the markup builders is a key of the delegated action map (a dead button is the loss this guards)
+    const wiring = extractFunction('installEventDelegation');
+    const keys = new Set(Array.from(wiring.matchAll(/^ {4}([A-Za-z0-9_]+):\s/gm)).map(m => m[1]));
+    const sources = [fresh].concat(['_hpHeadHtml', '_hpChartHtml', '_hpTradesHtml', '_hpFootHtml', '_paletteOptHtml', '_dashHoldings'].map(n => extractFunction(n))).concat([extractFunction('renderStocks'), extractFunction('renderCrypto')]);
+    const used = new Set(); sources.forEach(src => Array.from(src.matchAll(/data-(?:click|input)="([A-Za-z0-9_]+)"/g)).forEach(m => used.add(m[1])));
+    ['closeHoldingPanel', 'holdingPanelAction', 'openCommandPalette', 'closeCommandPalette', 'paletteRun', 'paletteInput', 'openHolding'].forEach(k => assert.ok(used.has(k), 'unused ' + k));
+    used.forEach(k => assert.ok(keys.has(k), 'data-click without an action: ' + k));
+    // the backdrop closes both, through the same lookup the modals use
+    assert.ok(wiring.includes("'holding-panel':    closeHoldingPanel,") && wiring.includes("'cmd-palette':      closeCommandPalette"));
+    assert.ok(wiring.includes('closeHoldingPanel:   () => closeHoldingPanel(),') && wiring.includes('holdingPanelAction:  (el) => holdingPanelAction(A(el)[0]),'));
+    // Escape closes either one even when focus sits outside it
+    assert.ok(wiring.includes("if (_cp) closeCommandPalette();\n    else if (_hp) closeHoldingPanel();"));
+    // the palette's options keep focus in the field (no focus on press), and the pointer drives the active result
+    assert.ok(wiring.includes("if (_cp && e.target.closest && e.target.closest('.cp-list')) e.preventDefault();") && wiring.includes("if (opt) paletteHover(opt.getAttribute('data-i'));"));
+    // the panel and the palette use the shared focus helpers, there is no second trap
+    ['openHoldingPanel', 'openCommandPalette'].forEach(n => assert.ok(extractFunction(n).includes('openModalFocus(overlay, close'), n));
+    ['closeHoldingPanel', 'closeCommandPalette'].forEach(n => assert.ok(extractFunction(n).includes('closeModalFocus(overlay);'), n));
+    assert.strictEqual(/addEventListener\('keydown'[^)]*Tab/.test(extractFunction('openHoldingPanel') + extractFunction('openCommandPalette')), false);
+  });
+
+  test('Step 8a styles - a 400px panel sliding in over 280ms on the house curve, full width at 768px and below, still under reduced motion, a solid backing, tokens only, the v2.73 block last', () => {
+    const start = indexSrc.indexOf('/* HOLDING SIDE PANEL, COMMAND PALETTE AND THEIR TRIGGERS (Step 8a).');
+    const end = indexSrc.indexOf('/* MOBILE LIST ROWS, CHIP FILTERS AND ACTIONS (v2.73).');
+    assert.ok(start > -1 && end > start);
+    const css = indexSrc.slice(start, end);
+    assert.ok(css.includes('.hp-panel{position:absolute;top:0;right:0;bottom:0;display:flex;flex-direction:column;width:min(400px,100%);background:linear-gradient(var(--surface-solid),var(--surface-solid)),var(--bg);border-left:1px solid var(--border2);box-shadow:var(--glass-shadow);transform:translateX(102%);transition:transform 0.28s cubic-bezier(.2,.8,.2,1)}'));
+    assert.ok(css.includes('.hp-overlay.hp-in .hp-panel{transform:none}') && css.includes('.hp-overlay.hp-in::before{opacity:1}'));
+    // closed overlays hide by visibility (so the close can animate and nothing inside is focusable), open ones take the pointer, both sit at the modal layer
+    assert.ok(css.includes('.hp-overlay,.cp-overlay{position:fixed;inset:0;z-index:200;visibility:hidden;pointer-events:none;transition:visibility 0s linear 0.28s}'));
+    assert.ok(css.includes('.hp-overlay.open,.cp-overlay.open{visibility:visible;pointer-events:auto;transition-delay:0s}'));
+    assert.ok(/\.overlay\{[^}]*z-index:200/.test(indexSrc) && /#toast-host\{[^}]*z-index:300/.test(indexSrc));   // the same layer as the modals, under toasts
+    // the palette: a centred dialog, its top placed so the full-height dialog would sit mid-window, a solid backing
+    assert.ok(css.includes('.cp-overlay{display:flex;align-items:flex-start;justify-content:center;padding:max(48px,calc(50vh - 260px)) 16px 16px;'));
+    assert.ok(/\.cp\{[^}]*max-width:560px[^}]*background:linear-gradient\(var\(--surface-solid\),var\(--surface-solid\)\),var\(--bg\)/.test(css));   // --surface-solid over an opaque --bg: the dark one is 94% opaque and the page must not ghost through it
+    // phone: the panel is full width, the palette sits at the top, the field text is 16px so iOS does not zoom, Esc and the footer hint give way to a close button
+    assert.ok(/@media \(max-width:768px\)\{\s*\.hp-panel\{width:100%;border-left:0\}\s*\.hp-foot \.btn\{min-height:44px\}\s*\}/.test(css));
+    const phone = css.slice(css.indexOf('@media (max-width:640px){\n  .cp-overlay'));
+    assert.ok(phone.includes('.cp-input{font-size:16px}') && phone.includes('.cp-esc,.cp-foot{display:none}') && phone.includes('.cp-x{display:flex}'));
+    assert.ok(css.includes('.cp-x{display:none}'));
+    // reduced motion: the panel, its scrim, the palette and the trigger do not move
+    assert.ok(css.includes('@media (prefers-reduced-motion:reduce){\n  .hp-overlay,.hp-overlay::before,.hp-panel,.cp-overlay{transition:none}\n}'));
+    assert.ok(css.includes('@media (prefers-reduced-motion:reduce){.tb-search{transition:none}}'));
+    // the trigger: icon only from 769px to 940px (the bar has no room beside the currency switch), an icon button on the phone, and the title keeps its word at 320px
+    assert.ok(css.includes('@media (min-width:769px) and (max-width:940px){.tb-search-lbl,.tb-kbd{display:none}.tb-search{padding:6px 9px}}'));
+    assert.ok(css.includes('@media (max-width:768px){.tb-search{display:none}.tb-search-m{display:flex}}') && css.includes('.tb-search-m{display:none}'));
+    assert.ok(css.includes('@media (max-width:360px){.ccy-toggle button{padding-inline:6px}}'));
+    // floating and solid: no blur on either surface, and no block of the panel gives way to the others (a block with overflow set shrinks to zero otherwise)
+    assert.strictEqual(/\.(hp-panel|cp)\{[^}]*backdrop-filter/.test(css), false);
+    assert.ok(css.includes('.hp-body > *{flex:none}'));
+    // tokens only, bar the scrim black (the literal the modal overlay uses): no hex, and the only two rgba are the two scrims
+    assert.strictEqual(/#[0-9a-fA-F]{3,8}\b/.test(css), false);
+    assert.deepStrictEqual(css.match(/rgba?\([^)]*\)/g), ['rgba(0,0,0,0.5)', 'rgba(0,0,0,0.5)']);
+    assert.ok(indexSrc.includes('.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7)'));
+    // the symbol button reads as the text it replaced
+    assert.ok(css.includes('.sym-btn{padding:0;border:0;border-radius:4px;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}'));
+    // the v2.73 block still closes the stylesheet
+    assert.strictEqual(indexSrc.slice(end).includes('\n.btn{'), false);
+  });
+
+  test('Step 8a contrast - the dim text, the match mark, the gain and loss text and the trigger clear 4.5:1 on the panel, the palette and the top bar in both themes', () => {
+    const block = s => { const i = indexSrc.indexOf(s); assert.ok(i > -1, s); return indexSrc.slice(i, indexSrc.indexOf('\n}', i)); };
+    const light = block(':root{'), dark = block('html.dark{');
+    const token = (blk, name) => {
+      const m = new RegExp('--' + name + ':([^;]+);').exec(blk);
+      assert.ok(m, '--' + name + ' missing');
+      const ref = /^var\(--([a-z0-9-]+)\)$/.exec(m[1].trim());
+      return ref ? token(blk, ref[1]) : m[1].trim();
+    };
+    const colour = text => {                                   // #rrggbb or rgba(r,g,b,a) to { rgb, a }
+      const hex = /^#([0-9a-f]{6})$/i.exec(text);
+      if (hex) return { rgb:[0, 2, 4].map(i => parseInt(hex[1].slice(i, i + 2), 16)), a:1 };
+      const m = /^rgba?\(([^)]*)\)$/.exec(text); assert.ok(m, text);
+      const p = m[1].split(',').map(Number); return { rgb:p.slice(0, 3), a:p.length > 3 ? p[3] : 1 };
+    };
+    const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const lum = c => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+    const ratio = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+    const over = (top, bottom) => top.rgb.map((v, i) => v * top.a + bottom[i] * (1 - top.a));
+    [['light', light], ['dark', dark]].forEach(([name, blk]) => {
+      const c = n => colour(token(blk, n));
+      // The dark --surface-solid is 94% opaque and the panel and the palette paint an opaque --bg under it, so the surface is --surface-solid over --bg. The light one is opaque white.
+      const bg3 = c('bg3').rgb, chk = (what, fg, bg, min) => assert.ok(ratio(fg, bg) >= (min || 4.5), name + ' ' + what + ' ' + ratio(fg, bg).toFixed(2));
+      const surface = over(c('surface-solid'), c('bg').rgb);
+      ['text3', 'text2', 'text', 'accent', 'gain', 'loss'].forEach(t => chk('--' + t + ' on the panel and palette surface', c(t).rgb, surface));
+      // the active result's tint: its text, the dim text that steps up to --text2, and the mark
+      ['text', 'text2', 'accent'].forEach(t => chk('--' + t + ' on the active result (--bg3)', c(t).rgb, bg3));
+      // the trigger: --text2 on the glass bar over a card or the page, the two surfaces that can scroll behind it
+      [['bg2', c('bg2').rgb], ['bg', c('bg').rgb]].forEach(([n, rgb]) => chk('--text2 on the top bar glass over --' + n, c('text2').rgb, over(c('glass'), rgb)));
+      // the monogram letters in the panel header sit on their tint over the surface
+      ['stocks', 'crypto'].forEach(k => {
+        const tint = over({ rgb:c('c-' + k).rgb, a:0.16 }, surface);
+        chk('--c-' + k + '-ink on its tint', colour(token(blk, 'c-' + k + '-ink')).rgb, tint);
+      });
+    });
+    // the dim text rules say what they mean: the active result's sub text and the trigger use the stronger tokens
+    assert.ok(indexSrc.includes('.cp-opt[aria-selected="true"] .cp-s{color:var(--text2)}'));
+    assert.ok(/\.tb-search\{[^}]*color:var\(--text2\)/.test(indexSrc));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

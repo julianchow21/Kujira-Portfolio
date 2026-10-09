@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.73';
-const APP_DISPLAY_VERSION = 'v2.73 (09 Oct)';
+const APP_VERSION = 'v2.74';
+const APP_DISPLAY_VERSION = 'v2.74 (09 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -5533,6 +5533,7 @@ function showPage(key){
   }
   closeMoreSheet(); // navigating (incl. from within the sheet) always closes it
   closeShellMenus(false); // and so does it for the workspace and Add menus
+  closeHoldingPanel(); // and for the holding panel (Back or a hash change while it is open)
   _syncNavActive(key); // sidebar item and bottom-bar area for the new page
   _syncTopbarContext(); // top bar title and status line
   updateCcyToggleUI(); // reflect the new tab's currency
@@ -6142,6 +6143,7 @@ async function refreshStockPrices(opts = {}){
     // silent auto-tick stamped the cloud sheet each minute per open tab, which
     // is what kept two clients in a rolling conflict.
     renderStocks();
+    refreshHoldingPanel();   // an open holding panel takes the new price
     if (!opts.silent) showToast('Prices: ' + ok + ' refreshed' + (fail ? ', ' + fail + ' failed' : ''), fail ? 'error' : 'success');
     // Fundamentals ride behind the price refresh, fire-and-forget: the cells
     // fill in when they land, and a miss leaves the '—' tokens (non-fatal).
@@ -6209,6 +6211,7 @@ async function refreshCryptoPrices(){
     // No saveData(): same reasoning as refreshStockPrices, _priceCache is
     // memory-only, so there is nothing to persist and nothing worth pushing.
     renderCrypto();
+    refreshHoldingPanel();   // an open holding panel takes the new price
     // Report configured coins that came back with no price too (typo'd or
     // delisted coingeckoId), not just how many succeeded, so a silent gap
     // in the ledger doesn't hide behind an all-green "N refreshed" toast.
@@ -7263,12 +7266,12 @@ function _holdingLabel(m){
   return [m.sym, m.sub, shown, share, ret, m.fx ? 'FX rate missing' : ''].filter(Boolean).join(', ');
 }
 
-/* A holding row opens the holding. Step 8 swaps the edit form for a side panel, so every row routes through here. */
+/* A holding row opens the holding in the side panel (Step 8a, openHoldingPanel), so every row of every page and the command palette route through here.
+   Edit holding lives inside the panel. False for anything that is not a stock or a coin, for an unsafe id (it says so) and for a holding that is gone. */
 function openHoldingDetail(table, id){
   if (table !== 'stocks' && table !== 'crypto') return false;
   if (!kjrSafeId(id)){ showToast('Invalid entry id', 'error'); return false; }
-  openEntityModal(table, id);
-  return true;
+  return openHoldingPanel(table, id);
 }
 
 function _holdingRowHtml(m){
@@ -8303,7 +8306,7 @@ function renderStocks(){
           const cells = cols.map(c => `<td class="${c.cls}">${c.render(r, ctx)}</td>`).join('');
           const ax = encodeURIComponent(r.ysym);
           return `<tr>
-            <td class="tl cell-sym sticky-col">${kjrEscape(r.s.symbol)}</td>
+            <td class="tl cell-sym sticky-col"><button type="button" class="sym-btn" data-click="openHolding" data-a0="stocks" data-a1="${kjrEscape(r.s.id)}" aria-haspopup="dialog" aria-label="Open ${kjrEscape(r.s.symbol)} details">${kjrEscape(r.s.symbol)}</button></td>
             ${cells}
             <td class="row-actions">
               <a class="btn btn-sm btn-ghost" href="../Trading/index.html?symbol=${ax}" target="_blank" rel="noopener" title="Open chart analysis for ${kjrEscape(r.s.symbol)}">Analyse</a>
@@ -10430,7 +10433,7 @@ function renderCrypto(){
           ? `${fmt(r.priceSgd)}${r.stale ? ' <span class="hint">(stale)</span>' : ''}`
           : '<span class="price-stale">—</span>';
         return `<tr>
-          <td class="tl cell-sym">${kjrEscape(r.c.symbol)}</td>
+          <td class="tl cell-sym"><button type="button" class="sym-btn" data-click="openHolding" data-a0="crypto" data-a1="${kjrEscape(r.c.id)}" aria-haspopup="dialog" aria-label="Open ${kjrEscape(r.c.symbol)} details">${kjrEscape(r.c.symbol)}</button></td>
           <td class="tl muted">${kjrEscape(r.cid || '—')}</td>
           <td class="num">${r.c.amount || 0}</td>
           <td class="num">${r.c.avgCost ? fmtSgdOrNative(r.c.avgCost, r.ccy) : '—'}</td>
@@ -12989,7 +12992,7 @@ function _dashHoldingRows(stockRows){
   const rows = [];
   stockRows.forEach(r => {
     const move = _stockDayMove(r);
-    rows.push({ nav:'stocks', cls:'stocks', sym:String(r.s.symbol || '?'), sub:[r.s.market, r.s.sector].filter(Boolean).join(' · '),
+    rows.push({ nav:'stocks', table:'stocks', id:r.s.id, cls:'stocks', sym:String(r.s.symbol || '?'), sub:[r.s.market, r.s.sector].filter(Boolean).join(' · '),
       name:(r.px && r.px.shortName) ? String(r.px.shortName) : String(r.s.market || ''),
       mv:r.mv, pl:r.pl, plPct:r.plPct, dayPct:move.pct, daySgd:move.sgd });
   });
@@ -12997,7 +13000,7 @@ function _dashHoldingRows(stockRows){
     const r = _cryptoRow(c);
     const pct = (r.px && r.px.change24h != null && isFinite(Number(r.px.change24h))) ? Number(r.px.change24h) : null;
     const id = String(c.coingeckoId || '').replace(/-/g, ' ').trim();
-    rows.push({ nav:'crypto', cls:'crypto', sym:String(c.symbol || '?'), sub:'Crypto',
+    rows.push({ nav:'crypto', table:'crypto', id:c.id, cls:'crypto', sym:String(c.symbol || '?'), sub:'Crypto',
       name: id ? id.charAt(0).toUpperCase() + id.slice(1) : 'Crypto',
       mv:r.mv, pl:r.pl, plPct:r.plPct, dayPct:pct, daySgd:(r.mv != null && pct != null) ? _dayMoveSgd(r.mv, pct) : null });
   });
@@ -13005,7 +13008,8 @@ function _dashHoldingRows(stockRows){
 }
 
 /* Holdings: the eight largest positions by S$ value. Each row is one button
-   that opens its tab. A missing price shows a dash, never NaN. */
+   that opens the holding's side panel (a row with no safe id falls back to
+   opening its tab). A missing price shows a dash, never NaN. */
 function _dashHoldings(rows, displayNet){
   const dash = '–';
   const head = withLink => '<div class="card-head"><h3>Holdings</h3>' + (withLink ? '<button type="button" class="dash-link" data-click="refreshDashPrices">Refresh prices</button>' : '') + '</div>';
@@ -13020,7 +13024,10 @@ function _dashHoldings(rows, displayNet){
     const share = (r.mv != null && displayNet > 0) ? (r.mv / displayNet * 100).toFixed(1) + '% of total' : dash;
     const day = r.dayPct != null ? '<span class="dash-chg ' + (r.dayPct >= 0 ? 'up' : 'down') + '">' + fmtPct(r.dayPct) + '</span><span class="dash-sub">today</span>' : '<span class="dash-chg">' + dash + '</span><span class="dash-sub">today</span>';
     const ret = r.plPct != null ? '<span class="dash-chg ' + (r.pl >= 0 ? 'up' : 'down') + '">' + fmtPct(r.plPct) + '</span><span class="dash-sub money-chip">' + fmt(r.pl, {dp:0, signed:true}) + '</span>' : '<span class="dash-chg">' + dash + '</span><span class="dash-sub">&nbsp;</span>';
-    return '<button type="button" class="dash-hrow" data-click="navigate" data-a0="' + r.nav + '">'
+    const opens = ((r.table === 'stocks' || r.table === 'crypto') && kjrSafeId(r.id))
+      ? 'data-click="openHolding" data-a0="' + r.table + '" data-a1="' + kjrEscape(r.id) + '" aria-haspopup="dialog"'
+      : 'data-click="navigate" data-a0="' + r.nav + '"';
+    return '<button type="button" class="dash-hrow" ' + opens + '>'
       + '<span class="dash-who">' + _monogram(r.sym, r.cls) + '<span class="dash-who-t"><b>' + kjrEscape(r.sym) + '</b><span>' + kjrEscape(r.sub) + '</span></span></span>'
       + '<span class="dash-hcell"><span class="dash-hval money-chip">' + (r.mv != null ? _moneyHtml(fmt(r.mv, {dp:0})) : dash) + '</span><span class="dash-sub">' + share + '</span></span>'
       + '<span class="dash-hcell dash-col-day">' + day + '</span>'
@@ -13262,6 +13269,757 @@ function renderSummary(items){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   HOLDING SIDE PANEL (Step 8a)
+   A holding row opens a 400px panel from the right (full width on a phone): the price and the day move, a
+   3 month price chart, the position's figures and its trades, with Record trade and Edit holding at the foot.
+   It reads the same rows the Stocks and Crypto tabs read (buildStockChartRows, _cryptoRow), so it can never
+   disagree with them. Presentation only, no money maths: every figure is a row field or goes through the
+   app's own formatters. Per-share figures (price, average cost, a trade) are stated in the holding's own
+   currency and position totals (value, unrealised, dividends) in S$, so the panel reads the same whichever
+   page opened it. The model is plain text, the markup builders escape it, and amounts sit in .money-chip so
+   Hide amounts blurs them. The overlay is the dialog (role, aria-modal, label), openModalFocus owns the focus
+   trap, Escape and the return of focus, and the overlay's own backdrop is the scrim (BACKDROP_CLOSE_FNS).
+   ═══════════════════════════════════════════════════════════════════════ */
+const HP_HISTORY_RANGE = 'THREE_MONTHS';   // a PB_PERIODS key. fetchStockHistory reads it as '3mo', and its memory cache is keyed by the same key
+const HP_TRADES_SHOWN = 10;                // trades listed before Show all
+const HP_ACTIONS = ['record', 'edit', 'retry', 'trades'];
+let _hp = null;        // the open panel: { table, id, ysym, ccy, showAll, hist, html }
+let _hpHistSeq = 0;    // numbers each history request, so a late answer for a closed or reopened panel is dropped
+
+/* An amount as plain text in a stated currency, never converted (fmt prints a figure as given when it is handed a currency). */
+function _hpMoney(n, ccy, opts){
+  return _finiteNum(n) ? fmt(n, Object.assign({ currency: String(ccy || 'SGD').toUpperCase() }, opts || {})) : LIST_DASH;
+}
+
+/* Decimals for a per-share figure: two from 1 up, and below 1 as many as the value needs (S$0.215), to six. */
+function _hpDp(n){
+  const v = Math.abs(Number(n));
+  if (!isFinite(v) || v >= 1) return 2;
+  for (let dp = 2; dp < 6; dp++){
+    if (Math.abs(v * Math.pow(10, dp) - Math.round(v * Math.pow(10, dp))) < 1e-7) return dp;
+  }
+  return 6;
+}
+
+/* A quantity of shares or coins with up to maxDp decimals and no trailing zeros. */
+function _hpQty(n, maxDp){
+  const v = Number(n);
+  return isFinite(v) ? v.toLocaleString('en-SG', { maximumFractionDigits: maxDp }) : LIST_DASH;
+}
+
+/* A holding's share of net worth as a percentage: its S$ value over the figure the dashboard hero shows. Null when either is missing or the net worth is not positive. */
+function _hpShare(mv, displayNet){
+  return (_finiteNum(mv) && _finiteNum(displayNet) && displayNet > 0) ? mv / displayNet * 100 : null;
+}
+function _hpShareText(pct){
+  if (!_finiteNum(pct)) return LIST_DASH;
+  return (pct > 0 && pct < 0.05) ? '<0.1%' : pct.toFixed(1) + '%';
+}
+
+/* The net worth the dashboard hero shows (the Include CPF switch respected), and whether it is a known subtotal. */
+function _hpNetWorth(){
+  const valuation = _netWorthValueInfo();
+  return { displayNet: _allocationData(valuation.classes, _dashShowCpf).total, incomplete: !!valuation.incomplete };
+}
+
+/* The day move under the price: a signed percentage (the pill carries an arrow), and the S$ move of the position when known. Null with no percentage. */
+function _hpDay(pct, sgd, when){
+  if (!_finiteNum(pct)) return null;
+  const dir = pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat');
+  const sgdText = (_finiteNum(sgd) && Math.abs(sgd) >= 0.005) ? _hpMoney(sgd, 'SGD', { dp: Math.abs(sgd) >= 1 ? 0 : 2, signed:true }) : '';
+  return { dir, pctText: fmtPct(pct), when, sgdText };
+}
+
+/* A stock's trades, newest first. Same date: the one entered later comes first. A trade with no date sorts last. Each is plain text in the stock's currency. */
+function _hpTrades(stockId, ccy){
+  const rows = (DB.stockTxns || []).filter(t => t && t.stockId === stockId).map((t, i) => ({ t, i }));
+  rows.sort((a, b) => {
+    const da = String(a.t.date || ''), db = String(b.t.date || '');
+    return da === db ? b.i - a.i : (da < db ? 1 : -1);
+  });
+  return { total: rows.length, rows: rows.map(x => {
+    const t = x.t, sell = t.side === 'sell';
+    const qty = Math.abs(Number(t.shares) || 0), price = Number(t.price) || 0, fees = Number(t.fees) || 0;
+    const gross = qty * price;
+    return { id:String(t.id || ''), sell, sideText: sell ? 'Sold' : 'Bought', dateText: t.date ? fmtDateSG(t.date) : '',
+      qtyText: _hpQty(qty, 4), priceText: _hpMoney(price, ccy, { dp:_hpDp(price) }),
+      valueText: _hpMoney(sell ? gross - fees : gross + fees, ccy),
+      feesText: fees ? _hpMoney(fees, ccy) : '' };
+  }) };
+}
+
+/* The panel model of one stock, from its buildStockChartRows row. Null when the stock is not there (deleted). */
+function _hpStockModel(id, ctx){
+  const r = buildStockChartRows().find(x => x.s && x.s.id === id);
+  if (!r) return null;
+  const s = r.s;
+  const sym = String(s.symbol || '?');
+  const px = (r.px && r.px.price != null && isFinite(Number(r.px.price))) ? r.px : null;
+  const name = (r.px && r.px.shortName) ? String(r.px.shortName) : '';
+  const sub = name ? [name, s.market].filter(Boolean).join(' · ') : [s.market, s.sector].filter(Boolean).join(' · ');
+  const nativeCcy = String(r.priceCcy || r.ccy || 'SGD').toUpperCase();
+  const price = { has:!!px, nativeText:'', sgdText:'', fxMissing:false, staleText: (px && r.stale && px.fetchedAt) ? 'Last updated ' + relTime(px.fetchedAt) : '' };
+  if (px){
+    price.nativeText = _hpMoney(Number(px.price), nativeCcy, { dp:_hpDp(px.price) });
+    if (nativeCcy !== 'SGD'){
+      if (_finiteNum(r.priceSgd)) price.sgdText = _hpMoney(r.priceSgd, 'SGD', { dp:_hpDp(r.priceSgd) });
+      else price.fxMissing = true;
+    }
+  }
+  const move = _stockDayMove(r);
+  const shares = Number(r.shares) || 0;
+  const mvKnown = _finiteNum(r.mv), plKnown = _finiteNum(r.pl);
+  const priceNote = px ? 'FX rate missing' : 'No price yet';
+  const stats = [
+    { key:'holding', label:'Holding', text: _hpQty(shares, 4) + (shares === 1 ? ' share' : ' shares'), chip:true },
+    { key:'avgCost', label:'Average cost', text: _finiteNum(r.avgCost) ? _hpMoney(r.avgCost, r.ccy, { dp:_hpDp(r.avgCost) }) : LIST_DASH, chip:true },
+    { key:'value', label:'Market value', text: mvKnown ? _hpMoney(r.mv, 'SGD', { dp:0 }) : LIST_DASH, chip:true, note: mvKnown ? '' : priceNote },
+    { key:'unrealised', label:'Unrealised', ret: _returnCell(r.pl, r.plPct, plKnown ? _hpMoney(r.pl, 'SGD', { dp:0, signed:true }) : ''),
+      note: plKnown ? '' : (r.cost == null ? 'FX rate missing' : (mvKnown ? '' : priceNote)) }
+  ];
+  if ((Number(s.divPerShare) || 0) > 0 && shares > 0){
+    const known = _finiteNum(r.divAnnualSgd);
+    stats.push({ key:'dividends', label:'Dividends a year', text: known ? _hpMoney(r.divAnnualSgd, 'SGD', { dp:0 }) : LIST_DASH, chip:true, note: known ? '' : 'FX rate missing' });
+  }
+  const share = _hpShare(r.mv, ctx && ctx.displayNet);
+  stats.push({ key:'share', label:'Share of net worth', text:_hpShareText(share), note: (share != null && ctx && ctx.incomplete) ? 'of the known total' : '' });
+  return { table:'stocks', id:s.id, cls:'stocks', sym, sub, ysym:r.ysym, ccy:nativeCcy, price, day:_hpDay(move.pct, move.sgd, 'today'),
+    stats, trades:_hpTrades(s.id, r.ccy), canTrade:true };
+}
+
+/* The panel model of one coin, from its _cryptoRow. Prices come from CoinGecko in S$ and US$, so a USD coin shows US$ first and S$ after. */
+function _hpCryptoModel(id, ctx){
+  const c = (DB.crypto || []).find(x => x && x.id === id);
+  if (!c) return null;
+  const r = _cryptoRow(c);
+  const sym = String(c.symbol || '?');
+  const ccy = String(r.ccy || 'USD').toUpperCase();
+  const px = (r.px && r.px.sgd != null && isFinite(Number(r.px.sgd))) ? r.px : null;
+  const price = { has:!!px, nativeText:'', sgdText:'', fxMissing:false, staleText: (px && r.stale && px.fetchedAt) ? 'Last updated ' + relTime(px.fetchedAt) : '' };
+  if (px){
+    const usd = (px.usd != null && isFinite(Number(px.usd))) ? Number(px.usd) : null;
+    if (ccy === 'USD' && usd != null){
+      price.nativeText = _hpMoney(usd, 'USD', { dp:_hpDp(usd) });
+      price.sgdText = _hpMoney(Number(px.sgd), 'SGD', { dp:_hpDp(px.sgd) });
+    } else {
+      price.nativeText = _hpMoney(Number(px.sgd), 'SGD', { dp:_hpDp(px.sgd) });
+    }
+  }
+  const pct = (r.px && r.px.change24h != null && isFinite(Number(r.px.change24h))) ? Number(r.px.change24h) : null;
+  const mvKnown = _finiteNum(r.mv), plKnown = _finiteNum(r.pl);
+  const stats = [
+    { key:'holding', label:'Holding', text: _hpQty(c.amount, 8) + ' ' + sym, chip:true },
+    { key:'avgCost', label:'Average cost', text: Number(c.avgCost) > 0 ? _hpMoney(Number(c.avgCost), ccy, { dp:_hpDp(c.avgCost) }) : LIST_DASH, chip:true },
+    { key:'value', label:'Market value', text: mvKnown ? _hpMoney(r.mv, 'SGD', { dp:0 }) : LIST_DASH, chip:true, note: mvKnown ? '' : 'No price yet' },
+    { key:'unrealised', label:'Unrealised', ret: _returnCell(r.pl, r.plPct, plKnown ? _hpMoney(r.pl, 'SGD', { dp:0, signed:true }) : ''),
+      note: plKnown ? '' : (r.cost == null ? 'FX rate missing' : (mvKnown ? '' : 'No price yet')) }
+  ];
+  const share = _hpShare(r.mv, ctx && ctx.displayNet);
+  stats.push({ key:'share', label:'Share of net worth', text:_hpShareText(share), note: (share != null && ctx && ctx.incomplete) ? 'of the known total' : '' });
+  return { table:'crypto', id:c.id, cls:'crypto', sym, sub:'Crypto', ysym:'', ccy, price, day:_hpDay(pct, (mvKnown && pct != null) ? _dayMoveSgd(r.mv, pct) : null, 'past 24 hours'),
+    stats, trades:{ total:0, rows:[] }, canTrade:false };
+}
+
+/* The model behind the panel, or null for anything that is not a stock or a coin on the books. ctx is _hpNetWorth(). */
+function _holdingPanelModel(table, id, ctx){
+  if (!kjrSafeId(id)) return null;
+  if (table === 'stocks') return _hpStockModel(id, ctx || {});
+  if (table === 'crypto') return _hpCryptoModel(id, ctx || {});
+  return null;
+}
+
+/* Price history points ({t, c} from the Apps Script) as a series the hero chart helpers take: one point per Singapore day (a later point of the day wins),
+   oldest first, only real positive prices. */
+function _hpSeries(points){
+  const byDate = new Map();
+  (Array.isArray(points) ? points : []).forEach(p => {
+    if (!p || p.t == null || p.c == null) return;
+    const t = Number(p.t), c = Number(p.c);
+    if (!isFinite(t) || !isFinite(c) || !(c > 0)) return;
+    const when = new Date(t);
+    if (isNaN(when.getTime())) return;
+    byDate.set(_isoDateSG(when), c);
+  });
+  return Array.from(byDate.keys()).sort().map(date => ({ date, value:byDate.get(date) }));
+}
+
+function _hpCcySym(ccy){
+  const c = String(ccy || 'SGD').toUpperCase();
+  return c === 'USD' ? 'US$' : (c === 'SGD' ? 'S$' : c + ' ');
+}
+
+/* Decimals the gridline labels need so each one reads exactly (S$3.2, S$3.3), from none up to four. */
+function _hpAxisDp(grid){
+  let dp = 0;
+  grid.forEach(t => {
+    let d = 0;
+    while (d < 4 && Math.abs(t.value * Math.pow(10, d) - Math.round(t.value * Math.pow(10, d))) > 1e-6) d++;
+    if (d > dp) dp = d;
+  });
+  return dp;
+}
+/* The power of ten to scale a price series by before _heroGeometry. The hero pads its value range to at least 1 (a dollar), which suits net worth and would
+   flatten a stock under about 10 into the middle third of the plot. Scaling the level up to 100 or more keeps that floor under 1% of the level, and the
+   gridline values are scaled back for their labels. 1 for a level of 100 or more, and for anything that is not a positive number. */
+function _hpScale(points){
+  const top = Math.max.apply(null, points.map(p => Math.abs(p.value)));
+  if (!(top > 0) || !isFinite(top) || top >= 100) return 1;
+  return Math.pow(10, Math.ceil(Math.log10(100 / top)));
+}
+/* A gridline label. From 1,000 up it is the hero's compact form (US$1.2k), below that a price with the decimals the chart needs. */
+function _hpAxisLabel(v, sym, dp){
+  if (Math.abs(v) >= 1000) return _heroAxisLabel(v, sym);
+  return (v < 0 ? '-' : '') + sym + Math.abs(v).toFixed(dp);
+}
+
+/* One markup builder per block. Every text goes through kjrEscape, and a plain amount through _moneyHtml for its dimmed currency prefix. */
+function _hpAmountHtml(text){ return _moneyHtml(kjrEscape(text)); }
+
+function _hpHeadHtml(m){
+  return '<div class="hp-head">' + _monogram(m.sym, m.cls)
+    + '<div class="hp-id"><h2 class="hp-title" id="hp-title">' + kjrEscape(m.sym) + '</h2>'
+    + (m.sub ? '<p class="hp-sub" title="' + kjrEscape(m.sub) + '">' + kjrEscape(m.sub) + '</p>' : '') + '</div>'
+    + '<button type="button" class="icon-btn hp-close" id="hp-close" data-click="closeHoldingPanel" aria-label="Close holding details">'
+    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>';
+}
+
+function _hpPriceHtml(m){
+  const p = m.price;
+  const top = p.has
+    ? '<span class="hp-px-v">' + _hpAmountHtml(p.nativeText) + '</span>'
+      + (p.sgdText ? '<span class="hp-px-s">' + kjrEscape(p.sgdText) + '</span>' : '')
+      + (p.fxMissing ? '<span class="hp-px-s">S$ value needs an FX rate</span>' : '')
+    : '<span class="hp-px-v">' + LIST_DASH + '</span><span class="hp-px-s">No price yet, refresh prices</span>';
+  let day = '';
+  if (m.day){
+    day = '<span class="dash-pill ' + m.day.dir + '">' + kjrEscape(m.day.pctText) + '</span><span class="hp-when">' + kjrEscape(m.day.when)
+      + (m.day.sgdText ? ' · <span class="money-chip">' + kjrEscape(m.day.sgdText) + '</span> on this holding' : '') + '</span>';
+  } else if (p.has){
+    day = '<span class="hp-when">No day change yet</span>';
+  }
+  if (p.staleText) day += '<span class="hp-when">' + kjrEscape(p.staleText) + '</span>';
+  return '<section class="hp-price" aria-label="Price"><div class="hp-px">' + top + '</div>' + (day ? '<div class="hp-day">' + day + '</div>' : '') + '</section>';
+}
+
+/* The 3 month chart, built on the hero chart's geometry and CSS so the two charts look the same. The line takes the gain or loss colour from the period's result. */
+function _hpSeriesHtml(hist){
+  const points = hist.series;
+  const k = _hpScale(points);
+  const geo = _heroGeometry(k === 1 ? points : points.map(p => ({ date:p.date, value:p.value * k })));
+  const last = points.length - 1;
+  const change = points[last].value - points[0].value;
+  const pct = points[0].value !== 0 ? change / Math.abs(points[0].value) * 100 : null;
+  const sym = _hpCcySym(hist.ccy);
+  const lines = geo.grid.map(t => ({ value:+(t.value / k).toPrecision(12), y:t.y }));   // the gridlines back in the price's own units
+  const dp = _hpAxisDp(lines);
+  const pos = v => (v * 100).toFixed(3) + '%';
+  let line = '';
+  points.forEach((p, i) => { line += (i ? 'L' : 'M') + (geo.xs[i] * 1000).toFixed(1) + ' ' + (geo.ys[i] * 300).toFixed(1); });
+  const grid = lines.map(t => '<i style="top:' + pos(t.y) + '"><b>' + kjrEscape(_hpAxisLabel(t.value, sym, dp)) + '</b></i>').join('');
+  const ticks = geo.dates.map(t => '<span style="left:' + pos(t.x) + '">' + kjrEscape(_pbHumanDate(t.iso, geo.style)) + '</span>').join('');
+  const trend = pct == null ? '' : (change === 0 ? ', level' : ', ' + (change > 0 ? 'up ' : 'down ') + Math.abs(pct).toFixed(1) + '%');
+  const dir = change > 0 ? 'up' : (change < 0 ? 'down' : '');
+  return '<div class="hero-chart hp-chart ' + (change >= 0 ? 'up' : 'down') + '" role="img" aria-label="' + kjrEscape('Price over the past 3 months' + trend) + '">'
+    + '<div class="hero-grid" aria-hidden="true">' + grid + '</div>'
+    + '<div class="hero-plot"><svg viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true" focusable="false">'
+    + '<defs><linearGradient id="hp-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity=".22"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>'
+    + '<path d="' + line + 'L1000 300L0 300Z" fill="url(#hp-fill)"/>'
+    + '<path d="' + line + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
+    + '</svg><i class="hero-dot end" style="left:' + pos(geo.xs[last]) + ';top:' + pos(geo.ys[last]) + '"></i></div>'
+    + '<div class="hero-ticks' + (geo.style === 'month' ? ' month' : '') + '" aria-hidden="true">' + ticks + '</div></div>'
+    + '<p class="hp-caption"><span>3 months</span><span class="hp-res' + (dir ? ' ' + dir : '') + '">' + kjrEscape(pct == null ? '' : fmtPct(pct)) + '</span></p>';
+}
+
+/* The chart block for the history state: ok (a chart), loading, nosync, sparse, error (with Retry), or coin (no history for coins yet). */
+function _hpChartHtml(m, hist){
+  const note = (text, extra) => '<div class="hp-empty"><span class="hp-empty-icon" aria-hidden="true">' + _emptyIcon('stocks') + '</span><p>' + kjrEscape(text) + '</p>' + (extra || '') + '</div>';
+  if (m.table === 'crypto') return note('Price history is not available for coins yet.');
+  const state = hist && hist.state;
+  if (state === 'ok') return _hpSeriesHtml(hist);
+  if (state === 'loading') return '<div class="hp-empty hp-loading" aria-live="polite"><p>Loading price history…</p></div>';
+  if (state === 'nosync') return note('Price history needs your sync connection.');
+  if (state === 'sparse') return note('Not enough price history yet.');
+  return note('Price history is unavailable right now.', '<button type="button" class="btn btn-sm" id="hp-retry" data-click="holdingPanelAction" data-a0="retry">Retry</button>');
+}
+
+function _hpStatHtml(st){
+  let value;
+  if (st.ret){
+    value = '<span class="hp-ret' + (st.ret.dir ? ' ' + st.ret.dir : '') + '"><span class="hp-ret-pct">' + kjrEscape(st.ret.pct) + '</span>'
+      + (st.ret.amount ? '<span class="hp-ret-amt money-chip">' + _hpAmountHtml(st.ret.amount) + '</span>' : '') + '</span>';
+  } else {
+    value = st.chip ? '<span class="money-chip">' + _hpAmountHtml(st.text) + '</span>' : _hpAmountHtml(st.text);
+  }
+  return '<div class="hp-stat"><dt>' + kjrEscape(st.label) + '</dt><dd>' + value + (st.note ? '<span class="hp-stat-note">' + kjrEscape(st.note) + '</span>' : '') + '</dd></div>';
+}
+
+function _hpTradeHtml(t){
+  const sub = [t.dateText, t.feesText ? 'fees ' + t.feesText : ''].filter(Boolean).join(' · ');
+  return '<li class="hp-trade"><div class="hp-trade-t"><span class="hp-side">' + kjrEscape(t.sideText) + '</span> <span class="money-chip">' + kjrEscape(t.qtyText + ' @ ' + t.priceText) + '</span></div>'
+    + '<div class="hp-trade-s">' + kjrEscape(sub) + '</div>'
+    + '<div class="hp-trade-v money-chip">' + _hpAmountHtml(t.valueText) + '</div></li>';
+}
+
+function _hpTradesHtml(m, showAll){
+  const t = m.trades;
+  const more = t.total > HP_TRADES_SHOWN
+    ? '<button type="button" class="dash-link" id="hp-trades-toggle" data-click="holdingPanelAction" data-a0="trades" aria-expanded="' + (showAll ? 'true' : 'false') + '">'
+      + (showAll ? 'Show fewer' : 'Show all ' + t.total) + '</button>'
+    : '';
+  const head = '<div class="hp-sect"><h3 class="hp-h" id="hp-trades-h">Trades</h3>' + more + '</div>';
+  if (!t.total) return '<section aria-labelledby="hp-trades-h">' + head + '<p class="hp-none">No trades recorded yet.</p></section>';
+  return '<section aria-labelledby="hp-trades-h">' + head + '<ol class="hp-trades">' + (showAll ? t.rows : t.rows.slice(0, HP_TRADES_SHOWN)).map(_hpTradeHtml).join('') + '</ol></section>';
+}
+
+function _hpFootHtml(m){
+  return '<div class="hp-foot">'
+    + (m.canTrade ? '<button type="button" class="btn btn-primary" id="hp-record" data-click="holdingPanelAction" data-a0="record">Record trade</button>' : '')
+    + '<button type="button" class="btn" id="hp-edit" data-click="holdingPanelAction" data-a0="edit">Edit holding</button></div>';
+}
+
+/* The whole panel. view is the open panel's state: showAll (every trade) and hist (the chart's history state). */
+function _holdingPanelHtml(m, view){
+  view = view || {};
+  return _hpHeadHtml(m)
+    + '<div class="hp-body" id="hp-body">' + _hpPriceHtml(m)
+    + '<section class="hp-chartwrap" aria-label="Price history, 3 months">' + _hpChartHtml(m, view.hist) + '</section>'
+    + '<dl class="hp-stats">' + m.stats.map(_hpStatHtml).join('') + '</dl>'
+    + (m.table === 'stocks' ? _hpTradesHtml(m, !!view.showAll) : '') + '</div>'
+    + _hpFootHtml(m);
+}
+
+/* Paints the panel. A repaint that would change nothing is skipped, so a price refresh that moved nothing does not disturb focus or the chart. Scroll and focus
+   survive a real repaint (every control has an id), and a control that is gone (Retry) hands focus to the dialog itself, so Escape and Tab keep working. */
+function _hpRender(m){
+  const st = _hp, host = document.getElementById('hp-panel');
+  if (!st || !host) return false;
+  const html = _holdingPanelHtml(m, st);
+  if (html === st.html) return false;
+  const repaint = !!st.html;
+  const body = host.querySelector('.hp-body');
+  const top = (repaint && body) ? body.scrollTop : 0;
+  const focusId = (repaint && host.contains(document.activeElement)) ? document.activeElement.id : '';
+  host.innerHTML = html;
+  st.html = html;
+  const next = host.querySelector('.hp-body');
+  if (next && top) next.scrollTop = top;
+  if (focusId){
+    const back = document.getElementById(focusId);
+    _modalFocusElement(back && host.contains(back) ? back : document.getElementById('holding-panel'));
+  }
+  return true;
+}
+
+/* Starts the 3 month history for the open stock. No sync connection is its own state (the call needs one), and an answer that arrives after the panel was closed or reopened is dropped. */
+function _hpStartHistory(){
+  const st = _hp;
+  if (!st || st.table !== 'stocks') return;
+  if (!st.ysym){ st.hist = { state:'error', token:0 }; return; }
+  if (!getSyncUrl()){ st.hist = { state:'nosync', token:0 }; return; }
+  const token = ++_hpHistSeq;
+  const ysym = st.ysym, ccy = st.ccy;
+  st.hist = { state:'loading', token };
+  const settle = hist => {
+    if (!_hp || _hp.hist.token !== token) return;
+    _hp.hist = Object.assign({ token }, hist);
+    refreshHoldingPanel();
+  };
+  fetchStockHistory([ysym], HP_HISTORY_RANGE).then(out => {
+    const h = out && out[ysym];
+    if (!h) return settle({ state:'error' });
+    const series = _hpSeries(h.points);
+    settle(series.length < 2 ? { state:'sparse' } : { state:'ok', ccy: h.ccy || ccy, series });
+  }).catch(() => settle({ state:'error' }));
+}
+
+/* Opens the panel for a stock or a coin. False when the holding is not on the books (it says so) or the markup is missing. */
+function openHoldingPanel(table, id){
+  const overlay = document.getElementById('holding-panel');
+  if (!overlay || (table !== 'stocks' && table !== 'crypto') || !kjrSafeId(id)) return false;
+  const model = _holdingPanelModel(table, id, _hpNetWorth());
+  if (!model){
+    showToast('That holding no longer exists, it may have been deleted elsewhere', 'error');
+    return false;
+  }
+  closeShellMenus(false);
+  _hp = { table, id, ysym:model.ysym || '', ccy:model.ccy || '', showAll:false, hist:{ state: table === 'crypto' ? 'coin' : 'idle', token:0 }, html:'' };
+  if (table === 'stocks') _hpStartHistory();
+  _hpRender(model);
+  overlay.classList.add('open', 'hp-in');
+  openModalFocus(overlay, closeHoldingPanel);
+  return true;
+}
+
+/* Focus after the panel closes. closeModalFocus returns it to the opener when the opener is still on the page. When a repaint replaced it (a row of the
+   dashboard or a table), the same holding's control is found again. A focus that already sits outside the panel (the palette's opener) is left alone. */
+function _hpRestoreFocus(st, overlay){
+  const active = document.activeElement;
+  if (active && active !== document.body && !overlay.contains(active)) return false;
+  const found = Array.from(document.querySelectorAll('[data-click="openHolding"][data-a0="' + st.table + '"][data-a1="' + st.id + '"]')).find(_modalFocusVisible);
+  if (!found){
+    // The holding is gone (deleted elsewhere), so there is nothing to return to. A control inside the closing overlay must not keep focus, it is about to be hidden.
+    if (active && active !== document.body && typeof active.blur === 'function') active.blur();
+    return false;
+  }
+  _modalFocusElement(found);
+  return true;
+}
+
+function closeHoldingPanel(){
+  const overlay = document.getElementById('holding-panel');
+  const st = _hp;
+  _hp = null;
+  _hpHistSeq++;   // a history answer still on its way is dropped
+  if (!overlay || !overlay.classList.contains('open')) return false;
+  overlay.classList.remove('open', 'hp-in');
+  closeModalFocus(overlay);
+  if (st) _hpRestoreFocus(st, overlay);
+  return true;
+}
+
+/* Repaints the open panel in place from the current data (renderAll and the price refreshes call it). The holding gone from the books closes it, saying so.
+   Safe to call at any time and never throws into a render. */
+function refreshHoldingPanel(){
+  const st = _hp;
+  if (!st) return false;
+  try {
+    const model = _holdingPanelModel(st.table, st.id, _hpNetWorth());
+    if (!model){
+      closeHoldingPanel();
+      showToast('This holding was removed, so its panel was closed');
+      return false;
+    }
+    _hpRender(model);
+    return true;
+  } catch (err){
+    console.error('[holding panel] refresh failed', err);
+    return false;
+  }
+}
+
+/* The panel's four controls. Record trade and Edit holding close the panel first (focus goes back to the opener), then open the entity modal, so closing
+   the modal returns focus to the same place. Record trade preselects the stock, and refuses to open a form for a stock that has just gone. */
+function holdingPanelAction(name){
+  const st = _hp;
+  if (!st || HP_ACTIONS.indexOf(name) === -1) return false;
+  if (name === 'trades'){
+    st.showAll = !st.showAll;
+    refreshHoldingPanel();
+    return true;
+  }
+  if (name === 'retry'){
+    if (st.table !== 'stocks') return false;
+    _hpStartHistory();
+    refreshHoldingPanel();
+    return true;
+  }
+  const table = st.table, id = st.id;
+  if (name === 'record'){
+    if (table !== 'stocks') return false;
+    closeHoldingPanel();
+    if (!(DB.stocks || []).some(s => s.id === id)){
+      showToast('That stock no longer exists, it may have been deleted elsewhere', 'error');
+      return false;
+    }
+    openEntityModal('stockTxns', undefined, { stockId:id });
+    return true;
+  }
+  closeHoldingPanel();
+  openEntityModal(table, id);
+  return true;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   COMMAND PALETTE (Step 8a)
+   Cmd+K or Ctrl+K, the Search or jump to field in the top bar, or the phone's search button opens a centred dialog: a text field and a listbox of
+   results under three small labels, Pages (every live tab), Holdings (stocks and coins, which open the side panel) and Actions (the + Add flows, Refresh
+   prices, Hide amounts, the theme and Include CPF). The matching is pure (_paletteResults over _paletteModel). The combobox keeps focus in the field and
+   points at the active option with aria-activedescendant, Arrow keys wrap, Enter runs, Escape closes (openModalFocus returns focus to the opener).
+   ═══════════════════════════════════════════════════════════════════════ */
+const PALETTE_CAP = 8;   // results per group for a typed query. An empty query lists every page and action, they are menus, not search results
+const PALETTE_GROUPS = [['pages', 'Pages'], ['holdings', 'Holdings'], ['actions', 'Actions']];
+const CP_PLUS_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>';
+const CP_REFRESH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>';
+let _cp = null;   // the open palette: { query, active, items, model }
+
+/* True on a Mac, an iPhone or an iPad, where the shortcut is written Cmd K. */
+function _isApplePlatform(nav){
+  const n = nav || (typeof navigator !== 'undefined' ? navigator : null);
+  if (!n) return false;
+  const platform = String((n.userAgentData && n.userAgentData.platform) || n.platform || n.userAgent || '');
+  return /Mac|iPhone|iPad|iPod/i.test(platform);
+}
+function _paletteHint(nav){ return _isApplePlatform(nav) ? '⌘K' : 'Ctrl K'; }
+function _syncPaletteHint(){
+  const hint = _paletteHint();
+  const kbd = document.getElementById('cp-kbd');
+  if (kbd) kbd.textContent = hint;
+  // The tooltip names the shortcut too, it is the only label the icon-only trigger (769px to 940px) and the phone icon show.
+  ['cp-trigger', 'cp-trigger-m'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.title = 'Search or jump to (' + hint + ')';
+  });
+}
+
+/* What the palette searches, from the live data: every live page in the sidebar's labels, every stock and coin (a parked Stocks or Crypto page takes its
+   holdings with it), and the actions. The labels follow the state, so the toggles name what they will do. */
+function _paletteModel(){
+  const pages = TABS.filter(t => !PHASE_2_TABS.has(t.key)).map(t => {
+    const group = NAV_GROUPS.find(g => g.tabs.indexOf(t.key) !== -1);
+    return { key:t.key, label:t.label, sub: group ? group.label : '' };
+  });
+  const holdings = [];
+  if (!PHASE_2_TABS.has('stocks')){
+    (DB.stocks || []).forEach(s => {
+      if (!s || !kjrSafeId(s.id)) return;
+      const px = DB._priceCache ? DB._priceCache[yahooSymbol(s)] : null;
+      const name = (px && px.shortName) ? String(px.shortName) : '';
+      const market = String(s.market || ''), sector = String(s.sector || '');
+      holdings.push({ table:'stocks', id:s.id, cls:'stocks', sym:String(s.symbol || '?'), name, sector,
+        sub: name ? [name, market].filter(Boolean).join(' · ') : [market, sector].filter(Boolean).join(' · ') });
+    });
+  }
+  if (!PHASE_2_TABS.has('crypto')){
+    (DB.crypto || []).forEach(c => {
+      if (!c || !kjrSafeId(c.id)) return;
+      const slug = String(coinIdFor(c.coingeckoId || c.symbol) || '').replace(/-/g, ' ').trim();
+      const name = slug ? slug.charAt(0).toUpperCase() + slug.slice(1) : '';
+      holdings.push({ table:'crypto', id:c.id, cls:'crypto', sym:String(c.symbol || '?'), name, sector:'Crypto', sub: name ? name + ' · Crypto' : 'Crypto' });
+    });
+  }
+  const actions = _addMenuModel().map(it => ({ id:'add:' + it.table, op:'add', arg:it.table, label:it.label, sub: it.disabled ? 'Add a stock first' : '', disabled:!!it.disabled }));
+  actions.push({ id:'refresh', op:'refresh', label:'Refresh prices', sub:'' });
+  actions.push({ id:'privacy', op:'privacy', label: privacyOn() ? 'Show amounts' : 'Hide amounts', sub:'' });
+  actions.push({ id:'theme', op:'theme', label: currentTheme() === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', sub:'' });
+  actions.push({ id:'cpf', op:'cpf', label: _dashShowCpf ? 'Exclude CPF' : 'Include CPF', sub:'' });
+  return { pages, holdings, actions };
+}
+
+/* The rank of a query in a list of fields in priority order: null for no match, else a number to sort by. Any prefix match ranks before any substring match,
+   and within each kind an earlier field ranks first (a symbol before a name before a sector). lowercase q. */
+function _paletteRank(q, fields){
+  let best = null;
+  fields.forEach((f, i) => {
+    const at = String(f == null ? '' : f).toLowerCase().indexOf(q);
+    if (at === -1) return;
+    const rank = (at === 0 ? 0 : 10) + i;
+    if (best === null || rank < best) best = rank;
+  });
+  return best;
+}
+
+/* Pure. The grouped results for a query over a _paletteModel. Case-insensitive substring match, prefix matches first, at most PALETTE_CAP per group. An
+   empty query lists every page and action and no holdings. A group with nothing in it is left out. Returns { query (trimmed, lowercase), groups: [{ key,
+   label, items }], count }, each item { id, kind, label, sub, ... } holding raw text (the markup builder escapes it). */
+function _paletteResults(query, model){
+  const q = String(query == null ? '' : query).trim().toLowerCase();
+  const m = model || {};
+  const lists = {
+    pages: (m.pages || []).map(p => ({ fields:[p.label], item:{ id:'page:' + p.key, kind:'page', key:p.key, label:p.label, sub:p.sub || '' } })),
+    holdings: (m.holdings || []).map(h => ({ fields:[h.sym, h.name, h.sector], item:{ id:'holding:' + h.table + ':' + h.id, kind:'holding', table:h.table, hid:h.id, cls:h.cls, sym:h.sym, label:h.sym, sub:h.sub || '' } })),
+    actions: (m.actions || []).map(a => ({ fields:[a.label], item:{ id:'action:' + a.id, kind:'action', op:a.op, arg:a.arg, label:a.label, sub:a.sub || '', disabled:!!a.disabled } }))
+  };
+  const groups = [];
+  let count = 0;
+  PALETTE_GROUPS.forEach(g => {
+    let rows = lists[g[0]];
+    if (q){
+      rows = rows.map((row, i) => ({ row, i, rank:_paletteRank(q, row.fields) })).filter(x => x.rank !== null)
+        .sort((a, b) => a.rank - b.rank || a.i - b.i).slice(0, PALETTE_CAP).map(x => x.row);
+    } else if (g[0] === 'holdings'){
+      rows = [];
+    }
+    if (!rows.length) return;
+    groups.push({ key:g[0], label:g[1], items:rows.map(x => x.item) });
+    count += rows.length;
+  });
+  return { query:q, groups, count };
+}
+
+/* A label with the first match of the query marked. Everything is escaped, and a label whose lowercase form changes length is left unmarked. */
+function _paletteMark(text, q){
+  const t = String(text == null ? '' : text);
+  const low = t.toLowerCase();
+  const at = (q && low.length === t.length) ? low.indexOf(q) : -1;
+  if (at === -1) return kjrEscape(t);
+  return kjrEscape(t.slice(0, at)) + '<mark class="cp-mark">' + kjrEscape(t.slice(at, at + q.length)) + '</mark>' + kjrEscape(t.slice(at + q.length));
+}
+
+function _paletteActionIcon(it){
+  if (it.op === 'add') return CP_PLUS_ICON;
+  if (it.op === 'refresh') return CP_REFRESH_ICON;
+  if (it.op === 'privacy') return privacyOn() ? EYE_SVG : EYE_OFF_SVG;
+  if (it.op === 'theme') return THEME_ICONS;
+  return _navIcon('cpf');
+}
+
+function _paletteOptHtml(it, n, on, q){
+  const lead = it.kind === 'page' ? '<span class="cp-ico">' + _navIcon(it.key) + '</span>'
+    : (it.kind === 'holding' ? _monogram(it.sym, it.cls) : '<span class="cp-ico">' + _paletteActionIcon(it) + '</span>');
+  return '<div class="cp-opt" role="option" id="cp-o-' + n + '" data-i="' + n + '" data-click="paletteRun" data-a0="' + n + '" aria-selected="' + (on ? 'true' : 'false') + '"' + (it.disabled ? ' aria-disabled="true"' : '') + '>'
+    + lead + '<span class="cp-main"><span class="cp-t">' + _paletteMark(it.label, q) + '</span>' + (it.sub ? '<span class="cp-s">' + _paletteMark(it.sub, q) + '</span>' : '') + '</span></div>';
+}
+
+/* The listbox markup: one labelled group per result group, options numbered across the groups so the arrow keys and aria-activedescendant walk one list. */
+function _paletteHtml(results, active){
+  let n = 0;
+  return results.groups.map(g => {
+    const gid = 'cp-g-' + g.key;
+    return '<div class="cp-group" role="group" aria-labelledby="' + gid + '"><div class="cp-label" id="' + gid + '" role="presentation">' + kjrEscape(g.label) + '</div>'
+      + g.items.map(it => { const at = n++; return _paletteOptHtml(it, at, at === active, results.query); }).join('') + '</div>';
+  }).join('');
+}
+
+/* Keeps the field's aria-activedescendant and each option's aria-selected on the active option, and the active option in view. */
+function _paletteSyncActive(){
+  const cp = _cp, input = document.getElementById('cp-input'), list = document.getElementById('cp-list');
+  if (!cp || !input) return;
+  const id = cp.items.length ? 'cp-o-' + cp.active : '';
+  input.setAttribute('aria-activedescendant', id);
+  if (!list) return;
+  list.querySelectorAll('.cp-opt').forEach(el => {
+    const on = el.id === id;
+    el.setAttribute('aria-selected', on ? 'true' : 'false');
+    if (on && el.scrollIntoView) el.scrollIntoView({ block:'nearest' });
+  });
+}
+
+function _paletteRender(){
+  const cp = _cp, list = document.getElementById('cp-list'), input = document.getElementById('cp-input');
+  if (!cp || !list || !input) return false;
+  const results = _paletteResults(cp.query, cp.model);
+  cp.items = [].concat.apply([], results.groups.map(g => g.items));
+  if (cp.active >= cp.items.length) cp.active = 0;
+  list.innerHTML = _paletteHtml(results, cp.active);
+  list.hidden = !cp.items.length;
+  const none = document.getElementById('cp-empty');
+  if (none) none.hidden = cp.items.length > 0;
+  const status = document.getElementById('cp-status');
+  if (status) status.textContent = cp.items.length ? cp.items.length + (cp.items.length === 1 ? ' result' : ' results') : 'No matches';
+  input.setAttribute('aria-expanded', cp.items.length ? 'true' : 'false');
+  _paletteSyncActive();
+  return true;
+}
+
+/* The shortcut and the buttons stay out of the way of the unlock gate (a locked vault has nothing to search), of any open modal or sheet, and of the side panel. */
+function _commandPaletteBlocked(){
+  const isOpen = id => { const el = document.getElementById(id); return !!(el && el.classList.contains('open')); };
+  if (isOpen('vault-gate') || isOpen('nas-auth-gate')) return true;
+  if (_vaultManager && _vaultManager.isEnabled() && !_vaultManager.isUnlocked()) return true;
+  if (_hp || isOpen('holding-panel')) return true;
+  return !!document.querySelector('.overlay.open');
+}
+
+function openCommandPalette(){
+  const overlay = document.getElementById('cmd-palette'), input = document.getElementById('cp-input');
+  if (!overlay || !input || _cp || _commandPaletteBlocked()) return false;
+  closeShellMenus(false);
+  _cp = { query:'', active:0, items:[], model:_paletteModel() };
+  input.value = '';
+  _paletteRender();
+  overlay.classList.add('open');
+  openModalFocus(overlay, closeCommandPalette);
+  _modalFocusElement(input);   // now, not a frame later, so a fast typist loses no character
+  return true;
+}
+
+function closeCommandPalette(){
+  const overlay = document.getElementById('cmd-palette');
+  if (!overlay) return false;
+  const was = !!_cp || overlay.classList.contains('open');
+  _cp = null;
+  overlay.classList.remove('open');
+  closeModalFocus(overlay);
+  // When the opener could not take focus back (it is gone or hidden), the field must not keep it while the palette is hidden.
+  const active = document.activeElement;
+  if (active && active !== document.body && overlay.contains(active) && typeof active.blur === 'function') active.blur();
+  return was;
+}
+
+/* The field's text changed: search again from the top. */
+function paletteQuery(value){
+  if (!_cp) return false;
+  _cp.query = String(value == null ? '' : value).slice(0, 80);
+  _cp.active = 0;
+  return _paletteRender();
+}
+
+/* Moves the active result by delta, wrapping at both ends. */
+function _paletteMove(delta){
+  const cp = _cp;
+  if (!cp || !cp.items.length) return false;
+  cp.active = (cp.active + delta + cp.items.length) % cp.items.length;
+  _paletteSyncActive();
+  return true;
+}
+
+/* Hover makes a result active too, so the mouse and the keys never point at two rows. */
+function paletteHover(i){
+  const cp = _cp, n = _paletteIndex(i);
+  if (!cp || n < 0 || n >= cp.items.length || n === cp.active) return false;
+  cp.active = n;
+  _paletteSyncActive();
+  return true;
+}
+
+/* A result number from a click or the pointer: a whole number, or a string of digits (a data attribute), else -1. A missing attribute is not result 0. */
+function _paletteIndex(i){
+  if (typeof i === 'number') return Number.isInteger(i) ? i : -1;
+  return (typeof i === 'string' && /^\d+$/.test(i)) ? Number(i) : -1;
+}
+
+function _paletteRunAction(it){
+  if (it.op === 'add') addMenuPick(it.arg);
+  else if (it.op === 'refresh') refreshDashPrices();
+  else if (it.op === 'privacy') togglePrivacy();
+  else if (it.op === 'theme') toggleTheme();
+  else if (it.op === 'cpf'){
+    toggleDashCpf();
+    showToast(_dashShowCpf ? 'CPF included in net worth' : 'CPF left out of net worth');
+  }
+}
+
+/* Runs result i. The palette closes first, so focus is back on its opener before a modal or the side panel opens (they return to it in turn). */
+function runPaletteItem(i){
+  const cp = _cp, n = _paletteIndex(i);
+  if (!cp || n < 0 || n >= cp.items.length) return false;
+  const it = cp.items[n];
+  closeCommandPalette();
+  if (it.kind === 'page') navigate(it.key);
+  else if (it.kind === 'holding') openHoldingDetail(it.table, it.hid);
+  else if (it.kind === 'action') _paletteRunAction(it);
+  return true;
+}
+
+/* Keys in the field: Arrow Down and Up move (wrapping), Enter runs the active result. Escape and Tab belong to openModalFocus. */
+function paletteKeydown(e){
+  if (!_cp || e.isComposing) return false;
+  if (e.key === 'ArrowDown'){ e.preventDefault(); _paletteMove(1); return true; }
+  if (e.key === 'ArrowUp'){ e.preventDefault(); _paletteMove(-1); return true; }
+  if (e.key === 'Enter'){ e.preventDefault(); runPaletteItem(_cp.active); return true; }
+  return false;
+}
+
+/* Cmd+K or Ctrl+K, with no Shift or Alt. */
+function _isPaletteShortcut(e){
+  return !!e && typeof e.key === 'string' && e.key.toLowerCase() === 'k' && !!(e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
+}
+
+/* The global shortcut. It opens the palette from anywhere, closes it when it is already open, and otherwise leaves the key to the browser (the gate, a modal
+   or the side panel is up). True when it handled the key. */
+function paletteShortcut(e){
+  if (!_isPaletteShortcut(e)) return false;
+  if (_cp){
+    e.preventDefault();
+    closeCommandPalette();
+    return true;
+  }
+  if (_commandPaletteBlocked()) return false;
+  e.preventDefault();
+  return openCommandPalette();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    RENDER ALL — top-level redraw
    ═══════════════════════════════════════════════════════════════════════ */
 /* Is DB[table]-owning page `key` the one currently on screen? Mirrors the
@@ -13300,6 +14058,7 @@ function renderAll(){
   }
   if (window.scrollTo) window.scrollTo(sx, sy);
   _refreshTblScrollHints();
+  refreshHoldingPanel(); // an open holding panel repaints in place, or closes when its holding is gone
 }
 
 /* Mobile table scroll hint (F5): every h-scroll .tbl-wrap gets a right-edge
@@ -13416,7 +14175,10 @@ function installEventDelegation(){
     'stock-cols-modal': () => closeColumns('stocks'),
     'board-cols-modal': () => closeColumns('board'),
     'setup-wizard':     closeSetupWizard,
-    'sync-details-modal': closeSyncDetails
+    'sync-details-modal': closeSyncDetails,
+    // Step 8a: the side panel and the command palette are their own scrim, a click on the backdrop closes them
+    'holding-panel':    closeHoldingPanel,
+    'cmd-palette':      closeCommandPalette
   };
   document.addEventListener('click', (e) => {
     const fn = BACKDROP_CLOSE_FNS[e.target && e.target.id];
@@ -13437,6 +14199,27 @@ function installEventDelegation(){
       if (e.key === 'z' && !e.shiftKey){ e.preventDefault(); undoAction(); return; }
       if (e.key === 'y' || (e.key === 'z' && e.shiftKey)){ e.preventDefault(); redoAction(); return; }
     }
+  });
+  // Command palette (Step 8a): Cmd+K or Ctrl+K from anywhere (paletteShortcut leaves the key alone while the unlock gate, a modal or the side panel is up),
+  // and Arrow Up, Arrow Down and Enter inside its field. Escape and Tab belong to openModalFocus.
+  document.addEventListener('keydown', (e) => {
+    if (paletteShortcut(e)) return;
+    if (e.target && e.target.id === 'cp-input') paletteKeydown(e);
+  });
+  // Escape closes the palette or the side panel even when focus sits outside it (openModalFocus handles it, and stops it here, while focus is inside).
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (_cp) closeCommandPalette();
+    else if (_hp) closeHoldingPanel();
+  });
+  // The palette's options are not focusable, so a press on one must not take focus from the field, and the pointer makes the option under it the active one.
+  document.addEventListener('mousedown', (e) => {
+    if (_cp && e.target.closest && e.target.closest('.cp-list')) e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!_cp) return;
+    const opt = e.target.closest ? e.target.closest('.cp-opt') : null;
+    if (opt) paletteHover(opt.getAttribute('data-i'));
   });
   // ── Delegated action dispatch (CSP: no inline handlers) ────────────────────
   // Every former inline on* handler now carries data-click / data-change /
@@ -13518,6 +14301,13 @@ function installEventDelegation(){
     stocksFilterMarket:  (el) => { _stocksFilter.market = el.value; _stocksPage = 0; renderStocks(); },
     // phone list rows, chips and More menus (v2.73)
     openHolding:         (el) => { const [a0, a1] = A(el); openHoldingDetail(a0, a1); },
+    // holding side panel and command palette (Step 8a)
+    closeHoldingPanel:   () => closeHoldingPanel(),
+    holdingPanelAction:  (el) => holdingPanelAction(A(el)[0]),
+    openCommandPalette:  () => openCommandPalette(),
+    closeCommandPalette: () => closeCommandPalette(),
+    paletteRun:          (el) => runPaletteItem(A(el)[0]),
+    paletteInput:        (el) => paletteQuery(el.value),
     stocksSortPick:      (el) => stocksSortPick(el.value),
     cpfChipFilter:       (el) => cpfChipFilter(el),
     cpfClearFilters:     () => cpfClearFilters(),
@@ -13648,6 +14438,7 @@ async function boot(){
   const verEl = document.getElementById('logo-version');
   if (verEl) verEl.textContent = APP_DISPLAY_VERSION;
   renderNav();
+  _syncPaletteHint(); // the top bar field shows Cmd K on a Mac and Ctrl K elsewhere
   installEventDelegation();
   setInterval(_refreshSyncAge, 60000); // "Synced 2m ago" keeps counting
   installAutoRefreshVisibility();
