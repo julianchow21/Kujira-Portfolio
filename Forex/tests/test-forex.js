@@ -700,10 +700,34 @@ test('hosted sync conflicts are durable, reviewable, and stop blind retries', ()
   assert.match(indexSrc, /if\(_hasOpenConflict\(t,id,'upsert'\)\) continue/);
   assert.match(indexSrc, /need conflict resolution in Settings/);
 });
-test('375px mobile rules shrink the topbar without removing app links or theme', () => {
+// Step 6b: the pill switcher (.tb-tabs) is replaced by a workspace menu. The sidebar copy (desktop) and the header copy (phone) must
+// list the same three real anchors in the fixed order, with this app marked current, and the phone rules must keep the theme switch.
+test('375px mobile rules shrink the topbar without removing app links or theme, and the sidebar keeps showView gating', () => {
   assert.match(indexSrc, /@media\(max-width:640px\)\{[\s\S]*?\.topbar\{gap:6px;/);
-  for (const label of ['Trading', 'Forex', 'Portfolio']) assert.match(indexSrc, new RegExp('class="tb-tab[^>]*>\\s*' + label));
+  assert.match(indexSrc, /@media \(max-width:768px\)\{[\s\S]*?\.sidebar\{display:none\}[\s\S]*?\.ws-m\{display:block\}/);
+  assert.match(indexSrc, /@media \(max-width:768px\)\{[\s\S]*?#theme-btn-m\{display:flex\}/);
+  assert.doesNotMatch(indexSrc, /class="tb-tab/);
+  for (const id of ['ws-menu', 'ws-menu-m']) {
+    const block = new RegExp('id="' + id + '" role="menu"[^>]*>([\\s\\S]*?)</div>').exec(indexSrc);
+    assert.ok(block, id + ' menu exists');
+    const links = [...block[1].matchAll(/<a class="menu-item" role="menuitem" tabindex="-1" href="([^"]+)"([^>]*)>\s*(Trading|Forex|Portfolio)/g)];
+    assert.deepStrictEqual(links.map((l) => l[3]), ['Trading', 'Forex', 'Portfolio'], id + ' order');
+    assert.deepStrictEqual(links.map((l) => l[1]), ['../Trading/', './', '../Portfolio/'], id + ' hrefs');
+    assert.deepStrictEqual(links.map((l) => /aria-current="page"/.test(l[2])), [false, true, false], id + ' current app');
+  }
+  for (const id of ['ws-btn', 'ws-btn-m']) assert.match(indexSrc, new RegExp('id="' + id + '"[^>]*aria-haspopup="menu" aria-expanded="false"'));
   assert.match(indexSrc, /id="theme-btn"/);
+  assert.match(indexSrc, /id="theme-btn-m"/);
+  // The sidebar views still go through showView(), so authoriseFeature() gating is kept.
+  assert.match(indexSrc, /<nav class="side-nav" id="side-nav" aria-label="Forex">/);
+  for (const v of ['journal', 'reports', 'simulator', 'coach']) assert.match(indexSrc, new RegExp('class="side-item[^"]*" data-v="' + v + '"[^>]*onclick="showView\\(\'' + v + '\'\\)"'));
+  assert.match(indexSrc, /onclick="openTagManager\(\)"><svg/);
+  // the lock reads the same keys showView() hands to authoriseFeature
+  assert.match(indexSrc, /VIEW_FEATURES=\{ reports:'advanced_analytics', simulator:'simulator', coach:'ai_coach' \}/);
+  for (const [v, f] of [['simulator', 'simulator'], ['reports', 'advanced_analytics'], ['coach', 'ai_coach']]) {
+    assert.match(indexSrc, new RegExp("v==='" + v + "' && !await authoriseFeature\\('" + f + "'"));
+  }
+  assert.strictEqual((indexSrc.match(/<span class="side-lock" hidden>/g) || []).length, 3, 'one lock per gated view');
 });
 test('schema defines authenticated read-only tables, trusted CAS and durable tombstones', () => {
   assert.match(schemaSrc, /^begin;\s*$/m);
@@ -1112,14 +1136,14 @@ async function runSyncContractTests() {
         clients: { claim: () => Promise.resolve() },
       },
       caches: {
-        keys: async () => ['kjr-forex-v0.13', 'kjr-forex-v0.14', 'kjr-portfolio-v0.9', 'other-cache'],
+        keys: async () => ['kjr-forex-v0.14', 'kjr-forex-v0.15', 'kjr-portfolio-v0.9', 'other-cache'],
         delete: async (key) => { deleted.push(key); return true; },
       },
     };
     vm.runInNewContext(swSrc, swSandbox, { filename: SW_PATH });
     swSandbox.self.listeners.activate({ waitUntil(promise) { activation = promise; } });
     await activation;
-    assert.deepStrictEqual(deleted, ['kjr-forex-v0.13']);
+    assert.deepStrictEqual(deleted, ['kjr-forex-v0.14']);
   });
 
   await testAsync('sbSyncRow - stale server version is rejected and returned for recovery', async () => {

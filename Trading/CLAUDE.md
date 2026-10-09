@@ -52,7 +52,7 @@ Client-side from the series: `ema()`, `rsi()` (Wilder), `macd()` (12/26/9), `vwa
 
 ## Design tokens
 
-Ported from Investment Tracker: `--bg/bg2/bg3/bg4`, `--green` (gains) / `--red` (losses), `--accent:#2962FF`, `--accent2:#1565C0` (TradingView blue), `--blue` (EMA9), `--amber` (EMA20), `--radius:6px`, `--radius-lg:8px`. Dark only.
+Ported from Investment Tracker: `--bg/bg2/bg3/bg4`, `--green` (gains) / `--red` (losses), `--accent:#2962FF`, `--accent2:#1565C0` (TradingView blue), `--blue` (EMA9), `--amber` (EMA20), `--radius:6px`, `--radius-lg:8px`. Dark only. Shell tokens `--sidebar` (#0E111A) and `--sidebar-dim` (`--text2`) since v3.14. The sidebar links to the page sections (`chartCard`, `levelsCard`, `fundCard`, `indCard`, `calcCard`, `alertsCard`) with scroll-spy. z-order: sidebar (none) < top bar 100 < menus 110 < alert bar 150 < scrim 200 < drawer 201 < fullscreen chart and toasts 300. Never give `.content-col` a transform, filter or contain, it would trap the fixed layers.
 
 ## Files
 

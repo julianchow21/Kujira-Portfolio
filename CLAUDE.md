@@ -25,17 +25,15 @@ Every app has its own `CLAUDE.md` with architecture notes, gotchas, and design t
 
 ## Cross-app linkage
 
-All apps share a topbar with a three-way segmented control linking `Trading`, `Forex`, and `Portfolio`. The pattern is:
+Since Portfolio v2.72, Trading v3.14 and Forex v0.15, all three apps share one navigation shell instead of the old `tb-tabs` pill switcher:
 
-```html
-<nav class="tb-tabs" aria-label="Switch app">
-  <a class="tb-tab active" href="./" aria-current="page">Trading</a>
-  <a class="tb-tab" href="../Forex/">Forex</a>
-  <a class="tb-tab" href="../Portfolio/">Portfolio</a>
-</nav>
-```
+- Above 768 px, a 224 px sticky left sidebar (`.shell` grid of 224 px and 1fr) on a per-app `--sidebar` surface, with `--sidebar-dim` for small text on it (each app picks values that keep 4.5:1)
+- At the top of the sidebar, a workspace switcher (`.ws-btn`, whale `../Portfolio/Worker/whale-icon.png`, "Kujira", app name ▾) opens `.ws-menu`. It lists Trading, Forex, Portfolio in that fixed order as real anchors. The current app uses `href="./"` with `aria-current="page"`, the others use `../Trading/`, `../Forex/` or `../Portfolio/`
+- Each app's own nav sits below (Portfolio pages, Trading page sections with scroll-spy, Forex views), with Settings, a status line in words and the version badge in the sidebar footer
+- At 768 px and below the sidebar hides and the top bar carries a second workspace button (`ws-btn-m`, `ws-menu-m`)
+- Menus share one keyboard model: `aria-haspopup`, `aria-expanded`, arrow keys, Home and End, Esc returns focus, outside click closes
 
-Fixed order: Trading, Forex, Portfolio. Every entry is a real anchor (no `<span>`). The current app's entry uses `href="./"` with `class="tb-tab active"` and `aria-current="page"`. Other apps use relative paths `../Trading/`, `../Forex/`, or `../Portfolio/`. If you change the topbar in one app, update all three.
+Each app keeps its own tokens, font, theme rules and CSP. If you change the shell in one app, update all three.
 
 ## Critical constraints
 

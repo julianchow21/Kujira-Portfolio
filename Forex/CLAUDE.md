@@ -41,9 +41,9 @@ Inherited from the starter, keep the gotchas true: preview guard at the TOP of t
 - `lib/` — vendored shared engines.
 - `SPEC.md` — product + tech spec (doubles as the PRD). Disposable once the build settles.
 
-## Topbar
+## Navigation shell
 
-Three-way segmented control: Trading | Forex | Portfolio, sibling links in the same repo.
+Shared with Portfolio and Trading (see the repo-root `CLAUDE.md`, Cross-app linkage). Above 768 px the sidebar holds the workspace menu, the views (Journal, Reports, Simulator, Coach, each through `showView()` so `authoriseFeature()` gating applies, with a "Locked" label when gated) and Tags. Its footer holds Account, Settings, the sync status in words, the theme toggle (`#theme-btn`) and the version (`#ver`). The top bar shows the view title and "+ Log trade". `#subnav` is the phone view switcher only. Tokens `--sidebar` and `--sidebar-dim` exist in both themes.
 
 ## Hosting
 

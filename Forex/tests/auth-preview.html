@@ -192,8 +192,8 @@
         const source = await response.text();
         const version = /const APP = \{[\s\S]*?version:'([^']+)'/.exec(source);
         const sdkTag = /<script\b[^>]*\bsrc=["']lib\/supabase-2\.117\.2\.umd\.js\?v=2\.117\.2["'][^>]*><\/script>/i;
-        if (!version || version[1] !== 'v0.14 (03 Oct)' || !source.includes('id="account-btn"') || !sdkTag.test(source)) {
-          throw new Error('Refused stale Forex app bytes. Expected v0.14 with Account controls');
+        if (!version || version[1] !== 'v0.15 (09 Oct)' || !source.includes('id="account-btn"') || !sdkTag.test(source)) {
+          throw new Error('Refused stale Forex app bytes. Expected v0.15 with Account controls');
         }
         const injection = '<script>(' + syntheticBootstrapScript.toString() + ')(' + JSON.stringify(location.origin) + ');<\/script>';
         const fixtureCsp = '<meta http-equiv="Content-Security-Policy" content="connect-src \'self\' ' + location.origin + '">';

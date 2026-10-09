@@ -21,6 +21,8 @@
   --amber:#f59e0b;--amber-soft:#2a1f0a;
   --accent:#2dd4bf;--accent2:#14b8a6;--accent-soft:#0d2420;
   --radius:8px;--radius-lg:12px;
+  --sidebar:#0a0a0a; /* the app shell sidebar, a step darker than --bg */
+  --sidebar-dim:var(--text2); /* small text on the sidebar: --text2 measures 6.9:1 (dark) and 5.6:1 (light), --text3 is only 3.8:1 on the light sidebar */
 }
 html.light{
   --bg:#f0f2f5;--bg2:#ffffff;--bg3:#f5f6f8;--bg4:#eaecef;
@@ -31,6 +33,7 @@ html.light{
   --blue:#1a6fd4;--blue-soft:#e0ecfb;
   --amber:#b87000;--amber-soft:#fef3dc;
   --accent:#0d9488;--accent2:#0f766e;--accent-soft:#ccfbf1;
+  --sidebar:#e6e9ee;
 }
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5;transition:background .2s,color .2s}
 a{color:var(--blue);text-decoration:none}
@@ -38,15 +41,7 @@ a:hover{text-decoration:underline}
 button{font-family:inherit}
 
 .topbar{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;height:calc(56px + env(safe-area-inset-top));padding:env(safe-area-inset-top) max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left));position:sticky;top:0;z-index:100}
-.logo{font-weight:800;font-size:15px;letter-spacing:.3px;display:flex;align-items:center;gap:9px;cursor:pointer;color:var(--text)}
-.logo-mark{height:26px;width:26px;flex-shrink:0}
-.logo-name{background:linear-gradient(135deg,#2dd4bf,#a78bfa,#f472b6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.tb-tabs{display:flex;gap:2px;background:var(--bg3);border:1px solid var(--border);border-radius:999px;padding:3px}
-.tb-tab{padding:5px 12px;border-radius:999px;font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;border:none;background:none;text-decoration:none;white-space:nowrap}
-.tb-tab:hover{color:var(--text);text-decoration:none}
-.tb-tab.active{background:var(--accent);color:#04201c}
-.spacer{flex:1}
-.ver{font-size:11px;color:var(--text3);font-variant-numeric:tabular-nums;padding:3px 8px;border:1px solid var(--border);border-radius:999px;white-space:nowrap}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .sync{font-size:12px;white-space:nowrap;min-width:64px;text-align:right}
 .icon-btn{width:32px;height:32px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--bg3);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text2);transition:all .15s;flex-shrink:0;font-size:15px}
 .icon-btn:hover{background:var(--bg4);color:var(--text)}
@@ -185,13 +180,112 @@ th.sortable.desc::after{content:'\25BC'}
 .toast.err{background:var(--red-soft);border-color:var(--red);color:var(--red)}
 @keyframes pop{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
+/* APP SHELL (v1), the same structure as Portfolio and Trading, with this app's own dark and light tokens.
+   769px and up: a 224px sidebar beside the content column, the top bar holds the view title and + Log trade.
+   768px and below: no sidebar, the top bar carries the whale, a workspace menu, the sync text and the theme switch,
+   and the view switch (#subnav, with Tags, Account, Settings and + Log trade) sits under it as before.
+   Markup: .shell > .sidebar (.ws, .side-nav, .side-foot) + .content-col (.topbar, main).
+   z-order: sidebar (no z-index) < top bar 100 < menus 110 < modal overlay 200 < toasts 300.
+   .content-col must never get a transform, filter or contain, that would trap the fixed modal overlay inside it. */
+.shell{display:grid;grid-template-columns:224px minmax(0,1fr);min-height:100vh;min-height:100dvh}
+.content-col{min-width:0}
+.sidebar{position:sticky;top:0;align-self:start;height:100vh;height:100dvh;display:flex;flex-direction:column;padding:14px 12px 12px;background:var(--sidebar);border-right:1px solid var(--border)}
+/* Focus rings for the shell controls. Inset inside the sidebar and its menus, where an outset ring would clip. --accent2 is 7.9:1 (dark) and 3.1:1 or better (light) against every surface it touches. */
+.ws-btn:focus-visible,.side-item:focus-visible,.menu-item:focus-visible,.side-tools .icon-btn:focus-visible{outline:2px solid var(--accent2);outline-offset:-2px}
+.icon-btn:focus-visible,.tb-log:focus-visible{outline:2px solid var(--accent2);outline-offset:2px}
+
+/* Workspace switcher: the mark and name, a menu of real links to the sibling apps. */
+.ws{flex:none}
+.ws-btn{display:flex;align-items:center;gap:10px;width:100%;padding:6px 8px;border:0;border-radius:var(--radius);background:none;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.ws-btn[aria-expanded="true"]{background:color-mix(in srgb,var(--text) 7%,transparent)}
+@media (hover:hover){.ws-btn:hover{background:color-mix(in srgb,var(--text) 7%,transparent)}}
+/* The hover and open tint lowers the dim text a little, so it follows its label to --text while hovered or open. */
+.ws-btn[aria-expanded="true"] .ws-sub{color:var(--text)}
+@media (hover:hover){.ws-btn:hover .ws-sub{color:var(--text)}}
+.ws-mark{width:32px;height:32px;flex:none;border-radius:9px;background:var(--accent-soft);object-fit:contain;padding:2px}
+.ws-text{display:flex;flex-direction:column;min-width:0}
+.ws-name{font-size:14px;line-height:18px;font-weight:700;letter-spacing:0.02em}
+.ws-sub{display:flex;align-items:center;gap:4px;font-size:12px;line-height:16px;font-weight:500;color:var(--sidebar-dim)}
+.ws-caret{width:11px;height:11px;flex:none;transition:transform 0.15s ease-out}
+.ws-btn[aria-expanded="true"] .ws-caret{transform:rotate(180deg)}
+
+/* Navigation: the four views and the tag manager. Only this list scrolls, so the switcher and the footer stay put on a short window. */
+.side-nav{flex:1 1 auto;min-height:0;margin:4px -4px 0;padding:0 4px 8px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.side-group + .side-group{margin-top:2px}
+.side-label{margin:0;padding:12px 10px 6px;font-size:11px;line-height:14px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--sidebar-dim)}
+.side-list{list-style:none;display:grid;gap:2px}
+.side-item{display:flex;align-items:center;gap:10px;width:100%;min-height:34px;padding:6px 10px;border:0;border-radius:var(--radius);background:none;color:var(--text2);font:inherit;font-size:14px;line-height:20px;font-weight:500;text-align:left;text-decoration:none;cursor:pointer;transition:background 0.15s ease-out,color 0.15s ease-out}
+.side-item svg{width:16px;height:16px;flex:none}
+.side-text{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.side-stack{display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
+.side-sub{font-size:12px;line-height:16px;font-weight:500;color:var(--sidebar-dim);overflow-wrap:anywhere}
+/* A view the plan does not include: a lock and the word Locked, read from entitlement() by updateShell(). */
+.side-lock{flex:none;display:inline-flex;align-items:center;gap:4px;font-size:11px;line-height:14px;font-weight:600;color:var(--sidebar-dim)}
+.side-lock[hidden]{display:none}
+.side-lock svg{width:12px;height:12px}
+@media (hover:hover){.side-item:hover{background:color-mix(in srgb,var(--text) 6%,transparent);color:var(--text)}.side-item:hover .side-sub,.side-item:hover .side-lock{color:var(--text)}}
+/* The current view: soft accent fill, heavier weight and aria-current. The label is --accent2, light --accent is only 3.3:1 on this fill. */
+.side-item.active{background:var(--accent-soft);color:var(--accent2);font-weight:700}
+
+/* Footer: Account, Settings, the sync state in words, then the version badge and the theme switch. */
+.side-foot{flex:none;display:grid;gap:2px;margin-top:6px;padding-top:8px;border-top:1px solid var(--border)}
+.side-sync{display:flex;align-items:center;gap:10px;min-height:32px;padding:6px 10px;font-size:13px;line-height:18px;font-weight:600;color:var(--sidebar-dim)}
+.side-dot{width:8px;height:8px;margin:0 4px;border-radius:50%;background:var(--text3);flex:none}
+.side-sync[data-state="ok"] .side-dot{background:var(--green)}
+.side-sync[data-state="saving"] .side-dot,.side-sync[data-state="preview"] .side-dot{background:var(--amber)}
+.side-sync[data-state="error"] .side-dot{background:var(--red)}
+.side-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 2px 0 10px}
+.side-version{font-size:12px;line-height:16px;font-weight:500;color:var(--sidebar-dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+.side-tools{display:flex;gap:2px}
+.side-tools .icon-btn{border-color:transparent;background:none}
+@media (hover:hover){.side-tools .icon-btn:hover{background:color-mix(in srgb,var(--text) 8%,transparent)}}
+
+/* Top bar: the view title on the left, + Log trade on the right. On a phone it holds the whale, the workspace menu, the sync text and the theme switch. */
+.tb-head{display:flex;align-items:center;gap:10px;flex:1 1 auto;min-width:0}
+.tb-title{margin:0;font-size:17px;line-height:22px;font-weight:700;letter-spacing:-0.01em;overflow-wrap:anywhere}
+.tb-log{flex:none}
+.tb-log[hidden]{display:none}
+.ws-m{display:none}
+#theme-btn-m{display:none}
+
+/* Popup menus (the workspace switcher). Solid, so the sidebar and the top bar never show through. */
+.menu-wrap{position:relative}
+.shell-menu{position:absolute;z-index:110;top:calc(100% + 6px);left:0;min-width:200px;display:flex;flex-direction:column;gap:1px;padding:6px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius-lg);box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.shell-menu[hidden]{display:none}
+.ws-menu{right:0;min-width:0}
+.ws-menu-m{right:auto;min-width:200px}
+.menu-item{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-height:36px;padding:8px 10px;border:0;border-radius:var(--radius);background:none;color:var(--text);font:inherit;font-size:13px;line-height:20px;font-weight:500;text-align:left;text-decoration:none;cursor:pointer}
+@media (hover:hover){.menu-item:hover{background:color-mix(in srgb,var(--text) 8%,transparent);text-decoration:none}}
+.menu-item[aria-current="page"]{color:var(--accent2);font-weight:700}
+.menu-check{width:14px;height:14px;flex:none}
+
+@media (min-width:769px){
+  /* The top bar lines up with the 1100px page column, the view switch and the sync text live in the sidebar. */
+  .topbar{padding-left:max(20px,calc((100% - 1100px) / 2 + 20px));padding-right:max(20px,calc((100% - 1100px) / 2 + 20px))}
+  .subnav{display:none}
+  #sync{display:none}
+  /* Toasts centre on the content column, not the whole window. */
+  #toasts{left:calc(224px + (100% - 224px) / 2);max-width:calc(100vw - 224px - 32px)}
+}
+@media (max-width:768px){
+  .shell{display:block}
+  .sidebar{display:none}
+  .ws-m{display:block}
+  .ws-btn-m{width:auto;min-height:40px;padding:4px 8px 4px 4px}
+  .ws-m-label{display:flex;align-items:center;gap:4px;font-size:15px;line-height:20px;font-weight:700}
+  .tb-title,.tb-log{display:none}
+  #theme-btn-m{display:flex}
+}
+@media (pointer:coarse){
+  .side-item,.menu-item{min-height:44px}
+}
+@media (prefers-reduced-motion:reduce){
+  .ws-caret,.side-item{transition:none}
+}
+
 @media(max-width:640px){
   .topbar{gap:6px;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right))}
   .main{padding:12px}
-  .logo-name{display:none}
-  .ver{display:none}
-  .tb-tabs{min-width:0}
-  .tb-tab{padding:5px 7px}
   .sync{min-width:0}
   .search{min-width:110px}
   .subnav{align-items:flex-start}
@@ -208,20 +302,92 @@ th.sortable.desc::after{content:'\25BC'}
 </head>
 <body>
 
-<header class="topbar">
-  <a class="logo" href="./" aria-label="Kujira Forex">
-    <svg class="logo-mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset=".5" stop-color="#a78bfa"/><stop offset="1" stop-color="#f472b6"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="url(#lg)"/><path d="M9 18c3 3 11 3 14 0" stroke="#04201c" stroke-width="2.2" fill="none" stroke-linecap="round"/><circle cx="12" cy="13" r="1.5" fill="#04201c"/></svg>
-    <span class="logo-name" id="app-name">Kujira</span>
-  </a>
-  <nav class="tb-tabs" aria-label="Switch app">
-    <a class="tb-tab" href="../Trading/">Trading</a>
-    <a class="tb-tab active" href="./" aria-current="page">Forex</a>
-    <a class="tb-tab" href="../Portfolio/">Portfolio</a>
-  </nav>
-  <div class="spacer"></div>
+<h1 class="sr-only">Kujira Forex</h1>
+
+<!-- APP SHELL (v1). 769px and up: a 224px sidebar beside the content column. 768px and below: no sidebar,
+     the top bar carries the whale, a workspace menu, the sync text and the theme switch, and #subnav keeps the view switch.
+     Structure: .shell > .sidebar (.ws, .side-nav, .side-foot) + .content-col (.topbar, main).
+     Behaviour lives in the APP SHELL block of the script (menus) and updateShell() (current view, locks, account, sync). -->
+<div class="shell">
+
+  <div class="sidebar" id="sidebar">
+    <!-- Workspace switcher: this app's mark and name, a menu of real links to the apps -->
+    <div class="ws menu-wrap">
+      <button type="button" class="ws-btn" id="ws-btn" data-menu-btn="ws" onclick="toggleShellMenu('ws')" aria-haspopup="menu" aria-expanded="false" aria-controls="ws-menu">
+        <img class="ws-mark" src="../Portfolio/Worker/whale-icon.png" alt="" width="32" height="32">
+        <span class="ws-text">
+          <span class="ws-name" id="app-name">Kujira</span>
+          <span class="ws-sub">Forex <svg class="ws-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg></span>
+        </span>
+      </button>
+      <div class="shell-menu ws-menu" id="ws-menu" role="menu" aria-label="Switch app" hidden>
+        <a class="menu-item" role="menuitem" tabindex="-1" href="../Trading/">Trading</a>
+        <a class="menu-item" role="menuitem" tabindex="-1" href="./" aria-current="page">Forex <svg class="menu-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true" focusable="false"><path d="M5 12l5 5 9-10"/></svg></a>
+        <a class="menu-item" role="menuitem" tabindex="-1" href="../Portfolio/">Portfolio</a>
+      </div>
+    </div>
+
+    <!-- The four views go through showView(), so authoriseFeature() still gates the paid ones. updateShell() marks the current one
+         and shows the lock and the word Locked on a view the plan does not include (entitlement(), the same check showView uses). -->
+    <nav class="side-nav" id="side-nav" aria-label="Forex">
+      <div class="side-group">
+        <p class="side-label">Views</p>
+        <ul class="side-list">
+          <li><button type="button" class="side-item active" data-v="journal" aria-current="page" onclick="showView('journal')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span class="side-text">Journal</span></button></li>
+          <li><button type="button" class="side-item" data-v="reports" onclick="showView('reports')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg><span class="side-text">Reports</span><span class="side-lock" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true" focusable="false"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Locked</span></button></li>
+          <li><button type="button" class="side-item" data-v="simulator" onclick="showView('simulator')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg><span class="side-text">Simulator</span><span class="side-lock" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true" focusable="false"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Locked</span></button></li>
+          <li><button type="button" class="side-item" data-v="coach" onclick="showView('coach')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="side-text">Coach</span><span class="side-lock" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true" focusable="false"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Locked</span></button></li>
+        </ul>
+      </div>
+      <div class="side-group">
+        <p class="side-label">Manage</p>
+        <ul class="side-list">
+          <li><button type="button" class="side-item" onclick="openTagManager()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><path d="M7 7h.01"/></svg><span class="side-text">Tags</span></button></li>
+        </ul>
+      </div>
+    </nav>
+
+    <div class="side-foot">
+      <!-- Same destination as the Account button in #subnav. The status text under it is filled by updateShell() from accountStatusLabel(). -->
+      <button type="button" class="side-item" id="side-account" onclick="openAccountSettings()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span class="side-stack"><span class="side-text">Account</span><span class="side-sub" id="side-account-sub"></span></span>
+      </button>
+      <button type="button" class="side-item" id="side-settings" onclick="openSettings()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span class="side-text">Settings</span>
+      </button>
+      <!-- The sync state in words, mirrored from setSync() by updateShellSync(). The dot colour only repeats what the words say. -->
+      <div class="side-sync" id="sb-sync" data-state="idle" role="status" aria-live="polite"><span class="side-dot" aria-hidden="true"></span><span id="sb-sync-text">Local only</span></div>
+      <div class="side-meta">
+        <span class="side-version" id="ver"></span>
+        <span class="side-tools"><button type="button" class="icon-btn" id="theme-btn" title="Toggle theme" aria-label="Toggle colour theme" onclick="toggleTheme()">◐</button></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="content-col">
+
+<header class="topbar" id="topbar">
+  <div class="tb-head">
+    <!-- Phone only: the sidebar is not there, so the whale and the app name open the same workspace menu -->
+    <div class="ws-m menu-wrap">
+      <button type="button" class="ws-btn ws-btn-m" id="ws-btn-m" data-menu-btn="wsm" onclick="toggleShellMenu('wsm')" aria-haspopup="menu" aria-expanded="false" aria-controls="ws-menu-m">
+        <img class="ws-mark" src="../Portfolio/Worker/whale-icon.png" alt="" width="32" height="32">
+        <span class="ws-m-label">Forex <svg class="ws-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg></span>
+      </button>
+      <div class="shell-menu ws-menu ws-menu-m" id="ws-menu-m" role="menu" aria-label="Switch app" hidden>
+        <a class="menu-item" role="menuitem" tabindex="-1" href="../Trading/">Trading</a>
+        <a class="menu-item" role="menuitem" tabindex="-1" href="./" aria-current="page">Forex <svg class="menu-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true" focusable="false"><path d="M5 12l5 5 9-10"/></svg></a>
+        <a class="menu-item" role="menuitem" tabindex="-1" href="../Portfolio/">Portfolio</a>
+      </div>
+    </div>
+    <!-- Desktop: the current view, mirrored by updateShell(). The sidebar item carries aria-current for assistive tech. -->
+    <p class="tb-title" id="tb-title" aria-hidden="true">Journal</p>
+  </div>
   <span class="sync" id="sync" aria-live="polite" role="status"></span>
-  <span class="ver" id="ver"></span>
-  <button class="icon-btn" id="theme-btn" title="Toggle theme" aria-label="Toggle colour theme" onclick="toggleTheme()">◐</button>
+  <button type="button" class="btn btn-primary tb-log" id="tb-log" onclick="openTradeModal()" hidden>+ Log trade</button>
+  <button type="button" class="icon-btn" id="theme-btn-m" title="Toggle theme" aria-label="Toggle colour theme" onclick="toggleTheme()">◐</button>
 </header>
 
 <main class="main">
@@ -323,6 +489,9 @@ th.sortable.desc::after{content:'\25BC'}
   </section>
 </main>
 
+  </div><!-- /.content-col -->
+</div><!-- /.shell -->
+
 <div id="toasts" aria-live="polite" role="status"></div>
 <div id="modal-root"></div>
 
@@ -336,7 +505,7 @@ th.sortable.desc::after{content:'\25BC'}
 /* ============================================================================
    APP CONFIG
    ========================================================================== */
-const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.14 (03 Oct)' };
+const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.15 (09 Oct)' };
 const CCY = '$';
 const TABLES = ['trades'];
 const PAGE_SIZE = 25;
@@ -635,11 +804,14 @@ function markDirty(table,id){
 let _syncState='idle';
 function setSync(s,msg){
   _syncState=s; const el=document.getElementById('sync'); if(!el) return;
-  if(s==='saving'){ el.textContent='⟳ Syncing'; el.style.color='var(--text3)'; }
-  else if(s==='ok'){ el.textContent='✓ Synced'; el.style.color='var(--green)'; setTimeout(()=>{ if(_syncState==='ok') el.textContent=''; },2500); }
-  else if(s==='error'){ el.textContent='⚠ Offline'; el.style.color='var(--red)'; if(msg) console.warn('Sync:',msg); }
-  else if(s==='preview'){ el.textContent='● Preview'; el.style.color='var(--amber)'; }
+  // The words stay --text2, which passes 4.5:1 on the top bar in both themes. Light --green (4.3:1) and --amber (3.9:1) do not, so only the glyph carries the state colour.
+  const put=(glyph,word,color)=>{ el.textContent=''; const g=document.createElement('span'); g.style.color=color; g.textContent=glyph; el.append(g,' '+word); el.style.color='var(--text2)'; };
+  if(s==='saving') put('⟳','Syncing','var(--text3)');
+  else if(s==='ok'){ put('✓','Synced','var(--green)'); setTimeout(()=>{ if(_syncState==='ok') el.textContent=''; },2500); }
+  else if(s==='error'){ put('⚠','Offline','var(--red)'); if(msg) console.warn('Sync:',msg); }
+  else if(s==='preview') put('●','Preview','var(--amber)');
   else el.textContent='';
+  updateShellSync();
 }
 async function sbSyncRow(table,item,isDelete,scope){
   assertSyncTable(table); assertStoredId(item.id);
@@ -1016,6 +1188,94 @@ async function showView(v){
 }
 
 /* ============================================================================
+   APP SHELL (sidebar on desktop, workspace header on a phone)
+   ========================================================================== */
+// The sidebar menu (desktop) and the header menu (phone) share one pattern. One menu is open at a time. Enter, Space or an arrow key
+// on the button opens it with focus on an item. Arrows, Home and End move between items, Escape closes it and returns focus to the
+// button, Tab closes it and carries on from the button, a click outside closes it.
+const SHELL_MENUS={ ws:['ws-btn','ws-menu'], wsm:['ws-btn-m','ws-menu-m'] };
+function shellMenuItems(menu){ return Array.from(menu.querySelectorAll('[role="menuitem"]')); }
+function openShellMenu(which,focusLast){
+  const ids=SHELL_MENUS[which], btn=ids&&document.getElementById(ids[0]), menu=ids&&document.getElementById(ids[1]);
+  if(!btn||!menu) return;
+  closeShellMenus(false);
+  menu.hidden=false; btn.setAttribute('aria-expanded','true');
+  const items=shellMenuItems(menu), first=focusLast?items[items.length-1]:items[0];
+  if(first) first.focus();
+}
+function closeShellMenus(returnFocus){
+  Object.keys(SHELL_MENUS).forEach(which=>{
+    const btn=document.getElementById(SHELL_MENUS[which][0]), menu=document.getElementById(SHELL_MENUS[which][1]);
+    if(!btn||!menu||menu.hidden) return;
+    menu.hidden=true; btn.setAttribute('aria-expanded','false');
+    if(returnFocus) btn.focus();
+  });
+}
+function toggleShellMenu(which){
+  const ids=SHELL_MENUS[which], menu=ids&&document.getElementById(ids[1]);
+  if(!menu) return;
+  if(menu.hidden) openShellMenu(which); else closeShellMenus(true);
+}
+function shellMenuKeydown(e){
+  const menu=e.target.closest?e.target.closest('.shell-menu'):null;
+  if(menu&&!menu.hidden){
+    const items=shellMenuItems(menu), at=items.indexOf(document.activeElement);
+    const go=n=>{ e.preventDefault(); if(items.length) items[(n+items.length)%items.length].focus(); };
+    if(e.key==='ArrowDown') go(at+1);
+    else if(e.key==='ArrowUp') go(at-1);
+    else if(e.key==='Home') go(0);
+    else if(e.key==='End') go(items.length-1);
+    else if(e.key==='Escape'){ e.preventDefault(); closeShellMenus(true); }
+    else if(e.key==='Tab') closeShellMenus(true);
+    else if(e.key===' '&&document.activeElement&&document.activeElement.tagName==='A'){ e.preventDefault(); document.activeElement.click(); }
+    return;
+  }
+  const btn=e.target.closest?e.target.closest('[data-menu-btn]'):null;
+  if(btn&&(e.key==='ArrowDown'||e.key==='ArrowUp')){ e.preventDefault(); openShellMenu(btn.getAttribute('data-menu-btn'),e.key==='ArrowUp'); return; }
+  if(e.key==='Escape') closeShellMenus(true);   // a menu opened by mouse while focus sits elsewhere
+}
+document.addEventListener('keydown',shellMenuKeydown);
+document.addEventListener('click',e=>{ if(!(e.target.closest&&e.target.closest('.menu-wrap'))) closeShellMenus(false); });
+(function(){
+  // The menu that was open may be on the side that just went away when the window crosses the phone breakpoint.
+  const mq=window.matchMedia&&window.matchMedia('(max-width:768px)');
+  if(mq&&mq.addEventListener) mq.addEventListener('change',()=>closeShellMenus(false));
+})();
+
+// Sidebar and top bar state, all derived from values that already exist: _view, entitlement(), accountStatusLabel(), _syncState, #subnav.
+// Called from updateAccountUI() (which renderApp() runs first) and from setSync().
+const VIEW_TITLES={ journal:'Journal', reports:'Reports', simulator:'Simulator', coach:'Coach' };
+const VIEW_FEATURES={ reports:'advanced_analytics', simulator:'simulator', coach:'ai_coach' };   // the same keys showView() passes to authoriseFeature()
+function updateShell(){
+  document.querySelectorAll('#side-nav [data-v]').forEach(b=>{
+    const on=b.dataset.v===_view, feature=VIEW_FEATURES[b.dataset.v], lock=b.querySelector('.side-lock');
+    b.classList.toggle('active',on);
+    if(on) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current');
+    if(lock) lock.hidden=!feature||entitlement(feature);
+  });
+  const title=document.getElementById('tb-title'); if(title) title.textContent=VIEW_TITLES[_view]||VIEW_TITLES.journal;
+  const acc=document.getElementById('side-account-sub'); if(acc){ const label=accountStatusLabel(); if(acc.textContent!==label) acc.textContent=label; }
+  const log=document.getElementById('tb-log'), sub=document.getElementById('subnav'); if(log&&sub) log.hidden=sub.classList.contains('hidden');   // Log trade is offered exactly when the view switch is
+  updateShellSync();
+}
+// A hosted session with no user has nothing to sync, whatever _syncState still holds from before the sign-out.
+function shellSyncIdle(){ return !isLocalOwner()&&!currentUser().id; }
+function shellSyncLabel(){
+  if(shellSyncIdle()) return isHostedBroken() ? 'Auth unavailable' : 'Signed out';
+  if(_syncState==='saving') return 'Syncing';
+  if(_syncState==='ok') return 'Synced';
+  if(_syncState==='error') return 'Offline';
+  if(_syncState==='preview') return 'Preview';
+  return isLocalOwner() ? 'Local only' : 'Not syncing';
+}
+function updateShellSync(){
+  const box=document.getElementById('sb-sync'), txt=document.getElementById('sb-sync-text'); if(!box||!txt) return;
+  const label=shellSyncLabel(), state=!shellSyncIdle()&&['saving','ok','error','preview'].indexOf(_syncState)>=0?_syncState:'idle';
+  if(txt.textContent!==label) txt.textContent=label;
+  if(box.getAttribute('data-state')!==state) box.setAttribute('data-state',state);
+}
+
+/* ============================================================================
    RENDER
    ========================================================================== */
 function show(id,cond){ const el=document.getElementById(id); if(el) el.classList.toggle('hidden',!cond); }
@@ -1038,6 +1298,7 @@ function updateAccountUI(){
       copy.textContent='This hosted journal needs an authenticated account before it can load data.';
     }
   }
+  updateShell();
 }
 function accountPlanText(){
   const cap=_accountState.trade_cap==null?'unlimited':String(_accountState.trade_cap);
@@ -1210,9 +1471,9 @@ function renderApp(){
   show('error', !_cloudReachable&&!authBlocked);
   show('auth-required', authBlocked);
   if(authBlocked){
-    show('subnav', false); show('empty',false); show('dash-wrap',false); show('table-card',false); show('view-simulator',false); show('view-reports',false); show('view-coach',false); return;
+    show('subnav', false); show('empty',false); show('dash-wrap',false); show('table-card',false); show('view-simulator',false); show('view-reports',false); show('view-coach',false); updateShell(); return;
   }
-  show('subnav', true);
+  show('subnav', true); updateShell();
   const total=DB.trades.length, jr=_view==='journal';
   show('empty', total===0 && jr);
   show('dash-wrap', total>0 && jr);
