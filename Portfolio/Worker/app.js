@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.74';
-const APP_DISPLAY_VERSION = 'v2.74 (09 Oct)';
+const APP_VERSION = 'v2.75';
+const APP_DISPLAY_VERSION = 'v2.75 (10 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -666,7 +666,7 @@ const STOCK_COLUMNS = [
       : '<span class="price-stale">—</span>' },
   { key:'dayChange', label:dc=>`Day P&L (${dc})`, cls:'num', defVis:false,
     render:r => r.changeSgd!=null ? `<span class="${r.changeSgd>=0?'pos':'neg'}">${fmtSgdOrNative(r.px.change, r.priceCcy || r.ccy,{signed:true})}</span>` : '—' },
-  { key:'dayChangePct', label:()=>'Day %', cls:'num', defVis:false,
+  { key:'dayChangePct', label:()=>'Day %', cls:'num pct', defVis:false,
     render:r => (r.px&&r.px.changePct!=null) ? `<span class="${r.px.changePct>=0?'pos':'neg'}">${fmtPct(r.px.changePct)}</span>` : '—' },
   { key:'prevClose', label:()=>'Prev close', cls:'num', defVis:false,
     render:r => r.prevCloseSgd!=null ? fmtSgdOrNative(r.px.previousClose, r.priceCcy || r.ccy) : '—' },
@@ -678,19 +678,19 @@ const STOCK_COLUMNS = [
   { key:'week52', label:()=>'52w range', cls:'num', defVis:false, backend:true,
     render:r => (r.px&&r.px.week52Low!=null&&r.px.week52High!=null)
       ? `${fmtSgdOrNative(r.px.week52Low,r.priceCcy||r.px.currency||r.ccy)}–${fmtSgdOrNative(r.px.week52High,r.priceCcy||r.px.currency||r.ccy)}` : '—' },
-  { key:'pos52w', label:()=>'52w pos', cls:'num', defVis:false, backend:true,
+  { key:'pos52w', label:()=>'52w pos', cls:'num pct', defVis:false, backend:true,
     // Where the price sits in the 52w band: 0% = at the low, 100% = at the high.
     render:r => {
       const v = r.px ? rangePosition(r.px.price, r.px.week52Low, r.px.week52High) : null;
       return v!=null ? `<span title="0% = 52w low, 100% = 52w high">${(v*100).toFixed(0)}%</span>` : '—';
     } },
-  { key:'vs200d', label:()=>'vs 200d avg', cls:'num', defVis:false, backend:true,
+  { key:'vs200d', label:()=>'vs 200d avg', cls:'num pct', defVis:false, backend:true,
     render:r => {
       const f = r.px && r.px.fund;
       const v = f ? vsBaseline(r.px.price, f.sma200) : null;
       return v!=null ? `<span class="${v>=0?'pos':'neg'}">${v>=0?'▲':'▼'} ${Math.abs(v*100).toFixed(1)}%</span>` : '—';
     } },
-  { key:'vs50d', label:()=>'vs 50d avg', cls:'num', defVis:false, backend:true,
+  { key:'vs50d', label:()=>'vs 50d avg', cls:'num pct', defVis:false, backend:true,
     render:r => {
       const f = r.px && r.px.fund;
       const v = f ? vsBaseline(r.px.price, f.sma50) : null;
@@ -704,17 +704,17 @@ const STOCK_COLUMNS = [
     render:r => r.cost != null ? fmtSgdOrNative(r.cost, 'SGD', {dp:0}) : '<span class="price-stale">— FX missing</span>' },
   { key:'pl', label:dc=>`P&L (${dc})`, cls:'num', defVis:true,
     render:r => r.pl!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${_plArrow(r.pl)}${fmtSgdOrNative(r.pl, 'SGD', {dp:0,signed:true})}</span>` : '—' },
-  { key:'plPct', label:()=>'P&L %', cls:'num', defVis:true,
+  { key:'plPct', label:()=>'P&L %', cls:'num pct', defVis:true,
     render:r => r.plPct!=null ? `<span class="${r.pl>=0?'pos':'neg'}">${fmtPct(r.plPct)}</span>` : '—' },
   { key:'realised', label:dc=>`Realised P&L (${dc})`, cls:'num', defVis:false,
     render:r => r.realisedSgd!=null ? `<span class="${r.realisedSgd>=0?'pos':'neg'}">${_plArrow(r.realisedSgd)}${fmtSgdOrNative(r.realisedSgd, 'SGD', {dp:0,signed:true})}</span>` : '—' },
-  { key:'weight', label:()=>'Weight %', cls:'num', defVis:false,
+  { key:'weight', label:()=>'Weight %', cls:'num pct', defVis:false,
     render:r => r.weight!=null ? r.weight.toFixed(1)+'%' : '—' },
   { key:'divIncome', label:dc=>`Dividend/yr (${dc})`, cls:'num', defVis:false,
     render:r => r.divAnnualSgd!=null ? fmtSgdOrNative(r.divAnnualSgd, 'SGD', {dp:0}) : '—' },
-  { key:'divYoc', label:()=>'Yield on cost', cls:'num', defVis:false,
+  { key:'divYoc', label:()=>'Yield on cost', cls:'num pct', defVis:false,
     render:r => r.divYoc!=null ? r.divYoc.toFixed(2)+'%' : '—' },
-  { key:'divYield', label:()=>'Div yield', cls:'num', defVis:false,
+  { key:'divYield', label:()=>'Div yield', cls:'num pct', defVis:false,
     render:r => r.divYieldCur!=null ? r.divYieldCur.toFixed(2)+'%' : '—' },
   // Fundamentals come from the quoteSummary proxy (px.fund). ETFs and unfetched
   // symbols have no fund object — every cell falls back to the '—' token.
@@ -726,7 +726,7 @@ const STOCK_COLUMNS = [
     render:r => { const f=r.px&&r.px.fund; return (f&&f.priceToBook!=null) ? f.priceToBook.toFixed(2) : '—'; } },
   { key:'beta', label:()=>'Beta', cls:'num', defVis:false, backend:true,
     render:r => { const f=r.px&&r.px.fund; return (f&&f.beta!=null) ? f.beta.toFixed(2) : '—'; } },
-  { key:'payout', label:()=>'Payout', cls:'num', defVis:false, backend:true,
+  { key:'payout', label:()=>'Payout', cls:'num pct', defVis:false, backend:true,
     render:r => { const f=r.px&&r.px.fund; return (f&&f.payoutRatio!=null) ? (f.payoutRatio*100).toFixed(0)+'%' : '—'; } },
   { key:'mktCap', label:()=>'Mkt cap', cls:'num', defVis:false, backend:true,
     render:r => {
@@ -773,7 +773,7 @@ const BOARD_COLUMNS = [
   { key:'change', label:()=>'Change', cls:'num', defVis:true,
     render:r => (r.px && r.px.change!=null)
       ? `<span class="${r.px.change>=0?'pos':'neg'}">${fmtSgdOrNative(r.px.change, r.ccy,{signed:true})}</span>` : '—' },
-  { key:'changePct', label:()=>'Change %', cls:'num', defVis:true,
+  { key:'changePct', label:()=>'Change %', cls:'num pct', defVis:true,
     render:r => (r.px && r.px.changePct!=null)
       ? `<span class="${r.px.changePct>=0?'pos':'neg'}">${fmtPct(r.px.changePct)}</span>` : '—' },
   { key:'prevClose', label:()=>'Prev close', cls:'num', defVis:false,
@@ -784,7 +784,7 @@ const BOARD_COLUMNS = [
   { key:'week52', label:()=>'52w range', cls:'num', defVis:true, backend:true,
     render:r => (r.px && r.px.week52Low!=null && r.px.week52High!=null)
       ? `${fmtSgdOrNative(r.px.week52Low, r.ccy)}–${fmtSgdOrNative(r.px.week52High, r.ccy)}` : '—' },
-  { key:'pos52w', label:()=>'52w pos', cls:'num', defVis:false, backend:true,
+  { key:'pos52w', label:()=>'52w pos', cls:'num pct', defVis:false, backend:true,
     render:r => { const v = r.px ? rangePosition(r.px.price, r.px.week52Low, r.px.week52High) : null;
       return v!=null ? `<span title="0% = 52w low, 100% = 52w high">${(v*100).toFixed(0)}%</span>` : '—'; } },
   { key:'volume', label:()=>'Volume', cls:'num', defVis:true, backend:true,
@@ -799,7 +799,7 @@ const BOARD_COLUMNS = [
     render:r => { const f=r.px&&r.px.fund; return (f&&f.priceToBook!=null) ? f.priceToBook.toFixed(2) : '—'; } },
   { key:'beta', label:()=>'Beta', cls:'num', defVis:false, backend:true,
     render:r => { const f=r.px&&r.px.fund; return (f&&f.beta!=null) ? f.beta.toFixed(2) : '—'; } },
-  { key:'payout', label:()=>'Payout', cls:'num', defVis:false, backend:true,
+  { key:'payout', label:()=>'Payout', cls:'num pct', defVis:false, backend:true,
     render:r => { const f=r.px&&r.px.fund; return (f&&f.payoutRatio!=null) ? (f.payoutRatio*100).toFixed(0)+'%' : '—'; } },
   { key:'exchange', label:()=>'Exchange', cls:'tl', defVis:false,
     render:r => (r.px && r.px.exchange) ? kjrEscape(r.px.exchange) : '—' },
@@ -1170,20 +1170,36 @@ function showToast(msg, kind, action){
   el.className = 'toast' + (kind ? ' ' + kind : '');
   // Optional inline action (e.g. Undo). Built from nodes, never innerHTML, so
   // the message stays text-safe. An action toast lingers longer (8s) so the
-  // affordance is actually reachable.
-  if (action && action.label && typeof action.fn === 'function'){
+  // affordance is actually reachable. The button is a real <button> (.toast-act
+  // in index.html carries its focus ring), so the keyboard reaches it, and the
+  // host is a polite live region, so the message is announced.
+  const hasAction = !!(action && action.label && typeof action.fn === 'function');
+  if (hasAction){
     const span = document.createElement('span'); span.textContent = msg;
-    const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = action.label;
-    btn.style.cssText = 'margin-left:12px;background:none;border:none;color:inherit;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer;padding:0';
+    const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = action.label; btn.className = 'toast-act';
     btn.onclick = () => { try{ action.fn(); } finally { el.remove(); } };
     el.append(span, btn);
   } else {
     el.textContent = msg;
   }
   host.appendChild(el);
-  const ttl = (action || kind === 'error') ? 8000 : 5000;
-  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; }, ttl);
-  setTimeout(() => el.remove(), ttl + 400);
+  let fadeTimer = 0, removeTimer = 0;
+  const arm = ms => {
+    clearTimeout(fadeTimer); clearTimeout(removeTimer);
+    el.style.opacity = '';
+    fadeTimer = setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; }, ms);
+    removeTimer = setTimeout(() => el.remove(), ms + 400);
+  };
+  arm((action || kind === 'error') ? 8000 : 5000);
+  if (hasAction){
+    // A toast with an action holds still while the pointer or the keyboard focus is on it (someone tabbing to Undo
+    // must not lose it mid-reach), and goes 3s after both have left.
+    const hold = () => { clearTimeout(fadeTimer); clearTimeout(removeTimer); el.style.opacity = ''; };
+    el.addEventListener('mouseenter', hold);
+    el.addEventListener('focusin', hold);
+    el.addEventListener('mouseleave', () => { if (!el.contains(document.activeElement)) arm(3000); });
+    el.addEventListener('focusout', () => { if (!el.matches(':hover')) arm(3000); });
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -4817,11 +4833,11 @@ function renderBucketPreview(){
     const amt = takeHome * (Number(r.pct)||0) / 100;
     return `<div class="bucket">
       <div class="bucket-label">${kjrEscape(r.name||'(unnamed)')}</div>
-      <div class="bucket-amt">${_moneyHtml(fmt(amt,{dp:0}))}</div>
+      <div class="bucket-amt money-chip">${_moneyHtml(fmt(amt,{dp:0}))}</div>
       <div class="bucket-sub">${(Number(r.pct)||0)}%${r.dest ? ' → ' + kjrEscape(r.dest) : ''}</div>
     </div>`;
   }).join('');
-  el.innerHTML = `<div class="hint" style="margin-bottom:6px">This month on take-home of ${fmt(takeHome,{dp:0})}${cpf.allocated===false&&age==null?' (set birth year for exact CPF)':''}:</div><div class="bucket-grid">${cells}</div>`;
+  el.innerHTML = `<div class="hint" style="margin-bottom:6px">This month on take-home of <span class="money-chip">${fmt(takeHome,{dp:0})}</span>${cpf.allocated===false&&age==null?' (set birth year for exact CPF)':''}:</div><div class="bucket-grid">${cells}</div>`;
 }
 
 /* ─── SG Income Tax engine ──────────────────────────────────────────────
@@ -4905,29 +4921,29 @@ function renderTaxEstimate(){
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:10px">
       <div class="hint-block">
         <div class="hint" style="font-size:12px;margin-bottom:2px">Annual gross</div>
-        <div style="font-weight:600">${fmt2(est.annualGross)}</div>
+        <div class="money-chip" style="font-weight:600">${fmt2(est.annualGross)}</div>
       </div>
       <div class="hint-block">
         <div class="hint" style="font-size:12px;margin-bottom:2px">Less employee CPF</div>
-        <div style="font-weight:600">(${fmt2(est.annualEmpCpf)})</div>
+        <div class="money-chip" style="font-weight:600">(${fmt2(est.annualEmpCpf)})</div>
         <div class="hint" style="font-size:11px">incl. CPF on bonus</div>
       </div>
       <div class="hint-block">
         <div class="hint" style="font-size:12px;margin-bottom:2px">Less reliefs</div>
-        <div style="font-weight:600">(${fmt2(est.reliefs)})</div>
+        <div class="money-chip" style="font-weight:600">(${fmt2(est.reliefs)})</div>
       </div>
       <div class="hint-block">
         <div class="hint" style="font-size:12px;margin-bottom:2px">Chargeable income</div>
-        <div style="font-weight:600">${fmt2(est.chargeableIncome)}</div>
+        <div class="money-chip" style="font-weight:600">${fmt2(est.chargeableIncome)}</div>
       </div>
       <div class="hint-block">
         <div class="hint" style="font-size:12px;margin-bottom:2px">Est. annual tax${est.isManual ? ' (manual override)' : ''}</div>
-        <div style="font-weight:600;font-size:16px">${fmt2(est.annualTax)}</div>
+        <div class="money-chip" style="font-weight:600;font-size:16px">${fmt2(est.annualTax)}</div>
         <div class="hint">${est.effectiveRate.toFixed(2)}% effective rate${nr ? ' (non-resident, higher of 15% flat / graduated)' : ''}</div>
       </div>
       <div class="hint-block">
         <div class="hint" style="font-size:12px;margin-bottom:2px">Monthly provision</div>
-        <div style="font-weight:600;font-size:16px">${fmt2(est.monthlyProvision)}</div>
+        <div class="money-chip" style="font-weight:600;font-size:16px">${fmt2(est.monthlyProvision)}</div>
         <div class="hint">Accrual. SG has no monthly PAYE.</div>
       </div>
     </div>
@@ -5625,8 +5641,18 @@ function privacyOn(){ return localStorage.getItem(LK_PRIVACY) === '1'; }
 function _privacyMaskLabel(label){
   return privacyOn() ? '••••' : label;
 }
+/* The same for a Chart.js axis tick (Step 8b): the axis of a money measure shows •••• while Hide amounts is on, an axis of counts or percentages is left alone.
+   unit is the measure's unit, 'money' when it has none. applyPrivacy redraws the live charts, so the tick callbacks read the new mode at once. */
+function _privacyMaskAxis(label, unit){
+  return (privacyOn() && (!unit || unit === 'money')) ? '••••' : label;
+}
 function applyPrivacy(on){
   document.documentElement.classList.toggle('privacy', !!on);
+  // The charts draw their money tick labels to canvas, which the CSS blur cannot reach, so redraw the live ones in place (no animation) and let the tick
+  // callbacks read the new mode.
+  try {
+    Object.keys(_pbCharts).forEach(id => { const c = _pbCharts[id]; if (c && typeof c.update === 'function') c.update('none'); });
+  } catch (_) { /* a chart that cannot redraw keeps its labels until the next render */ }
   const btn = document.getElementById('privacy-toggle');
   if (btn){
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -5640,6 +5666,28 @@ function togglePrivacy(){
   localStorage.setItem(LK_PRIVACY, on ? '1' : '0');
   applyPrivacy(on);
   showToast(on ? 'Amounts hidden' : 'Amounts shown');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MOTION (Step 8b). Every script-driven animation (the hero number roll, the
+   price flash, the skeleton shimmer) asks _reducedMotion() before it moves.
+   The CSS animations (flash, shimmer, toast, end dot, panel slide) carry their
+   own prefers-reduced-motion override in index.html. All of it is decoration:
+   the figures, the arrows and the signs are the signal, never the motion.
+   ═══════════════════════════════════════════════════════════════════════ */
+/* True when the person has asked their system for less motion. Read on every
+   call, not cached, so changing the setting needs no reload. Where matchMedia
+   is missing or throws the answer is false (animate): a browser that cannot be
+   asked cannot have been told, and nothing here carries meaning, so the worst
+   case is a short fade, never a lost figure. */
+function _reducedMotion(){
+  try {
+    if (typeof window === 'undefined' || !window || typeof window.matchMedia !== 'function') return false;
+    const q = window.matchMedia('(prefers-reduced-motion: reduce)');
+    return !!(q && q.matches);
+  } catch (_) {
+    return false;
+  }
 }
 function updateThemeUI(t){
   t = t || currentTheme();
@@ -5968,9 +6016,11 @@ let _undoStack = [], _redoStack = [];
 // repopulates on the next price refresh regardless of undo state.
 function _undoSnapshot(){ return JSON.stringify(localPersistPayload()); }
 function pushUndo(){
-  _undoStack.push(_undoSnapshot());
+  const snapshot = _undoSnapshot();
+  _undoStack.push(snapshot);
   if (_undoStack.length > UNDO_MAX) _undoStack.shift();
   _redoStack = [];
+  return snapshot;   // the step just pushed, so a toast can tell later whether it is still the newest (undoDeleteToast)
 }
 async function undoAction(){
   if (!_undoStack.length){ showToast('Nothing to undo'); return; }
@@ -5987,6 +6037,59 @@ async function redoAction(){
   DB = JSON.parse(_redoStack.pop());
   DB._priceCache = prevPriceCache || {}; // carry the live cache forward, same as pullFromRemote
   const saved = await Promise.resolve(saveData()); renderAll(); if (saved) showToast('Redone', 'success');
+}
+
+/* Undo on a delete toast (Step 8b). step is what the delete recorded:
+     snapshot  the string pushUndo returned just before it
+     revision  _localSaveRevision once the delete had saved
+     trashIds  the Recently deleted entries the delete made
+   While nothing else has been saved since (the step is still the newest on the
+   stack and the save revision has not moved) this is the ordinary undoAction:
+   the whole database goes back to the moment before, so the record, its place in
+   its table and the trash list all come back exactly, and the save goes through
+   saveData like any edit, so the sync flags match a normal undo. If anything was
+   saved in between (another edit, a background FX or salary write, a pull),
+   rolling the whole database back would undo that too, so only the deleted
+   records are put back, from the trash, and the rest is left alone. Never throws
+   into a toast click, and says so when there is nothing left to undo. */
+async function undoDeleteToast(step){
+  try {
+    const s = step || {};
+    const top = _undoStack[_undoStack.length - 1];
+    if (typeof s.snapshot === 'string' && top === s.snapshot && s.revision === _localSaveRevision){
+      await undoAction();
+      return true;
+    }
+    const ids = (Array.isArray(s.trashIds) ? s.trashIds : []).filter(id => (DB.trash || []).some(e => e && e.id === id));
+    if (ids.length){
+      let all = true;
+      for (const id of ids) all = !!(await restoreFromTrash(id)) && all;
+      return all;
+    }
+    showToast('This can no longer be undone from here. Check Settings, Recently deleted.', 'error');
+    return false;
+  } catch (err){
+    console.error('[undo] delete toast', err);
+    showToast('Undo failed: ' + (err && err.message ? err.message : 'unknown error') + '. The record is still in Settings, Recently deleted.', 'error');
+    return false;
+  }
+}
+
+/* "Deleted AAPL": the Undo toast's words for a record. A stock, coin or watchlist
+   row by its symbol, a property or cash account by its name, a policy by insurer
+   and plan, anything else (or a record with no name) by the kind of record.
+   Plain text (the toast sets textContent) and capped so a long name cannot swell
+   the toast. */
+const DELETED_NOUNS = { stocks:'stock', stockTxns:'trade', watchlist:'watchlist entry', crypto:'coin', realestate:'property', cash:'cash account', cashTxns:'cash movement', cpfHistory:'CPF entry', income:'income entry', expenses:'expense', insurance:'policy', insuranceRiders:'rider' };
+function _deletedText(table, item){
+  const d = item || {};
+  let name = '';
+  if (table === 'stocks' || table === 'watchlist' || table === 'crypto') name = String(d.symbol == null ? '' : d.symbol).trim();
+  else if (table === 'realestate' || table === 'cash') name = String(d.name == null ? '' : d.name).trim();
+  else if (table === 'insurance') name = [d.insurer, d.plan].filter(Boolean).join(' ').trim();
+  if (!name) name = Object.prototype.hasOwnProperty.call(DELETED_NOUNS, table) ? DELETED_NOUNS[table] : 'entry';
+  if (name.length > 40) name = name.slice(0, 39) + '…';
+  return 'Deleted ' + name;
 }
 
 function autoRefreshEnabled(){
@@ -6111,6 +6214,146 @@ function priceFor(table, item){
   return null;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   PRICE FLASH AND LOADING SKELETONS (Step 8b)
+   A refresh that moves a price flashes the rows and the panel price that show
+   it, a soft gain or loss tint that fades over 1.2s. A first load, before any
+   quote is cached, shows skeleton placeholders where the figures will be.
+   Both are decoration: the arrows, signs and figures are the signal, nothing
+   here is the only way to tell, and both stand still under reduced motion.
+   The maths is pure and unit-tested (_quotePrice, _priceDiff, _skeletonOn), the
+   painter (_pxFlashPaint) only adds a class to elements that carry data-px, the
+   price-cache key of the holding they show ('AAPL', 'D05.SI', 'bitcoin').
+   ═══════════════════════════════════════════════════════════════════════ */
+const PX_FLASH_MS = 1200;
+let _pxFlashes = new Map();   // price-cache key -> { dir:'up'|'down', at:ms }, alive for PX_FLASH_MS so a repaint inside the window carries on the fade
+
+/* The number a flash compares in one cached quote: price for a stock, else sgd or usd for a coin. Null for anything that is not a real, positive price. */
+function _quotePrice(q){
+  if (!q || typeof q !== 'object') return null;
+  for (const k of ['price', 'sgd', 'usd']){
+    const v = q[k];
+    if (v == null || v === '') continue;
+    const n = Number(v);
+    if (isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+/* Cache key -> price, for the keys that hold a real price right now. A refresh takes this BEFORE it writes the cache, the write overwrites the old quote. */
+function _priceSnapshot(keys){
+  const out = {};
+  const cache = (DB && DB._priceCache) || {};
+  (Array.isArray(keys) ? keys : []).forEach(k => {
+    if (!Object.prototype.hasOwnProperty.call(cache, k)) return;
+    const p = _quotePrice(cache[k]);
+    if (p !== null) out[k] = p;
+  });
+  return out;
+}
+
+/* Pure. Which prices moved between two snapshots (_priceSnapshot shape): { key: 'up' | 'down' }. Only a key with a real price on BOTH sides can flash, so a new
+   symbol, a price that was missing, and a first load all stay quiet, and so does a price that did not change. */
+function _priceDiff(before, after){
+  const out = {};
+  const was = before || {}, now = after || {};
+  Object.keys(now).forEach(k => {
+    if (!Object.prototype.hasOwnProperty.call(was, k)) return;
+    const a = now[k], b = was[k];
+    if (!(typeof a === 'number' && isFinite(a) && a > 0 && typeof b === 'number' && isFinite(b) && b > 0)) return;
+    if (a > b) out[k] = 'up';
+    else if (a < b) out[k] = 'down';
+  });
+  return out;
+}
+
+/* Registers the moves a refresh found, so the next paints flash them. Nothing under reduced motion. Returns how many keys were noted. */
+function _pxFlashNote(moved, now){
+  if (_reducedMotion()) return 0;
+  const at = typeof now === 'number' ? now : Date.now();
+  let n = 0;
+  Object.keys(moved || {}).forEach(k => {
+    if (moved[k] !== 'up' && moved[k] !== 'down') return;
+    _pxFlashes.set(k, { dir:moved[k], at });
+    n++;
+  });
+  return n;
+}
+
+/* Puts the flash class on every element under root (the page by default) whose data-px key has a live flash. A repaint inside the window starts partway through
+   the fade (a negative delay, --px-delay), so a second render never restarts the colour at full strength. Expired entries are dropped. Returns how many
+   elements were painted. A no-op, with no DOM scan, while nothing is flashing. */
+function _pxFlashPaint(root, now){
+  if (!_pxFlashes.size) return 0;
+  if (_reducedMotion()){ _pxFlashes.clear(); return 0; }
+  const t = typeof now === 'number' ? now : Date.now();
+  Array.from(_pxFlashes.keys()).forEach(k => { if (t - _pxFlashes.get(k).at >= PX_FLASH_MS) _pxFlashes.delete(k); });
+  if (!_pxFlashes.size) return 0;
+  const host = root || document;
+  let n = 0;
+  host.querySelectorAll('[data-px]').forEach(el => {
+    const f = _pxFlashes.get(el.getAttribute('data-px'));
+    if (!f || el._pxAt === f.at) return;   // not flashing, or already painted for this very flash
+    el._pxAt = f.at;
+    if (el.classList.contains('flash-up') || el.classList.contains('flash-down')){
+      el.classList.remove('flash-up', 'flash-down');
+      void el.offsetWidth;   // a second flash on a row that is still showing the first one restarts the animation
+    }
+    el.style.setProperty('--px-delay', '-' + Math.max(0, Math.round(t - f.at)) + 'ms');
+    el.classList.add('flash-' + f.dir);
+    el.addEventListener('animationend', () => el.classList.remove('flash-up', 'flash-down'), { once:true });
+    n++;
+  });
+  return n;
+}
+
+/* The data-px attribute for a price-cache key ('' when there is none), already escaped. */
+function _pxAttr(key){
+  return key ? ' data-px="' + kjrEscape(String(key)) + '"' : '';
+}
+
+/* Pure. Do the price lists draw skeleton placeholders? Only while a price fetch is in flight AND none of the holdings on show has any price yet (a first
+   load). Once any quote is cached, even a stale last-known one, the real rows take over and their own dashes and stale marks say what is missing. keys are
+   the holdings' price-cache keys, cache is DB._priceCache. */
+function _skeletonOn(inFlight, keys, cache){
+  if (!inFlight) return false;
+  const list = Array.isArray(keys) ? keys : [];
+  if (!list.length) return false;
+  const c = cache || {};
+  return !list.some(k => Object.prototype.hasOwnProperty.call(c, k) && _quotePrice(c[k]) !== null);
+}
+
+/* One shimmering bar where a figure will be, and the words a screen reader gets while the lists are loading. The bar is empty and aria-hidden, the status is
+   the live announcement ("Loading prices"), and each list that shows bars is marked aria-busy="true" for as long as it does. */
+const SKEL_BAR = '<span class="skel" aria-hidden="true"></span>';
+const SKEL_STATUS = '<span class="sr-only" role="status">Loading prices</span>';
+/* While loading, a cell that would only say "nothing yet" (the table dash or the phone list's en dash) shows a bar instead. A cell with a real figure stays. */
+function _skelIf(loading, html){
+  return (loading && (html === '\u2014' || html === '\u2013' || html === '<span class="price-stale">\u2014</span>')) ? SKEL_BAR : html;
+}
+
+/* Is the first-load skeleton up for these holdings right now? Reads the two in-flight flags. stocks and crypto say which fetches count (the dashboard counts both). */
+function _pricesLoading(keys, stocks, crypto){
+  return _skeletonOn((!!stocks && _stockRefreshInFlight) || (!!crypto && _cryptoRefreshInFlight), keys, DB._priceCache);
+}
+
+/* Repaints what shows prices: the Stocks and Crypto pages when one is on screen, the dashboard when it is, and an open holding panel. Used when a price fetch
+   starts with nothing cached (the skeletons go up) and when one ends without data (they clear). */
+function _repaintPriceSurfaces(){
+  if (_isPageActive('stocks') || _isPageActive('board')) renderStocks();
+  if (_isPageActive('crypto')) renderCrypto();
+  _repaintDashAfterPrices();
+  refreshHoldingPanel();
+}
+
+/* The dashboard rows after a price refresh, only when the dashboard is the page on screen (showPage redraws it on arrival otherwise). The saved charts are
+   left alone, a silent refresh every minute must not rebuild and re-animate them, they rebuild with the next full render. */
+function _repaintDashAfterPrices(){
+  if (!_isPageActive('dashboard')) return false;
+  renderDashboard({ keepCharts:true });
+  return true;
+}
+
 async function refreshStockPrices(opts = {}){
   if (!DB.stocks.length && !(DB.watchlist || []).length){ if (!opts.silent) showToast('No stocks to refresh'); return; }
   if (!getSyncUrl()){ if (!opts.silent) showToast('Set the Apps Script URL first', 'error'); return; }
@@ -6118,13 +6361,19 @@ async function refreshStockPrices(opts = {}){
   _stockRefreshInFlight = true;
   const btn = document.getElementById('btn-refresh-stocks');
   if (btn) btn.disabled = true;
+  // Step 8b: a first load (no holding has a price yet) draws skeleton placeholders until the quotes, or an error, arrive. The repaint sits inside the try,
+  // so whatever it does the in-flight flag is cleared by the finally.
+  let skeleton = false, repainted = false;
   try {
+    skeleton = _skeletonOn(true, DB.stocks.map(yahooSymbol).filter(Boolean), DB._priceCache);
+    if (skeleton) _repaintPriceSurfaces();
     const symbols = Array.from(new Set(
       DB.stocks.map(yahooSymbol).concat((DB.watchlist || []).map(yahooSymbol)).filter(Boolean)
     ));
     if (!symbols.length){ if (!opts.silent) showToast('No valid symbols', 'error'); return; }
     const url = getSyncUrl() + (getSyncUrl().includes('?') ? '&' : '?') +
                 'action=prices&symbols=' + encodeURIComponent(symbols.join(','));
+    const pxBefore = _priceSnapshot(symbols);   // the cache write below overwrites the old quotes, so the flash needs them now
     const resp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
     const data = await resp.json();
     if (data.error && !data.quotes) throw new Error(data.error);
@@ -6134,6 +6383,7 @@ async function refreshStockPrices(opts = {}){
       DB._priceCache[sym] = q;
       ok++;
     });
+    _pxFlashNote(_priceDiff(pxBefore, _priceSnapshot(symbols)));   // the rows whose price moved flash on the repaints below
     // Auto-refresh FX too if we have any USD-denominated positions
     if (DB.stocks.some(s => (s.currency || (s.market === 'US' ? 'USD' : 'SGD')) === 'USD') && !DB.settings.fxOverrides.USDSGD){
       refreshFx({ silent: true }).catch(()=>{});
@@ -6144,6 +6394,8 @@ async function refreshStockPrices(opts = {}){
     // is what kept two clients in a rolling conflict.
     renderStocks();
     refreshHoldingPanel();   // an open holding panel takes the new price
+    _repaintDashAfterPrices();   // and the dashboard rows, when it is the page on screen (a silent refresh used to leave them stale)
+    repainted = true;
     if (!opts.silent) showToast('Prices: ' + ok + ' refreshed' + (fail ? ', ' + fail + ' failed' : ''), fail ? 'error' : 'success');
     // Fundamentals ride behind the price refresh, fire-and-forget: the cells
     // fill in when they land, and a miss leaves the '—' tokens (non-fatal).
@@ -6158,6 +6410,9 @@ async function refreshStockPrices(opts = {}){
   } finally {
     _stockRefreshInFlight = false;
     if (btn) btn.disabled = false;
+    if (skeleton && !repainted){   // an error or an empty answer: the skeletons clear to the rows' own dashes
+      try { _repaintPriceSurfaces(); } catch (err){ console.warn('[prices] repaint after a refresh without data failed:', err && err.message); }
+    }
   }
 }
 
@@ -6191,11 +6446,16 @@ async function refreshCryptoPrices(){
   _cryptoRefreshInFlight = true;
   const btn = document.getElementById('btn-refresh-crypto');
   if (btn) btn.disabled = true;
+  // Step 8b: same first-load skeletons and price flash as the stock refresh.
+  let skeleton = false, repainted = false;
   try {
+    skeleton = _skeletonOn(true, DB.crypto.map(c => coinIdFor(c.coingeckoId || c.symbol)).filter(Boolean), DB._priceCache);
+    if (skeleton) _repaintPriceSurfaces();
     const ids = Array.from(new Set(DB.crypto.map(c => coinIdFor(c.coingeckoId || c.symbol)).filter(Boolean)));
     if (!ids.length){ showToast('No valid coin ids', 'error'); return; }
     const url = getSyncUrl() + (getSyncUrl().includes('?') ? '&' : '?') +
                 'action=crypto&ids=' + encodeURIComponent(ids.join(',')) + '&vs=sgd,usd';
+    const pxBefore = _priceSnapshot(ids);   // the cache write below overwrites the old quotes, so the flash needs them now
     const resp = await fetch(url, { method:'GET', mode:'cors', redirect:'follow' });
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
@@ -6210,8 +6470,11 @@ async function refreshCryptoPrices(){
     });
     // No saveData(): same reasoning as refreshStockPrices, _priceCache is
     // memory-only, so there is nothing to persist and nothing worth pushing.
+    _pxFlashNote(_priceDiff(pxBefore, _priceSnapshot(ids)));   // the rows whose price moved flash on the repaints below
     renderCrypto();
     refreshHoldingPanel();   // an open holding panel takes the new price
+    _repaintDashAfterPrices();   // and the dashboard rows, when it is the page on screen
+    repainted = true;
     // Report configured coins that came back with no price too (typo'd or
     // delisted coingeckoId), not just how many succeeded, so a silent gap
     // in the ledger doesn't hide behind an all-green "N refreshed" toast.
@@ -6222,6 +6485,9 @@ async function refreshCryptoPrices(){
   } finally {
     _cryptoRefreshInFlight = false;
     if (btn) btn.disabled = false;
+    if (skeleton && !repainted){   // an error or an empty answer: the skeletons clear to the rows' own dashes
+      try { _repaintPriceSurfaces(); } catch (err){ console.warn('[prices] repaint after a refresh without data failed:', err && err.message); }
+    }
   }
 }
 
@@ -6244,6 +6510,8 @@ function sendToTrash(table, id){
 
 /* Human label for a trashed entry, by table. Used by the Recently deleted UI. */
 const TRASH_TABLE_NAMES = { stocks:'Stock', stockTxns:'Trade', watchlist:'Watchlist', crypto:'Crypto', realestate:'Property', cash:'Cash account', cashTxns:'Cash movement', cpfHistory:'CPF entry', income:'Income', expenses:'Expense', insurance:'Policy', insuranceRiders:'Rider' };
+/* The tables whose trash label carries an amount or a share count ("Buy 10 AAPL", "deposit 3200", "Gross 8000"), so Hide amounts blurs the label (Step 8b). */
+const TRASH_AMOUNT_TABLES = ['stockTxns', 'cashTxns', 'cpfHistory', 'income', 'expenses'];
 function trashLabel(table, data){
   data = data || {};
   const d = data.date ? (' · ' + fmtDateSG(data.date)) : '';
@@ -6284,7 +6552,7 @@ function renderTrash(){
     <div class="trash-row">
       <div class="trash-info">
         <span class="tag">${kjrEscape(TRASH_TABLE_NAMES[e.table] || e.table)}</span>
-        <span class="trash-label">${kjrEscape(trashLabel(e.table, e.data))}</span>
+        <span class="trash-label${TRASH_AMOUNT_TABLES.indexOf(e.table) !== -1 ? ' money-chip' : ''}">${kjrEscape(trashLabel(e.table, e.data))}</span>
         <span class="hint">deleted ${kjrEscape(relTime(e.ts))}</span>
       </div>
       <div class="trash-actions">
@@ -7142,16 +7410,31 @@ async function entityModalDelete(){
   // longer exists), they are not deleted and are recoverable automatically:
   // restoring the policy from trash makes them reappear with no extra step.
 
-  const prompt = refWarning + 'Move this entry to trash? You can restore it from Settings → Recently deleted.';
-  if (!confirm(prompt)) return false;
-  pushUndo();
+  // Step 8b: a delete nothing points at goes straight to the trash with an Undo on the toast (undoDeleteToast), no dialog.
+  // The two cascade cases above keep their confirm: the rows that point at the record are left behind and the books stay
+  // unbalanced until the person acts, which is worth reading first, and the toast's Undo would only mend it after the fact.
+  if (refWarning){
+    const prompt = refWarning + 'Move this entry to trash? You can restore it from Settings → Recently deleted.';
+    if (!confirm(prompt)) return false;
+  }
+  const snapshot = pushUndo();
   _entityDeleteInFlight = true;
   let saved = false;
-  try { saved = await Promise.resolve(sendToTrash(table, item.id)); }
+  const trashIds = [];
+  try {
+    const pending = sendToTrash(table, item.id);
+    // sendToTrash takes the row out and adds its trash entry before it saves, so the newest entry is this record's
+    const last = (DB.trash || [])[(DB.trash || []).length - 1];
+    if (last && last.table === table && last.data && last.data.id === item.id) trashIds.push(last.id);
+    saved = await Promise.resolve(pending);
+  }
   finally { _entityDeleteInFlight = false; }
   if (_modalState === modalToken) closeEntityModal();
   renderAll();
-  if (saved) showToast('Moved to trash', 'success');
+  if (saved){
+    const step = { snapshot, revision:_localSaveRevision, trashIds };
+    showToast(_deletedText(table, item), 'success', { label:'Undo', fn: () => undoDeleteToast(step) });
+  }
   return saved;
 }
 
@@ -7244,7 +7527,7 @@ function _stockListModel(r){
   const share = _finiteNum(r.weight) ? r.weight.toFixed(1) + '%' : LIST_DASH;
   const ret = _returnCell(r.pl, r.plPct, pl ? pl.text : '');
   return { table:'stocks', id:r.s.id, sym, cls:'stocks', sub, value: mv ? mv.text : LIST_DASH, share, shareOf:'of stocks', fx: !!((mv && mv.fx) || (pl && pl.fx)),
-    dir:ret.dir, pct:ret.pct, amount:ret.amount };
+    dir:ret.dir, pct:ret.pct, amount:ret.amount, px:r.ysym };
 }
 
 /* One Crypto row for the phone list, from a _cryptoRow row. totMv is the whole coin list's value, the share is of that. */
@@ -7254,7 +7537,7 @@ function _cryptoListModel(r, totMv){
   const weight = _finiteNum(r.mv) ? safeRatio(r.mv, totMv) : null;
   const share = _finiteNum(weight) ? weight.toFixed(1) + '%' : LIST_DASH;
   const ret = _returnCell(r.pl, r.plPct, _finiteNum(r.pl) ? fmt(r.pl, {dp:0, signed:true}) : '');
-  return { table:'crypto', id:r.c.id, sym, cls:'crypto', sub:'Crypto', value, share, shareOf:'of coins', fx:false, dir:ret.dir, pct:ret.pct, amount:ret.amount };
+  return { table:'crypto', id:r.c.id, sym, cls:'crypto', sub:'Crypto', value, share, shareOf:'of coins', fx:false, dir:ret.dir, pct:ret.pct, amount:ret.amount, px:r.cid };
 }
 
 /* The spoken form of a holding row, so a screen reader hears the name, the value and the return in words. */
@@ -7274,26 +7557,28 @@ function openHoldingDetail(table, id){
   return openHoldingPanel(table, id);
 }
 
-function _holdingRowHtml(m){
-  return '<button type="button" class="dash-hrow hl-row" data-click="openHolding" data-a0="' + kjrEscape(m.table) + '" data-a1="' + kjrEscape(m.id) + '" aria-haspopup="dialog" aria-label="' + kjrEscape(_holdingLabel(m)) + '">'
+/* loading (Step 8b, a first load with a price fetch in flight): a figure that is only a dash for now is a shimmering bar instead. data-px is the price-cache key
+   the flash finds the row by. */
+function _holdingRowHtml(m, loading){
+  return '<button type="button" class="dash-hrow hl-row" data-click="openHolding" data-a0="' + kjrEscape(m.table) + '" data-a1="' + kjrEscape(m.id) + '" aria-haspopup="dialog" aria-label="' + kjrEscape(_holdingLabel(m)) + '"' + _pxAttr(m.px) + '>'
     + '<span class="dash-who">' + _monogram(m.sym, m.cls) + '<span class="dash-who-t"><b>' + kjrEscape(m.sym) + '</b><span>' + kjrEscape(m.sub) + '</span></span></span>'
-    + '<span class="dash-hcell"><span class="dash-hval money-chip">' + _moneyHtml(m.value) + '</span><span class="dash-sub">'
-    + (m.fx ? '<span class="price-stale">FX missing</span>' : kjrEscape(m.share) + (m.share === LIST_DASH ? '' : '<span class="hl-of"> ' + kjrEscape(m.shareOf) + '</span>')) + '</span></span>'
-    + '<span class="dash-hcell"><span class="dash-chg' + (m.dir ? ' ' + m.dir : '') + '">' + m.pct + '</span><span class="dash-sub money-chip">' + (m.amount || '&nbsp;') + '</span></span>'
+    + '<span class="dash-hcell"><span class="dash-hval money-chip">' + _skelIf(loading, _moneyHtml(m.value)) + '</span><span class="dash-sub">'
+    + (m.fx ? '<span class="price-stale">FX missing</span>' : _skelIf(loading, kjrEscape(m.share)) + (m.share === LIST_DASH ? '' : '<span class="hl-of"> ' + kjrEscape(m.shareOf) + '</span>')) + '</span></span>'
+    + '<span class="dash-hcell"><span class="dash-chg' + (m.dir ? ' ' + m.dir : '') + '">' + _skelIf(loading, m.pct) + '</span><span class="dash-sub money-chip">' + (m.amount || '&nbsp;') + '</span></span>'
     + '</button>';
 }
 
 /* The totals line under a holdings list: the same figures the desktop totals row shows. */
-function _holdingTotalHtml(t){
+function _holdingTotalHtml(t, loading){
   return '<div class="hl-total"><span>' + kjrEscape(t.label) + '</span>'
-    + '<span class="dash-hcell"><span class="dash-hval money-chip">' + _moneyHtml(t.value) + '</span><span class="dash-sub">' + (t.fx ? '<span class="price-stale">FX missing</span>' : '&nbsp;') + '</span></span>'
-    + '<span class="dash-hcell"><span class="dash-chg' + (t.dir ? ' ' + t.dir : '') + '">' + t.pct + '</span><span class="dash-sub money-chip">' + (t.amount || '&nbsp;') + '</span></span></div>';
+    + '<span class="dash-hcell"><span class="dash-hval money-chip">' + _skelIf(loading, _moneyHtml(t.value)) + '</span><span class="dash-sub">' + (t.fx ? '<span class="price-stale">FX missing</span>' : '&nbsp;') + '</span></span>'
+    + '<span class="dash-hcell"><span class="dash-chg' + (t.dir ? ' ' + t.dir : '') + '">' + _skelIf(loading, t.pct) + '</span><span class="dash-sub money-chip">' + (t.amount || '&nbsp;') + '</span></span></div>';
 }
 
-function _holdingsListHtml(models, total, label){
-  return '<div class="hl" role="group" aria-label="' + kjrEscape(label) + '">'
+function _holdingsListHtml(models, total, label, loading){
+  return '<div class="hl" role="group" aria-label="' + kjrEscape(label) + '"' + (loading ? ' aria-busy="true"' : '') + '>' + (loading ? SKEL_STATUS : '')
     + '<div class="dash-hrow dash-hhead hl-head" aria-hidden="true"><span>Asset</span><span>Value</span><span>Return</span></div>'
-    + models.map(_holdingRowHtml).join('') + (total ? _holdingTotalHtml(total) : '') + '</div>';
+    + models.map(m => _holdingRowHtml(m, loading)).join('') + (total ? _holdingTotalHtml(total, loading) : '') + '</div>';
 }
 
 /* One Cash account for the phone list, from a renderCash row. The S$ value and the native balance use the table's own formatting. */
@@ -8174,7 +8459,7 @@ function renderStocks(){
   if (anyDiv){
     const totDivYoc = safeRatio(totDivAnnual, totCost);
     summaryItems.push({ label:'Dividend income', value: fmtSgdOrNative(totDivAnnual, 'SGD', {dp:0}),
-      sub: fmtSgdOrNative(roundMoney(totDivAnnual/12), 'SGD') + ' / mo' + (totDivYoc != null ? ' · ' + totDivYoc.toFixed(2) + '% on cost' : ''),
+      sub: '<span class="money-chip">' + fmtSgdOrNative(roundMoney(totDivAnnual/12), 'SGD') + ' / mo</span>' + (totDivYoc != null ? ' · ' + totDivYoc.toFixed(2) + '% on cost' : ''),
       accent:'accent' });
   }
   const allocHtml = renderSectorAllocation(rows, anyPriceMissing || anyFxMissing || anyCostMissing);
@@ -8213,6 +8498,8 @@ function renderStocks(){
   const dc = displayCcy();
   const cols = orderedStockCols().filter(c => c.visible);
   const ctx = { dc, totMv };
+  // First load (a price fetch in flight, no holding priced yet): the figures that would only say "nothing yet" shimmer instead (Step 8b).
+  const loading = _pricesLoading(rows.map(r => r.ysym), true, false);
   // Sortable header cell: reserved glyph space so the layout never shifts.
   const thSort = (key, lbl, extraCls) => {
     const active = sortPref.key === key && sortPref.dir;
@@ -8280,7 +8567,7 @@ function renderStocks(){
         case 'mv':       return `<td class="num">${fAnyMv?fmtSgdOrNative(fTotMv,'SGD',{dp:0}):'—'}</td>`;
         case 'cost':     return `<td class="num">${fAnyCostMissing ? '—' : fmtSgdOrNative(fTotCost,'SGD',{dp:0})}</td>`;
         case 'pl':       return `<td class="num">${fAnyMv&&!fAnyPriceMissing&&!fAnyCostMissing?`<span class="${fTotPl>=0?'pos':'neg'}">${_plArrow(fTotPl)}${fmtSgdOrNative(fTotPl,'SGD',{dp:0,signed:true})}</span>`:'—'}</td>`;
-        case 'plPct':    return `<td class="num">${fAnyMv&&!fAnyPriceMissing&&!fAnyCostMissing&&fTotPlPct!=null?`<span class="${fTotPl>=0?'pos':'neg'}">${fmtPct(fTotPlPct)}</span>`:'—'}</td>`;
+        case 'plPct':    return `<td class="num pct">${fAnyMv&&!fAnyPriceMissing&&!fAnyCostMissing&&fTotPlPct!=null?`<span class="${fTotPl>=0?'pos':'neg'}">${fmtPct(fTotPlPct)}</span>`:'—'}</td>`;
         case 'realised': return `<td class="num">${fTotRealised?`<span class="${fTotRealised>=0?'pos':'neg'}">${_plArrow(fTotRealised)}${fmtSgdOrNative(fTotRealised,'SGD',{dp:0,signed:true})}</span>`:'—'}</td>`;
         case 'divIncome':return `<td class="num">${fTotDiv?fmtSgdOrNative(fTotDiv,'SGD',{dp:0}):'—'}</td>`;
         default:         return `<td></td>`;
@@ -8293,19 +8580,19 @@ function renderStocks(){
     const tPl = plKnown ? _listMoney(fTotPl, 'SGD', {dp:0, signed:true}) : null;
     const totalRet = _returnCell(plKnown ? fTotPl : null, plKnown ? fTotPlPct : null, tPl ? tPl.text : '');
     const listHtml = _holdingsListHtml(pageRows.map(_stockListModel),
-      { label:'Total', value: tMv ? tMv.text : LIST_DASH, fx: !!((tMv && tMv.fx) || (tPl && tPl.fx)), dir:totalRet.dir, pct:totalRet.pct, amount:totalRet.amount }, 'Holdings');
+      { label:'Total', value: tMv ? tMv.text : LIST_DASH, fx: !!((tMv && tMv.fx) || (tPl && tPl.fx)), dir:totalRet.dir, pct:totalRet.pct, amount:totalRet.amount }, 'Holdings', loading);
 
     bodyEl.innerHTML = `
       <div class="card">
         <div class="card-head"><h3>Holdings${_infoTip('stocks-cost-tip', 'How cost is calculated', 'Cost basis and average cost use the weighted-average method, not FIFO.')}</h3>${cardHeadRight}${phoneActions}</div>
         ${phoneChips}
-        <div class="tbl-wrap hd-only"><table class="holdings"><thead><tr>
+        <div class="tbl-wrap hd-only">${loading ? SKEL_STATUS : ''}<table class="holdings"${loading ? ' aria-busy="true"' : ''}><thead><tr>
         ${thSort('symbol', 'Symbol', ' tl sticky-col')}${headCells}<th></th>
       </tr></thead><tbody>
         ${pageRows.map(r => {
-          const cells = cols.map(c => `<td class="${c.cls}">${c.render(r, ctx)}</td>`).join('');
+          const cells = cols.map(c => `<td class="${c.cls}">${_skelIf(loading, c.render(r, ctx))}</td>`).join('');
           const ax = encodeURIComponent(r.ysym);
-          return `<tr>
+          return `<tr${_pxAttr(r.ysym)}>
             <td class="tl cell-sym sticky-col"><button type="button" class="sym-btn" data-click="openHolding" data-a0="stocks" data-a1="${kjrEscape(r.s.id)}" aria-haspopup="dialog" aria-label="Open ${kjrEscape(r.s.symbol)} details">${kjrEscape(r.s.symbol)}</button></td>
             ${cells}
             <td class="row-actions">
@@ -8332,6 +8619,7 @@ function renderStocks(){
   renderBoard();     // Watchlist+ board mirrors the same tickers
   renderDividendTimeline(rows);
   renderStockTxns();
+  _pxFlashPaint();   // Step 8b: a refresh that moved prices flashes the rows it just rebuilt
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -9121,17 +9409,17 @@ function _pbDrawCrossSectional(host, cfg, showEmpty, showChart){
   const yK1 = cfg.yFields[0], yK2 = cfg.yFields[1];
   const scales = isRound ? {} : {
     x: { ticks:{ color:axisColor, font:{size:10}, maxRotation:40 }, grid:{ display:false } },
-    y: { ticks:{ color:axisColor, font:{size:10}, callback:v => kjrFmtAxis(v, flds[yK1], curSym) }, grid:{ color:gridColor },
+    y: { ticks:{ color:axisColor, font:{size:10}, callback:v => _privacyMaskAxis(kjrFmtAxis(v, flds[yK1], curSym), flds[yK1] && flds[yK1].unit) }, grid:{ color:gridColor },
          title:{ display:true, text:flds[yK1]?.label||'', color:axisColor, font:{size:10} } }
   };
   if (cfg.dualAxis && cfg.yFields.length > 1){
     scales.y2 = { position:'right', grid:{ display:false },
-      ticks:{ color:PB_PALETTE[1], font:{size:10}, callback:v => kjrFmtAxis(v, flds[yK2], curSym) },
+      ticks:{ color:PB_PALETTE[1], font:{size:10}, callback:v => _privacyMaskAxis(kjrFmtAxis(v, flds[yK2], curSym), flds[yK2] && flds[yK2].unit) },
       title:{ display:true, text:flds[yK2]?.label||'', color:PB_PALETTE[1], font:{size:10} } };
   }
   _pbMountChart(host.canvasId, {
     type: cfg.chartType, data:{ labels, datasets },
-    options:{ responsive:true, maintainAspectRatio:false, animation:{duration:300}, interaction:{mode:'index',intersect:false},
+    options:{ responsive:true, maintainAspectRatio:false, animation:{duration:_reducedMotion() ? 0 : 300}, interaction:{mode:'index',intersect:false},
       plugins:{ legend:{ display: datasets.length>1 || isRound, position: isRound?'bottom':'top', labels:{ color:_cssVar('--text2'), font:{size:11}, padding:12, usePointStyle:true } },
         tooltip:{ callbacks:{ label: t => {
           const yKey = cfg.yFields[t.datasetIndex] || cfg.yFields[0];
@@ -9237,12 +9525,12 @@ async function _pbDrawTimeSeries(host, cfg, showEmpty, showChart){
   const axisColor = _cssVar('--text3'), gridColor = _cssVar('--border');
   _pbMountChart(host.canvasId, {
     type:'line', data:{ labels, datasets },
-    options:{ responsive:true, maintainAspectRatio:false, animation:{duration:300}, interaction:{mode:'index',intersect:false},
+    options:{ responsive:true, maintainAspectRatio:false, animation:{duration:_reducedMotion() ? 0 : 300}, interaction:{mode:'index',intersect:false},
       plugins:{ legend:{ position:'top', labels:{ color:_cssVar('--text2'), font:{size:11}, padding:10, usePointStyle:true,
                   filter: it => !/ avg cost$/.test(it.text) } },
         tooltip:{ callbacks:{ label: t => ' ' + t.dataset.label + ': ' + _privacyMaskLabel(curSym + (Number(t.parsed.y)||0).toLocaleString('en-SG',{maximumFractionDigits:2})) } } },
       scales:{ x:{ ticks:{ color:axisColor, font:{size:10}, maxTicksLimit:8 }, grid:{ display:false } },
-               y:{ ticks:{ color:axisColor, font:{size:10}, callback:v => curSym + kjrFmtAxis(v, {unit:'count'}, curSym) }, grid:{ color:gridColor } } }
+               y:{ ticks:{ color:axisColor, font:{size:10}, callback:v => _privacyMaskAxis(curSym + kjrFmtAxis(v, {unit:'count'}, curSym), 'money') }, grid:{ color:gridColor } } }
     }
   });
   if (host.summaryEl){
@@ -9290,7 +9578,7 @@ function _pbDrawInternalSeries(host, cfg, showEmpty, showChart){
   _pbMountChart(host.canvasId, {
     type: 'line', data: { labels: ser.labels, datasets: ser.datasets },
     options: {
-      responsive:true, maintainAspectRatio:false, animation:{duration:300},
+      responsive:true, maintainAspectRatio:false, animation:{duration:_reducedMotion() ? 0 : 300},
       interaction:{ mode:'index', intersect:false },
       plugins:{
         legend:{ display: ser.stacked || ser.datasets.length > 1, position:'bottom', labels:{ color:_cssVar('--text2'), font:{size:11}, boxWidth:12, padding:12 } },
@@ -9308,7 +9596,7 @@ function _pbDrawInternalSeries(host, cfg, showEmpty, showChart){
                       return i > 0 && _pbHumanDate(this.getLabelForValue(ticks[i - 1].value), tickStyle) === text ? '' : text;
                     } } },
         y:{ stacked:ser.stacked, grid:{ color:gridColor },
-            ticks:{ color:axisColor, font:{size:10}, maxTicksLimit:6, callback: v => kjrFmtAxis(v, { unit:'money' }, _pbCurSym()) } }
+            ticks:{ color:axisColor, font:{size:10}, maxTicksLimit:6, callback: v => _privacyMaskAxis(kjrFmtAxis(v, { unit:'money' }, _pbCurSym())) } }
       }
     }
   });
@@ -9966,8 +10254,8 @@ function renderWatchlist(){
           <td class="tl"><span class="tag ${w.market === 'SGX' ? 'sgx' : 'us'}">${kjrEscape(w.market || '')}</span></td>
           <td class="tl">${w.sector ? kjrEscape(w.sector) : '—'}</td>
           <td class="num">${priceCell}</td>
-          <td class="num">${dayCell}</td>
-          <td class="num">${posCell}</td>
+          <td class="num pct">${dayCell}</td>
+          <td class="num pct">${posCell}</td>
           <td class="num">${peCell}</td>
           <td class="num">${pbCell}</td>
           <td class="num">${targetCell}</td>
@@ -10418,10 +10706,12 @@ function renderCrypto(){
   ]);
 
   const dc = displayCcy();
+  // First load (a price fetch in flight, no coin priced yet): the figures that would only say "nothing yet" shimmer instead (Step 8b).
+  const loading = _pricesLoading(rows.map(r => r.cid), false, true);
   // The phone list reads the same rows as the table, and the share is each coin's value over the whole list's (totMv above).
-  const listHtml = _holdingsListHtml(rows.map(r => _cryptoListModel(r, totMv)), null, 'Coins');
+  const listHtml = _holdingsListHtml(rows.map(r => _cryptoListModel(r, totMv)), null, 'Coins', loading);
   bodyEl.innerHTML = `
-    <div class="card"><div class="tbl-wrap hd-only"><table class="holdings"><thead><tr>
+    <div class="card"><div class="tbl-wrap hd-only">${loading ? SKEL_STATUS : ''}<table class="holdings"${loading ? ' aria-busy="true"' : ''}><thead><tr>
       <th class="tl">Symbol</th><th class="tl">CoinGecko ID</th><th>Amount</th><th>Avg cost</th>
       <th>Price (${dc})</th><th>24h</th><th>Market value (${dc})</th><th>P&L (${dc})</th><th>P&L %</th><th>Updated</th><th></th>
     </tr></thead><tbody>
@@ -10432,17 +10722,17 @@ function renderCrypto(){
         const priceTxt = r.priceSgd != null
           ? `${fmt(r.priceSgd)}${r.stale ? ' <span class="hint">(stale)</span>' : ''}`
           : '<span class="price-stale">—</span>';
-        return `<tr>
+        return `<tr${_pxAttr(r.cid)}>
           <td class="tl cell-sym"><button type="button" class="sym-btn" data-click="openHolding" data-a0="crypto" data-a1="${kjrEscape(r.c.id)}" aria-haspopup="dialog" aria-label="Open ${kjrEscape(r.c.symbol)} details">${kjrEscape(r.c.symbol)}</button></td>
           <td class="tl muted">${kjrEscape(r.cid || '—')}</td>
           <td class="num">${r.c.amount || 0}</td>
           <td class="num">${r.c.avgCost ? fmtSgdOrNative(r.c.avgCost, r.ccy) : '—'}</td>
-          <td class="num">${priceTxt}</td>
-          <td class="num ${chg}">${px && px.change24h != null ? fmtPct(px.change24h) : '—'}</td>
-          <td class="num">${r.mv != null ? fmt(r.mv, {dp:0}) : '—'}</td>
-          <td class="num ${plClass}">${r.pl != null ? _plArrow(r.pl) + fmt(r.pl, {dp:0,signed:true}) : '—'}</td>
-          <td class="num ${plClass}">${r.plPct != null ? fmtPct(r.plPct) : '—'}</td>
-          <td class="num muted">${px && px.fetchedAt ? relTime(px.fetchedAt) : '—'}</td>
+          <td class="num">${_skelIf(loading, priceTxt)}</td>
+          <td class="num pct ${chg}">${_skelIf(loading, px && px.change24h != null ? fmtPct(px.change24h) : '—')}</td>
+          <td class="num">${_skelIf(loading, r.mv != null ? fmt(r.mv, {dp:0}) : '—')}</td>
+          <td class="num ${plClass}">${_skelIf(loading, r.pl != null ? _plArrow(r.pl) + fmt(r.pl, {dp:0,signed:true}) : '—')}</td>
+          <td class="num pct ${plClass}">${_skelIf(loading, r.plPct != null ? fmtPct(r.plPct) : '—')}</td>
+          <td class="num muted">${_skelIf(loading, px && px.fetchedAt ? relTime(px.fetchedAt) : '—')}</td>
           <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="crypto" data-edit-id="${kjrEscape(r.c.id)}">Edit</button></td>
         </tr>`;
       }).join('')}
@@ -10453,6 +10743,7 @@ function renderCrypto(){
     fresh.className = 'freshness' + (anyPriceMissing ? ' stale' : ' fresh');
     fresh.textContent = priceFreshnessText('crypto');
   }
+  _pxFlashPaint();   // Step 8b: a refresh that moved prices flashes the rows it just rebuilt
 }
 
 function exportCryptoCSV(){
@@ -10975,14 +11266,14 @@ function _renderInsPremiumChart(series){
     type: 'bar',
     data: { labels: months, datasets: [{ label:'Premiums', data: values, backgroundColor: PB_PALETTE[0]+'55', borderColor: PB_PALETTE[0], borderWidth:1.5, borderRadius:4 }] },
     options: {
-      responsive:true, maintainAspectRatio:false, animation:{duration:300},
+      responsive:true, maintainAspectRatio:false, animation:{duration:_reducedMotion() ? 0 : 300},
       plugins:{
         legend:{ display:false },
         tooltip:{ callbacks:{ label: c => ' ' + _privacyMaskLabel(fmt(c.parsed.y, { noConvert:true, dp:0 })) } }
       },
       scales:{
         x:{ ticks:{ color:axisColor, font:{size:10} }, grid:{ display:false } },
-        y:{ ticks:{ color:axisColor, font:{size:10}, callback: v => kjrFmtAxis(v, { unit:'money' }, _pbCurSym()) }, grid:{ color:gridColor } }
+        y:{ ticks:{ color:axisColor, font:{size:10}, callback: v => _privacyMaskAxis(kjrFmtAxis(v, { unit:'money' }, _pbCurSym())) }, grid:{ color:gridColor } }
       }
     }
   });
@@ -11163,8 +11454,8 @@ function renderProjections(){
   const negSavings = monthlySavings < 0;
   const assumptionsCard = `<div class="card"><div class="card-head"><h3>Assumptions</h3></div><div class="card-body">
     <div class="tbl-wrap"><table class="holdings"><tbody>
-      <tr><td class="tl">Expected return</td><td class="num">${fmtPctPlain(returnPct,1)}</td></tr>
-      <tr><td class="tl">Inflation</td><td class="num">${fmtPctPlain(inflationPct,1)}</td></tr>
+      <tr><td class="tl">Expected return</td><td class="num pct">${fmtPctPlain(returnPct,1)}</td></tr>
+      <tr><td class="tl">Inflation</td><td class="num pct">${fmtPctPlain(inflationPct,1)}</td></tr>
       <tr><td class="tl">FIRE target</td><td class="num">${s.fireTarget!=null ? fmt(Number(s.fireTarget),{dp:0}) + ' (manual override)' : (Number(s.fireMultiple)||25) + '&times; expenses'}</td></tr>
       <tr><td class="tl">Retirement age</td><td class="num">${retirementAge}</td></tr>
       <tr><td class="tl">Annual expenses (derived)</td><td class="num">${expInfo.annual>0 ? fmt(expInfo.annual,{dp:0}) : '—'}${expInfo.excluded ? ' <span class="hint">('+expInfo.excluded+' excluded, FX missing)</span>' : ''}</td></tr>
@@ -11204,7 +11495,7 @@ function _renderProjectionChart(liquidSeries, cpfSeries, fireNumber){
       { label:'FIRE number', data: fireLine, borderColor: PB_PALETTE[3], backgroundColor:'transparent', borderWidth:1.5, borderDash:[6,4], pointRadius:0 }
     ] },
     options: {
-      responsive:true, maintainAspectRatio:false, animation:{duration:300},
+      responsive:true, maintainAspectRatio:false, animation:{duration:_reducedMotion() ? 0 : 300},
       interaction:{ mode:'index', intersect:false },
       plugins:{
         legend:{ position:'top', labels:{ color:_cssVar('--text2'), font:{size:11}, padding:10, usePointStyle:true } },
@@ -11212,7 +11503,7 @@ function _renderProjectionChart(liquidSeries, cpfSeries, fireNumber){
       },
       scales:{
         x:{ ticks:{ color:axisColor, font:{size:10}, autoSkip:false, maxRotation:0 }, grid:{ display:false } },
-        y:{ ticks:{ color:axisColor, font:{size:10}, callback: v => kjrFmtAxis(v, { unit:'money' }, _pbCurSym()) }, grid:{ color:gridColor } }
+        y:{ ticks:{ color:axisColor, font:{size:10}, callback: v => _privacyMaskAxis(kjrFmtAxis(v, { unit:'money' }, _pbCurSym())) }, grid:{ color:gridColor } }
       }
     }
   });
@@ -11381,7 +11672,7 @@ function renderCash(){
         <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${r.bal.toLocaleString('en-SG', {maximumFractionDigits:2})}${r.derived ? '<span class="hint" title="Calculated from movements + linked trades"> ◆</span>' : ''}</td>
         <td class="num">${kjrEscape(r.ccy)}</td>
         <td class="num ${r.bal < -0.005 ? 'neg' : ''}">${r.sgd != null ? fmt(r.sgd) : '<span class="price-stale">— FX missing</span>'}</td>
-        ${showApy ? `<td class="num">${r.apy ? r.apy.toFixed(2) + '%' : '—'}</td><td class="num">${r.monthlyInt ? r.c.currency && r.c.currency !== 'SGD' ? kjrEscape(r.c.currency) + ' ' + r.monthlyInt.toLocaleString('en-SG',{maximumFractionDigits:2}) : fmt(toSGD(r.monthlyInt, r.ccy)) : '—'}</td>` : ''}
+        ${showApy ? `<td class="num pct">${r.apy ? r.apy.toFixed(2) + '%' : '—'}</td><td class="num">${r.monthlyInt ? r.c.currency && r.c.currency !== 'SGD' ? kjrEscape(r.c.currency) + ' ' + r.monthlyInt.toLocaleString('en-SG',{maximumFractionDigits:2}) : fmt(toSGD(r.monthlyInt, r.ccy)) : '—'}</td>` : ''}
         <td class="tl muted">${kjrEscape(r.c.notes || '')}</td>
         <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="cash" data-edit-id="${kjrEscape(r.c.id)}">Edit</button></td>
       </tr>`).join('')}
@@ -11561,16 +11852,17 @@ function renderCpf(){
   const total = eff.OA + eff.SA + eff.MA + eff.RA;
   const accrued = total - opening;
   const anchor = _cpfAnchorDate();
-  const subLine = accrued > 0.5
-    ? '+' + fmt(accrued, {dp:0}) + ' since ' + (anchor ? fmtDateSG(anchor) : '—') + ' (salary + year-end interest)'
-    : (anchor ? 'Anchored ' + fmtDateSG(anchor) : 'Set starting balances in Settings');
+  // The amount sits in a .money-chip (Hide amounts blurs it), the words and the date stay readable. Both parts are escaped here, the markup is built after.
+  const subHtml = accrued > 0.5
+    ? '<span class="money-chip">+' + kjrEscape(fmt(accrued, {dp:0})) + '</span>' + kjrEscape(' since ' + (anchor ? fmtDateSG(anchor) : '—') + ' (salary + year-end interest)')
+    : kjrEscape(anchor ? 'Anchored ' + fmtDateSG(anchor) : 'Set starting balances in Settings');
 
   // KPI row — live balance (typed figure auto-grown by salary each payday).
   // Whole dollars (F7): matches every other card in the app (dashboard,
   // metrics, history subtotals below); fmt()'s default is 2dp, which made
   // these the one place still showing cents ($92,760.00 vs $92,760 elsewhere).
   balsEl.innerHTML = `<div class="metrics">
-    <div class="metric"><div class="metric-label">Total CPF</div><div class="metric-value">${_moneyHtml(fmt(total,{dp:0}))}</div><div class="metric-sub${accrued > 0.5 ? ' pos' : ''}">${kjrEscape(subLine)}</div></div>
+    <div class="metric"><div class="metric-label">Total CPF</div><div class="metric-value">${_moneyHtml(fmt(total,{dp:0}))}</div><div class="metric-sub${accrued > 0.5 ? ' pos' : ''}">${subHtml}</div></div>
     <div class="metric"><div class="metric-label">OA · ${DB.settings.cpfRates.OA}%</div><div class="metric-value">${_moneyHtml(fmt(eff.OA||0,{dp:0}))}</div></div>
     <div class="metric"><div class="metric-label">SA · ${DB.settings.cpfRates.SA}%</div><div class="metric-value">${_moneyHtml(fmt(eff.SA||0,{dp:0}))}</div></div>
     <div class="metric"><div class="metric-label">MA · ${DB.settings.cpfRates.MA}%</div><div class="metric-value">${_moneyHtml(fmt(eff.MA||0,{dp:0}))}</div></div>
@@ -11746,11 +12038,11 @@ function renderCashflow(){
   const sumEl = document.getElementById('cf-summary');
   if (sumEl){
     sumEl.innerHTML = renderSummary([
-      { label: fYear ? 'Income ' + fYear : 'Income (all years)',  value: fmt(totNet,{dp:0}),  accent:'pos', sub: 'gross ' + fmt(totGross,{dp:0}) },
+      { label: fYear ? 'Income ' + fYear : 'Income (all years)',  value: fmt(totNet,{dp:0}),  accent:'pos', sub: 'gross <span class="money-chip">' + fmt(totGross,{dp:0}) + '</span>' },
       { label: fYear ? 'Expenses ' + fYear : 'Expenses (all years)', value: fmt(totExp,{dp:0}), accent:'neg',
         sub: expenses.length + ' txns' + (excludedExpCount ? ' · ' + excludedExpCount + ' excluded, FX missing' : '') },
       { label: 'Net savings', value: fmt(savings,{dp:0}), accent: savings >= 0 ? 'pos' : 'neg' },
-      { label: 'Savings rate', value: savingsRate != null ? fmtPct(savingsRate) : '—', accent: savingsRate != null && savingsRate >= 0 ? 'pos' : 'neg', sub: 'of take-home' }
+      { label: 'Savings rate', value: savingsRate != null ? fmtPct(savingsRate) : '—', accent: savingsRate != null && savingsRate >= 0 ? 'pos' : 'neg', sub: 'of take-home', pct:true }
     ]);
   }
 
@@ -11774,7 +12066,7 @@ function renderCashflow(){
         <td class="num muted">${fmt(gross,{dp:0})}</td>
         <td class="num">${fmt(exp,{dp:0})}</td>
         <td class="num ${cls}">${fmt(ne,{dp:0})}</td>
-        <td class="num ${cls}">${rate != null ? fmtPct(rate) : '—'}</td>
+        <td class="num pct ${cls}">${rate != null ? fmtPct(rate) : '—'}</td>
         <td class="num muted">${txns}</td>
       </tr>`;
     }).join('')}</tbody></table></div>`;
@@ -11785,7 +12077,7 @@ function renderCashflow(){
 
   // ─── Income table ───────────────────────────────────────────────────
   const incomeMeta = document.getElementById('cf-income-meta');
-  if (incomeMeta) incomeMeta.textContent = income.length + ' entr' + (income.length === 1 ? 'y' : 'ies') + ' · ' + fmt(totNet,{dp:0}) + ' take-home';
+  if (incomeMeta) incomeMeta.innerHTML = kjrEscape(income.length + ' entr' + (income.length === 1 ? 'y' : 'ies') + ' · ') + '<span class="money-chip">' + kjrEscape(fmt(totNet,{dp:0})) + '</span> take-home';
   if (!income.length){
     incomeEl.innerHTML = `<div class="empty"><div class="empty-icon">${_emptyIcon('cashflow')}</div><div class="empty-title">No income yet</div><div class="empty-sub">Click <b>＋ Add income</b> to log a salary, bonus, or other inflow.</div><button class="btn btn-primary" data-click="openEntity" data-a0="income" style="margin-top:14px">＋ Add income</button></div>`;
   } else {
@@ -11806,7 +12098,7 @@ function renderCashflow(){
 
   // ─── Expense table ──────────────────────────────────────────────────
   const expenseMeta = document.getElementById('cf-expense-meta');
-  if (expenseMeta) expenseMeta.textContent = expenses.length + ' txn' + (expenses.length === 1 ? '' : 's') + ' · ' + fmt(totExp);
+  if (expenseMeta) expenseMeta.innerHTML = kjrEscape(expenses.length + ' txn' + (expenses.length === 1 ? '' : 's') + ' · ') + '<span class="money-chip">' + kjrEscape(fmt(totExp)) + '</span>';
   if (!expenses.length){
     expenseEl.innerHTML = `<div class="empty"><div class="empty-icon">${_emptyIcon('cashflow')}</div><div class="empty-title">No expenses yet</div><div class="empty-sub">Click <b>＋ Add expense</b> to log a transaction.</div><button class="btn btn-primary" data-click="openEntity" data-a0="expenses" style="margin-top:14px">＋ Add expense</button></div>`;
   } else {
@@ -11989,6 +12281,9 @@ async function cleanOrphanedTrades(){
     .map(t => t.id);
   if (!orphans.length) return;
   const n = orphans.length;
+  // Step 8b: this confirm stays. Undo is not real here: a trade whose stock or cash account is gone fails the trash restore's
+  // validation (normaliseEntityRow rejects the dangling id), so only a whole-database undo could bring it back, and that is
+  // unsafe once anything else has been saved.
   if (!confirm('Move ' + n + ' orphaned trade' + (n > 1 ? 's' : '') + ' to trash? You can restore from Settings → Recently deleted.')) return;
   let saved = true;
   for (const id of orphans) saved = !!(await Promise.resolve(sendToTrash('stockTxns', id))) && saved;
@@ -12256,6 +12551,12 @@ function toggleArrange(){
    Takes HTML-safe text (fmt() output or markup a caller already built) and
    returns it untouched unless the whole value is one plain amount, so counts,
    percentages, '—' and FX-missing markup pass straight through. */
+/* Wraps every currency amount in text that is already escaped (S$1,234, -US$56.70, +S$3,200, JP¥500, CHF 40) in a .money-chip, so a sentence that carries an
+   amount, such as a reconciliation message, blurs the figure under Hide amounts and leaves the words readable (Step 8b). Plain text in, markup out. */
+function _chipAmounts(escaped){
+  return String(escaped == null ? '' : escaped).replace(/[+\-\u2212]?(?:[A-Z]{0,3}\$|[A-Z]{0,2}[€£¥]|[A-Z]{3} )\d+(?:,\d{3})*(?:\.\d+)?[kMBT]?/g, m => '<span class="money-chip">' + m + '</span>');
+}
+
 function _moneyHtml(s){
   const str = String(s);
   const m = /^([+\-−]?)([A-Z]{0,3}\$|[A-Z]{0,2}[€£¥]|[A-Z]{3} )(\d[\d,]*(?:\.\d+)?[kMBT]?)$/.exec(str);
@@ -12294,7 +12595,104 @@ function _dashStatusLine(rec){
 const HERO_RANGES = ['1M', '3M', 'YTD', '1Y', 'ALL'];
 const HERO_RANGE_LABELS = { '1M':'1M', '3M':'3M', YTD:'YTD', '1Y':'1Y', ALL:'All' };
 const _heroState = { range:null };
-let _heroView = null;   // the scrubbable chart on screen: { hero, geo, restValue, restPill, restWhen, idx }, replaced by every render
+let _heroView = null;   // the scrubbable chart on screen: { hero, geo, restValue, restPill, restWhen, restNum, restCcy, idx }, replaced by every render
+
+/* ─── Hero number roll (Step 8b) ──────────────────────────────────────────
+   When the headline figure changes between renders (the Include CPF switch, a price refresh, a live value change) the digits roll from the figure the hero
+   showed to the new one over 450ms, cubic ease-out. Every frame is the same fmt() and _moneyHtml() the final text comes from, so the currency prefix and
+   the formatting never change, and the digits are tabular, so the width holds. The figure last shown lives in _heroShown, outside the DOM a render
+   rebuilds. There is no roll on the first paint, on a scrub (the number follows the pointer directly and stays instant), across a currency switch
+   (different units), while the dashboard is not on screen, or under reduced motion. A render or a scrub cancels a running roll, except that a render to the
+   very figure the roll is heading for lets it finish in the new markup (a stock refresh, a coin refresh and the dashboard's own repaint can land within one
+   roll). A hidden tab pauses animation frames, so a timer ends every roll on the exact final figure. Screen readers get the final figure once: it sits in a
+   visually hidden span and the figure people see is aria-hidden (_heroValueHtml). */
+const HERO_ROLL_MS = 450;
+let _heroShown = null;   // { value, ccy }: the figure the hero is showing right now (mid-roll, the in-between figure)
+let _heroRoll = null;    // the roll running now: { to, ccy, raf, timer }
+
+/* Pure. Ease-out cubic, 1 - (1 - t)^3: 0 at t <= 0, 1 at t >= 1, rising monotonically and fastest at the start. Anything that is not a number is 0 (infinity is 1). */
+function _easeOutCubic(t){
+  let k = Number(t);
+  if (!isFinite(k)) return k === Infinity ? 1 : 0;
+  k = Math.max(0, Math.min(1, k));
+  return 1 - Math.pow(1 - k, 3);
+}
+
+/* Pure. The figure a roll shows elapsed ms after it started. Exactly from at the start, exactly to once the duration has passed, and exactly to whenever an
+   input is not a number, so a roll can only ever end on the real figure. */
+function _rollValue(from, to, elapsed, duration){
+  if (!_finiteNum(from) || !_finiteNum(to)) return to;
+  if (!(duration > 0) || !(elapsed < duration)) return to;
+  if (!(elapsed > 0)) return from;
+  return from + (to - from) * _easeOutCubic(elapsed / duration);
+}
+
+/* Pure. What a render does with the hero figure next = { value, ccy }, given prev (the figure shown until now) and o:
+     reduced    the person asked for less motion
+     scrubbing  the chart is being scrubbed, the number is the pointer's
+     visible    the dashboard is the page on screen
+     running    { value, ccy } a roll is heading to now, or null
+   Returns { action:'roll', from } to roll from prev.value, { action:'keep' } to let the running roll finish in the new markup, or { action:'jump' } to show the
+   figure at once (the first paint, a currency switch, an unchanged figure and every case above). */
+function _heroRollPlan(prev, next, o){
+  const opt = o || {};
+  if (opt.reduced || opt.scrubbing || !opt.visible) return { action:'jump' };
+  if (!next || !_finiteNum(next.value)) return { action:'jump' };
+  const run = opt.running;
+  if (run && run.ccy === next.ccy && run.value === next.value) return { action:'keep' };
+  if (!prev || !_finiteNum(prev.value) || prev.ccy !== next.ccy) return { action:'jump' };
+  return Math.round(prev.value) !== Math.round(next.value) ? { action:'roll', from:prev.value } : { action:'jump' };
+}
+
+/* The headline's markup: a visually hidden copy of the final text for screen readers, then the figure people see, aria-hidden so the digits in motion are
+   never read out. finalText is plain fmt() output (escaped here), shownHtml is already _moneyHtml(...) of what to show now. */
+function _heroValueHtml(finalText, shownHtml){
+  return '<span class="sr-only">' + kjrEscape(finalText) + '</span><span class="hero-num" aria-hidden="true">' + shownHtml + '</span>';
+}
+
+function _heroRollCancel(){
+  const run = _heroRoll;
+  if (!run) return;
+  _heroRoll = null;
+  if (run.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(run.raf);
+  clearTimeout(run.timer);
+}
+
+/* Rolls the visible figure from one number to another over HERO_ROLL_MS. The frames write into the figure's span by lookup on every frame, so a render that
+   rebuilt the markup mid-roll is simply painted into, and the span going away ends the roll. */
+function _heroRollStart(from, to, ccy){
+  _heroRollCancel();
+  const run = { to, ccy, raf:0, timer:0 };
+  _heroRoll = run;
+  const t0 = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
+  const paint = v => {
+    const el = document.querySelector('#hero-value .hero-num');
+    if (!el) return false;
+    const keep = _renderCcy;   // fmt reads the render currency, so set the dashboard's for the frame and hand it back
+    setRenderCcy('dashboard');
+    try { el.innerHTML = _moneyHtml(fmt(v, { dp:0 })); }
+    finally { _renderCcy = keep; }
+    return true;
+  };
+  const finish = () => {
+    if (_heroRoll !== run) return;
+    _heroRollCancel();
+    _heroShown = { value:to, ccy };
+    paint(to);
+  };
+  const step = now => {
+    if (_heroRoll !== run) return;
+    if (_reducedMotion()){ finish(); return; }
+    const elapsed = now - t0;
+    if (!(elapsed < HERO_ROLL_MS)){ finish(); return; }
+    const v = _rollValue(from, to, elapsed, HERO_ROLL_MS);
+    _heroShown = { value:v, ccy };
+    if (!paint(v)){ _heroRollCancel(); _heroShown = { value:to, ccy }; return; }
+    run.raf = requestAnimationFrame(step);
+  };
+  run.raf = requestAnimationFrame(step);
+  run.timer = setTimeout(finish, HERO_ROLL_MS + 120);
+}
 
 /* The remembered range, read once. A per-device view preference only, so a blocked
    or full store (private mode, quota) falls back to 1M and never throws. */
@@ -12561,10 +12959,14 @@ function _heroSetScrub(i){
   const v = _heroView;
   if (!v || !(i >= 0 && i < v.hero.points.length) || v.idx === i) return;
   v.idx = i;
+  _heroRollCancel();   // the number follows the pointer directly, a roll must never fight it
   setRenderCcy('dashboard');
   const pt = v.hero.points[i], base = v.hero.first.value, diff = pt.value - base;
   const valueEl = document.getElementById('hero-value');
-  if (valueEl) valueEl.innerHTML = _moneyHtml(fmt(pt.value, { dp:0 }));
+  if (valueEl){
+    const text = fmt(pt.value, { dp:0 });
+    valueEl.innerHTML = _heroValueHtml(text, _moneyHtml(text));
+  }
   const pillEl = document.getElementById('hero-pill');
   if (pillEl) pillEl.innerHTML = base !== 0 ? _gainPill(diff, diff / Math.abs(base) * 100) : '';
   const whenEl = document.getElementById('hero-when');
@@ -12581,6 +12983,7 @@ function _heroEndScrub(){
   const last = v.hero.points.length - 1;
   const valueEl = document.getElementById('hero-value');
   if (valueEl) valueEl.innerHTML = v.restValue;
+  _heroShown = { value:v.restNum, ccy:v.restCcy };   // the figure on screen is the live one again, instantly
   const pillEl = document.getElementById('hero-pill');
   if (pillEl) pillEl.innerHTML = v.restPill;
   const whenEl = document.getElementById('hero-when');
@@ -12972,7 +13375,7 @@ function _dashWhereItSits(valuation){
   const hint = '<span class="hint">' + (m.hasTargets
     ? '<span class="dash-hint-long">Share incl. CPF · marker shows your target</span><span class="dash-hint-short">Share incl. CPF</span>'
     : 'Share incl. CPF') + '</span>';
-  const bar = m.rows.filter(r => r.val > 0).map(r => '<div class="dash-split-seg" style="flex:' + r.val + ';background:var(' + r.color + ')" title="' + kjrEscape(r.key) + ' · ' + kjrEscape(fmt(r.val, {dp:0})) + ' (' + r.share.toFixed(0) + '%)"></div>').join('');
+  const bar = m.rows.filter(r => r.val > 0).map(r => '<div class="dash-split-seg" style="flex:' + r.val + ';background:var(' + r.color + ')" title="' + kjrEscape(r.key) + ' · ' + r.share.toFixed(0) + '%"></div>').join('');
   const insightHtml = m.insight
     ? '<div class="dash-insight"><span class="dash-insight-icon">' + ALERT_ICON + '</span><div><p>' + kjrEscape(m.insight) + '</p><button type="button" class="dash-insight-link" data-click="reviewTargets">Review targets</button></div></div>'
     : '';
@@ -12994,7 +13397,7 @@ function _dashHoldingRows(stockRows){
     const move = _stockDayMove(r);
     rows.push({ nav:'stocks', table:'stocks', id:r.s.id, cls:'stocks', sym:String(r.s.symbol || '?'), sub:[r.s.market, r.s.sector].filter(Boolean).join(' · '),
       name:(r.px && r.px.shortName) ? String(r.px.shortName) : String(r.s.market || ''),
-      mv:r.mv, pl:r.pl, plPct:r.plPct, dayPct:move.pct, daySgd:move.sgd });
+      mv:r.mv, pl:r.pl, plPct:r.plPct, dayPct:move.pct, daySgd:move.sgd, px:r.ysym });
   });
   (DB.crypto || []).forEach(c => {
     const r = _cryptoRow(c);
@@ -13002,7 +13405,7 @@ function _dashHoldingRows(stockRows){
     const id = String(c.coingeckoId || '').replace(/-/g, ' ').trim();
     rows.push({ nav:'crypto', table:'crypto', id:c.id, cls:'crypto', sym:String(c.symbol || '?'), sub:'Crypto',
       name: id ? id.charAt(0).toUpperCase() + id.slice(1) : 'Crypto',
-      mv:r.mv, pl:r.pl, plPct:r.plPct, dayPct:pct, daySgd:(r.mv != null && pct != null) ? _dayMoveSgd(r.mv, pct) : null });
+      mv:r.mv, pl:r.pl, plPct:r.plPct, dayPct:pct, daySgd:(r.mv != null && pct != null) ? _dayMoveSgd(r.mv, pct) : null, px:r.cid });
   });
   return rows;
 }
@@ -13010,7 +13413,7 @@ function _dashHoldingRows(stockRows){
 /* Holdings: the eight largest positions by S$ value. Each row is one button
    that opens the holding's side panel (a row with no safe id falls back to
    opening its tab). A missing price shows a dash, never NaN. */
-function _dashHoldings(rows, displayNet){
+function _dashHoldings(rows, displayNet, loading){
   const dash = '–';
   const head = withLink => '<div class="card-head"><h3>Holdings</h3>' + (withLink ? '<button type="button" class="dash-link" data-click="refreshDashPrices">Refresh prices</button>' : '') + '</div>';
   if (!rows.length){
@@ -13022,18 +13425,20 @@ function _dashHoldings(rows, displayNet){
   }).slice(0, 8);
   const list = top.map(r => {
     const share = (r.mv != null && displayNet > 0) ? (r.mv / displayNet * 100).toFixed(1) + '% of total' : dash;
-    const day = r.dayPct != null ? '<span class="dash-chg ' + (r.dayPct >= 0 ? 'up' : 'down') + '">' + fmtPct(r.dayPct) + '</span><span class="dash-sub">today</span>' : '<span class="dash-chg">' + dash + '</span><span class="dash-sub">today</span>';
-    const ret = r.plPct != null ? '<span class="dash-chg ' + (r.pl >= 0 ? 'up' : 'down') + '">' + fmtPct(r.plPct) + '</span><span class="dash-sub money-chip">' + fmt(r.pl, {dp:0, signed:true}) + '</span>' : '<span class="dash-chg">' + dash + '</span><span class="dash-sub">&nbsp;</span>';
+    // loading (Step 8b, a first load with a price fetch in flight): a figure that is only a dash for now is a shimmering bar instead
+    const day = r.dayPct != null ? '<span class="dash-chg ' + (r.dayPct >= 0 ? 'up' : 'down') + '">' + fmtPct(r.dayPct) + '</span><span class="dash-sub">today</span>' : '<span class="dash-chg">' + _skelIf(loading, dash) + '</span><span class="dash-sub">today</span>';
+    const ret = r.plPct != null ? '<span class="dash-chg ' + (r.pl >= 0 ? 'up' : 'down') + '">' + fmtPct(r.plPct) + '</span><span class="dash-sub money-chip">' + fmt(r.pl, {dp:0, signed:true}) + '</span>' : '<span class="dash-chg">' + _skelIf(loading, dash) + '</span><span class="dash-sub">&nbsp;</span>';
     const opens = ((r.table === 'stocks' || r.table === 'crypto') && kjrSafeId(r.id))
       ? 'data-click="openHolding" data-a0="' + r.table + '" data-a1="' + kjrEscape(r.id) + '" aria-haspopup="dialog"'
       : 'data-click="navigate" data-a0="' + r.nav + '"';
-    return '<button type="button" class="dash-hrow" ' + opens + '>'
+    return '<button type="button" class="dash-hrow" ' + opens + _pxAttr(r.px) + '>'
       + '<span class="dash-who">' + _monogram(r.sym, r.cls) + '<span class="dash-who-t"><b>' + kjrEscape(r.sym) + '</b><span>' + kjrEscape(r.sub) + '</span></span></span>'
-      + '<span class="dash-hcell"><span class="dash-hval money-chip">' + (r.mv != null ? _moneyHtml(fmt(r.mv, {dp:0})) : dash) + '</span><span class="dash-sub">' + share + '</span></span>'
+      + '<span class="dash-hcell"><span class="dash-hval money-chip">' + (r.mv != null ? _moneyHtml(fmt(r.mv, {dp:0})) : _skelIf(loading, dash)) + '</span><span class="dash-sub">' + _skelIf(loading, share) + '</span></span>'
       + '<span class="dash-hcell dash-col-day">' + day + '</span>'
       + '<span class="dash-hcell">' + ret + '</span></button>';
   }).join('');
-  return '<section class="card" aria-label="Holdings">' + head(true) + '<div class="dash-hold"><div class="dash-hrow dash-hhead"><span>Asset</span><span>Value</span><span class="dash-col-day">Day</span><span>Return</span></div>' + list + '</div></section>';
+  return '<section class="card" aria-label="Holdings">' + head(true) + '<div class="dash-hold"' + (loading ? ' aria-busy="true"' : '') + '>' + (loading ? SKEL_STATUS : '')
+    + '<div class="dash-hrow dash-hhead"><span>Asset</span><span>Value</span><span class="dash-col-day">Day</span><span>Return</span></div>' + list + '</div></section>';
 }
 
 /* Today: the four biggest day moves in S$, then Coming up. */
@@ -13044,7 +13449,7 @@ function _dashToday(rows, stockRows){
     ? movers.map(r => {
         const up = r.daySgd > 0;
         const amount = _plArrow(r.daySgd) + fmt(r.daySgd, {dp: Math.abs(r.daySgd) >= 1 ? 0 : 2, signed:true});
-        return '<div class="dash-li">' + _monogram(r.sym, r.cls) + '<div class="dash-li-main"><div class="dash-li-t">' + kjrEscape(r.sym) + '</div><div class="dash-li-s">' + kjrEscape(r.name) + '</div></div>'
+        return '<div class="dash-li"' + _pxAttr(r.px) + '>' + _monogram(r.sym, r.cls) + '<div class="dash-li-main"><div class="dash-li-t">' + kjrEscape(r.sym) + '</div><div class="dash-li-s">' + kjrEscape(r.name) + '</div></div>'
           + '<div class="dash-li-end"><div class="dash-chg ' + (up ? 'up' : 'down') + ' money-chip">' + amount + '</div><div class="dash-li-s">' + (r.dayPct != null ? (r.dayPct >= 0 ? '+' : '') + r.dayPct.toFixed(2) + '%' : '') + '</div></div></div>';
       }).join('')
     : '<p class="dash-empty-line">' + (rows.length ? 'Refresh prices for today\'s moves' : 'No holdings yet') + '</p>';
@@ -13059,7 +13464,8 @@ function _dashToday(rows, stockRows){
         const d = _parseDateOnlyLocal(it.date);
         const amount = it.amount == null ? '' : '<div class="dash-li-amt money-chip' + (it.kind === 'insurance' ? '' : ' pos') + '">' + (it.kind === 'insurance' ? '' : '+') + fmt(it.amount, {dp:0}) + '</div>';
         return '<div class="dash-li"><div class="dash-date"><b>' + d.getDate() + '</b><span>' + PB_MONTHS[d.getMonth()].toUpperCase() + '</span></div>'
-          + '<div class="dash-li-main"><div class="dash-li-t">' + kjrEscape(it.title) + '</div><div class="dash-li-s">' + kjrEscape(it.line) + '</div></div>' + amount + '</div>';
+          // a dividend line carries the share count and the per-share amount, so it blurs (the title above it stays readable)
+          + '<div class="dash-li-main"><div class="dash-li-t">' + kjrEscape(it.title) + '</div><div class="dash-li-s' + (it.kind === 'dividend' ? ' money-chip' : '') + '">' + kjrEscape(it.line) + '</div></div>' + amount + '</div>';
       }).join('')
     : '<p class="dash-empty-line">Nothing due in the next 90 days</p>';
   return '<section class="card" aria-label="Today and upcoming"><div class="card-head"><h3>Today</h3><span class="hint">Biggest moves in S$</span></div>'
@@ -13128,7 +13534,7 @@ function renderDashboard(opts){
   const estimateCount = stockInfo.estimatedCount + cryptoInfo.estimatedCount;
   const estimateAmount = stockInfo.estimatedAmount + cryptoInfo.estimatedAmount;
   const marketEstimateNote = estimateCount
-    ? `<div class="dash-hero-label" style="margin-top:4px">Includes cost-basis estimate for ${estimateCount} stock/crypto position${estimateCount>1?'s':''} without a live price (${fmt(estimateAmount,{dp:0})})</div>`
+    ? `<div class="dash-hero-label" style="margin-top:4px">Includes cost-basis estimate for ${estimateCount} stock/crypto position${estimateCount>1?'s':''} without a live price (<span class="money-chip">${fmt(estimateAmount,{dp:0})}</span>)</div>`
     : '';
 
   // Change under the number, the range tabs and the chart all read one series
@@ -13146,7 +13552,18 @@ function renderDashboard(opts){
   const heroOk = !!hero && hero.state === 'ok';
   const geo = heroOk ? _heroGeometry(hero.points) : null;
   const change = heroOk && hero.changePct != null ? { diff:hero.change, pct:hero.changePct } : null;
-  const valueHtml = _moneyHtml(fmt(displayNet, {dp:0}));
+  // The headline's roll (Step 8b): from the figure the hero showed until now (_heroShown, kept outside the markup replaced below) to this one. A running roll
+  // heading for this very figure goes on in the new markup, anything else cancels it.
+  const heroNow = { value:displayNet, ccy:displayCcy() };
+  const roll = _heroRollPlan(_heroShown, heroNow, {
+    reduced:_reducedMotion(), scrubbing:!!(_heroView && _heroView.idx !== null), visible:_isPageActive('dashboard'),
+    running:_heroRoll ? { value:_heroRoll.to, ccy:_heroRoll.ccy } : null
+  });
+  if (roll.action !== 'keep') _heroRollCancel();
+  const valueText = fmt(displayNet, {dp:0});
+  const valueHtml = _heroValueHtml(valueText, _moneyHtml(valueText));   // at rest, and what the end of a scrub restores
+  const shownFrom = roll.action === 'roll' ? roll.from : (roll.action === 'keep' ? _heroShown.value : null);
+  const valueShownHtml = shownFrom === null ? valueHtml : _heroValueHtml(valueText, _moneyHtml(fmt(shownFrom, {dp:0})));
   const pillHtml = change ? _gainPill(change.diff, change.pct) : '';
   const whenText = change ? whenLabels[heroRange] : '';
   // A range short of history keeps an empty row, so the chart does not jump as the tabs change.
@@ -13160,14 +13577,16 @@ function renderDashboard(opts){
   const keepFocus = nwEl.contains(document.activeElement) ? document.activeElement.id : '';
   nwEl.innerHTML = `<div class="dash-hero" id="dash-hero">
     <div class="dash-hero-head">
-      <div><div class="dash-hero-label">${headline}${cpfSwitch}</div><div class="dash-hero-value" id="hero-value">${valueHtml}</div>${deltaRow}${marketEstimateNote}${fxExclusionNote}</div>
+      <div><div class="dash-hero-label">${headline}${cpfSwitch}</div><div class="dash-hero-value" id="hero-value">${valueShownHtml}</div>${deltaRow}${marketEstimateNote}${fxExclusionNote}</div>
       ${heroSecondary}
     </div>
     ${heroRanges}
     ${heroChart}
   </div>`;
   // Scrub state sits outside the DOM just rebuilt, at rest after every render.
-  _heroView = heroOk ? { hero, geo, restValue:valueHtml, restPill:pillHtml, restWhen:whenText, idx:null } : null;
+  _heroView = heroOk ? { hero, geo, restValue:valueHtml, restPill:pillHtml, restWhen:whenText, restNum:displayNet, restCcy:heroNow.ccy, idx:null } : null;
+  if (roll.action === 'roll') _heroRollStart(roll.from, displayNet, heroNow.ccy);
+  else if (roll.action === 'jump') _heroShown = heroNow;
   if (keepFocus){
     const back = document.getElementById(keepFocus);
     if (back) back.focus({ preventScroll:true });
@@ -13193,7 +13612,7 @@ function renderDashboard(opts){
     if (intEl) intEl.innerHTML = `<div class="integrity-bar bad">
       <div class="integrity-title">⚠ ${rec.issues.length} thing${rec.issues.length > 1 ? 's' : ''} to check</div>
       <ul class="integrity-list">${rec.issues.map(i =>
-        `<li class="${i.level}">${kjrEscape(i.msg)}${i.fixFn
+        `<li class="${i.level}">${_chipAmounts(kjrEscape(i.msg))}${i.fixFn
           ? ` <button class="btn btn-sm btn-danger" style="margin-left:8px;padding:1px 8px;font-size:12px" data-click="callFixFn" data-a0="${kjrEscape(i.fixFn)}">Remove orphaned</button>`
           : ''}</li>`
       ).join('')}</ul>
@@ -13230,7 +13649,16 @@ function renderDashboard(opts){
   if (activityEl){
     const stockRows = buildStockChartRows();
     const holdingRows = _dashHoldingRows(stockRows);
-    activityEl.innerHTML = '<div class="dash-row">' + _dashHoldings(holdingRows, displayNet) + _dashToday(holdingRows, stockRows) + '</div>';
+    // First load (a price fetch in flight, no holding priced yet): the Holdings card draws skeleton placeholders until the quotes or an error arrive.
+    const holdingsLoading = _pricesLoading(holdingRows.map(r => r.px), true, true);
+    activityEl.innerHTML = '<div class="dash-row">' + _dashHoldings(holdingRows, displayNet, holdingsLoading) + _dashToday(holdingRows, stockRows) + '</div>';
+  }
+
+  // A price refresh repaints the rows but not the saved charts (they would rebuild and re-animate every minute), then flashes the rows whose price moved.
+  if (opts && opts.keepCharts){
+    if (_dashArrange) _dashDecorate();   // the rebuild removed the Arrange controls
+    _pxFlashPaint();
+    return;
   }
 
   // Saved charts only when the tab is visible (Chart.js needs a sized canvas).
@@ -13246,6 +13674,7 @@ function renderDashboard(opts){
   // Show Arrange button once content is present.
   const arrangeBtn = document.getElementById('dash-arrange-btn');
   if (arrangeBtn) arrangeBtn.style.display = '';
+  _pxFlashPaint();   // Step 8b: a refresh that moved prices flashes the Holdings and Today rows it just rebuilt
 }
 
 const INFO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>';
@@ -13262,7 +13691,7 @@ function renderSummary(items){
     items.map(it => `
       <div class="h-summary-item ${it.accent || ''}">
         <div class="h-summary-label">${kjrEscape(it.label)}</div>
-        ${it.value ? `<div class="h-summary-value">${_moneyHtml(it.value)}</div>` : ''}
+        ${it.value ? `<div class="h-summary-value${it.pct ? ' pct' : ''}">${_moneyHtml(it.value)}</div>` : ''}
         ${it.sub ? `<div class="h-summary-sub">${it.sub}</div>` : ''}
       </div>`).join('')
   }</div>`;
@@ -13383,7 +13812,7 @@ function _hpStockModel(id, ctx){
   }
   const share = _hpShare(r.mv, ctx && ctx.displayNet);
   stats.push({ key:'share', label:'Share of net worth', text:_hpShareText(share), note: (share != null && ctx && ctx.incomplete) ? 'of the known total' : '' });
-  return { table:'stocks', id:s.id, cls:'stocks', sym, sub, ysym:r.ysym, ccy:nativeCcy, price, day:_hpDay(move.pct, move.sgd, 'today'),
+  return { table:'stocks', id:s.id, cls:'stocks', sym, sub, ysym:r.ysym, px:r.ysym, ccy:nativeCcy, price, day:_hpDay(move.pct, move.sgd, 'today'),
     stats, trades:_hpTrades(s.id, r.ccy), canTrade:true };
 }
 
@@ -13416,7 +13845,7 @@ function _hpCryptoModel(id, ctx){
   ];
   const share = _hpShare(r.mv, ctx && ctx.displayNet);
   stats.push({ key:'share', label:'Share of net worth', text:_hpShareText(share), note: (share != null && ctx && ctx.incomplete) ? 'of the known total' : '' });
-  return { table:'crypto', id:c.id, cls:'crypto', sym, sub:'Crypto', ysym:'', ccy, price, day:_hpDay(pct, (mvKnown && pct != null) ? _dayMoveSgd(r.mv, pct) : null, 'past 24 hours'),
+  return { table:'crypto', id:c.id, cls:'crypto', sym, sub:'Crypto', ysym:'', px:r.cid, ccy, price, day:_hpDay(pct, (mvKnown && pct != null) ? _dayMoveSgd(r.mv, pct) : null, 'past 24 hours'),
     stats, trades:{ total:0, rows:[] }, canTrade:false };
 }
 
@@ -13498,7 +13927,7 @@ function _hpPriceHtml(m){
     day = '<span class="hp-when">No day change yet</span>';
   }
   if (p.staleText) day += '<span class="hp-when">' + kjrEscape(p.staleText) + '</span>';
-  return '<section class="hp-price" aria-label="Price"><div class="hp-px">' + top + '</div>' + (day ? '<div class="hp-day">' + day + '</div>' : '') + '</section>';
+  return '<section class="hp-price" aria-label="Price"' + _pxAttr(m.px) + '><div class="hp-px">' + top + '</div>' + (day ? '<div class="hp-day">' + day + '</div>' : '') + '</section>';
 }
 
 /* The 3 month chart, built on the hero chart's geometry and CSS so the two charts look the same. The line takes the gain or loss colour from the period's result. */
@@ -13554,9 +13983,10 @@ function _hpStatHtml(st){
 }
 
 function _hpTradeHtml(t){
-  const sub = [t.dateText, t.feesText ? 'fees ' + t.feesText : ''].filter(Boolean).join(' · ');
+  // The fee is an amount, so it sits in a .money-chip (Hide amounts blurs it), the date and the words stay readable.
+  const sub = kjrEscape(t.dateText) + (t.feesText ? (t.dateText ? ' · ' : '') + 'fees <span class="money-chip">' + kjrEscape(t.feesText) + '</span>' : '');
   return '<li class="hp-trade"><div class="hp-trade-t"><span class="hp-side">' + kjrEscape(t.sideText) + '</span> <span class="money-chip">' + kjrEscape(t.qtyText + ' @ ' + t.priceText) + '</span></div>'
-    + '<div class="hp-trade-s">' + kjrEscape(sub) + '</div>'
+    + '<div class="hp-trade-s">' + sub + '</div>'
     + '<div class="hp-trade-v money-chip">' + _hpAmountHtml(t.valueText) + '</div></li>';
 }
 
@@ -13607,6 +14037,7 @@ function _hpRender(m){
     const back = document.getElementById(focusId);
     _modalFocusElement(back && host.contains(back) ? back : document.getElementById('holding-panel'));
   }
+  _pxFlashPaint(host);   // Step 8b: a refresh that moved this holding's price flashes the price block
   return true;
 }
 

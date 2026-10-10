@@ -40,6 +40,8 @@ Chart.js 4.4.1 (CDN, SRI-pinned). Backend is Google Apps Script + Google Sheets 
 
 **Holding panel and palette (v2.74):** `openHoldingDetail(table, id)` opens the holding side panel (`#holding-panel`, built by `_holdingPanelModel`, with a 3-month chart from `fetchStockHistory` using the key `THREE_MONTHS`, never the bare string `3mo`). ⌘K or Ctrl+K opens the command palette (`_paletteResults` is pure), and the shortcut stays blocked while the vault or NAS gate, any open overlay or the panel is up.
 
+**Motion, privacy and Undo (v2.75):** `_reducedMotion()` gates every JS animation, and every CSS keyframe has a `prefers-reduced-motion` override. Hide amounts blurs amounts at 7 px. Percentage cells carry `.pct` and stay readable, so tag any new percentage cell the same way. The hero headline rolls between renders (`_heroShown`, `_heroRollPlan`), never on scrub. Refreshes snapshot `_priceCache` (`_priceSnapshot`, `_priceDiff`) and flash changed rows that carry `data-px`. Skeletons show only while a fetch is in flight and no visible holding has a price. Deleting a record that nothing references shows an Undo toast instead of a confirm. Cascading deletes, `cleanOrphanedTrades` and every irreversible or bulk action still confirm.
+
 ## Data layer
 
 `freshDB()` returns the canonical empty DB shape. `ENTITY_SCHEMAS` defines per-table field types and validation. Conflict modal fires when a cloud write is attempted over a newer remote version. `kjr-core.js:looksPopulated()` guards against seeding a non-empty cloud sheet.

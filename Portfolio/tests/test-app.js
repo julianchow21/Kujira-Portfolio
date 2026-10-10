@@ -175,10 +175,15 @@ const FUNCTION_TARGETS = [
   '_isApplePlatform', '_paletteHint', '_syncPaletteHint', '_paletteModel', '_paletteRank', '_paletteResults', '_paletteMark', '_paletteActionIcon',
   '_paletteOptHtml', '_paletteHtml', '_paletteSyncActive', '_paletteRender', '_commandPaletteBlocked', 'openCommandPalette', 'closeCommandPalette',
   'paletteQuery', '_paletteMove', '_paletteIndex', 'paletteHover', '_paletteRunAction', 'runPaletteItem', 'paletteKeydown', '_isPaletteShortcut', 'paletteShortcut',
-  '_dashHoldingRows', '_dashHoldings'
+  '_dashHoldingRows', '_dashHoldings',
+  // Motion and feedback (Step 8b): the reduced-motion check, the hero roll maths and runner, the price diff and flash, the loading skeletons, and Undo on a delete toast
+  '_reducedMotion', '_easeOutCubic', '_rollValue', '_heroRollPlan', '_heroValueHtml', '_heroRollCancel', '_heroRollStart',
+  '_quotePrice', '_priceSnapshot', '_priceDiff', '_pxFlashNote', '_pxFlashPaint', '_pxAttr', '_skeletonOn', '_skelIf', '_pricesLoading',
+  '_deletedText', 'undoDeleteToast', 'sendToTrash', 'cleanOrphanedTrades', '_chipAmounts', 'trashLabel'
 ];
 const CONST_TARGETS = ['APP_VERSION', 'APP_DISPLAY_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'LIST_DASH', 'CPF_TYPE_LABEL', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState',
-  'HP_HISTORY_RANGE', 'HP_TRADES_SHOWN', 'HP_ACTIONS', 'PALETTE_CAP', 'PALETTE_GROUPS', 'CP_PLUS_ICON', 'CP_REFRESH_ICON', 'EYE_SVG', 'EYE_OFF_SVG'];
+  'HP_HISTORY_RANGE', 'HP_TRADES_SHOWN', 'HP_ACTIONS', 'PALETTE_CAP', 'PALETTE_GROUPS', 'CP_PLUS_ICON', 'CP_REFRESH_ICON', 'EYE_SVG', 'EYE_OFF_SVG',
+  'HERO_ROLL_MS', 'PX_FLASH_MS', 'SKEL_BAR', 'SKEL_STATUS', 'DELETED_NOUNS', 'TRASH_MAX', 'TRASH_AMOUNT_TABLES', 'TRASH_TABLE_NAMES'];
 
 const extractedFns = {};
 const missingFns = [];
@@ -286,6 +291,12 @@ function freshSandbox(dbOverrides){
     _modalState: null,
     _fxInFlight: null,
     _autoTickInFlight: false,
+    _stockRefreshInFlight: false,
+    _cryptoRefreshInFlight: false,
+    _pxFlashes: new Map(),
+    _heroShown: null,
+    _heroRoll: null,
+    _renderCcy: 'SGD',
     _ibkrImportInFlight: false,
     _pbSaveInFlight: false,
     _pbUndoChart: null,
@@ -2124,7 +2135,7 @@ async function runTests(){
     const dashboardSrc = extractFunction('renderDashboard');
     assert.ok(dashboardSrc.includes('_dashWhereItSits(valuation)') && !dashboardSrc.includes('displayClasses'));
     // the hero and the Holdings shares keep following the switch
-    assert.ok(dashboardSrc.includes('_allocationData(valuation.classes, _dashShowCpf)') && dashboardSrc.includes('_dashHoldings(holdingRows, displayNet)'));
+    assert.ok(dashboardSrc.includes('_allocationData(valuation.classes, _dashShowCpf)') && dashboardSrc.includes('_dashHoldings(holdingRows, displayNet, '));
     // with no target in use the hint drops the marker clause and the target column goes
     const bare = whereSandbox({ stocks:0, cash:0, cpf:0, realestate:0, crypto:0 })._dashWhereItSits(v);
     assert.ok(bare.includes('Share incl. CPF') && !bare.includes('marker shows') && bare.includes('no-target'));
@@ -6189,8 +6200,9 @@ async function runTests(){
     const html = sb._dashHoldings(rows, 16550);
     const buttons = Array.from(html.matchAll(/<button type="button" class="dash-hrow"[^>]*>/g)).map(m => m[0]);
     assert.strictEqual(buttons.length, 5);
-    assert.ok(buttons.includes('<button type="button" class="dash-hrow" data-click="openHolding" data-a0="stocks" data-a1="s_aapl" aria-haspopup="dialog">'));
-    assert.ok(buttons.includes('<button type="button" class="dash-hrow" data-click="openHolding" data-a0="crypto" data-a1="c_btc" aria-haspopup="dialog">'));
+    // Step 8b: each row also carries data-px, the price-cache key of its holding, which the price flash finds the row by
+    assert.ok(buttons.includes('<button type="button" class="dash-hrow" data-click="openHolding" data-a0="stocks" data-a1="s_aapl" aria-haspopup="dialog" data-px="AAPL">'));
+    assert.ok(buttons.includes('<button type="button" class="dash-hrow" data-click="openHolding" data-a0="crypto" data-a1="c_btc" aria-haspopup="dialog" data-px="bitcoin">'));
     assert.strictEqual(html.includes('data-click="navigate"'), false);   // a row no longer only opens its tab
     assert.strictEqual(/\son[a-z]+="/i.test(html), false);
     assert.ok(html.includes('class="dash-hval money-chip"') && html.includes('<b>AAPL</b>'));
@@ -6350,6 +6362,777 @@ async function runTests(){
     // the dim text rules say what they mean: the active result's sub text and the trigger use the stronger tokens
     assert.ok(indexSrc.includes('.cp-opt[aria-selected="true"] .cp-s{color:var(--text2)}'));
     assert.ok(/\.tb-search\{[^}]*color:var\(--text2\)/.test(indexSrc));
+  });
+
+  /* ═══ Step 8b: motion and feedback. Hide amounts, the hero number roll, the price flash, loading skeletons, Undo on delete toasts, reduced motion ═══ */
+
+  test('_reducedMotion - asks prefers-reduced-motion afresh on every call, and falls back to animating when matchMedia is missing, throws or answers nothing', () => {
+    const sb = freshSandbox();
+    assert.strictEqual(sb._reducedMotion(), false);                           // the sandbox window has no matchMedia at all
+    const asked = [];
+    sb.window.matchMedia = q => { asked.push(q); return { matches:true }; };
+    assert.strictEqual(sb._reducedMotion(), true);
+    sb.window.matchMedia = q => { asked.push(q); return { matches:false }; };
+    assert.strictEqual(sb._reducedMotion(), false);
+    assert.deepStrictEqual(asked, ['(prefers-reduced-motion: reduce)', '(prefers-reduced-motion: reduce)']);   // not cached, a changed setting needs no reload
+    sb.window.matchMedia = () => { throw new Error('blocked'); };
+    assert.doesNotThrow(() => assert.strictEqual(sb._reducedMotion(), false));
+    sb.window.matchMedia = () => null;
+    assert.strictEqual(sb._reducedMotion(), false);
+    sb.window.matchMedia = 'not a function';
+    assert.strictEqual(sb._reducedMotion(), false);
+    sb.window = undefined;                                                    // no window at all (a non-browser host)
+    assert.strictEqual(sb._reducedMotion(), false);
+  });
+
+  test('hero roll maths - ease-out cubic is 0 at the start and 1 at the end, monotonic and fastest first, and a rolled figure starts at from, ends exactly on to and never overshoots', () => {
+    const sb = freshSandbox();
+    const ease = sb._easeOutCubic;
+    assert.strictEqual(ease(0), 0); assert.strictEqual(ease(1), 1);
+    let last = -1;
+    for (let i = 0; i <= 100; i++){ const v = ease(i / 100); assert.ok(v >= last && v >= 0 && v <= 1, 'monotonic at ' + i); last = v; }
+    assert.ok(ease(0.25) > 0.25 && ease(0.5) > 0.5);                          // ahead of linear
+    assert.ok(ease(0.1) - ease(0) > ease(1) - ease(0.9));                     // fastest at the start, slowest at the end
+    assert.deepStrictEqual([-5, 9, NaN, Infinity, -Infinity, 'x', null, undefined].map(ease), [0, 1, 0, 1, 0, 0, 0, 0]);
+    assert.strictEqual(vm.runInContext('HERO_ROLL_MS', sb), 450);
+    const D = 450;
+    assert.strictEqual(sb._rollValue(100, 200, 0, D), 100);
+    assert.strictEqual(sb._rollValue(100, 200, D, D), 200);
+    assert.strictEqual(sb._rollValue(100, 200, D + 999, D), 200);
+    assert.strictEqual(sb._rollValue(100, 200, -20, D), 100);                 // a first frame stamped just before the start
+    [[100, 200], [200, 100], [-50, 50], [0, 1e6], [621435, 723075]].forEach(([from, to]) => {
+      let prev = from;
+      for (let t = 0; t <= D; t += 15){
+        const v = sb._rollValue(from, to, t, D);
+        assert.ok(to >= from ? (v >= prev && v <= to) : (v <= prev && v >= to), from + ' to ' + to + ' at ' + t);
+        prev = v;
+      }
+      assert.strictEqual(sb._rollValue(from, to, D, D), to);
+    });
+    // anything that is not a number ends on the real figure, never on NaN
+    assert.strictEqual(sb._rollValue(NaN, 200, 100, D), 200);
+    assert.strictEqual(sb._rollValue(100, 200, NaN, D), 200);
+    assert.strictEqual(sb._rollValue(100, 200, 100, 0), 200);
+  });
+
+  test('_heroRollPlan - rolls only a real change on a visible dashboard, never on the first paint, a scrub, a currency switch or under reduced motion, and lets a running roll to the same figure finish', () => {
+    const sb = freshSandbox();
+    const ok = { reduced:false, scrubbing:false, visible:true, running:null };
+    const plan = (prev, next, o) => navPlain(sb._heroRollPlan(prev, next, Object.assign({}, ok, o)));
+    const sgd = value => ({ value, ccy:'SGD' });
+    assert.deepStrictEqual(plan(sgd(621435), sgd(723075)), { action:'roll', from:621435 });
+    assert.deepStrictEqual(plan(sgd(723075), sgd(621435)), { action:'roll', from:723075 });      // down as well as up
+    assert.deepStrictEqual(plan(null, sgd(723075)), { action:'jump' });                          // the first paint
+    assert.deepStrictEqual(plan(sgd(5), sgd(5)), { action:'jump' });                             // nothing changed
+    assert.deepStrictEqual(plan(sgd(5.2), sgd(5.4)), { action:'jump' });                         // the same whole figure on screen
+    assert.deepStrictEqual(plan({ value:5, ccy:'SGD' }, { value:9, ccy:'USD' }), { action:'jump' });   // a currency switch is another unit
+    assert.deepStrictEqual(plan(sgd(1), sgd(2), { reduced:true }), { action:'jump' });
+    assert.deepStrictEqual(plan(sgd(1), sgd(2), { scrubbing:true }), { action:'jump' });
+    assert.deepStrictEqual(plan(sgd(1), sgd(2), { visible:false }), { action:'jump' });
+    assert.deepStrictEqual(plan(sgd(1), { value:NaN, ccy:'SGD' }), { action:'jump' });
+    assert.deepStrictEqual(plan({ value:NaN, ccy:'SGD' }, sgd(2)), { action:'jump' });
+    assert.deepStrictEqual(plan(sgd(1), null), { action:'jump' });
+    assert.deepStrictEqual(plan(sgd(1), undefined, undefined), { action:'jump' });
+    // a roll already heading for this very figure goes on in the new markup, one heading elsewhere is replaced
+    assert.deepStrictEqual(plan(sgd(650000), sgd(723075), { running:sgd(723075) }), { action:'keep' });
+    assert.deepStrictEqual(plan(sgd(650000), sgd(700000), { running:sgd(723075) }), { action:'roll', from:650000 });
+    assert.deepStrictEqual(plan(sgd(650000), sgd(723075), { running:sgd(723075), reduced:true }), { action:'jump' });
+    assert.deepStrictEqual(plan(sgd(650000), sgd(723075), { running:sgd(723075), scrubbing:true }), { action:'jump' });
+    assert.deepStrictEqual(navPlain(sb._heroRollPlan(sgd(1), sgd(2))), { action:'jump' });      // no options at all: not visible, so no roll
+  });
+
+  test('_heroValueHtml - the final figure once for screen readers in a visually hidden span, the figure people see aria-hidden, and the text escaped', () => {
+    const sb = realEscape(freshSandbox());
+    assert.strictEqual(sb._heroValueHtml('S$723,075', '<span class="ccy">S$</span>650,000'), '<span class="sr-only">S$723,075</span><span class="hero-num" aria-hidden="true"><span class="ccy">S$</span>650,000</span>');
+    assert.strictEqual(sb._heroValueHtml('<b>x</b>', '1'), '<span class="sr-only">&lt;b&gt;x&lt;/b&gt;</span><span class="hero-num" aria-hidden="true">1</span>');
+    const markup = sb._heroValueHtml('S$1', 'S$0');
+    assert.strictEqual((markup.match(/aria-hidden="true"/g) || []).length, 1);                  // only the moving figure is hidden, the final text is not
+    assert.ok(markup.indexOf('sr-only') < markup.indexOf('hero-num'));
+  });
+
+  test('_heroRollStart - frames roll the visible figure and end on the exact final one, a timer ends the roll when frames never come, cancel stops it, and a missing span never throws', () => {
+    const mk = () => {
+      const sb = freshSandbox();
+      const env = { span:{ innerHTML:'' }, frames:[], timers:[], now:1000, ccySets:0 };
+      sb.document = { querySelector: sel => sel === '#hero-value .hero-num' ? env.span : null };
+      sb.setRenderCcy = () => { env.ccySets++; };
+      sb.fmt = n => 'S$' + Math.round(n).toLocaleString('en-SG');
+      sb.requestAnimationFrame = cb => { env.frames.push(cb); return env.frames.length; };
+      sb.cancelAnimationFrame = () => {};
+      sb.performance = { now: () => env.now };
+      sb.setTimeout = (fn, ms) => { env.timers.push({ fn, ms }); return env.timers.length; };
+      sb.clearTimeout = () => {};
+      env.frame = at => { const cb = env.frames.shift(); env.now = at; cb(at); };
+      return { sb, env };
+    };
+    // a roll from 100 to 200: in-between figures climb, the end is exactly 200, and nothing is left running
+    let { sb, env } = mk();
+    sb._heroRollStart(100, 200, 'SGD');
+    assert.strictEqual(vm.runInContext('_heroRoll', sb).to, 200);
+    assert.strictEqual(env.frames.length, 1); assert.strictEqual(env.timers[0].ms, 450 + 120);
+    const shown = [];
+    [1000, 1100, 1225, 1340].forEach(at => { env.frame(at); shown.push(Number(env.span.innerHTML.replace(/<[^>]*>/g, '').replace(/[^\d]/g, ''))); });
+    assert.ok(shown.every((v, i) => v >= 100 && v <= 200 && (i === 0 || v >= shown[i - 1])), JSON.stringify(shown));
+    assert.strictEqual(shown[0], 100); assert.ok(shown[3] > shown[1]);
+    assert.ok(vm.runInContext('_heroShown', sb).value > 100);
+    env.frame(1450);
+    assert.ok(env.span.innerHTML.includes('200') && !env.span.innerHTML.includes('199'));
+    assert.deepStrictEqual(navPlain(vm.runInContext('_heroShown', sb)), { value:200, ccy:'SGD' });
+    assert.strictEqual(vm.runInContext('_heroRoll', sb), null); assert.strictEqual(env.frames.length, 0);
+    assert.ok(env.ccySets > 0);                                                // each frame sets the dashboard's currency (and hands the render currency back)
+    // frames paused (a hidden tab): the timer ends it on the exact figure
+    ({ sb, env } = mk());
+    sb._heroRollStart(100, 200, 'SGD');
+    env.timers[0].fn();
+    assert.ok(env.span.innerHTML.includes('200')); assert.strictEqual(vm.runInContext('_heroRoll', sb), null);
+    assert.deepStrictEqual(navPlain(vm.runInContext('_heroShown', sb)), { value:200, ccy:'SGD' });
+    // a newer render or a scrub cancels it: the queued frame and the timer then change nothing
+    ({ sb, env } = mk());
+    sb._heroRollStart(100, 200, 'SGD'); sb._heroRollCancel();
+    env.span.innerHTML = 'scrubbed';
+    env.frame(1100); env.timers[0].fn();
+    assert.strictEqual(env.span.innerHTML, 'scrubbed'); assert.strictEqual(vm.runInContext('_heroRoll', sb), null);
+    // a second roll replaces the first
+    ({ sb, env } = mk());
+    sb._heroRollStart(100, 200, 'SGD'); const first = env.frames.shift();
+    sb._heroRollStart(100, 300, 'SGD');
+    first(1100);
+    assert.strictEqual(env.span.innerHTML, '');                                // the first roll's frame knows it was replaced
+    assert.strictEqual(vm.runInContext('_heroRoll', sb).to, 300);
+    // reduced motion switched on mid-roll ends it at once
+    ({ sb, env } = mk());
+    sb._heroRollStart(100, 200, 'SGD');
+    sb.window.matchMedia = () => ({ matches:true });
+    env.frame(1050);
+    assert.ok(env.span.innerHTML.includes('200')); assert.strictEqual(vm.runInContext('_heroRoll', sb), null);
+    // the span is gone (the markup was replaced): the roll stops quietly on the final figure
+    ({ sb, env } = mk());
+    sb._heroRollStart(100, 200, 'SGD');
+    sb.document.querySelector = () => null;
+    assert.doesNotThrow(() => env.frame(1100));
+    assert.strictEqual(vm.runInContext('_heroRoll', sb), null);
+    assert.deepStrictEqual(navPlain(vm.runInContext('_heroShown', sb)), { value:200, ccy:'SGD' });
+  });
+
+  test('Hero roll wiring - renderDashboard plans the roll from the figure kept outside the DOM, a scrub cancels it and the end of a scrub restores the live figure at once', () => {
+    const dash = extractFunction('renderDashboard');
+    assert.ok(dash.includes('const heroNow = { value:displayNet, ccy:displayCcy() };'));
+    assert.ok(dash.includes('_heroRollPlan(_heroShown, heroNow, {') && dash.includes("visible:_isPageActive('dashboard')") && dash.includes('reduced:_reducedMotion()'));
+    assert.ok(dash.includes('scrubbing:!!(_heroView && _heroView.idx !== null)'));
+    assert.ok(dash.includes("if (roll.action !== 'keep') _heroRollCancel();"));
+    assert.ok(dash.includes("if (roll.action === 'roll') _heroRollStart(roll.from, displayNet, heroNow.ccy);") && dash.includes("else if (roll.action === 'jump') _heroShown = heroNow;"));
+    assert.ok(dash.includes('id="hero-value">${valueShownHtml}</div>') && dash.includes('_heroValueHtml(valueText, _moneyHtml(valueText))'));
+    // the live figure the end of a scrub restores is the final markup, with its number and currency kept for the next roll
+    assert.ok(dash.includes('restValue:valueHtml') && dash.includes('restNum:displayNet, restCcy:heroNow.ccy'));
+    // a scrub: cancel first, write the pointer's figure directly in the same markup, and the end of a scrub puts the live figure back instantly
+    const set = extractFunction('_heroSetScrub'), end = extractFunction('_heroEndScrub');
+    assert.ok(set.indexOf('_heroRollCancel();') > -1 && set.indexOf('_heroRollCancel();') < set.indexOf('_heroValueHtml('));
+    assert.ok(end.includes('valueEl.innerHTML = v.restValue;') && end.includes('_heroShown = { value:v.restNum, ccy:v.restCcy };'));
+    assert.strictEqual(set.includes('requestAnimationFrame'), false); assert.strictEqual(end.includes('requestAnimationFrame'), false);
+    // the roll runner is the only place that animates, and it asks first
+    assert.ok(extractFunction('_heroRollStart').includes('_reducedMotion()') && extractFunction('_pxFlashPaint').includes('_reducedMotion()') && extractFunction('_pxFlashNote').includes('_reducedMotion()'));
+  });
+
+  test('Price flash maths - _quotePrice reads price, then sgd, then usd, real positive numbers only', () => {
+    const sb = freshSandbox();
+    assert.strictEqual(sb._quotePrice({ price:254.3, sgd:1 }), 254.3);
+    assert.strictEqual(sb._quotePrice({ sgd:152000, usd:112600 }), 152000);
+    assert.strictEqual(sb._quotePrice({ usd:5 }), 5);
+    assert.strictEqual(sb._quotePrice({ price:'12.5' }), 12.5);
+    assert.strictEqual(sb._quotePrice({ price:0, sgd:3 }), 3);                  // a zero price is no price, the next field counts
+    [null, undefined, 0, 'x', [], {}, { price:null }, { price:'' }, { price:'abc' }, { price:NaN }, { price:Infinity }, { price:-4 }, { price:0 }, { fund:{ beta:1 } }, { previousClose:3 }]
+      .forEach(q => assert.strictEqual(sb._quotePrice(q), null, JSON.stringify(q)));
+  });
+
+  test('_priceSnapshot - cache key to price for the keys with a real price now, own keys only, taken before a refresh overwrites the cache', () => {
+    const sb = freshSandbox({ _priceCache:{ AAPL:{ price:254.3 }, bitcoin:{ sgd:152000, usd:112600 }, 'D05.SI':{ price:0 }, NOPX:{ fund:{ beta:1 } }, NULLQ:null } });
+    assert.deepStrictEqual(navPlain(sb._priceSnapshot(['AAPL', 'bitcoin', 'D05.SI', 'NOPX', 'NULLQ', 'MISSING', 'constructor', '__proto__', 'toString'])), { AAPL:254.3, bitcoin:152000 });
+    assert.deepStrictEqual(navPlain(sb._priceSnapshot([])), {}); assert.deepStrictEqual(navPlain(sb._priceSnapshot(undefined)), {}); assert.deepStrictEqual(navPlain(sb._priceSnapshot('AAPL')), {});
+    const taken = sb._priceSnapshot(['AAPL']);
+    sb.DB._priceCache.AAPL = { price:300 };                                      // the refresh writes the new quote
+    assert.strictEqual(taken.AAPL, 254.3);                                       // the snapshot kept the old price
+    const none = freshSandbox(); none.DB._priceCache = undefined;
+    assert.deepStrictEqual(navPlain(none._priceSnapshot(['AAPL'])), {});
+  });
+
+  test('_priceDiff - up, down, unchanged, a new symbol, a missing price and junk: only a price that really moved is flashed', () => {
+    const sb = freshSandbox();
+    const diff = (a, b) => navPlain(sb._priceDiff(a, b));
+    assert.deepStrictEqual(diff({ AAPL:254.3, NVDA:190, 'D05.SI':52.4 }, { AAPL:255.1, NVDA:186.5, 'D05.SI':52.4 }), { AAPL:'up', NVDA:'down' });   // unchanged stays out
+    assert.deepStrictEqual(diff({ bitcoin:152000 }, { bitcoin:152000.01 }), { bitcoin:'up' });
+    assert.deepStrictEqual(diff({ AAPL:100 }, { AAPL:100, NEW:50 }), {});                                          // a new symbol has nothing to compare with: a first load never flashes
+    assert.deepStrictEqual(diff({}, { AAPL:100 }), {});
+    assert.deepStrictEqual(diff({ AAPL:100 }, {}), {});                                                            // missing after: nothing to show
+    assert.deepStrictEqual(diff({ AAPL:100 }, { AAPL:null }), {}); assert.deepStrictEqual(diff({ AAPL:null }, { AAPL:100 }), {});
+    assert.deepStrictEqual(diff({ AAPL:0 }, { AAPL:100 }), {}); assert.deepStrictEqual(diff({ AAPL:100 }, { AAPL:-1 }), {});
+    assert.deepStrictEqual(diff({ AAPL:'100' }, { AAPL:'101' }), {});                                              // the snapshots hold numbers, anything else is skipped
+    assert.deepStrictEqual(diff({ AAPL:NaN }, { AAPL:NaN }), {}); assert.deepStrictEqual(diff({ AAPL:Infinity }, { AAPL:1 }), {});
+    assert.deepStrictEqual(diff(null, { AAPL:1 }), {}); assert.deepStrictEqual(diff({ AAPL:1 }, undefined), {}); assert.deepStrictEqual(diff(undefined, undefined), {});
+    // keys that exist on every object are not prices
+    assert.deepStrictEqual(diff({}, { constructor:5, toString:5 }), {});
+    const before = { A:1 }, after = { A:2 };
+    sb._priceDiff(before, after);
+    assert.deepStrictEqual(navPlain(before), { A:1 }); assert.deepStrictEqual(navPlain(after), { A:2 });          // inputs untouched
+  });
+
+  test('_pxFlashNote and _pxFlashPaint - classes on the rows that carry a moved price\'s key, fading from where a repaint finds them, dropped after 1.2s, nothing under reduced motion', () => {
+    const sb = freshSandbox();
+    const mk = key => {
+      const classes = new Set(); const props = {}; const listeners = [];
+      return { classes, props, listeners, offsetWidth:0, style:{ setProperty:(k, v) => { props[k] = v; } }, getAttribute:a => a === 'data-px' ? key : null,
+        classList:{ add:c => classes.add(c), remove:(...c) => c.forEach(x => classes.delete(x)), contains:c => classes.has(c) },
+        addEventListener:(t, fn, o) => listeners.push([t, fn, o]) };
+    };
+    const els = ['AAPL', 'NVDA', 'D05.SI', 'bitcoin', 'AAPL'].map(mk);          // AAPL shows twice (the dashboard row and the Stocks row)
+    const root = { selectors:[], querySelectorAll(sel){ this.selectors.push(sel); return els; } };
+    assert.strictEqual(sb._pxFlashPaint(root, 5000), 0); assert.deepStrictEqual(root.selectors, []);                // nothing flashing: no DOM scan at all
+    assert.strictEqual(sb._pxFlashNote({ AAPL:'up', NVDA:'down', junk:'sideways', other:undefined }, 10000), 2);
+    assert.deepStrictEqual(Array.from(sb._pxFlashes.keys()).sort(), ['AAPL', 'NVDA']);
+    assert.strictEqual(sb._pxFlashPaint(root, 10200), 3);                        // both AAPL rows and NVDA
+    assert.deepStrictEqual(root.selectors, ['[data-px]']);
+    assert.deepStrictEqual([els[0], els[4]].map(e => Array.from(e.classes)), [['flash-up'], ['flash-up']]);
+    assert.deepStrictEqual(Array.from(els[1].classes), ['flash-down']);
+    assert.strictEqual(els[2].classes.size, 0); assert.strictEqual(els[3].classes.size, 0);                         // unchanged and unrelated rows stay quiet
+    assert.strictEqual(els[0].props['--px-delay'], '-200ms');                    // a repaint 200ms in carries on from there
+    assert.strictEqual(els[0].listeners[0][0], 'animationend'); assert.deepStrictEqual(navPlain(els[0].listeners[0][2]), { once:true });
+    els[0].listeners[0][1]();                                                    // the fade ends: the class goes
+    assert.strictEqual(els[0].classes.size, 0);
+    assert.strictEqual(sb._pxFlashPaint(root, 10300), 0);                        // every row is already painted for this flash: a repaint of the same markup never replays it
+  });
+
+  test('_pxFlashPaint - a second flash restarts a row, an expired flash is dropped, and reduced motion paints and notes nothing', () => {
+    const sb = freshSandbox();
+    const mk = key => {
+      const classes = new Set(['flash-up']); const props = {}; let reflows = 0;
+      return { classes, props, get offsetWidth(){ reflows++; return 0; }, get reflows(){ return reflows; }, style:{ setProperty:(k, v) => { props[k] = v; } },
+        getAttribute:() => key, classList:{ add:c => classes.add(c), remove:(...c) => c.forEach(x => classes.delete(x)), contains:c => classes.has(c) }, addEventListener(){} };
+    };
+    const el = mk('AAPL');
+    const root = { querySelectorAll:() => [el] };
+    sb._pxFlashNote({ AAPL:'down' }, 20000);                                      // a new flash on a row still showing the last one
+    assert.strictEqual(sb._pxFlashPaint(root, 20050), 1);
+    assert.deepStrictEqual(Array.from(el.classes), ['flash-down']); assert.ok(el.reflows >= 1);   // removed, reflowed, added: the animation restarts
+    // expired: 1.2s after the note the entry is gone and nothing is painted
+    sb._pxFlashNote({ AAPL:'up' }, 30000);
+    assert.strictEqual(sb._pxFlashPaint(root, 30000 + vm.runInContext('PX_FLASH_MS', sb)), 0);
+    assert.strictEqual(sb._pxFlashes.size, 0);
+    assert.strictEqual(vm.runInContext('PX_FLASH_MS', sb), 1200);
+    // reduced motion: noted nothing, painted nothing
+    sb.window.matchMedia = () => ({ matches:true });
+    assert.strictEqual(sb._pxFlashNote({ AAPL:'up' }, 40000), 0); assert.strictEqual(sb._pxFlashes.size, 0);
+    sb.window.matchMedia = () => ({ matches:false });
+    sb._pxFlashNote({ AAPL:'up' }, 40000);
+    sb.window.matchMedia = () => ({ matches:true });                              // the setting changes between the refresh and the repaint
+    const fresh = mk('AAPL'); fresh.classes.clear();
+    assert.strictEqual(sb._pxFlashPaint({ querySelectorAll:() => [fresh] }, 40010), 0);
+    assert.strictEqual(fresh.classes.size, 0); assert.strictEqual(sb._pxFlashes.size, 0);
+  });
+
+  test('_pxAttr - the price-cache key as an escaped data-px attribute, nothing for no key', () => {
+    const sb = realEscape(freshSandbox());
+    assert.strictEqual(sb._pxAttr('AAPL'), ' data-px="AAPL"');
+    assert.strictEqual(sb._pxAttr('D05.SI'), ' data-px="D05.SI"');
+    assert.strictEqual(sb._pxAttr('"><b>x</b>'), ' data-px="&quot;&gt;&lt;b&gt;x&lt;/b&gt;"');
+    ['', null, undefined, 0].forEach(k => assert.strictEqual(sb._pxAttr(k), ''));
+  });
+
+  test('Price flash wiring - both refreshes take the old prices before the fetch, note what moved after the write and before the repaints, and repaint the dashboard after the panel', () => {
+    const stocks = appSrc.slice(appSrc.indexOf('async function refreshStockPrices'), appSrc.indexOf('async function refreshFundamentals'));
+    const crypto = appSrc.slice(appSrc.indexOf('async function refreshCryptoPrices'), appSrc.indexOf('SOFT DELETE'));
+    [[stocks, 'symbols', 'DB._priceCache[sym] = q;', 'renderStocks();'], [crypto, 'ids', 'DB._priceCache[id] = {', 'renderCrypto();']].forEach(([src, keys, write, render]) => {
+      assert.ok(src.includes('const pxBefore = _priceSnapshot(' + keys + ');'));
+      assert.ok(src.indexOf('const pxBefore') < src.indexOf('await fetch(') && src.indexOf('await fetch(') < src.indexOf(write));
+      const note = '_pxFlashNote(_priceDiff(pxBefore, _priceSnapshot(' + keys + ')));';
+      assert.ok(src.indexOf(write) < src.indexOf(note) && src.indexOf(note) < src.indexOf(render));
+      assert.ok(src.includes(render + '\n    refreshHoldingPanel();   // an open holding panel takes the new price\n    _repaintDashAfterPrices();'));
+      // the skeletons: raised when a first load starts, cleared in finally when no data came back
+      assert.ok(src.includes('skeleton = _skeletonOn(true, ') && src.includes('if (skeleton) _repaintPriceSurfaces();'));
+      assert.ok(src.indexOf('let skeleton = false, repainted = false;\n  try {') > -1 && src.indexOf('skeleton = _skeletonOn(') > src.indexOf('  try {'));   // inside the try: the finally always clears the in-flight flag
+      assert.ok(src.includes('if (skeleton && !repainted){') && src.includes('try { _repaintPriceSurfaces(); } catch (err){'));
+      assert.ok(src.indexOf('} finally {') < src.indexOf('if (skeleton && !repainted)'));
+    });
+    assert.ok(stocks.indexOf('_stockRefreshInFlight = false;\n    if (btn) btn.disabled = false;\n    if (skeleton && !repainted){') > -1);
+    assert.ok(crypto.indexOf('_cryptoRefreshInFlight = false;\n    if (btn) btn.disabled = false;\n    if (skeleton && !repainted){') > -1);
+    // the dashboard repaint: only when it is the page on screen, never the saved charts
+    const repaint = extractFunction('_repaintDashAfterPrices');
+    assert.ok(repaint.includes("_isPageActive('dashboard')") && repaint.includes('renderDashboard({ keepCharts:true })'));
+    const all = extractFunction('_repaintPriceSurfaces');
+    ['renderStocks();', 'renderCrypto();', '_repaintDashAfterPrices();', 'refreshHoldingPanel();'].forEach(call => assert.ok(all.includes(call), call));
+    const dash = extractFunction('renderDashboard');
+    assert.ok(dash.includes('if (opts && opts.keepCharts){') && dash.indexOf('if (opts && opts.keepCharts){') < dash.indexOf('pbSeedDefaults();'));
+    assert.ok(dash.includes('_pxFlashPaint();') && dash.lastIndexOf('_pxFlashPaint();') > dash.indexOf('arrangeBtn.style.display'));
+    // every surface that repaints paints the flash last: the two tables and lists, the dashboard rows, the panel
+    ['renderStocks', 'renderCrypto', '_hpRender'].forEach(name => assert.ok(extractFunction(name).includes('_pxFlashPaint('), name));
+    assert.ok(extractFunction('_hpRender').includes('_pxFlashPaint(host);'));
+    // the rows carry the key they are found by
+    assert.ok(extractFunction('_dashHoldingRows').includes('px:r.ysym') && extractFunction('_dashHoldingRows').includes('px:r.cid'));
+    assert.ok(extractFunction('_dashToday').includes('_pxAttr(r.px)') && extractFunction('_dashHoldings').includes('_pxAttr(r.px)'));
+    assert.ok(extractFunction('_hpPriceHtml').includes('_pxAttr(m.px)') && extractFunction('_stockListModel').includes('px:r.ysym') && extractFunction('_cryptoListModel').includes('px:r.cid'));
+    assert.ok(extractFunction('renderStocks').includes('<tr${_pxAttr(r.ysym)}>') && extractFunction('renderCrypto').includes('<tr${_pxAttr(r.cid)}>'));
+    assert.ok(extractFunction('_holdingRowHtml').includes('_pxAttr(m.px)'));
+  });
+
+  test('_skeletonOn - up only while a fetch is in flight and no holding on show has a price yet', () => {
+    const sb = freshSandbox();
+    const on = (inFlight, keys, cache) => sb._skeletonOn(inFlight, keys, cache);
+    assert.strictEqual(on(true, ['AAPL', 'D05.SI'], {}), true);                                   // a first load
+    assert.strictEqual(on(false, ['AAPL'], {}), false);                                           // nothing in flight: the rows' own dashes say it
+    assert.strictEqual(on(true, [], {}), false); assert.strictEqual(on(true, undefined, {}), false);   // nothing to show
+    assert.strictEqual(on(true, ['AAPL', 'D05.SI'], { AAPL:{ price:254.3 } }), false);              // one priced holding: the real rows take over
+    assert.strictEqual(on(true, ['AAPL'], { AAPL:{ price:254.3, fetchedAt:'2020-01-01T00:00:00Z' } }), false);   // a stale last-known price still counts
+    assert.strictEqual(on(true, ['bitcoin'], { bitcoin:{ sgd:152000 } }), false);
+    assert.strictEqual(on(true, ['AAPL'], { AAPL:{ fund:{ beta:1 } } }), true);                      // a cache entry with no price is no price
+    assert.strictEqual(on(true, ['AAPL'], { AAPL:null }), true);
+    assert.strictEqual(on(true, ['AAPL'], { MSFT:{ price:5 } }), true);                              // a price for something else
+    assert.strictEqual(on(true, ['constructor'], {}), true);                                         // not fooled by the keys every object has
+    assert.strictEqual(on(true, ['AAPL'], undefined), true); assert.strictEqual(on(true, ['AAPL'], null), true);
+    assert.strictEqual(on(1, ['AAPL'], {}), true); assert.strictEqual(on(0, ['AAPL'], {}), false);
+  });
+
+  test('_pricesLoading - reads the stock and coin in-flight flags, and only the ones the list is fed by', () => {
+    const sb = freshSandbox({ _priceCache:{} });
+    const loading = (stocks, crypto) => sb._pricesLoading(['AAPL'], stocks, crypto);
+    assert.strictEqual(loading(true, true), false);                                                 // nothing in flight
+    sb._stockRefreshInFlight = true;
+    assert.strictEqual(loading(true, false), true); assert.strictEqual(loading(false, true), false); assert.strictEqual(loading(true, true), true);
+    sb._stockRefreshInFlight = false; sb._cryptoRefreshInFlight = true;
+    assert.strictEqual(loading(false, true), true); assert.strictEqual(loading(true, false), false); assert.strictEqual(loading(true, true), true);   // the dashboard counts both
+    sb.DB._priceCache.AAPL = { price:1 };
+    assert.strictEqual(loading(true, true), false);                                                 // a price arrives: the skeleton goes
+  });
+
+  test('_skelIf - a "nothing yet" cell becomes one shimmering bar while loading, a real figure never does, and nothing changes when not loading', () => {
+    const sb = freshSandbox();
+    const bar = vm.runInContext('SKEL_BAR', sb);
+    assert.strictEqual(bar, '<span class="skel" aria-hidden="true"></span>');
+    ['\u2014', '\u2013', '<span class="price-stale">\u2014</span>'].forEach(dash => { assert.strictEqual(sb._skelIf(true, dash), bar); assert.strictEqual(sb._skelIf(false, dash), dash); assert.strictEqual(sb._skelIf(undefined, dash), dash); });
+    ['US$254.30', '▲ +1.80%', '', '-', '<span class="price-stale">\u2014 FX missing</span>', '0', 'AAPL'].forEach(real => assert.strictEqual(sb._skelIf(true, real), real, real));
+    assert.strictEqual(vm.runInContext('SKEL_STATUS', sb), '<span class="sr-only" role="status">Loading prices</span>');
+  });
+
+  test('Loading skeletons - the holdings list and the dashboard Holdings card show bars for the figures that are not here yet, are aria-busy with a Loading prices status, and read exactly as before when not loading', () => {
+    const sb = panelSandbox(panelFixture(), 'SGD');
+    const rows = sb._dashHoldingRows(sb.buildStockChartRows());
+    const nopx = rows.find(r => r.sym === 'NOPX');
+    // the dashboard card: only the row with no price has dashes, so only it shimmers
+    const idle = sb._dashHoldings(rows, 16550), idleExplicit = sb._dashHoldings(rows, 16550, false);
+    assert.strictEqual(idle, idleExplicit); assert.ok(!idle.includes('class="skel"') && !idle.includes('aria-busy') && !idle.includes('Loading prices'));
+    const busy = sb._dashHoldings(rows, 16550, true);
+    assert.ok(busy.includes('<div class="dash-hold" aria-busy="true"><span class="sr-only" role="status">Loading prices</span>'));
+    const nopxRow = /<button[^>]*data-px="NOPX"[\s\S]*?<\/button>/.exec(busy)[0];
+    assert.strictEqual((nopxRow.match(/class="skel"/g) || []).length, 4);                         // value, share, day and return
+    assert.ok(!nopxRow.includes('–'));                                                       // no dash left in it
+    assert.ok(nopxRow.includes('<b>NOPX</b>') && nopxRow.includes('class="mono"'));              // who it is stays
+    const aaplRow = /<button[^>]*data-px="AAPL"[\s\S]*?<\/button>/.exec(busy)[0];
+    assert.ok(!aaplRow.includes('class="skel"'));                                                  // a priced row keeps its figures
+    // all rows unpriced (a true first load): every row shimmers, the card is busy once
+    const bare = rows.map(r => Object.assign({}, r, { mv:null, pl:null, plPct:null, dayPct:null, daySgd:null }));
+    const first = sb._dashHoldings(bare, 16550, true);
+    assert.strictEqual((first.match(/class="skel"/g) || []).length, 4 * bare.length);
+    assert.strictEqual((first.match(/aria-busy="true"/g) || []).length, 1); assert.strictEqual((first.match(/role="status"/g) || []).length, 1);
+    // the phone list rows and their container
+    const m = { table:'stocks', id:'s_aapl', sym:'AAPL', cls:'stocks', sub:'US', value:DASH, share:DASH, shareOf:'of stocks', fx:false, dir:'', pct:DASH, amount:'', px:'AAPL' };
+    const row = sb._holdingRowHtml(m, true), plain = sb._holdingRowHtml(m);
+    assert.strictEqual((row.match(/class="skel"/g) || []).length, 3); assert.ok(!row.includes('– ') && !/>–</.test(row));
+    assert.strictEqual(plain, sb._holdingRowHtml(m, false)); assert.ok(plain.includes('>–<') && !plain.includes('skel'));
+    assert.ok(row.includes('data-px="AAPL"'));
+    const list = sb._holdingsListHtml([m], { label:'Total', value:DASH, fx:false, dir:'', pct:DASH, amount:'' }, 'Holdings', true);
+    assert.ok(list.startsWith('<div class="hl" role="group" aria-label="Holdings" aria-busy="true"><span class="sr-only" role="status">Loading prices</span>'));
+    assert.strictEqual((list.match(/class="skel"/g) || []).length, 5);                              // three in the row, two in the total
+    const calm = sb._holdingsListHtml([m], null, 'Holdings');
+    assert.ok(calm.startsWith('<div class="hl" role="group" aria-label="Holdings"><div class="dash-hrow dash-hhead hl-head"') && !calm.includes('aria-busy'));
+  });
+
+  test('Loading skeletons - the Stocks and Crypto pages draw them only while their fetch is in flight with nothing cached, keep the symbol, market, shares and cost, and clear when a price arrives', () => {
+    const noCache = () => Object.assign(stockFixture(), { _priceCache:{} });
+    const sb = listSandbox(noCache(), 'USD'); const els = stocksBox(sb);
+    sb.renderStocks();
+    assert.ok(!els['stocks-body'].innerHTML.includes('class="skel"') && !els['stocks-body'].innerHTML.includes('aria-busy'));   // idle: dashes, as ever
+    sb._stockRefreshInFlight = true; sb.renderStocks();
+    let html = els['stocks-body'].innerHTML;
+    assert.ok(html.includes('<div class="tbl-wrap hd-only"><span class="sr-only" role="status">Loading prices</span><table class="holdings" aria-busy="true">'));
+    assert.ok(html.includes('<div class="hl" role="group" aria-label="Holdings" aria-busy="true"><span class="sr-only" role="status">Loading prices</span>'));
+    const tr = /<tr data-px="AAPL">[\s\S]*?<\/tr>/.exec(html)[0];
+    assert.ok(tr.includes('>AAPL</button>') && tr.includes('<span class="tag us">US</span>') && tr.includes('US$80.00'));      // who it is and what it cost stay real
+    assert.ok((tr.match(/class="skel"/g) || []).length >= 4);                                                                   // price, value, P&L, P&L %, updated
+    assert.ok(!/<td class="num">\u2014<\/td>|price-stale">\u2014/.test(tr));
+    // a price for one holding ends the first load: the real rows come back with their own dashes
+    sb.DB._priceCache.AAPL = { price:100, currency:'USD', fetchedAt:TODAY_ISO }; sb.renderStocks();
+    html = els['stocks-body'].innerHTML;
+    assert.ok(!html.includes('class="skel"') && !html.includes('aria-busy'));
+    // the fetch ends (or fails) with nothing cached: not in flight any more, no skeleton
+    const done = listSandbox(noCache(), 'USD'); const doneEls = stocksBox(done);
+    done._stockRefreshInFlight = true; done.renderStocks(); assert.ok(doneEls['stocks-body'].innerHTML.includes('class="skel"'));
+    done._stockRefreshInFlight = false; done.renderStocks(); assert.ok(!doneEls['stocks-body'].innerHTML.includes('class="skel"'));
+    // a coin fetch does not put the stock lists into loading, and Crypto follows its own flag
+    const mixed = listSandbox(Object.assign(noCache(), { crypto:[{ id:'c_btc', symbol:'BTC', coingeckoId:'bitcoin', amount:0.25, avgCost:60000, currency:'USD' }] }));
+    const sEls = stocksBox(mixed);                                                        // the stocks elements, and the document that serves them
+    const cEls = {}; ['crypto-body', 'crypto-summary', 'freshness-crypto'].forEach(id => { cEls[id] = { id, innerHTML:'', textContent:'', className:'' }; });
+    const stocksDoc = mixed.document.getElementById.bind(mixed.document);
+    mixed.document.getElementById = id => cEls[id] || stocksDoc(id);                       // ...which now serves the crypto elements too
+    mixed._cryptoRefreshInFlight = true; mixed.renderStocks(); mixed.renderCrypto();
+    assert.ok(!sEls['stocks-body'].innerHTML.includes('class="skel"'));
+    assert.ok(cEls['crypto-body'].innerHTML.includes('<table class="holdings" aria-busy="true">') && cEls['crypto-body'].innerHTML.includes('role="status">Loading prices'));
+    assert.ok(/<tr data-px="bitcoin">[\s\S]*?class="skel"[\s\S]*?<\/tr>/.test(cEls['crypto-body'].innerHTML));
+    assert.ok(cEls['crypto-body'].innerHTML.includes('>BTC</button>') && cEls['crypto-body'].innerHTML.includes('S$75,000.00'));       // the symbol and the cost stay (US$60,000 at the sandbox's 1.25)
+    mixed.DB._priceCache.bitcoin = { sgd:152000, usd:112600, change24h:1.8, fetchedAt:TODAY_ISO }; mixed.renderCrypto();
+    assert.ok(!cEls['crypto-body'].innerHTML.includes('class="skel"') && !cEls['crypto-body'].innerHTML.includes('aria-busy'));
+  });
+
+  test('Hide amounts - 7px over 250ms on every amount, the percentage cells and figures are left out, the money-chip selector and the hover reveal stay, and reduced motion switches the transition off', () => {
+    const start = indexSrc.indexOf('/* PRIVACY MODE (Hide amounts)'), end = indexSrc.indexOf('/* SYNC STATE.');
+    assert.ok(start > -1 && end > start);
+    const css = indexSrc.slice(start, end);
+    assert.ok(css.includes('html.privacy .money-chip,'));
+    assert.ok(css.includes('html.privacy td.num:not(.pct){filter:blur(7px);'));
+    assert.ok(css.includes('html.privacy .h-summary-value:not(.pct),') && css.includes('html.privacy .dash-hero-value,') && css.includes('html.privacy .metric-value,'));
+    assert.strictEqual(/blur\(0\.45em\)/.test(css), false);
+    assert.strictEqual((css.match(/blur\(/g) || []).length, 1); assert.strictEqual((css.match(/blur\(7px\)/g) || []).length, 1);
+    // no selector can reach a percentage cell: td.num is always :not(.pct), and a summary value that is a percentage opts out the same way
+    assert.strictEqual(/html\.privacy td\.num(?!:not\(\.pct\))/.test(css), false);
+    assert.strictEqual(/html\.privacy \.h-summary-value(?!:not\(\.pct\))/.test(css), false);
+    // the transition is on the figures, so the blur eases in and out, 250ms
+    assert.ok(css.includes('.dash-hero-value,.h-summary-value,.metric-value,.money-chip{transition:filter .25s ease}'));
+    assert.ok(css.includes('td.num{transition:background 0.12s ease,filter .25s ease}'));                 // the row hover fade the cells already had is kept
+    // pointer devices reveal one figure on hover, the same list
+    const hover = css.slice(css.indexOf('@media (hover:hover){'));
+    ['html.privacy .dash-hero-value:hover,', 'html.privacy .h-summary-value:not(.pct):hover,', 'html.privacy .metric-value:hover,', 'html.privacy .money-chip:hover,', 'html.privacy td.num:not(.pct):hover{filter:none;'].forEach(s => assert.ok(hover.includes(s), s));
+    // reduced motion: on and off at once
+    assert.ok(/@media \(prefers-reduced-motion:reduce\)\{\s*\.dash-hero-value,\.h-summary-value,\.metric-value,\.money-chip,td\.num\{transition:none\}\s*\}/.test(css));
+  });
+
+  test('Hide amounts - every Stocks column that prints a percentage carries .pct and no amount column does, whatever the column set', () => {
+    const f = panelFixture();
+    f.stocks[0].divPerShare = 2;
+    f._priceCache.AAPL = Object.assign({}, f._priceCache.AAPL, { week52Low:60, week52High:120, dayLow:98, dayHigh:101, volume:1200000, prevClose:98,
+      fund:{ trailingPE:34.2, forwardPE:30.1, priceToBook:11.2, payoutRatio:0.25, marketCap:3.8e12, beta:0.9, sma200:90, sma50:95, currency:'USD' } });
+    const sb = panelSandbox(f, 'SGD');
+    sb.rangePosition = (p, lo, hi) => (p - lo) / (hi - lo); sb.vsBaseline = (p, ma) => (p - ma) / ma; sb.fmtCompactSgdOrNative = () => 'US$3.8T'; sb.sectorClass = () => 'sensitive';
+    const row = sb.buildStockChartRows().find(r => r.s.id === 's_aapl');
+    const seen = { pct:[], amount:[] };
+    vm.runInContext('STOCK_COLUMNS', sb).forEach(c => {
+      const classes = c.cls.split(' ');
+      if (classes.indexOf('num') === -1) return;
+      const text = sb._plainText(c.render(row, { dc:'SGD', totMv:1000 })).trim();
+      if (!text || text === '\u2014') return;                                               // nothing in this cell for this holding (no sells for Realised): nothing to judge
+      const isPct = text.endsWith('%');
+      assert.strictEqual(classes.indexOf('pct') !== -1, isPct, c.key + ' prints "' + text + '"');
+      seen[isPct ? 'pct' : 'amount'].push(c.key);
+    });
+    ['dayChangePct', 'pos52w', 'vs200d', 'vs50d', 'plPct', 'weight', 'divYoc', 'divYield', 'payout'].forEach(k => assert.ok(seen.pct.indexOf(k) !== -1, k + ' is a percentage column'));
+    ['avgCost', 'price', 'mv', 'pl', 'cost', 'divIncome', 'shares', 'volume', 'mktCap'].forEach(k => assert.ok(seen.amount.indexOf(k) !== -1, k + ' stays blurred'));
+    // the totals row, the crypto table, the cash APY, the savings rate and the projections inputs say the same in markup
+    assert.ok(extractFunction('renderStocks').includes('case \'plPct\':    return `<td class="num pct">'));
+    const cs = listSandbox({ crypto:[{ id:'c_btc', symbol:'BTC', coingeckoId:'bitcoin', amount:0.25, avgCost:60000, currency:'USD' }], _priceCache:{ bitcoin:{ sgd:152000, change24h:1.8, fetchedAt:TODAY_ISO } } });
+    const cEls = renderBox(cs, ['crypto-body', 'crypto-summary', 'freshness-crypto']); cs.renderCrypto();
+    const cells = Array.from(cEls['crypto-body'].innerHTML.matchAll(/<td class="([^"]*\bnum\b[^"]*)">([\s\S]*?)<\/td>/g)).map(m => [m[1].split(' '), cs._plainText(m[2]).trim()]);
+    assert.ok(cells.length >= 8);
+    cells.forEach(([cls, text]) => { if (text === '\u2014') return; assert.strictEqual(cls.indexOf('pct') !== -1, text.endsWith('%'), cls.join(' ') + ' "' + text + '"'); });
+    assert.ok(appSrc.includes('<td class="num pct ${cls}">${rate != null ? fmtPct(rate)') && appSrc.includes("<td class=\"num pct\">${r.apy ? r.apy.toFixed(2) + '%' : '—'}</td>"));
+    assert.ok(appSrc.includes('<td class="num pct">${fmtPctPlain(returnPct,1)}</td>') && appSrc.includes('<td class="num pct">${fmtPctPlain(inflationPct,1)}</td>'));
+    assert.ok(appSrc.includes('<td class="num pct">${dayCell}</td>') && appSrc.includes('<td class="num pct">${posCell}</td>'));                 // the Watchlist table
+    assert.ok(appSrc.includes("accent: savingsRate != null && savingsRate >= 0 ? 'pos' : 'neg', sub: 'of take-home', pct:true }") && appSrc.includes("<div class=\"h-summary-value${it.pct ? ' pct' : ''}\">"));
+  });
+
+  test('Hide amounts - the amounts the audit found outside a .money-chip now sit in one, the split bar tooltip no longer carries an amount, and money axes on canvas charts are masked', () => {
+    // Stocks dividend line, CPF accrual line, Income & spending subs and meta lines, the Settings tax estimate and bucket preview
+    ["sub: '<span class=\"money-chip\">' + fmtSgdOrNative(roundMoney(totDivAnnual/12), 'SGD') + ' / mo</span>'",
+      "'<span class=\"money-chip\">+' + kjrEscape(fmt(accrued, {dp:0})) + '</span>'", "sub: 'gross <span class=\"money-chip\">' + fmt(totGross,{dp:0}) + '</span>'",
+      "incomeMeta.innerHTML = kjrEscape(", "expenseMeta.innerHTML = kjrEscape(", '<div class="bucket-amt money-chip">', 'take-home of <span class="money-chip">${fmt(takeHome,{dp:0})}</span>'
+    ].forEach(s => assert.ok(appSrc.includes(s), s));
+    ['annualGross', 'annualEmpCpf', 'reliefs', 'chargeableIncome', 'annualTax', 'monthlyProvision'].forEach(k => assert.ok(new RegExp('<div class="money-chip" style="[^"]*">\\(?\\$\\{fmt2\\(est\\.' + k + '\\)\\}').test(appSrc), k));
+    // the dashboard's split bar tooltip: name and share, never an amount (a native tooltip shows while the mode is on)
+    const where = extractFunction('_dashWhereItSits');
+    assert.ok(where.includes("title=\"' + kjrEscape(r.key) + ' · ' + r.share.toFixed(0) + '%\"") && !/title="[^"]*fmt\(/.test(where));
+    // Chart.js draws ticks to canvas, so a money axis reads the mode through _privacyMaskAxis and applyPrivacy redraws the live charts
+    assert.strictEqual((appSrc.match(/_privacyMaskAxis\(/g) || []).length, 7);                       // the definition and the six money axes (Chart Builder y and y2, price history, net worth series, insurance premiums, projections)
+    assert.strictEqual(/callback:\s*v => kjrFmtAxis\(/.test(appSrc) || /callback:v => kjrFmtAxis\(/.test(appSrc), false);
+    const sb = freshSandbox();
+    sb.privacyOn = () => true;
+    vm.runInContext(extractFunction('_privacyMaskAxis'), sb);
+    assert.strictEqual(sb._privacyMaskAxis('S$650k'), '••••'); assert.strictEqual(sb._privacyMaskAxis('S$650k', 'money'), '••••');
+    assert.strictEqual(sb._privacyMaskAxis('12', 'count'), '12'); assert.strictEqual(sb._privacyMaskAxis('40%', 'pct'), '40%');          // counts and percentages stay readable
+    sb.privacyOn = () => false;
+    assert.strictEqual(sb._privacyMaskAxis('S$650k', 'money'), 'S$650k');
+    assert.ok(appSrc.includes("Object.keys(_pbCharts).forEach(id => { const c = _pbCharts[id]; if (c && typeof c.update === 'function') c.update('none'); });"));
+  });
+
+  test('_chipAmounts - every currency amount in an escaped sentence goes into a .money-chip, the words around it and plain numbers stay as they are', () => {
+    const sb = freshSandbox();
+    const chip = a => '<span class="money-chip">' + a + '</span>';
+    assert.strictEqual(sb._chipAmounts('DBS is negative (-S$1,234.50), so a deposit is missing.'), 'DBS is negative (' + chip('-S$1,234.50') + '), so a deposit is missing.');
+    assert.strictEqual(sb._chipAmounts('deposit +S$3,200 and US$56.70'), 'deposit ' + chip('+S$3,200') + ' and ' + chip('US$56.70'));
+    assert.strictEqual(sb._chipAmounts('S$650k to S$1.25M'), chip('S$650k') + ' to ' + chip('S$1.25M'));
+    assert.strictEqual(sb._chipAmounts('JP\u00a5500, A$5 and CHF 40'), chip('JP\u00a5500') + ', ' + chip('A$5') + ' and ' + chip('CHF 40'));
+    assert.strictEqual(sb._chipAmounts('-\u2212S$5'.slice(1)), chip('\u2212S$5'));                    // the typographic minus is part of the amount
+    ['2 trades reference a deleted stock', '50% of take-home', 'Jan 2026', '12 trades and 3.5 shares', ''].forEach(t => assert.strictEqual(sb._chipAmounts(t), t, t));
+    assert.strictEqual(sb._chipAmounts(null), ''); assert.strictEqual(sb._chipAmounts(undefined), ''); assert.strictEqual(sb._chipAmounts(12), '12');
+    // the integrity bar and the hero estimate note use it, so the amounts in those sentences blur
+    assert.ok(extractFunction('renderDashboard').includes('${_chipAmounts(kjrEscape(i.msg))}'));
+    assert.ok(extractFunction('renderDashboard').includes('without a live price (<span class="money-chip">${fmt(estimateAmount,{dp:0})}</span>)'));
+  });
+
+  test('Recently deleted - the label of a trade, movement, CPF entry, income or expense carries an amount, so it blurs, and a stock, coin or account name does not', () => {
+    const sb = freshSandbox();
+    const tables = vm.runInContext('TRASH_AMOUNT_TABLES', sb);
+    assert.deepStrictEqual(Array.from(tables).sort(), ['cashTxns', 'cpfHistory', 'expenses', 'income', 'stockTxns']);
+    const src = extractFunction('renderTrash');
+    assert.ok(src.includes('<span class="trash-label${TRASH_AMOUNT_TABLES.indexOf(e.table) !== -1 ? \' money-chip\' : \'\'}">${kjrEscape(trashLabel(e.table, e.data))}</span>'));
+    // every table that is in the list builds a label with a number in it, and none of the others does
+    sb.DB.stocks = [{ id:'s1', symbol:'AAPL' }];
+    const label = (table, data) => vm.runInContext('trashLabel', sb)(table, data);
+    sb.fmtDateSG = d => d;
+    const digits = x => /\d/.test(x);
+    assert.ok(digits(label('stockTxns', { stockId:'s1', side:'buy', shares:10, date:'2026-03-01' })) && digits(label('cashTxns', { type:'deposit', amount:3200 })) && digits(label('cpfHistory', { type:'contribution', account:'OA', amount:2300 }))
+      && digits(label('income', { gross:8000 })) && digits(label('expenses', { category:'food', amount:45 })));
+    ['stocks', 'watchlist', 'crypto', 'realestate', 'cash', 'insurance', 'insuranceRiders'].forEach(t => assert.strictEqual(tables.indexOf(t), -1, t));
+  });
+
+  test('_hpTradeHtml - the fee is the one amount in the sub line, so it alone sits in a .money-chip, the date and the words stay readable', () => {
+    const sb = realEscape(freshSandbox());
+    sb._hpAmountHtml = text => text;
+    const row = extra => sb._hpTradeHtml(Object.assign({ sideText:'Bought', qtyText:'5', priceText:'US$100.00', valueText:'US$502.00', dateText:'10/03/2026', feesText:'' }, extra));
+    assert.ok(row({ feesText:'US$2.00' }).includes('<div class="hp-trade-s">10/03/2026 \u00b7 fees <span class="money-chip">US$2.00</span></div>'));
+    assert.ok(row({}).includes('<div class="hp-trade-s">10/03/2026</div>'));                                      // no fee: the same line as before
+    assert.ok(row({ dateText:'', feesText:'US$2.00' }).includes('<div class="hp-trade-s">fees <span class="money-chip">US$2.00</span></div>'));
+    assert.ok(row({ dateText:'', feesText:'' }).includes('<div class="hp-trade-s"></div>'));
+    assert.ok(row({ feesText:'<b>x</b>', dateText:'<i>d</i>' }).includes('&lt;i&gt;d&lt;/i&gt; \u00b7 fees <span class="money-chip">&lt;b&gt;x&lt;/b&gt;</span>'));   // both parts escaped
+  });
+
+  test('Undo toast - _deletedText names the record by its symbol or name, falls back to the kind of record, and is capped', () => {
+    const sb = freshSandbox();
+    assert.strictEqual(sb._deletedText('stocks', { symbol:'AAPL' }), 'Deleted AAPL');
+    assert.strictEqual(sb._deletedText('watchlist', { symbol:' MSFT ' }), 'Deleted MSFT');
+    assert.strictEqual(sb._deletedText('crypto', { symbol:'BTC' }), 'Deleted BTC');
+    assert.strictEqual(sb._deletedText('realestate', { name:'HDB Punggol' }), 'Deleted HDB Punggol');
+    assert.strictEqual(sb._deletedText('cash', { name:'DBS Multiplier' }), 'Deleted DBS Multiplier');
+    assert.strictEqual(sb._deletedText('insurance', { insurer:'Seed Life', plan:'Term 65' }), 'Deleted Seed Life Term 65');
+    assert.strictEqual(sb._deletedText('insurance', { insurer:'Seed Life' }), 'Deleted Seed Life');
+    assert.strictEqual(sb._deletedText('stockTxns', { id:'t1' }), 'Deleted trade'); assert.strictEqual(sb._deletedText('cashTxns', {}), 'Deleted cash movement');
+    assert.strictEqual(sb._deletedText('cpfHistory', undefined), 'Deleted CPF entry'); assert.strictEqual(sb._deletedText('insuranceRiders', null), 'Deleted rider');
+    assert.strictEqual(sb._deletedText('stocks', { symbol:'' }), 'Deleted stock'); assert.strictEqual(sb._deletedText('stocks', { symbol:null }), 'Deleted stock');
+    assert.strictEqual(sb._deletedText('nonsense', {}), 'Deleted entry'); assert.strictEqual(sb._deletedText('__proto__', {}), 'Deleted entry'); assert.strictEqual(sb._deletedText('constructor', {}), 'Deleted entry');
+    const long = sb._deletedText('realestate', { name:'N'.repeat(200) });
+    assert.strictEqual(long, 'Deleted ' + 'N'.repeat(39) + '…');
+    assert.strictEqual(sb._deletedText('stocks', { symbol:'<b>x</b>' }), 'Deleted <b>x</b>');                      // plain text: the toast sets textContent
+  });
+
+  /* The real undo stack and the three functions around it in a sandbox of their own (the shared sandbox's pushUndo stays a no-op), ids that stay distinct, and every
+     toast and dialog recorded. saveData bumps the save revision like the real one, so "something else saved in between" can be staged. */
+  function undoSandbox(db){
+    const sb = freshSandbox(Object.assign({ trash:[], stockTxns:[], cashTxns:[], insuranceRiders:[] }, db));
+    vm.runInContext('var _undoStack = [], _redoStack = []; var UNDO_MAX = 20;\n' + [extractFunction('_undoSnapshot'), extractFunction('pushUndo'), extractFunction('undoAction')].join('\n'), sb);
+    installStockRestoreSchema(sb);
+    let n = 0; sb.uid = t => t + '_u' + (++n);
+    sb.saveData = () => { vm.runInContext('_localSaveRevision++', sb); return true; };
+    const log = { toasts:[], confirms:[], answer:true, renders:0 };
+    sb.showToast = (m, k, a) => log.toasts.push({ m, k, a });
+    sb.confirm = m => { log.confirms.push(m); return log.answer; };
+    sb.renderAll = () => { log.renders++; };
+    sb.closeEntityModal = () => { sb._modalState = null; };
+    return { sb, log, stack: () => vm.runInContext('_undoStack.length', sb) };
+  }
+  const stockRow = (id, symbol) => ({ id, symbol, market:'US', sector:'', shares:3, avgCost:10, currency:'USD', notes:'n', createdAt:'2026-09-01T00:00:00.000Z', updatedAt:'2026-09-02T00:00:00.000Z' });
+
+  await testAsync('entityModalDelete - a delete nothing points at goes straight to the trash with no dialog, then Undo puts the database back exactly, record, place and trash list', async () => {
+    const rows = [stockRow('s1', 'AAA'), stockRow('s2', 'BBB'), stockRow('s3', 'CCC')];
+    const { sb, log, stack } = undoSandbox({ stocks:JSON.parse(JSON.stringify(rows)), trash:[{ id:'tr_old', table:'stocks', ts:'2026-01-01T00:00:00.000Z', data:stockRow('s0', 'OLD') }] });
+    const before = JSON.stringify(sb.localPersistPayload());
+    sb._modalState = { table:'stocks', item:JSON.parse(JSON.stringify(rows[1])), isNew:false };
+    assert.strictEqual(await sb.entityModalDelete(), true);
+    assert.strictEqual(log.confirms.length, 0);                                                      // no dialog
+    assert.deepStrictEqual(sb.DB.stocks.map(s => s.id), ['s1', 's3']); assert.strictEqual(sb.DB.trash.length, 2);
+    assert.strictEqual(sb._modalState, null); assert.strictEqual(stack(), 1);
+    const t = log.toasts.at(-1);
+    assert.deepStrictEqual([t.m, t.k, t.a.label, typeof t.a.fn], ['Deleted BBB', 'success', 'Undo', 'function']);
+    assert.strictEqual(await t.a.fn(), true);
+    assert.strictEqual(JSON.stringify(sb.localPersistPayload()), before);                           // the whole database, byte for byte
+    assert.deepStrictEqual(navPlain(sb.DB.stocks), rows);                                            // the record and its place
+    assert.deepStrictEqual(navPlain(sb.DB.trash.map(e => e.id)), ['tr_old']);                         // the trash as it was
+    assert.strictEqual(log.toasts.at(-1).m, 'Undone');
+    assert.strictEqual(vm.runInContext('_redoStack.length', sb), 1);                                  // Redo (Ctrl+Y) can put the delete back
+  });
+
+  await testAsync('entityModalDelete - the cascade cases keep their confirm, a refusal changes nothing, and Undo still restores exactly after a yes', async () => {
+    const stock = stockRow('s2', 'BBB');
+    const cash = { id:'c1', name:'DBS', account:'Savings', amount:100, asOf:'2026-01-01', currency:'SGD' };
+    const mk = () => undoSandbox({ stocks:[stockRow('s1', 'AAA'), stock], cash:[cash], stockTxns:[{ id:'t1', stockId:'s2', date:'2026-03-01', side:'buy', shares:1, price:1, fees:0 }, { id:'t2', stockId:'s1', cashAccountId:'c1', date:'2026-03-02', side:'buy', shares:1, price:1, fees:0 }],
+      cashTxns:[{ id:'m1', type:'deposit', cashAccountId:'c1', date:'2026-03-03', amount:5 }] });
+    // a stock with trades
+    let { sb, log, stack } = mk();
+    const before = JSON.stringify(sb.localPersistPayload());
+    log.answer = false;
+    sb._modalState = { table:'stocks', item:JSON.parse(JSON.stringify(stock)), isNew:false };
+    assert.strictEqual(await sb.entityModalDelete(), false);
+    assert.strictEqual(log.confirms.length, 1);
+    assert.ok(log.confirms[0].startsWith('This stock has 1 trade in the ledger that will be left orphaned.\n\nMove this entry to trash?'));
+    assert.strictEqual(JSON.stringify(sb.localPersistPayload()), before); assert.strictEqual(stack(), 0); assert.strictEqual(log.toasts.length, 0);   // nothing moved, no undo step burned, no toast
+    log.answer = true;
+    assert.strictEqual(await sb.entityModalDelete(), true);
+    assert.strictEqual(sb.DB.stocks.length, 1); assert.strictEqual(log.toasts.at(-1).m, 'Deleted BBB'); assert.strictEqual(log.toasts.at(-1).a.label, 'Undo');
+    await log.toasts.at(-1).a.fn();
+    assert.strictEqual(JSON.stringify(sb.localPersistPayload()), before);
+    // a cash account that movements and linked trades point at
+    ({ sb, log, stack } = mk());
+    log.answer = false;
+    sb._modalState = { table:'cash', item:JSON.parse(JSON.stringify(cash)), isNew:false };
+    assert.strictEqual(await sb.entityModalDelete(), false);
+    assert.ok(log.confirms[0].startsWith('This account is referenced by 1 cash movement and 1 linked trade. Deleting it will leave those entries pointing at a missing account and unbalance the books.'));
+    assert.strictEqual(sb.DB.cash.length, 1);
+    // the source says so too: the dialog sits under `if (refWarning)` and the delete order is unchanged
+    const src = extractFunction('entityModalDelete');
+    assert.ok(src.includes('if (refWarning){') && src.indexOf('if (refWarning){') < src.indexOf('confirm(') && src.indexOf('confirm(') < src.indexOf('pushUndo()'));
+    assert.strictEqual((src.match(/confirm\(/g) || []).length, 1);
+    assert.ok(src.indexOf('pushUndo()') < src.indexOf('sendToTrash(') && src.indexOf('sendToTrash(') < src.indexOf('showToast(_deletedText('));
+  });
+
+  await testAsync('entityModalDelete - a policy with riders deletes without a dialog (its riders are never removed) and a record the save did not keep gets no Undo', async () => {
+    const policy = { id:'p1', insurer:'Seed Life', plan:'Term 65', type:'Term Life', status:'Active' };
+    const { sb, log } = undoSandbox({ insurance:[policy], insuranceRiders:[{ id:'r1', policyId:'p1', name:'CI rider', benefit:'Critical Illness', cover:1 }] });
+    sb._modalState = { table:'insurance', item:JSON.parse(JSON.stringify(policy)), isNew:false };
+    const before = JSON.stringify(sb.localPersistPayload());
+    assert.strictEqual(await sb.entityModalDelete(), true);
+    assert.strictEqual(log.confirms.length, 0); assert.strictEqual(log.toasts.at(-1).m, 'Deleted Seed Life Term 65');
+    assert.strictEqual(sb.DB.insuranceRiders.length, 1);
+    await log.toasts.at(-1).a.fn();
+    assert.strictEqual(JSON.stringify(sb.localPersistPayload()), before);
+    // the save fails: the records are still gone from memory, but nothing is announced and there is nothing to undo
+    const bad = undoSandbox({ stocks:[stockRow('s1', 'AAA')] });
+    bad.sb.saveData = () => false;
+    bad.sb._modalState = { table:'stocks', item:stockRow('s1', 'AAA'), isNew:false };
+    assert.strictEqual(await bad.sb.entityModalDelete(), false);
+    assert.strictEqual(bad.log.toasts.length, 0);
+  });
+
+  await testAsync('undoDeleteToast - when something else was saved since the delete only that record comes back, from the trash, and with nothing left to restore it says so', async () => {
+    const rows = [stockRow('s1', 'AAA'), stockRow('s2', 'BBB')];
+    const { sb, log } = undoSandbox({ stocks:JSON.parse(JSON.stringify(rows)) });
+    sb._modalState = { table:'stocks', item:JSON.parse(JSON.stringify(rows[1])), isNew:false };
+    await sb.entityModalDelete();
+    const toast = log.toasts.at(-1);
+    // an ordinary edit lands before Undo is pressed
+    sb.pushUndo(); sb.DB.stocks[0].shares = 99; sb.saveData();
+    assert.strictEqual(await toast.a.fn(), true);
+    assert.deepStrictEqual(sb.DB.stocks.map(s => [s.id, s.shares]), [['s1', 99], ['s2', 3]]);       // the later edit is kept, the record is back
+    assert.strictEqual(sb.DB.trash.length, 0);
+    const back = sb.DB.stocks.find(s => s.id === 's2');
+    assert.deepStrictEqual([back.symbol, back.market, back.avgCost, back.notes, back.createdAt], ['BBB', 'US', 10, 'n', '2026-09-01T00:00:00.000Z']);
+    assert.strictEqual(log.toasts.at(-1).m, 'Restored');
+    // the same, and the trash entry is already gone (purged): a plain message, no state change
+    const two = undoSandbox({ stocks:JSON.parse(JSON.stringify(rows)) });
+    two.sb._modalState = { table:'stocks', item:JSON.parse(JSON.stringify(rows[1])), isNew:false };
+    await two.sb.entityModalDelete();
+    const t2 = two.log.toasts.at(-1);
+    two.sb.pushUndo(); two.sb.saveData(); two.sb.DB.trash = [];
+    const snap = JSON.stringify(two.sb.localPersistPayload());
+    assert.strictEqual(await t2.a.fn(), false);
+    assert.strictEqual(two.log.toasts.at(-1).k, 'error'); assert.ok(/can no longer be undone from here/.test(two.log.toasts.at(-1).m));
+    assert.strictEqual(JSON.stringify(two.sb.localPersistPayload()), snap);
+    // no step at all (pushUndo was mocked out, a save revision from elsewhere): never throws
+    const bare = freshSandbox({ trash:[] }); bare.showToast = (m, k) => { bare.last = [m, k]; };
+    vm.runInContext('var _undoStack = [], _redoStack = [];', bare);
+    assert.strictEqual(await bare.undoDeleteToast(undefined), false); assert.strictEqual(await bare.undoDeleteToast({}), false); assert.strictEqual(bare.last[1], 'error');
+    // a failure inside the undo is reported, never an unhandled rejection from a toast click
+    const boom = undoSandbox({ stocks:JSON.parse(JSON.stringify(rows)) });
+    boom.sb.console = { error(){} };
+    boom.sb._modalState = { table:'stocks', item:JSON.parse(JSON.stringify(rows[1])), isNew:false };
+    await boom.sb.entityModalDelete();
+    const t4 = boom.log.toasts.at(-1);
+    boom.sb.undoAction = async () => { throw new Error('disk full'); };
+    assert.strictEqual(await t4.a.fn(), false);
+    assert.strictEqual(boom.log.toasts.at(-1).k, 'error'); assert.strictEqual(boom.log.toasts.at(-1).m, 'Undo failed: disk full. The record is still in Settings, Recently deleted.');
+    // a snapshot that is still the newest step but whose save revision moved is not trusted either
+    const moved = undoSandbox({ stocks:JSON.parse(JSON.stringify(rows)) });
+    moved.sb._modalState = { table:'stocks', item:JSON.parse(JSON.stringify(rows[1])), isNew:false };
+    await moved.sb.entityModalDelete();
+    const t3 = moved.log.toasts.at(-1);
+    vm.runInContext('_localSaveRevision++', moved.sb);                                              // a background write (FX, salary engine, a pull) saved in between
+    assert.strictEqual(await t3.a.fn(), true);
+    assert.strictEqual(moved.log.toasts.at(-1).m, 'Restored');                                       // from the trash, not a whole-database rollback
+  });
+
+  await testAsync('cleanOrphanedTrades - keeps its confirm: a trade whose stock or cash account is gone fails the trash restore, so an Undo for the batch would not be real', async () => {
+    const trades = [{ id:'t1', stockId:'ghost', date:'2026-03-01', side:'buy', shares:1, price:1, fees:0 }, { id:'t2', stockId:'s1', date:'2026-03-02', side:'buy', shares:1, price:1, fees:0 },
+      { id:'t3', stockId:'s1', cashAccountId:'gone', date:'2026-03-03', side:'buy', shares:1, price:1, fees:0 }];
+    const { sb, log, stack } = undoSandbox({ stocks:[stockRow('s1', 'AAA')], cash:[], stockTxns:JSON.parse(JSON.stringify(trades)) });
+    // the trade form's own rules: the stock and the funding account must be ones that exist now
+    sb.ENTITY_SCHEMAS.stockTxns = { fields:[
+      { key:'stockId', label:'Stock', type:'select', required:true, optionsFn:() => (sb.DB.stocks || []).map(s => [s.id, s.symbol]) },
+      { key:'date', label:'Trade date', type:'date', required:true },
+      { key:'side', label:'Side', type:'select', required:true, options:[['buy', 'Buy'], ['sell', 'Sell']], default:'buy' },
+      { key:'shares', label:'Shares', type:'number', required:true }, { key:'price', label:'Price per share', type:'number', required:true, min:'0' }, { key:'fees', label:'Fees', type:'number', min:'0' },
+      { key:'cashAccountId', label:'Funded from (cash account)', type:'select', optionsFn:() => [['', 'Not linked']].concat((sb.DB.cash || []).map(c => [c.id, c.name])) },
+      { key:'notes', label:'Notes', type:'textarea' }] };
+    const before = JSON.stringify(sb.localPersistPayload());
+    log.answer = false;
+    await sb.cleanOrphanedTrades();
+    assert.strictEqual(log.confirms.length, 1);
+    assert.strictEqual(log.confirms[0], 'Move 2 orphaned trades to trash? You can restore from Settings → Recently deleted.');
+    assert.strictEqual(JSON.stringify(sb.localPersistPayload()), before); assert.strictEqual(log.toasts.length, 0); assert.strictEqual(stack(), 0);     // a refusal changes nothing
+    log.answer = true;
+    await sb.cleanOrphanedTrades();
+    assert.deepStrictEqual(sb.DB.stockTxns.map(t => t.id), ['t2']);
+    assert.deepStrictEqual([log.toasts.at(-1).m, log.toasts.at(-1).k, log.toasts.at(-1).a], ['Moved 2 orphaned trades to trash', 'success', undefined]);   // a plain toast, no Undo promised
+    // why: each orphan fails the restore's validation, so the trash cannot give them back until the stock or account is added again
+    const ids = sb.DB.trash.map(e => e.id);
+    assert.strictEqual(ids.length, 2);
+    for (const id of ids) assert.strictEqual(await sb.restoreFromTrash(id), false);
+    assert.strictEqual(sb.DB.trash.length, 2); assert.strictEqual(sb.DB.stockTxns.length, 1);
+    assert.ok(log.toasts.at(-1).m.startsWith('Cannot restore this entry:') && log.toasts.at(-1).m.endsWith('It remains in Recently deleted.'));
+    // nothing orphaned: nothing happens
+    const calm = undoSandbox({ stocks:[stockRow('s1', 'AAA')], stockTxns:[trades[1]] });
+    await calm.sb.cleanOrphanedTrades();
+    assert.strictEqual(calm.log.confirms.length + calm.log.toasts.length + calm.stack(), 0);
+    // the source keeps one confirm before any move, and no undo step or Undo toast is wired to it
+    const src = extractFunction('cleanOrphanedTrades');
+    assert.strictEqual((src.match(/confirm\(/g) || []).length, 1);
+    assert.ok(src.indexOf('confirm(') < src.indexOf("sendToTrash('stockTxns', id)"));
+    assert.ok(!src.includes('pushUndo') && !src.includes('undoDeleteToast'));
+  });
+
+  test('Chart.js draws without animation under reduced motion, every chart config asks _reducedMotion for its duration', () => {
+    assert.strictEqual((appSrc.match(/animation:\{duration:_reducedMotion\(\) \? 0 : 300\}/g) || []).length, 5);
+    assert.strictEqual(/animation:\{duration:300\}/.test(appSrc), false);                        // no chart keeps a fixed 300ms
+    // the five configs above are every chart config: three through _pbMountChart and two built directly (insurance premiums, projections)
+    assert.strictEqual((appSrc.match(/new Chart\(canvas\.getContext\('2d'\), \{|_pbMountChart\(host\.canvasId, \{/g) || []).length, 5);
+  });
+
+  test('Toasts with an action - the Undo is a real button with a focus ring, the toast holds still while the pointer or the keyboard is on it, and the host announces it politely', () => {
+    const src = extractFunction('showToast');
+    assert.ok(src.includes("btn.className = 'toast-act'") && src.includes("document.createElement('button')") && src.includes("btn.type = 'button'"));
+    assert.strictEqual(src.includes('style.cssText'), false);                                          // no inline style on the button, the class carries it
+    ['mouseenter', 'focusin', 'mouseleave', 'focusout'].forEach(ev => assert.ok(src.includes("el.addEventListener('" + ev + "'"), ev));
+    assert.ok(src.includes('arm((action || kind === \'error\') ? 8000 : 5000);') && src.includes('arm(3000)'));
+    assert.ok(src.indexOf('if (hasAction){\n    // A toast with an action holds still') > src.indexOf('arm((action'));        // a plain toast never pauses
+    assert.ok(indexSrc.includes('<div id="toast-host" aria-live="polite" role="status"></div>'));
+    assert.ok(indexSrc.includes('.toast-act{margin-left:12px;padding:2px 4px;border:0;border-radius:4px;background:none;color:inherit;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer}'));
+    assert.ok(indexSrc.includes('.toast-act:focus-visible{outline:2px solid var(--accent);outline-offset:2px}'));
+    assert.ok(extractFunction('togglePrivacy').includes("showToast(on ? 'Amounts hidden' : 'Amounts shown');"));    // plain toasts keep their shape
+  });
+
+  test('Step 8b styles - the flash fades over 1.2s from the gain and loss soft tokens behind the content, the skeleton shimmers on the surface tokens, and every animation has a reduced-motion override', () => {
+    const start = indexSrc.indexOf('/* PRICE FLASH AND LOADING SKELETONS (Step 8b).');
+    assert.ok(start > -1);
+    const css = indexSrc.slice(start, indexSrc.indexOf('</style>', start));
+    assert.ok(css.includes('@keyframes flash-fade{from{opacity:1}to{opacity:0}}'));
+    assert.ok(css.includes('animation:flash-fade 1.2s ease-out var(--px-delay,0s) both'));
+    assert.ok(css.includes('.flash-up:not(tr)::before,tr.flash-up > td::before{background:var(--gain-soft)}') && css.includes('.flash-down:not(tr)::before,tr.flash-down > td::before{background:var(--loss-soft)}'));
+    assert.ok(css.includes('z-index:-1') && css.includes('isolation:isolate') && css.includes('pointer-events:none'));                       // a layer behind the content, the layout never moves
+    assert.ok(css.includes('tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}'));                                  // the sticky symbol column stays sticky
+    assert.ok(css.includes('@keyframes skel-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}'));
+    assert.ok(css.includes('background:linear-gradient(90deg,var(--bg3) 25%,var(--bg4) 50%,var(--bg3) 75%)') && css.includes('animation:skel-shimmer 1.4s linear infinite'));
+    assert.strictEqual(/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(css), false);                                                                      // tokens only
+    // reduced motion: no flash layer at all, a still bar
+    const rm = css.slice(css.indexOf('@media (prefers-reduced-motion:reduce){'));
+    assert.ok(rm.includes('.flash-up:not(tr)::before,.flash-down:not(tr)::before,tr.flash-up > td::before,tr.flash-down > td::before{content:none;animation:none}') && rm.includes('.skel{animation:none}'));
+    // every keyframe in the page has its override: a new one without a line here fails this on purpose
+    const names = Array.from(indexSrc.matchAll(/@keyframes ([a-z-]+)/g)).map(m => m[1]).sort();
+    assert.deepStrictEqual(names, ['flash-fade', 'hero-pulse', 'pulse', 'skel-shimmer', 'tin']);
+    const overrides = { pulse:'.sync-pill::before,.sync-dot::before{animation:none}', tin:'.toast{animation:none}', 'hero-pulse':'.hero-dot.end::after{animation:none', 'flash-fade':'content:none;animation:none', 'skel-shimmer':'.skel{animation:none}' };
+    const regions = Array.from(indexSrc.matchAll(/@media \(prefers-reduced-motion: ?reduce\)/g)).map(m => indexSrc.slice(m.index, m.index + 400)).join('\n');
+    names.forEach(n => assert.ok(regions.includes(overrides[n]), n + ' has no reduced-motion override'));
+    // the panel slide and the palette fade were already covered, and stay so
+    assert.ok(indexSrc.includes('@media (prefers-reduced-motion:reduce){\n  .hp-overlay,.hp-overlay::before,.hp-panel,.cp-overlay{transition:none}\n}'));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

@@ -227,21 +227,31 @@ html:not(.dark) .tt-light,html.dark .tt-dark{display:none}
   }
 }
 
-/* PRIVACY MODE, blur every money figure. Blur is em-based so it scales with
-   the text size and stays unreadable from the 40px net-worth hero down to 12px
-   table cells. On pointer devices, hovering a single figure reveals just that
-   one so the owner can still check a number without switching the mode off. */
+/* PRIVACY MODE (Hide amounts), blur every money figure by 7px over 250ms so an
+   onlooker cannot read the net worth or a balance off the screen. Percentages
+   stay readable on purpose: a table cell or summary figure that holds one carries
+   .pct and is left out (td.num:not(.pct), .h-summary-value:not(.pct)), and the
+   day move, return, share and drift texts are not in this list at all. The
+   transition sits on the figures themselves, so the blur eases in and out. On
+   pointer devices, hovering a single figure reveals just that one so the owner
+   can still check a number without switching the mode off. Under reduced motion
+   the blur goes on and off at once. */
+.dash-hero-value,.h-summary-value,.metric-value,.money-chip{transition:filter .25s ease}
+td.num{transition:background 0.12s ease,filter .25s ease}
 html.privacy .dash-hero-value,
-html.privacy .h-summary-value,
+html.privacy .h-summary-value:not(.pct),
 html.privacy .metric-value,
 html.privacy .money-chip,
-html.privacy td.num{filter:blur(0.45em);transition:filter .12s ease;-webkit-user-select:none;user-select:none;cursor:default}
+html.privacy td.num:not(.pct){filter:blur(7px);-webkit-user-select:none;user-select:none;cursor:default}
 @media (hover:hover){
   html.privacy .dash-hero-value:hover,
-  html.privacy .h-summary-value:hover,
+  html.privacy .h-summary-value:not(.pct):hover,
   html.privacy .metric-value:hover,
   html.privacy .money-chip:hover,
-  html.privacy td.num:hover{filter:none;-webkit-user-select:auto;user-select:auto}
+  html.privacy td.num:not(.pct):hover{filter:none;-webkit-user-select:auto;user-select:auto}
+}
+@media (prefers-reduced-motion:reduce){
+  .dash-hero-value,.h-summary-value,.metric-value,.money-chip,td.num{transition:none}
 }
 
 /* SYNC STATE. Two places show it: a row in the sidebar footer (a coloured dot and the words, "Synced 2m ago"),
@@ -440,6 +450,12 @@ html:not(.dark) .sheet-version{color:var(--text)}
 .toast.error{border-color:var(--red-border);background:var(--red-soft);color:var(--red)}
 .toast.success{border-color:var(--green-border);background:var(--green-soft);color:var(--green)}
 @keyframes tin{from{transform:translateY(8px);opacity:0}to{transform:translateY(0);opacity:1}}
+/* The action on a toast (Undo): a real button, so the keyboard reaches it, with its own focus ring (the toast is glass, the accent ring reads on both themes). */
+.toast-act{margin-left:12px;padding:2px 4px;border:0;border-radius:4px;background:none;color:inherit;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer}
+.toast-act:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* On a touch screen the Undo is a 44px target, the extra height borrowed from the toast's own padding so the toast stays one line tall. */
+@media (hover:none){.toast-act{display:inline-flex;align-items:center;min-height:44px;margin:-10px -6px -10px 6px;padding:0 14px;vertical-align:middle}}
+@media (prefers-reduced-motion:reduce){.toast{animation:none}}
 
 /* PHASE CHIP */
 .phase-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;background:var(--accent-soft);border:1px solid var(--accent-border);color:var(--accent);font-size:12px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase}
@@ -1164,6 +1180,28 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 @media (max-width:360px){
   .hl-of{display:none}
   #page-crypto .h-toolbar .freshness,#page-cash .h-toolbar .freshness{order:3;flex:0 0 100%;justify-content:center}
+}
+
+/* PRICE FLASH AND LOADING SKELETONS (Step 8b). A refresh that moves a price puts .flash-up or .flash-down on the rows and the price block that show it (the script
+   finds them by data-px) and the tint fades out over 1.2s. The tint is a layer behind the content, so the layout never moves, and --px-delay (negative) lets a
+   repaint inside the window pick the fade up where it was. A table row flashes through its cells. The arrows and signs in the rows say the same thing, the tint is
+   decoration, and under reduced motion it never shows. A skeleton is one shimmering bar where a figure will be, on the existing surface tokens, still under reduced motion. */
+@keyframes flash-fade{from{opacity:1}to{opacity:0}}
+.flash-up:not(tr),.flash-down:not(tr),tr.flash-up > td,tr.flash-down > td{position:relative;isolation:isolate}
+tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
+.flash-up:not(tr)::before,.flash-down:not(tr)::before,tr.flash-up > td::before,tr.flash-down > td::before{content:"";position:absolute;inset:calc(var(--flash-bleed-y,0px) * -1) calc(var(--flash-bleed,0px) * -1);z-index:-1;border-radius:var(--flash-r,inherit);pointer-events:none;animation:flash-fade 1.2s ease-out var(--px-delay,0s) both}
+.flash-up:not(tr)::before,tr.flash-up > td::before{background:var(--gain-soft)}
+.flash-down:not(tr)::before,tr.flash-down > td::before{background:var(--loss-soft)}
+.dash-li,.hp-price{--flash-bleed:8px;--flash-r:8px}
+.hp-price{--flash-bleed-y:6px}
+@keyframes skel-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+.skel{display:inline-block;width:56px;max-width:100%;height:12px;border-radius:6px;vertical-align:middle;background:linear-gradient(90deg,var(--bg3) 25%,var(--bg4) 50%,var(--bg3) 75%);background-size:200% 100%;animation:skel-shimmer 1.4s linear infinite}
+.dash-hval .skel{width:68px;height:13px}
+.dash-chg .skel{width:48px}
+.dash-sub .skel{width:40px;height:10px}
+@media (prefers-reduced-motion:reduce){
+  .flash-up:not(tr)::before,.flash-down:not(tr)::before,tr.flash-up > td::before,tr.flash-down > td::before{content:none;animation:none}
+  .skel{animation:none}
 }
 </style>
 </head>
@@ -2181,12 +2219,12 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.74"></script>
-<script src="Worker/kjr-sortable.js?v=2.74"></script>
-<script src="Worker/kjr-vault.js?v=2.74"></script>
-<script src="Worker/kjr-migration.js?v=2.74"></script>
-<script src="Worker/supabase.js?v=2.74"></script>
-<script src="Worker/kjr-nas.js?v=2.74"></script>
-<script src="Worker/app.js?v=2.74"></script>
+<script src="Worker/kjr-core.js?v=2.75"></script>
+<script src="Worker/kjr-sortable.js?v=2.75"></script>
+<script src="Worker/kjr-vault.js?v=2.75"></script>
+<script src="Worker/kjr-migration.js?v=2.75"></script>
+<script src="Worker/supabase.js?v=2.75"></script>
+<script src="Worker/kjr-nas.js?v=2.75"></script>
+<script src="Worker/app.js?v=2.75"></script>
 </body>
 </html>
