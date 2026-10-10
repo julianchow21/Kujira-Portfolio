@@ -287,7 +287,8 @@ test('unconfigured account and billing controls stay disabled', () => {
 
 test('synthetic Auth preview rejects stale bytes and never touches host storage', () => {
   assert.match(previewSrc, /index\.html\?v=auth-preview-\' \+ Date\.now\(\)/);
-  assert.match(previewSrc, /version\[1\] !== 'v0\.14 \(03 Oct\)'/);
+  const appVersion = /const APP = \{[\s\S]*?version:'([^']+)'/.exec(indexSrc)[1];
+  assert.ok(previewSrc.includes("version[1] !== '" + appVersion + "'"), 'auth preview must expect the current APP.version ' + appVersion);
   assert.match(previewSrc, /id="account-btn"/);
   assert.match(previewSrc, /Object\.defineProperty\(window, 'localStorage'/);
   assert.match(previewSrc, /Object\.defineProperty\(window, 'sessionStorage'/);
