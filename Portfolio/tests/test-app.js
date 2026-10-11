@@ -170,8 +170,8 @@ const FUNCTION_TARGETS = [
   '_holdingRowHtml', '_holdingTotalHtml', '_holdingsListHtml', '_cashListModel', '_cashRowHtml', '_cashListHtml',
   '_cashTxnView', '_ledgerRowHtml', '_cashTxnRowHtml', '_cpfRowView', '_cpfRowHtml',
   // Stocks page ledgers on the phone (v2.76): the Watchlist, Upcoming dividends and Trade history views and rows, and the three real renderers
-  '_wlListModel', '_wlLabel', '_wlRowHtml', '_dividendView', '_dividendRowHtml', '_stockTxnView', '_stockTxnRowHtml', '_stockPositionView', '_stockPositionRowHtml', '_stockGroupHtml',
-  'renderWatchlist', 'renderDividendTimeline', 'renderStockTxns',
+  '_wlTarget', '_wlListModel', '_wlLabel', '_wlRowHtml', '_dividendView', '_dividendRowHtml', '_stockTxnView', '_stockTxnRowHtml', '_stockPositionView', '_stockPositionRowHtml', '_stockGroupHtml',
+  'renderWatchlist', 'renderBoard', 'renderDividendTimeline', 'renderStockTxns',
   'moreMenuPick', '_moreMenuHtml', '_chipSelectHtml', '_stockSortChipOptions', 'setStockSortTo', 'stocksSortPick',
   '_chipKeep', '_chipRestore', 'cpfChipFilter', 'cpfClearFilters', '_syncCpfChips',
   'fmtSgdOrNative', '_nativeMoneyText', 'fmtPct', '_plArrow', '_moneyHtml', 'fmtDateSG', '_parseDateOnlyLocal', 'cpfTypeLabel',
@@ -193,7 +193,7 @@ const FUNCTION_TARGETS = [
   '_deletedText', 'undoDeleteToast', 'sendToTrash', 'cleanOrphanedTrades', '_chipAmounts', 'trashLabel',
   // Orphaned trades in Recently deleted: the batch move and the trim that keeps a trade's stock and account, the label, the plan, the guards and the compound restore
   'sharesHeldAsOf', '_moveToTrash', '_trashParentIds', '_trimTrash', '_trashParentEntry', '_trashTradeSymbol', '_tradeRestorePlan', '_tradeRestoreGuard',
-  '_placeRestoredRow', '_trashStage', '_prepareTrashRestore', 'renderTrash'
+  '_placeRestoredRow', '_trashStage', '_holdingKey', '_duplicateHoldingGuard', '_prepareTrashRestore', 'renderTrash'
 ];
 const CONST_TARGETS = ['APP_VERSION', 'APP_DISPLAY_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'LIST_DASH', 'CPF_TYPE_LABEL', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState',
   'HP_HISTORY_RANGE', 'HP_TRADES_SHOWN', 'HP_ACTIONS', 'PALETTE_CAP', 'PALETTE_GROUPS', 'CP_PLUS_ICON', 'CP_REFRESH_ICON', 'EYE_SVG', 'EYE_OFF_SVG',
@@ -8289,6 +8289,389 @@ async function runTests(){
     names.forEach(n => assert.ok(regions.includes(overrides[n]), n + ' has no reduced-motion override'));
     // the panel slide and the palette fade were already covered, and stay so
     assert.ok(indexSrc.includes('@media (prefers-reduced-motion:reduce){\n  .hp-overlay,.hp-overlay::before,.hp-panel,.cp-overlay{transition:none}\n}'));
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     p278, v2.78 polish: dim text in the light modal, the idle theme segment, the dark danger text and the light cyclical chip, the blank Watchlist target, and the
+     second-holding question on a restore. Ratios come from the declared tokens, composited the way the browser stacks them (the same maths as p277 above), and the
+     stylesheet is read as text. Every test name starts with p278.
+     ═══════════════════════════════════════════════════════════════════════ */
+  const p278 = (() => {
+    const { rgb, ratio, over, light, dark, hex, rgba, rules } = p277;
+    const scrim = +/\.overlay\{[^}]*background:rgba\(0,0,0,([\d.]+)\)/.exec(indexSrc)[1];
+    const tok = (blk, n) => rgb(hex(blk, n));
+    // the modal fill: --glass-strong over the scrim over what is behind it (the page, a card, or black as the floor)
+    const modalFill = (blk, behind) => { const g = rgba(hex(blk, 'glass-strong')); return over(g.c, g.a, over([0, 0, 0], scrim, behind)); };
+    // an element's --glass over the surface under it (the idle segment of a toggle over a card)
+    const glassOver = (blk, behind) => { const g = rgba(hex(blk, 'glass')); return over(g.c, g.a, behind); };
+    const body = sel => { const r = rules.find(o => o.sel === sel); assert.ok(r, sel + ' rule missing'); return r.body; };
+    const colour = sel => { const m = /(^|;)color:([^;]+)(;|$)/.exec(body(sel)); assert.ok(m, sel + ' has no colour'); return m[2]; };
+    // ids, then classes, attributes and pseudo-classes (:where() counts for nothing), then elements: enough for the selectors compared below
+    const specificity = sel => {
+      sel = sel.replace(/:where\([^)]*\)/g, '');
+      return [(sel.match(/#[\w-]+/g) || []).length,
+        (sel.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[\w-]+(\([^)]*\))?/g) || []).length,
+        (sel.match(/(^|[\s>+~])[a-zA-Z][\w-]*/g) || []).length];
+    };
+    const f2 = n => n.toFixed(2);
+    return { rgb, ratio, over, light, dark, hex, rgba, rules, scrim, tok, modalFill, glassOver, body, colour, specificity, f2 };
+  })();
+
+  test('p278 item 1 - a light modal re-points the dim token at --text2: --text3 is 3.74:1 on the grey modal fill, --text2 is 5.48:1 (4.66:1 over a black backdrop), dark is untouched, and every inner surface clears 4.5:1', () => {
+    const { rgb, ratio, light, dark, hex, tok, modalFill, f2, body, rules } = p278;
+    const t2 = tok(light, 'text2'), t3 = tok(light, 'text3');
+    const fill = modalFill(light, tok(light, 'bg')), overCard = modalFill(light, tok(light, 'bg2')), floor = modalFill(light, [0, 0, 0]);
+    assert.deepStrictEqual(fill.map(Math.round), [215, 215, 215]);                                   // the #d7d7d7 the More sheet comment calls grey
+    // before: the label and hint colour, --text3, is under 4.5:1 on that fill
+    assert.strictEqual(f2(ratio(t3, fill)), '3.74');
+    assert.ok(ratio(t3, fill) < 4.5);
+    // after: --text2 clears it on the page, over a card, and even over a black backdrop (the floor, a darker fill than any real page gives)
+    assert.strictEqual(f2(ratio(t2, fill)), '5.48');
+    assert.strictEqual(f2(ratio(t2, overCard)), '5.52');
+    assert.strictEqual(f2(ratio(t2, floor)), '4.66');
+    [fill, overCard, floor].forEach(f => assert.ok(ratio(t2, f) >= 4.5));
+    // the fix is one token re-point on the light modal, both the token and its --tx3 alias (the alias was resolved at :root, so it needs its own line)
+    assert.strictEqual(body('html:not(.dark) .modal'), '--text3:var(--text2);--tx3:var(--text2)');
+    // so the Edit dialog's label and hint, and the setup wizard's inline help line, all follow, while their own rules still read --text3 (outside a modal, and in dark, nothing moved)
+    assert.ok(/(^|;)color:var\(--text3\)(;|$)/.test(body('label.lbl')) && /(^|;)color:var\(--text3\)(;|$)/.test(body('.hint')));
+    assert.ok(appSrc.includes('<p id="sw-url-help" style="margin-top:14px;font-size:12px;color:var(--text3)">'));
+    assert.ok(appSrc.includes('<label class="lbl" for="${fid}">') && appSrc.includes('const hint = f.hint ? `<div class="hint">'));
+    // the dim parts that sit on a surface of their own inside the modal (a card, a code box, the sticky table cells) are --text2 there too, and clear 4.5:1 on each
+    const inner = { 'bg2': tok(light, 'bg2'), 'bg3': tok(light, 'bg3'), 'bg4': tok(light, 'bg4'), 'surface-solid': rgb(hex(light, 'surface-solid')) };
+    Object.keys(inner).forEach(n => assert.ok(ratio(t2, inner[n]) >= 4.5, '--text2 on ' + n));
+    assert.deepStrictEqual(Object.keys(inner).map(n => f2(ratio(t2, inner[n]))), ['7.89', '6.74', '6.21', '7.89']);
+    // dark is untouched: --text3 already clears 4.5:1 on the dark modal fill (nominal, over a card and over black), and there is no dark modal override
+    const dt3 = tok(dark, 'text3');
+    assert.strictEqual(f2(ratio(dt3, modalFill(dark, tok(dark, 'bg')))), '5.00');
+    assert.strictEqual(f2(ratio(dt3, modalFill(dark, tok(dark, 'bg2')))), '4.88');
+    assert.strictEqual(f2(ratio(dt3, modalFill(dark, [0, 0, 0]))), '5.21');
+    assert.strictEqual(rules.some(o => /^html\.dark\s+\.modal\b/.test(o.sel) || o.sel === '.modal' && /--text3/.test(o.body)), false);
+    // the comment quotes the real figures
+    ['--text3 is only 3.74:1 on it', '--text2 is 5.48:1 there (4.66 even over a black backdrop)', 'Dark --text3 is 5.00:1 on the dark modal fill and stays']
+      .forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+  });
+
+  test('p278 item 2 - the idle theme segment is --text2, as the currency toggle\'s is: dark --text3 is 4.22:1 on the glass over a card and --text2 is 6.08:1 (light 5.38:1 and 7.89:1)', () => {
+    const { light, dark, tok, ratio, glassOver, f2, body, colour, rules } = p278;
+    const dFill = glassOver(dark, tok(dark, 'bg2')), lFill = glassOver(light, tok(light, 'bg2'));
+    assert.strictEqual(f2(ratio(tok(dark, 'text3'), dFill)), '4.22');                                // before
+    assert.ok(ratio(tok(dark, 'text3'), dFill) < 4.5);
+    assert.strictEqual(f2(ratio(tok(dark, 'text2'), dFill)), '6.08');                                // after
+    assert.strictEqual(f2(ratio(tok(light, 'text3'), lFill)), '5.38');
+    assert.strictEqual(f2(ratio(tok(light, 'text2'), lFill)), '7.89');
+    assert.ok(ratio(tok(dark, 'text2'), dFill) >= 4.5 && ratio(tok(light, 'text2'), lFill) >= 4.5);
+    assert.strictEqual(colour('.theme-toggle button'), 'var(--text2)');
+    assert.strictEqual(colour('.theme-toggle button'), colour('.ccy-toggle button'));                // the same idle colour on both toggles
+    // the hover and the selected segment are untouched, and no theme-specific override was added
+    assert.ok(/(^|;)color:var\(--text\)(;|$)/.test(body('.theme-toggle button:hover')));
+    assert.strictEqual(body('.theme-toggle button.active'), 'background:var(--accent);color:var(--on-accent)');
+    assert.strictEqual(rules.some(o => /theme-toggle button/.test(o.sel) && /html(\.dark|:not\(\.dark\))/.test(o.sel)), false);
+    assert.ok(indexSrc.includes('dark --text3 is 4.22:1 on the glass over a card (--text2 is 6.08:1, and 7.89:1 in light)'));
+  });
+
+  test('p278 item 3 - the dark danger text and the light cyclical chip clear 4.5:1 with a colour built from the existing tokens (--loss in dark, --amber-ink in light), the base --red and --amber and the soft fills are untouched, and the disabled and hover states still win', () => {
+    const { light, dark, hex, tok, ratio, over, f2, body, colour, rules, specificity } = p278;
+    // before
+    assert.strictEqual(f2(ratio(tok(dark, 'red'), tok(dark, 'red-soft'))), '4.22');
+    assert.strictEqual(f2(ratio(tok(light, 'amber'), tok(light, 'amber-soft'))), '4.12');
+    // after: dark takes --loss, light takes --amber-ink, a fifth of --text mixed into --amber (color-mix in srgb is a straight blend of the channels)
+    assert.strictEqual(f2(ratio(tok(dark, 'loss'), tok(dark, 'red-soft'))), '5.83');
+    const mixed = over(tok(light, 'amber'), 0.8, tok(light, 'text'));
+    assert.deepStrictEqual(mixed.map(Math.round), [129, 91, 21]);
+    assert.strictEqual(f2(ratio(mixed, tok(light, 'amber-soft'))), '5.33');
+    assert.ok(ratio(tok(dark, 'loss'), tok(dark, 'red-soft')) >= 4.5 && ratio(mixed, tok(light, 'amber-soft')) >= 4.5);
+    // the rules
+    assert.strictEqual(body(':where(html.dark) .btn-danger'), 'color:var(--loss)');
+    assert.strictEqual(body('html.dark :is(.cov-pill.gap,.backend-banner-readonly,.toast.error)'), 'color:var(--loss)');
+    assert.strictEqual(hex(light, 'amber-ink'), 'color-mix(in srgb,var(--amber) 80%,var(--text))');
+    assert.strictEqual(hex(dark, 'amber-ink'), 'var(--amber)');
+    assert.strictEqual(colour('.sec-cyclical'), 'var(--amber-ink)');
+    // the base rules are as they were, and so are the tokens (the soft fills too)
+    assert.strictEqual(body('.btn-danger'), 'background:var(--red-soft);color:var(--red);border-color:var(--red-border)');
+    assert.strictEqual(body('.cov-pill.gap'), 'color:var(--red);background:var(--red-soft);border-color:var(--red-border)');
+    assert.strictEqual(body('.sec-cyclical'), 'color:var(--amber-ink);background:var(--amber-soft);border:1px solid var(--amber-border)');
+    [[light, 'red', '#b13838'], [light, 'amber', '#9a6a14'], [light, 'red-soft', '#f7e6e6'], [light, 'amber-soft', '#f8efd6'],
+      [dark, 'red', '#e24b4a'], [dark, 'amber', '#F0C36D'], [dark, 'red-soft', '#2a1a1e'], [dark, 'amber-soft', '#2a2213'], [dark, 'loss', '#F2707A']]
+      .forEach(([blk, n, v]) => assert.strictEqual(hex(blk, n), v, n));
+    // the pairs that already passed keep their colour: light danger (--red on --red-soft) and dark cyclical (--amber on --amber-soft)
+    assert.strictEqual(f2(ratio(tok(light, 'red'), tok(light, 'red-soft'))), '4.99');
+    assert.strictEqual(f2(ratio(tok(dark, 'amber'), tok(dark, 'amber-soft'))), '9.53');
+    assert.strictEqual(rules.some(o => ['html:not(.dark) .btn-danger', 'html:not(.dark) .cov-pill.gap', 'html.dark .sec-cyclical', 'html:not(.dark) .sec-cyclical', 'html.dark .cov-pill.gap', ':where(html:not(.dark)) .btn-danger'].includes(o.sel)), false);
+    // states: the dark colour carries the specificity of the base rule (:where() adds none) and comes after it, so a disabled button (.btn:disabled) and the hover (.btn-danger:hover)
+    // both out-rank it and the dark danger button keeps its dimmed look and its white-on-red hover
+    const sels = rules.map(o => o.sel);
+    assert.deepStrictEqual(specificity(':where(html.dark) .btn-danger'), specificity('.btn-danger'));
+    assert.ok(sels.indexOf(':where(html.dark) .btn-danger') > sels.indexOf('.btn-danger'));
+    assert.ok(specificity('.btn:disabled')[1] > specificity(':where(html.dark) .btn-danger')[1]);
+    assert.ok(specificity('.btn-danger:hover')[1] > specificity(':where(html.dark) .btn-danger')[1]);
+    assert.strictEqual(colour('.btn:disabled'), 'var(--text3)');
+    assert.strictEqual(body('.btn-danger:hover'), 'background:var(--red);color:#fff');
+    // the comments quote the real figures
+    ['Dark --red is 4.22:1 on --red-soft, so the dark text takes --loss (5.83:1)', 'Dark --red is 4.22:1 on --red-soft, so the dark text of the three rules that put it there (this pill, the read-only banner and the error toast) takes --loss (5.83:1)',
+      'Light --amber is 4.12:1 there, so the ink mixes a fifth of --text into it (5.33:1). The dark theme reuses --amber, which is 9.53:1.']
+      .forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+  });
+
+  test('p278 item 4 - the desktop Watchlist Target cell and the board\'s Target column print the empty token for a null, missing, blank or non-numeric target, never US$0.00, and agree with the phone row', () => {
+    const TOKEN = '\u2014';                                      // the empty token the table prints for a missing value
+    const px = (price, currency) => ({ price, currency:currency || 'USD', changePct:0, fetchedAt:TODAY_ISO });
+    const fixture = {
+      watchlist:[
+        { id:'w_set', symbol:'SET', market:'US', targetPrice:300 },                      // price 350, above the target
+        { id:'w_str', symbol:'STR', market:'US', targetPrice:'45.5' },                    // a numeric string
+        { id:'w_hit', symbol:'HIT', market:'US', targetPrice:300 },                       // price 290.5, at target
+        { id:'w_sgx', symbol:'D05', market:'SGX', targetPrice:20 },                       // an SGX target, shown in the display currency
+        { id:'w_blank', symbol:'BLANK', market:'US', targetPrice:'' },
+        { id:'w_space', symbol:'SPACES', market:'US', targetPrice:'   ' },
+        { id:'w_abc', symbol:'ABC', market:'US', targetPrice:'abc' },
+        { id:'w_nan', symbol:'NANUM', market:'US', targetPrice:NaN },
+        { id:'w_inf', symbol:'INFNUM', market:'US', targetPrice:Infinity },
+        { id:'w_null', symbol:'NULLT', market:'US', targetPrice:null },
+        { id:'w_none', symbol:'NONE', market:'US' },
+        { id:'w_zero', symbol:'ZEROPX', market:'US', targetPrice:'' }                    // a blank target and a price of zero: still no target and no flag
+      ],
+      _priceCache:{ SET:px(350), STR:px(50), HIT:px(290.5), D05:px(36.4, 'SGD'), BLANK:px(10), ZEROPX:px(0), NANUM:px(5), INFNUM:px(5) }
+    };
+    const { sb, els } = wlSandbox(fixture, 'USD');
+    sb.renderWatchlist();
+    const html = els['stocks-watchlist'].innerHTML;
+    const cell = sym => { const c = wlTableCells(html, sym)[7]; assert.ok(c, sym + ' row'); return c; };
+    // set targets print as before: the figure, and the At target flag only when the price is at or under it
+    assert.deepStrictEqual(cell('SET'), ['num', 'US$300.00']);
+    assert.deepStrictEqual(cell('STR'), ['num', 'US$45.50']);
+    assert.deepStrictEqual(cell('HIT'), ['num', 'US$300.00 <span class="wl-hit">✓ At target</span>']);
+    assert.deepStrictEqual(cell('D05'), ['num', 'US$16.00']);
+    // no target: the empty token alone, no figure, no flag, never NaN or 0.00
+    const none = ['BLANK', 'SPACES', 'ABC', 'NANUM', 'INFNUM', 'NULLT', 'NONE', 'ZEROPX'];
+    none.forEach(sym => {
+      assert.deepStrictEqual(cell(sym), ['num', TOKEN], sym);
+      assert.strictEqual(/0\.00|NaN|Infinity|undefined|wl-hit/.test(cell(sym)[1]), false, sym);
+    });
+    assert.strictEqual(fixture.watchlist.some(w => /US\$0\.00/.test(cell(w.symbol)[1])), false);              // no row's Target cell prints a zero amount (ZEROPX's price cell does, that is its price)
+    // the phone row prints nothing for exactly those rows, and the same figure for the others, so the table and the list can not disagree
+    const model = (w, p) => navPlain(sb._wlListModel({ w, px:p, ccy:(p && p.currency) || (w.market === 'SGX' ? 'SGD' : 'USD') }));   // the currency renderWatchlist gives each row
+    fixture.watchlist.forEach(w => {
+      const shown = cell(w.symbol)[1] !== TOKEN;
+      const m = model(w, fixture._priceCache[w.symbol] || null);
+      assert.strictEqual(m.target !== '', shown, w.symbol);
+      if (shown) assert.strictEqual(m.target, cell(w.symbol)[1].split(' <span')[0], w.symbol);
+    });
+    // the pure reader: only a finite number (or a numeric string) is a target, a finite zero included (the Edit form turns a zero or negative target into none on save)
+    const T = w => sb._wlTarget(w);
+    [undefined, null, {}, { targetPrice:null }, { targetPrice:undefined }, { targetPrice:'' }, { targetPrice:' ' }, { targetPrice:'\t\n' }, { targetPrice:'abc' }, { targetPrice:NaN },
+      { targetPrice:Infinity }, { targetPrice:-Infinity }, { targetPrice:'1e999' }, { targetPrice:'12abc' }].forEach(w => assert.strictEqual(T(w), null, JSON.stringify(w) + ' ' + String(w && w.targetPrice)));
+    assert.deepStrictEqual([T({ targetPrice:300 }), T({ targetPrice:'45.5' }), T({ targetPrice:' 7 ' }), T({ targetPrice:0 }), T({ targetPrice:'0' }), T({ targetPrice:0.0001 })], [300, 45.5, 7, 0, 0, 0.0001]);
+    // the board's Target column reads through the same helper: its cell for a no-target row is the token, a set target is the figure, and it flags only a real target
+    const board = vm.runInContext('(' + extractConstBlock('BOARD_COLUMNS').replace(/^const BOARD_COLUMNS = /, '').replace(/;$/, '') + ')', sb);
+    const targetCol = board.find(c => c.key === 'target');
+    assert.ok(targetCol && targetCol.cls === 'num');
+    const bcell = (w, p) => targetCol.render({ w, px:p, ccy:'USD' });
+    none.forEach(sym => assert.strictEqual(bcell(fixture.watchlist.find(w => w.symbol === sym), fixture._priceCache[sym] || null), TOKEN, 'board ' + sym));
+    assert.strictEqual(bcell({ targetPrice:300 }, px(350)), 'US$300.00');
+    assert.strictEqual(bcell({ targetPrice:'45.5' }, null), 'US$45.50');
+    assert.strictEqual(bcell({ targetPrice:300 }, px(290.5)), 'US$300.00 <span class="wl-hit">✓ At target</span>');
+    assert.strictEqual(bcell({ targetPrice:'' }, px(0)), TOKEN);                                      // a blank target and a price of zero is not at target on the desktop
+    // the three readers use the helper, and no cell formats Number(targetPrice) directly any more
+    assert.ok(extractFunction('renderWatchlist').includes('const target = _wlTarget(w);') && extractFunction('renderWatchlist').includes('fmtSgdOrNative(target, ccy)'));
+    assert.ok(extractConstBlock('BOARD_COLUMNS').includes('const target = _wlTarget(r.w);') && extractConstBlock('BOARD_COLUMNS').includes('fmtSgdOrNative(target, r.ccy)'));
+    assert.ok(extractFunction('_wlListModel').includes('const targetNum = _wlTarget(w);'));
+    assert.strictEqual(/fmtSgdOrNative\(Number\(/.test(extractFunction('renderWatchlist') + extractConstBlock('BOARD_COLUMNS')), false);
+  });
+
+  await testAsync('p278 item 5 - restoring a stock while a live holding of the same symbol and market exists asks first: declined changes nothing (no save, no undo step), accepted restores, a different market or symbol asks nothing', async () => {
+    const ASK = (sym, mkt) => 'You already hold ' + sym + ' (' + (mkt || 'US') + ') in Stocks.\n\nRestoring this one will create a second holding of ' + sym + '.\n\nRestore anyway?';
+    const live = { id:'s_live', symbol:'AAPL', market:'US', sector:'', shares:5, avgCost:100, currency:'USD', notes:'' };
+    const entry = data => ({ id:'tr_s', table:'stocks', ts:'2026-10-01T00:00:00.000Z', data });
+    // declined: nothing changes, nothing is saved, no undo step, no toast, the entry stays in the trash
+    const a = orphanSandbox({ stocks:[clone(live)], trash:[entry(clone(AAPL))] });
+    const before = a.payload();
+    a.log.answer = false;
+    assert.strictEqual(await a.sb.restoreFromTrash('tr_s'), false);
+    assert.deepStrictEqual(a.log.confirms, [ASK('AAPL')]);
+    assert.strictEqual(a.payload(), before);
+    assert.deepStrictEqual([a.log.saves, a.stack(), a.log.toasts.length, a.sb.DB.stocks.length, a.sb.DB.trash.length], [0, 0, 0, 1, 1]);
+    // accepted: it goes through as before, one undo step, one save, and the second holding is there
+    a.log.answer = true;
+    assert.strictEqual(await a.sb.restoreFromTrash('tr_s'), true);
+    assert.strictEqual(a.log.confirms.length, 2);
+    assert.deepStrictEqual(a.sb.DB.stocks.map(s => s.id), ['s_live', 's_aapl']);
+    assert.deepStrictEqual([a.log.saves, a.stack(), a.sb.DB.trash.length], [1, 1, 0]);
+    assert.deepStrictEqual(a.log.toasts.at(-1), { m:'Restored', k:'success', a:undefined });
+    await a.sb.undoAction();                                                                          // the one step puts the trash entry back and drops the second holding
+    assert.deepStrictEqual(clone([a.sb.DB.stocks.map(s => s.id), a.sb.DB.trash.length]), [['s_live'], 1]);   // clone: undoAction rebuilt DB inside the sandbox
+    // a different market, or a different symbol, is a different holding: no question, no extra work
+    const sgx = orphanSandbox({ stocks:[clone(live)], trash:[entry(Object.assign(clone(AAPL), { market:'SGX', currency:'SGD' }))] });
+    assert.strictEqual(await sgx.sb.restoreFromTrash('tr_s'), true);
+    assert.deepStrictEqual([sgx.log.confirms.length, sgx.sb.DB.stocks.length, sgx.log.saves, sgx.stack()], [0, 2, 1, 1]);
+    const other = orphanSandbox({ stocks:[clone(live)], trash:[entry(Object.assign(clone(AAPL), { symbol:'MSFT' }))] });
+    assert.strictEqual(await other.sb.restoreFromTrash('tr_s'), true);
+    assert.deepStrictEqual([other.log.confirms.length, other.sb.DB.stocks.length], [0, 2]);
+    // no live holding at all: no question
+    const empty = orphanSandbox({ trash:[entry(clone(AAPL))] });
+    assert.strictEqual(await empty.sb.restoreFromTrash('tr_s'), true);
+    assert.strictEqual(empty.log.confirms.length, 0);
+    // the same holding is the same however it was typed: case, spaces, and a missing market (read as US, as the Edit form and yahooSymbol read it)
+    const legacy = orphanSandbox({ stocks:[{ id:'s_old', symbol:' aapl ', shares:1, avgCost:1 }], trash:[entry(clone(AAPL))] });
+    legacy.log.answer = false;
+    assert.strictEqual(await legacy.sb.restoreFromTrash('tr_s'), false);
+    assert.deepStrictEqual(legacy.log.confirms, [ASK('AAPL')]);
+    const d05 = orphanSandbox({ stocks:[{ id:'s_d05', symbol:'D05', market:'SGX', shares:100, avgCost:30, currency:'SGD' }], trash:[entry({ id:'s_d05b', symbol:'d05', market:'SGX', shares:50, avgCost:31, currency:'SGD' })] });
+    d05.log.answer = false;
+    assert.strictEqual(await d05.sb.restoreFromTrash('tr_s'), false);
+    assert.deepStrictEqual(d05.log.confirms, [ASK('D05', 'SGX')]);
+    // other tables never ask (a cash account of the same name, a crypto holding of the same symbol, a watchlist ticker of the same symbol)
+    const rest = orphanSandbox({ stocks:[clone(live)], cash:[clone(IBKR)], crypto:[{ id:'c1', symbol:'BTC', amount:1 }], watchlist:[{ id:'w1', symbol:'AAPL', market:'US' }],
+      trash:[{ id:'tr_c', table:'cash', ts:'2026-10-01T00:00:00.000Z', data:Object.assign(clone(IBKR), { id:'c_ibkr2' }) }, { id:'tr_w', table:'watchlist', ts:'2026-10-01T00:00:00.000Z', data:{ id:'w2', symbol:'AAPL', market:'US' } }] });
+    assert.strictEqual(await rest.sb.restoreFromTrash('tr_c'), true);
+    assert.strictEqual(await rest.sb.restoreFromTrash('tr_w'), true);
+    assert.strictEqual(rest.log.confirms.length, 0);
+    // a trade restored with its stock: the stock is the row that comes back, so the question is asked, declined leaves the trade and the stock in the trash, accepted brings both
+    const tr = () => orphanSandbox({ stocks:[clone(live)], cash:[clone(IBKR)], trash:[entry(clone(AAPL)), { id:'tr_t', table:'stockTxns', ts:'2026-10-02T00:00:00.000Z', data:clone(SELL) }] });
+    const c1 = tr(), cBefore = c1.payload();
+    c1.log.answer = false;
+    assert.strictEqual(await c1.sb.restoreFromTrash('tr_t'), false);
+    assert.deepStrictEqual(c1.log.confirms, [ASK('AAPL')]);
+    assert.strictEqual(c1.payload(), cBefore);
+    assert.deepStrictEqual([c1.log.saves, c1.stack(), c1.log.toasts.length, c1.sb.DB.stocks.length, c1.sb.DB.stockTxns.length, c1.sb.DB.trash.length], [0, 0, 0, 1, 0, 2]);
+    const c2 = tr();
+    assert.strictEqual(await c2.sb.restoreFromTrash('tr_t'), true);
+    assert.deepStrictEqual(c2.log.confirms, [ASK('AAPL')]);
+    assert.deepStrictEqual([c2.log.saves, c2.stack(), c2.sb.DB.stocks.map(s => s.id), c2.sb.DB.stockTxns.map(t => t.stockId), c2.sb.DB.trash.length], [1, 1, ['s_live', 's_aapl'], ['s_aapl'], 0]);
+    assert.strictEqual(c2.log.toasts.at(-1).m, 'Restored stock and trade');
+    // a trade whose stock is live (the common case) asks nothing
+    const plain = orphanSandbox({ stocks:[clone(AAPL)], cash:[clone(IBKR)], trash:[{ id:'tr_t', table:'stockTxns', ts:'2026-10-02T00:00:00.000Z', data:clone(BUY) }] });
+    assert.strictEqual(await plain.sb.restoreFromTrash('tr_t'), true);
+    assert.strictEqual(plain.log.confirms.length, 0);
+    // the identity helper, and where the question sits: inside the prepare path, before anything is placed or any undo step is taken, and never as a second save
+    const key = s => a.sb._holdingKey(s);
+    assert.deepStrictEqual([key({ symbol:' aapl ', market:'US' }), key({ symbol:'AAPL' }), key({ symbol:'D05', market:'SGX' }), key({ symbol:'D05', market:'US' }), key(null), key({})], ['AAPL|US', 'AAPL|US', 'D05|SGX', 'D05|US', '|US', '|US']);
+    const prep = extractFunction('_prepareTrashRestore'), guard = extractFunction('_duplicateHoldingGuard'), rs = extractFunction('restoreFromTrash');
+    assert.strictEqual((guard.match(/confirm\(/g) || []).length, 1);
+    assert.strictEqual((rs.match(/confirm\(/g) || []).length, 0);
+    assert.ok(prep.indexOf("if (e.table === 'stocks'){ const stop = _duplicateHoldingGuard(item);") > -1);
+    assert.ok(prep.indexOf('_duplicateHoldingGuard(item)') < prep.indexOf('stage.add('));
+    assert.ok(rs.indexOf('_prepareTrashRestore(') > -1 && rs.indexOf('_prepareTrashRestore(') < rs.indexOf('pushUndo()'));
+    assert.strictEqual((rs.match(/pushUndo\(\)/g) || []).length, 1);
+    assert.strictEqual((rs.match(/saveData\(/g) || []).length, 1);
+  });
+
+  test('p278 item 6 - the app notes list every Worker script index.html loads and the whole npm test chain, and the decision notes pilot\'s light tokens match index.html', () => {
+    const doc = fs.readFileSync(path.join(__dirname, '..', 'CLAUDE.md'), 'utf8');
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    const chain = pkg.scripts.test.split(' && ').map(s => /^node tests\/(\S+\.js)$/.exec(s)[1]);
+    assert.strictEqual(chain.length, 14);
+    chain.forEach(f => assert.ok(doc.includes('`' + f + '`'), f + ' is not in the notes'));
+    assert.ok(doc.includes('chains 14 scripts in this order: ' + chain.slice(0, -1).map(f => '`' + f + '`').join(', ') + ' and `' + chain[chain.length - 1] + '`'));
+    assert.strictEqual(doc.includes('for `test-core.js`, `test-app.js` and `check-release.js`'), false);             // the three-script claim is gone
+    // every script tag index.html loads from Worker/ has its own line in the Architecture list
+    const loaded = Array.from(indexSrc.matchAll(/<script src="Worker\/([\w.-]+\.js)(\?v=[\d.]+)?"/g)).map(m => m[1]);
+    assert.deepStrictEqual(loaded.slice().sort(), ['app.js', 'kjr-core.js', 'kjr-migration.js', 'kjr-nas.js', 'kjr-sortable.js', 'kjr-vault.js', 'supabase.js', 'theme-init.js'].sort());
+    loaded.forEach(f => assert.ok(doc.includes('- `Worker/' + f + '`,'), f + ' has no Architecture line'));
+    // the pilot page's light theme carries the index.html light tokens (it kept the pre-v2.77 --text2 and --text3, and an older --green)
+    const pilot = fs.readFileSync(path.join(__dirname, '..', 'decision-notes-pilot.html'), 'utf8');
+    const pilotLight = /html\.light\{([^}]*)\}/.exec(pilot)[1];
+    const { light, hex } = p277;
+    ['text', 'text2', 'text3', 'bg', 'bg3', 'bg4', 'border', 'border2', 'red', 'red-soft', 'red-border', 'blue', 'amber', 'amber-soft', 'amber-border', 'accent', 'accent2']
+      .forEach(n => assert.strictEqual(new RegExp('--' + n + ':([^;]+);').exec(pilotLight)[1].toLowerCase(), hex(light, n).toLowerCase(), '--' + n));
+    assert.strictEqual(/--green:([^;]+);/.exec(pilotLight)[1].toLowerCase(), hex(light, 'gain').toLowerCase());          // index.html: --green is --gain
+    assert.strictEqual(pilotLight.includes('#6b665e') || pilotLight.includes('#7b766c') || pilotLight.includes('#2f7d4f'), false);
+  });
+
+  /* p278 fix round: the Target sort, and the sibling rules that carried the same failing pairs as items 2 and 3. */
+  test('p278 fix 1 - sorting by Target puts a blank, whitespace, non-numeric, null or missing target with the other empty values, last in both directions, on the Stocks Watchlist and on the board', () => {
+    const symbols = html => Array.from(html.matchAll(/<td class="tl cell-sym[^"]*">([^<]*)<\/td>/g)).map(m => m[1]);
+    const fixture = () => ({
+      watchlist:[
+        { id:'w_a', symbol:'AAA', market:'US', targetPrice:300 },          // 375 SGD at 1.25
+        { id:'w_b', symbol:'BBB', market:'US', targetPrice:'45.5' },       // 56.875 SGD, a numeric string
+        { id:'w_c', symbol:'CCC', market:'SGX', targetPrice:20 },          // 20 SGD
+        { id:'w_d', symbol:'DDD', market:'US', targetPrice:'' },
+        { id:'w_e', symbol:'EEE', market:'US', targetPrice:'   ' },
+        { id:'w_f', symbol:'FFF', market:'US', targetPrice:'abc' },
+        { id:'w_g', symbol:'GGG', market:'US', targetPrice:null },
+        { id:'w_h', symbol:'HHH', market:'US' }
+      ],
+      _priceCache:{}
+    });
+    const EMPTY = ['DDD', 'EEE', 'FFF', 'GGG', 'HHH'];                      // list order: the comparator leaves two empty values where they were
+    const stocksOrder = dir => { const { sb, els } = wlSandbox(fixture(), 'USD'); sb.DB.settings.watchlistSort = { key:'target', dir }; sb.renderWatchlist(); return symbols(els['stocks-watchlist'].innerHTML); };
+    const boardOrder = dir => {
+      const { sb } = wlSandbox(fixture(), 'USD');
+      const cols = vm.runInContext('(' + extractConstBlock('BOARD_COLUMNS').replace(/^const BOARD_COLUMNS = /, '').replace(/;$/, '') + ')', sb);
+      sb.orderedCols = () => cols.map(c => Object.assign({}, c, { visible: c.key === 'target' }));
+      vm.runInContext('var _renderCcy = "USD";', sb);
+      const els = renderBox(sb, ['board-list']);
+      sb.DB.settings.boardSort = { key:'target', dir };
+      sb.renderBoard();
+      return symbols(els['board-list'].innerHTML);
+    };
+    // the real values sort by their SGD amount, the empty ones come after them whichever way the column is sorted (as every other missing number does)
+    [['Stocks Watchlist', stocksOrder], ['board', boardOrder]].forEach(([name, order]) => {
+      assert.deepStrictEqual(order('asc'), ['CCC', 'BBB', 'AAA'].concat(EMPTY), name + ' ascending');
+      assert.deepStrictEqual(order('desc'), ['AAA', 'BBB', 'CCC'].concat(EMPTY), name + ' descending');
+    });
+    // both accessors read the target through _wlTarget, so no accessor turns '' into 0 any more
+    assert.strictEqual((appSrc.match(/const t = _wlTarget\(r\.w\); return t != null \? sgdOrNull\(t, r\.ccy\) : null;/g) || []).length, 2);
+    assert.ok(extractFunction('renderWatchlist').includes('target: r => { const t = _wlTarget(r.w);') && extractFunction('renderBoard').includes('target:     r => { const t = _wlTarget(r.w);'));
+    assert.strictEqual(/targetPrice != null \? sgdOrNull\(Number/.test(appSrc), false);
+    // the comparator is the convention the sort already had: an empty value returns before the direction is applied
+    assert.ok(extractFunction('renderWatchlist').includes('if (va == null) return 1;\n      if (vb == null) return -1;') && extractFunction('renderBoard').includes('if (va == null) return 1;\n      if (vb == null) return -1;'));
+  });
+
+  test('p278 fix 2 - the sibling rules clear 4.5:1 too: dark --red on --red-soft (read-only banner, error toast), the dark danger hover, light amber on --amber-soft (seven rules and the wizard warning through one --amber-ink), and a tag in a light modal', () => {
+    const { light, dark, hex, tok, ratio, over, rgba, f2, body, colour, rules, specificity, modalFill } = p278;
+    const L = n => tok(light, n), D = n => tok(dark, n);
+    const sels = rules.map(o => o.sel);
+    const has = (sel, decl) => new RegExp('(^|;)' + decl.replace(/[()]/g, '\\$&') + '(;|$)').test(body(sel));
+    // 1. dark --red on --red-soft: the base rules still pair them (the premise), and one dark rule gives the three of them --loss (specificity 0,3,1 beats each base rule)
+    ['.backend-banner-readonly', '.toast.error', '.cov-pill.gap'].forEach(sel => assert.ok(has(sel, 'color:var(--red)') && has(sel, 'background:var(--red-soft)'), sel));
+    assert.strictEqual(f2(ratio(D('red'), D('red-soft'))), '4.22');
+    assert.strictEqual(f2(ratio(D('loss'), D('red-soft'))), '5.83');
+    assert.strictEqual(body('html.dark :is(.cov-pill.gap,.backend-banner-readonly,.toast.error)'), 'color:var(--loss)');
+    assert.strictEqual(f2(ratio(L('red'), L('red-soft'))), '4.99');                                  // light already passed and is untouched
+    // 2. the dark danger hover: white on --red is 3.93:1, on --red2 it is 5.58:1, light keeps --red (6.01:1)
+    const white = [255, 255, 255];
+    assert.strictEqual(f2(ratio(white, D('red'))), '3.93');
+    assert.strictEqual(f2(ratio(white, D('red2'))), '5.58');
+    assert.strictEqual(f2(ratio(white, L('red'))), '6.01');
+    assert.strictEqual(body('.btn-danger:hover'), 'background:var(--red);color:#fff');
+    assert.strictEqual(body(':where(html.dark) .btn-danger:hover'), 'background:var(--red2)');
+    assert.deepStrictEqual(specificity(':where(html.dark) .btn-danger:hover'), specificity('.btn-danger:hover'));    // a tie, so the later rule wins and nothing else moves
+    assert.ok(sels.indexOf(':where(html.dark) .btn-danger:hover') > sels.indexOf('.btn-danger:hover'));
+    assert.ok(ratio(D('red2'), D('red-soft')) >= 2.5);                                                    // still a clear step from the resting fill, and the text flips from --loss to white
+    // 3. light amber on --amber-soft: one --amber-ink, used by seven rules and by the wizard's inline warning, and no rule pairs --amber text with the --amber-soft fill any more
+    const amberRules = ['.backend-banner', '.freshness.stale', '.cov-pill.partial', '.tag.warn', '.alert-warn', '.alloc-warn', '.sec-cyclical'];
+    amberRules.forEach(sel => { assert.strictEqual(colour(sel), 'var(--amber-ink)', sel); assert.ok(has(sel, 'background:var(--amber-soft)'), sel); });
+    const ink = over(L('amber'), 0.8, L('text'));
+    assert.strictEqual(f2(ratio(L('amber'), L('amber-soft'))), '4.12');
+    assert.strictEqual(f2(ratio(ink, L('amber-soft'))), '5.33');
+    assert.strictEqual(f2(ratio(D('amber'), D('amber-soft'))), '9.53');                                   // dark --amber-ink is --amber, so nothing moves there
+    assert.strictEqual(hex(light, 'amber-ink'), 'color-mix(in srgb,var(--amber) 80%,var(--text))');
+    assert.strictEqual(hex(dark, 'amber-ink'), 'var(--amber)');
+    assert.deepStrictEqual(rules.filter(r => /(^|;)color:var\(--amber\)(;|$)/.test(r.body) && /(^|;)background:var\(--amber-soft\)(;|$)/.test(r.body)).map(r => r.sel), []);
+    assert.ok(appSrc.includes('<p style="background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber-ink);padding:10px;border-radius:8px;font-size:12px">'));
+    // the read-only and NAS banners still override the base banner's colour, after it
+    assert.ok(sels.indexOf('.backend-banner-readonly') > sels.indexOf('.backend-banner') && sels.indexOf('.backend-banner-nas') > sels.indexOf('.backend-banner'));
+    assert.strictEqual(colour('.backend-banner-nas'), 'var(--accent)');
+    // 4. a tag in a light modal sits on the grey fill with only its 10% tint under it: --gain is 3.51:1 there, a 65% mix with --text is 5.30:1 (4.55:1 over a black backdrop)
+    const g = rgba(hex(light, 'gain-soft')), tagOn = f => over(g.c, g.a, f);
+    const fill = modalFill(light, L('bg')), floor = modalFill(light, [0, 0, 0]);
+    const tagInk = over(L('gain'), 0.65, L('text'));
+    assert.strictEqual(f2(ratio(L('gain'), tagOn(fill))), '3.51');
+    assert.strictEqual(f2(ratio(tagInk, tagOn(fill))), '5.30');
+    assert.strictEqual(f2(ratio(tagInk, tagOn(floor))), '4.55');
+    assert.strictEqual(body('html:not(.dark) .modal .tag.pos'), 'color:color-mix(in srgb,var(--gain) 65%,var(--text))');
+    assert.strictEqual(body('.tag.pos'), 'color:var(--gain);border-color:transparent;background:var(--gain-soft)');   // outside a modal the tag is as it was
+    const dg = rgba(hex(dark, 'gain-soft'));
+    assert.ok(ratio(D('gain'), over(dg.c, dg.a, modalFill(dark, D('bg')))) >= 4.5);                       // dark needs no override
+    assert.strictEqual(rules.some(o => /^html\.dark\b.*\.tag\.pos/.test(o.sel)), false);
+    // the base tokens are as they were
+    [[light, 'gain', '#117550'], [light, 'loss', '#B93641'], [light, 'red2', '#8f2c2c'], [dark, 'gain', '#43D193'], [dark, 'loss', '#F2707A'], [dark, 'red2', '#c03333']]
+      .forEach(([blk, n, v]) => assert.strictEqual(hex(blk, n), v, n));
+    // the comments quote the real figures
+    ['The hover is white on --red, 3.93:1 in dark, so the dark hover fill is --red2 (5.58:1), still a clear step from the soft resting fill. Light keeps --red (6.01:1).',
+      'In a light modal a tag sits on the grey fill with only its 10% tint under it, so --gain is 3.51:1 there. A modal\'s tag takes 35% --text mixed in (5.30:1, and 4.55 even over a black backdrop).']
+      .forEach(frag => assert.ok(indexSrc.includes(frag), frag));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

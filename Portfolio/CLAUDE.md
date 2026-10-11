@@ -10,6 +10,9 @@ Personal net-worth tracker: SGX/US stocks, crypto, real estate, insurance, cash,
 - `Worker/kjr-core.js`, pure, side-effect-free logic (no DOM, no localStorage, no fetch). Loaded as a `<script src>` global in the browser, also `require()`-able from `tests/` under node. **Keep pure.**
 - `Worker/kjr-sortable.js`, drag-sort helper
 - `Worker/kjr-vault.js`, optional passphrase-derived AES-GCM protection for sensitive browser storage
+- `Worker/kjr-migration.js`, legacy blob migration (`KjrMigration`): validates a parsed legacy database, builds a detached plan and hashes it, no browser or Node dependency
+- `Worker/supabase.js`, the vendored `@supabase/supabase-js` UMD bundle (global `supabase`), pinned in `Worker/supabase.pin` with its licence beside it
+- `Worker/kjr-nas.js`, the NAS controller (`KjrNas`): takes a Supabase client and an encrypted storage facade from the caller, owns no browser state, hydrates, stages and flushes records
 - `Worker/theme-init.js`, blocking theme init (FOUC guard)
 - `Worker/apps-script.gs`, Google Apps Script backend deployed as a Web App. Handles `read`, `write`, `backup`, `restore`, `seed`, and `fundamentals` actions. Julian re-deploys manually at script.google.com after every `.gs` change.
 
@@ -68,7 +71,7 @@ Glass layer (both themes): `--glass`, `--glass-strong`, `--glass-border`, `--gla
 
 - `index.html`, `sw.js` at the app root (runtime names, never rename)
 - `Worker/` support sources (see Architecture), plus `manifest.webmanifest` and `whale-icon.png` for PWA install
-- `tests/`, Node and browser unit tests. Run `npm test` from the app folder for `test-core.js`, `test-app.js` and `check-release.js`, then open `tests/tests.html` in a browser for the sortable suite
+- `tests/`, Node and browser unit tests. `npm test` from the app folder chains 14 scripts in this order: `test-core.js`, `test-app.js`, `test-apps-script.js`, `test-decision-notes-pilot.js`, `test-service-worker.js`, `test-vault.js`, `test-sortable.js`, `test-values.js`, `test-migration.js`, `test-supabase-schema.js`, `check-nas-config.js`, `test-nas.js`, `test-nas-app.js` and `check-release.js`. Then open `tests/tests.html` in a browser for the sortable suite
 - `Docs/`, QA SOP and point-in-time docs. Feature backlog lives in `~/.assistant-control/tasks/todo.md`, never in a local file
 - `../Trading/` and `../Forex/`, sibling apps with their own CLAUDE.md, cross-linked with relative paths
 - Repo-root `CLAUDE.md` documents monorepo-wide commands and app boundaries, `AGENTS.md` is a symlink to it

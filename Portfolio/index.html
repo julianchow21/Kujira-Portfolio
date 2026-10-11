@@ -69,6 +69,8 @@
   --c-insurance-soft:color-mix(in srgb,var(--c-insurance) 16%,transparent);
   --blue:#3a5e8c;--blue-soft:#e4ebf4;--blue-border:#c2d3e6;
   --amber:#9a6a14;--amber-soft:#f8efd6;--amber-border:#e7d3a0;
+  /* Ink variant for amber text on --amber-soft. Light --amber is 4.12:1 there, so the ink mixes a fifth of --text into it (5.33:1). The dark theme reuses --amber, which is 9.53:1. */
+  --amber-ink:color-mix(in srgb,var(--amber) 80%,var(--text));
   --purple:#7a4fa3;
   --accent:#0F6E56;--accent2:#0B5743;--accent-soft:#E3EFEA;--accent-border:#BFD9CE;
   --on-accent:#ffffff;
@@ -97,6 +99,7 @@ html.dark{
   --c-stocks-ink:var(--c-stocks);--c-cash-ink:var(--c-cash);--c-cpf-ink:var(--c-cpf);--c-re-ink:var(--c-re);--c-crypto-ink:var(--c-crypto);--c-insurance-ink:var(--c-insurance);
   --blue:#4a9eff;--blue-soft:#101f33;--blue-border:#1a2f43;
   --amber:#F0C36D;--amber-soft:#2a2213;--amber-border:#3a3220;
+  --amber-ink:var(--amber);
   --purple:#a78bfa;
   --accent:#2dd4bf;--accent2:#14b8a6;--accent-soft:#0d2420;--accent-border:#1a3530;
   --on-accent:#06121F;
@@ -374,7 +377,10 @@ tbody tr:first-child td{border-top:none}
 .btn-primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
 @media (hover:hover){.btn-primary:hover{background:var(--accent2);border-color:var(--accent2);color:var(--on-accent)}}
 .btn-danger{background:var(--red-soft);color:var(--red);border-color:var(--red-border)}
-@media (hover:hover){.btn-danger:hover{background:var(--red);color:#fff}}
+/* Dark --red is 4.22:1 on --red-soft, so the dark text takes --loss (5.83:1). :where() keeps the specificity of the rule above, so .btn:disabled and the hover below still win. */
+:where(html.dark) .btn-danger{color:var(--loss)}
+/* The hover is white on --red, 3.93:1 in dark, so the dark hover fill is --red2 (5.58:1), still a clear step from the soft resting fill. Light keeps --red (6.01:1). */
+@media (hover:hover){.btn-danger:hover{background:var(--red);color:#fff}:where(html.dark) .btn-danger:hover{background:var(--red2)}}
 .btn-sm{padding:4px 10px;font-size:12px}
 .btn-ghost{background:transparent;border-color:transparent}
 @media (hover:hover){.btn-ghost:hover{background:color-mix(in srgb,var(--text) 7%,transparent);border-color:transparent}}
@@ -404,7 +410,7 @@ textarea.fi{resize:vertical;min-height:70px}
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
 .overlay.open{display:flex}
 #vault-gate{z-index:300}
-.backend-banner{display:none;margin:0 auto 14px;max-width:1200px;padding:10px 14px;border:1px solid var(--amber-border);border-radius:var(--radius);background:var(--amber-soft);color:var(--amber);font-size:13px;line-height:1.45}
+.backend-banner{display:none;margin:0 auto 14px;max-width:1200px;padding:10px 14px;border:1px solid var(--amber-border);border-radius:var(--radius);background:var(--amber-soft);color:var(--amber-ink);font-size:13px;line-height:1.45}
 .backend-banner[hidden]{display:none}
 .content-col > .backend-banner{margin:14px auto 0;width:calc(100% - 48px)}
 .backend-banner-readonly{border-color:var(--red-border);background:var(--red-soft);color:var(--red);font-weight:600}
@@ -415,6 +421,8 @@ textarea.fi{resize:vertical;min-height:70px}
 .modal-head h3{font-size:15px;font-weight:600}
 .modal-body{padding:20px;overflow-y:auto;flex:1 1 auto}
 .modal-foot{padding:14px 20px;border-top:1px solid var(--glass-border);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;flex-shrink:0}
+/* In light the modal is glass over the dark scrim, so its fill is grey (about #d7d7d7, as the More sheet's) and --text3 is only 3.74:1 on it, under 4.5 for every field label, hint and help line. --text2 is 5.48:1 there (4.66 even over a black backdrop). The light modal re-points the dim token on itself, so every dim part inside follows, inline styles included. Dark --text3 is 5.00:1 on the dark modal fill and stays. */
+html:not(.dark) .modal{--text3:var(--text2);--tx3:var(--text2)}
 .sync-details-modal{max-width:620px}
 .sync-details-modal [hidden]{display:none !important}
 .sync-details-summary{margin-bottom:14px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2);font-size:13px;font-weight:600}
@@ -468,9 +476,9 @@ textarea.fi{resize:vertical;min-height:70px}
 .ccy-toggle button{padding:5px 11px;border:none;background:transparent;color:var(--text2);font-size:12px;font-weight:700;letter-spacing:0.3px;cursor:pointer;font-family:inherit;transition:all 0.15s}
 @media (hover:hover){.ccy-toggle button:hover{color:var(--text)}}
 .ccy-toggle button.active{background:var(--accent);color:var(--on-accent)}
-/* THEME TOGGLE (settings), mirrors the currency toggle */
+/* THEME TOGGLE (settings), mirrors the currency toggle, idle colour included: --text2, because dark --text3 is 4.22:1 on the glass over a card (--text2 is 6.08:1, and 7.89:1 in light) */
 .theme-toggle{display:inline-flex;border:1px solid var(--glass-border);border-radius:999px;overflow:hidden;background:var(--glass)}
-.theme-toggle button{padding:7px 16px;border:none;background:transparent;color:var(--text3);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 0.15s;display:inline-flex;align-items:center;gap:6px}
+.theme-toggle button{padding:7px 16px;border:none;background:transparent;color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 0.15s;display:inline-flex;align-items:center;gap:6px}
 @media (hover:hover){.theme-toggle button:hover{color:var(--text)}}
 .theme-toggle button.active{background:var(--accent);color:var(--on-accent)}
 .page.phase2-locked > *:not(.phase2-card){display:none}
@@ -493,7 +501,7 @@ textarea.fi{resize:vertical;min-height:70px}
 .h-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
 .h-toolbar .grow{flex:1}
 .freshness{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text3);padding:5px 10px;border-radius:999px;border:1px solid var(--border);background:var(--bg2)}
-.freshness.stale{color:var(--amber);border-color:var(--amber-border);background:var(--amber-soft)}
+.freshness.stale{color:var(--amber-ink);border-color:var(--amber-border);background:var(--amber-soft)}
 .freshness.fresh{color:var(--green);border-color:var(--green-border);background:var(--green-soft)}
 .freshness::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;opacity:0.85}
 
@@ -513,8 +521,10 @@ textarea.fi{resize:vertical;min-height:70px}
 .ins-group-row td{background:var(--bg3);font-weight:600;font-size:12px;color:var(--text2)}
 .cov-pill{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:var(--radius);border:1px solid transparent;white-space:nowrap}
 .cov-pill.covered{color:var(--green);background:var(--green-soft);border-color:var(--green-border)}
-.cov-pill.partial{color:var(--amber);background:var(--amber-soft);border-color:var(--amber-border)}
+.cov-pill.partial{color:var(--amber-ink);background:var(--amber-soft);border-color:var(--amber-border)}
 .cov-pill.gap{color:var(--red);background:var(--red-soft);border-color:var(--red-border)}
+/* Dark --red is 4.22:1 on --red-soft, so the dark text of the three rules that put it there (this pill, the read-only banner and the error toast) takes --loss (5.83:1). The danger button has its own :where() rule above. */
+html.dark :is(.cov-pill.gap,.backend-banner-readonly,.toast.error){color:var(--loss)}
 /* On --bg4 --text3 is 4.23:1 in light and 3.62:1 in dark, so the pill takes --text2 in both themes (6.21:1 and 5.20:1). */
 .cov-pill.na{color:var(--text2);background:var(--bg4);border-color:var(--border2)}
 /* Policy document-link icon (register first cell). Muted by default, accent
@@ -535,13 +545,15 @@ html.dark .ins-rider-row td{--text3:var(--text2);--tx3:var(--text2)}
 /* Market is context, not status: quiet text rather than a coloured chip. */
 .tag.sgx,.tag.us{color:var(--text3);border-color:transparent;background:none;padding-inline:0;font-weight:600}
 .tag.pos{color:var(--gain);border-color:transparent;background:var(--gain-soft)}
+/* In a light modal a tag sits on the grey fill with only its 10% tint under it, so --gain is 3.51:1 there. A modal's tag takes 35% --text mixed in (5.30:1, and 4.55 even over a black backdrop). */
+html:not(.dark) .modal .tag.pos{color:color-mix(in srgb,var(--gain) 65%,var(--text))}
 .tag.neg{color:var(--loss);border-color:transparent;background:var(--loss-soft)}
 /* Movement kind (Deposit, Contribution, Transfer): plain text, the signed amount carries direction. */
 .txn-kind{color:var(--text2)}
-.tag.warn{color:var(--amber);border-color:var(--amber-border);background:var(--amber-soft)}
+.tag.warn{color:var(--amber-ink);border-color:var(--amber-border);background:var(--amber-soft)}
 .tag.muted{color:var(--tx3);border-color:var(--border);background:transparent}
 .warn-row td{background:color-mix(in srgb,var(--amber-soft) 30%,transparent)}
-.alert-warn{background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);padding:8px 12px;border-radius:var(--radius);font-size:14px}
+.alert-warn{background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber-ink);padding:8px 12px;border-radius:var(--radius);font-size:14px}
 .integrity-bar{margin-top:14px;border-radius:var(--radius-lg);padding:12px 16px;font-size:13px;border:1px solid var(--border)}
 .integrity-bar.bad{background:var(--amber-soft);border-color:var(--amber-border)}
 /* Quiet status line under a page title (date · prices · books), replacing status pills. */
@@ -826,10 +838,10 @@ a.btn,a.btn:hover{text-decoration:none}
 .alloc-key{white-space:nowrap}
 .alloc-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:0}
 .alloc-split{margin-top:8px;font-size:12px;color:var(--text3)}
-.alloc-warn{margin-top:8px;display:inline-block;font-size:12px;color:var(--amber);background:var(--amber-soft);border:1px solid var(--amber-border);border-radius:var(--radius);padding:3px 9px}
+.alloc-warn{margin-top:8px;display:inline-block;font-size:12px;color:var(--amber-ink);background:var(--amber-soft);border:1px solid var(--amber-border);border-radius:var(--radius);padding:3px 9px}
 /* Sector class chips in the holdings table */
 .sec-chip{display:inline-block;font-size:12px;font-weight:700;letter-spacing:0.3px;padding:1px 6px;border-radius:var(--radius);vertical-align:1px}
-.sec-cyclical{color:var(--amber);background:var(--amber-soft);border:1px solid var(--amber-border)}
+.sec-cyclical{color:var(--amber-ink);background:var(--amber-soft);border:1px solid var(--amber-border)}
 .sec-defensive{color:var(--green);background:var(--green-soft);border:1px solid var(--green-border)}
 .sec-sensitive{color:var(--blue);background:var(--blue-soft);border:1px solid var(--blue-border)}
 /* Watchlist */
@@ -2268,12 +2280,12 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.77"></script>
-<script src="Worker/kjr-sortable.js?v=2.77"></script>
-<script src="Worker/kjr-vault.js?v=2.77"></script>
-<script src="Worker/kjr-migration.js?v=2.77"></script>
-<script src="Worker/supabase.js?v=2.77"></script>
-<script src="Worker/kjr-nas.js?v=2.77"></script>
-<script src="Worker/app.js?v=2.77"></script>
+<script src="Worker/kjr-core.js?v=2.78"></script>
+<script src="Worker/kjr-sortable.js?v=2.78"></script>
+<script src="Worker/kjr-vault.js?v=2.78"></script>
+<script src="Worker/kjr-migration.js?v=2.78"></script>
+<script src="Worker/supabase.js?v=2.78"></script>
+<script src="Worker/kjr-nas.js?v=2.78"></script>
+<script src="Worker/app.js?v=2.78"></script>
 </body>
 </html>

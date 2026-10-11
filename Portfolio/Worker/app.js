@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.77';
-const APP_DISPLAY_VERSION = 'v2.77 (11 Oct)';
+const APP_VERSION = 'v2.78';
+const APP_DISPLAY_VERSION = 'v2.78 (12 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -805,9 +805,10 @@ const BOARD_COLUMNS = [
     render:r => (r.px && r.px.exchange) ? kjrEscape(r.px.exchange) : '—' },
   { key:'target', label:()=>'Target', cls:'num', defVis:true,
     render:r => {
-      if (r.w.targetPrice == null) return '—';
-      const atTarget = (r.px && r.px.price!=null && r.px.price <= Number(r.w.targetPrice));
-      return fmtSgdOrNative(Number(r.w.targetPrice), r.ccy) + (atTarget ? ' <span class="wl-hit">✓ At target</span>' : '');
+      const target = _wlTarget(r.w);
+      if (target == null) return '—';
+      const atTarget = (r.px && r.px.price!=null && r.px.price <= target);
+      return fmtSgdOrNative(target, r.ccy) + (atTarget ? ' <span class="wl-hit">✓ At target</span>' : '');
     } },
   { key:'notes', label:()=>'Notes', cls:'tl', defVis:true,
     render:r => r.w.notes ? `<span class="wl-note" title="${kjrEscape(r.w.notes)}">${kjrEscape(r.w.notes)}</span>` : '' },
@@ -3614,7 +3615,7 @@ function renderSetupWizardStep(){
         <li>Who has access: <strong>Anyone</strong>.</li>
         <li>Click <strong>Deploy</strong> and copy the Web app URL (ends in <code>/exec</code>).</li>
       </ol>
-      <p style="background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);padding:10px;border-radius:8px;font-size:12px">
+      <p style="background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber-ink);padding:10px;border-radius:8px;font-size:12px">
         ⚠ The URL is your credential. Treat it like a password. Anyone with the URL can read and write your sheet. Don't share it.
       </p>
     </div>`;
@@ -6699,6 +6700,22 @@ function _tradeRestoreGuard(item){
   return null;
 }
 
+/* What makes two Stocks rows the same holding: the ticker (trimmed and upper case, as a saved row has it) and the market, SGX or else US as yahooSymbol reads it. */
+function _holdingKey(s){
+  const sym = String(s && s.symbol != null ? s.symbol : '').trim().toUpperCase();
+  return sym + '|' + (s && s.market === 'SGX' ? 'SGX' : 'US');
+}
+
+/* A stock going back into Stocks while a live holding of the same symbol and market is there makes a second holding of it, and the shares, cost and P&L split across two rows. So the
+   restore asks first, whether the stock comes back alone or as the parent of a trade. Like _tradeRestoreGuard it returns '' when the person declined (they chose that, so no error
+   toast) or null to go on. It runs inside _prepareTrashRestore, before pushUndo and before anything is placed, so a refusal costs no undo step and no save. */
+function _duplicateHoldingGuard(item){
+  const key = _holdingKey(item);
+  if (!(DB.stocks || []).some(s => _holdingKey(s) === key)) return null;
+  const sym = String(item.symbol), market = item.market === 'SGX' ? 'SGX' : 'US';
+  return confirm('You already hold ' + sym + ' (' + market + ') in Stocks.\n\nRestoring this one will create a second holding of ' + sym + '.\n\nRestore anyway?') ? null : '';
+}
+
 /* A restored row goes into its table and its trash entry comes out. */
 function _placeRestoredRow(table, item, trashId){
   (DB[table] = DB[table] || []).push(item);
@@ -6720,9 +6737,10 @@ function _trashStage(){
 }
 
 /* Check a restore of these trash entries, parents first, and keep nothing: each row goes through normaliseEntityRow with the rows before it in place (a trade's
-   Stock and Funded from only accept live rows), a trade then meets the trade form's guards (_tradeRestoreGuard), and the staging is reverted. Returns the rows to
-   place, or the first problem. A row keeps its id unless a live row already has it, so a restored trade still points at its restored stock and account (a parent
-   is only here because no live row has its id). No save and no undo step happen here, so a refusal costs nothing, as in entityModalSave. */
+   Stock and Funded from only accept live rows), a stock meets the second-holding question (_duplicateHoldingGuard), a trade meets the trade form's guards
+   (_tradeRestoreGuard), and the staging is reverted. Returns the rows to place, or the first problem. A row keeps its id unless a live row already has it, so a restored
+   trade still points at its restored stock and account (a parent is only here because no live row has its id). No save and no undo step happen here, so a refusal
+   costs nothing, as in entityModalSave. */
 function _prepareTrashRestore(entries){
   const stage = _trashStage();
   const rows = [];
@@ -6735,6 +6753,7 @@ function _prepareTrashRestore(entries){
     }
     const item = n.item;
     if ((DB[e.table] || []).some(x => x.id === item.id)) item.id = uid(e.table);
+    if (e.table === 'stocks'){ const stop = _duplicateHoldingGuard(item); if (stop !== null){ error = stop; break; } }
     if (e.table === 'stockTxns'){ const stop = _tradeRestoreGuard(item); if (stop !== null){ error = stop; break; } }
     stage.add(e.table, item, e.id);
     rows.push({ table:e.table, item, trashId:e.id });
@@ -7840,14 +7859,24 @@ function _cpfRowHtml(v){
    .money-chip wherever the table cell is td.num (so Hide amounts blurs the same things, and a percentage stays readable), a missing figure is an en dash, and a side,
    a gain or a loss is a word or a sign as well as a colour. Every typed value goes through kjrEscape. The empty states are the cards' own, they return before any list is built. */
 
+/* The target buy price of a Watchlist row as a number, or null when it has none. A missing, null, blank (empty or only spaces) or non-numeric target is no target, so
+   Number('') = 0 can never print as a US$0.00 target. The desktop table's Target cell, the board's Target column and the phone row all read the target through here. */
+function _wlTarget(w){
+  const v = w ? w.targetPrice : null;
+  if (v == null || String(v).trim() === '') return null;
+  const n = Number(v);
+  return _finiteNum(n) ? n : null;
+}
+
 /* One Watchlist row, from a renderWatchlist row ({ w, px, ccy }): the symbol and market over the target (with a check mark when the price is at it) and the note, the price over the day move.
    The target is the table's Target cell figure, from the same formatter (fmtSgdOrNative, through _listMoney so a missing FX rate keeps the short native form). A blank, missing or
-   non-numeric target is no target (target is an empty string, so the row prints nothing for it). */
+   non-numeric target is no target (_wlTarget, so target is an empty string and the row prints nothing for it). */
 function _wlListModel(r){
   const w = r.w || {}, px = r.px || null;
   const hasPrice = !!(px && px.price != null);
   const price = hasPrice ? _listMoney(px.price, r.ccy) : null;
-  const target = w.targetPrice != null && String(w.targetPrice).trim() !== '' && _finiteNum(Number(w.targetPrice)) ? _listMoney(Number(w.targetPrice), r.ccy) : null;
+  const targetNum = _wlTarget(w);
+  const target = targetNum != null ? _listMoney(targetNum, r.ccy) : null;
   const day = px && px.changePct != null ? Number(px.changePct) : NaN;
   return { id:w.id, sym:String(w.symbol == null ? '' : w.symbol), market:String(w.market || ''), note:String(w.notes == null ? '' : w.notes).trim(),
     price: price ? price.text : LIST_DASH, fx: !!(price && price.fx), stale: hasPrice && isStale(px.fetchedAt, 24),
@@ -10496,7 +10525,7 @@ function renderWatchlist(){
     pos52w: r => r.px ? rangePosition(r.px.price, r.px.week52Low, r.px.week52High) : null,
     peTtm:  r => (r.px && r.px.fund && r.px.fund.trailingPE  != null) ? r.px.fund.trailingPE  : null,
     pb:     r => (r.px && r.px.fund && r.px.fund.priceToBook != null) ? r.px.fund.priceToBook : null,
-    target: r => r.w.targetPrice != null ? sgdOrNull(Number(r.w.targetPrice), r.ccy) : null
+    target: r => { const t = _wlTarget(r.w); return t != null ? sgdOrNull(t, r.ccy) : null; }
   };
 
   const wlSort = DB.settings.watchlistSort || {};
@@ -10547,9 +10576,10 @@ function renderWatchlist(){
         const pbCell = (f && f.priceToBook != null) ? f.priceToBook.toFixed(2) : '—';
         // Buy target lives in the ticker's own currency, so the comparison
         // against the native quote price needs no FX at all.
-        const atTarget = (w.targetPrice != null && px && px.price != null && px.price <= Number(w.targetPrice));
-        const targetCell = w.targetPrice != null
-          ? fmtSgdOrNative(Number(w.targetPrice), ccy) + (atTarget ? ' <span class="wl-hit">✓ At target</span>' : '')
+        const target = _wlTarget(w);
+        const atTarget = (target != null && px && px.price != null && px.price <= target);
+        const targetCell = target != null
+          ? fmtSgdOrNative(target, ccy) + (atTarget ? ' <span class="wl-hit">✓ At target</span>' : '')
           : '—';
         const ax = encodeURIComponent(yahooSymbol(w));
         return `<tr>
@@ -10619,7 +10649,7 @@ function renderBoard(){
     beta:       r => (r.px && r.px.fund && r.px.fund.beta       != null) ? r.px.fund.beta : null,
     payout:     r => (r.px && r.px.fund && r.px.fund.payoutRatio!= null) ? r.px.fund.payoutRatio : null,
     exchange:   r => (r.px && r.px.exchange) || '',
-    target:     r => r.w.targetPrice != null ? sgdOrNull(Number(r.w.targetPrice), r.ccy) : null,
+    target:     r => { const t = _wlTarget(r.w); return t != null ? sgdOrNull(t, r.ccy) : null; },
     updated:    r => (r.px && r.px.fetchedAt) || null
   };
 
