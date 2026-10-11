@@ -190,7 +190,10 @@ const FUNCTION_TARGETS = [
   // Motion and feedback (Step 8b): the reduced-motion check, the hero roll maths and runner, the price diff and flash, the loading skeletons, and Undo on a delete toast
   '_reducedMotion', '_easeOutCubic', '_rollValue', '_heroRollPlan', '_heroValueHtml', '_heroRollCancel', '_heroRollStart',
   '_quotePrice', '_priceSnapshot', '_priceDiff', '_pxFlashNote', '_pxFlashPaint', '_pxAttr', '_skeletonOn', '_skelIf', '_pricesLoading',
-  '_deletedText', 'undoDeleteToast', 'sendToTrash', 'cleanOrphanedTrades', '_chipAmounts', 'trashLabel'
+  '_deletedText', 'undoDeleteToast', 'sendToTrash', 'cleanOrphanedTrades', '_chipAmounts', 'trashLabel',
+  // Orphaned trades in Recently deleted: the batch move and the trim that keeps a trade's stock and account, the label, the plan, the guards and the compound restore
+  'sharesHeldAsOf', '_moveToTrash', '_trashParentIds', '_trimTrash', '_trashParentEntry', '_trashTradeSymbol', '_tradeRestorePlan', '_tradeRestoreGuard',
+  '_placeRestoredRow', '_trashStage', '_prepareTrashRestore', 'renderTrash'
 ];
 const CONST_TARGETS = ['APP_VERSION', 'APP_DISPLAY_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'LIST_DASH', 'CPF_TYPE_LABEL', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState',
   'HP_HISTORY_RANGE', 'HP_TRADES_SHOWN', 'HP_ACTIONS', 'PALETTE_CAP', 'PALETTE_GROUPS', 'CP_PLUS_ICON', 'CP_REFRESH_ICON', 'EYE_SVG', 'EYE_OFF_SVG',
@@ -3204,9 +3207,9 @@ async function runTests(){
       assert.ok(rule(sel).includes('color:var(--sidebar-dim)'), sel + ' must use --sidebar-dim');
       assert.strictEqual(rule(sel).includes('--text3'), false, sel + ' still uses --text3');
     });
-    // the top bar status line, the idle currency segment and the sheet counts move to --text2, the version is --text2 in dark and --text in light
+    // the top bar status line, the idle currency segment, the sheet counts and the sheet version are all --text2 (v2.77: light --text2 clears the grey sheet, so the version no longer needs the --text override it had in v2.76)
     ['.tb-sub', '.ccy-toggle button', '.more-sheet-row .msr-count,.more-sheet-row .msr-ext', '.sheet-version'].forEach(sel => assert.ok(rule(sel).includes('color:var(--text2)'), sel));
-    assert.ok(rule('html:not(.dark) .sheet-version').includes('color:var(--text)'));
+    assert.strictEqual(indexSrc.includes('html:not(.dark) .sheet-version'), false);
     // hovered or open, the 6 to 7% tint under the dim text lowers its contrast, so the count, the sub and the age follow their label to --text
     ['.side-item:hover .side-count{color:var(--text)}', '.sync-pill:hover .sync-age{color:var(--text)}', '.ws-btn:hover .ws-sub{color:var(--text)}', '.ws-btn[aria-expanded="true"] .ws-sub{color:var(--text)}']
       .forEach(frag => assert.ok(indexSrc.includes(frag), frag));
@@ -3233,8 +3236,7 @@ async function runTests(){
       const sheet = over(rgba(token(blk, 'glass-strong')).c, rgba(token(blk, 'glass-strong')).a, over([0, 0, 0], scrim, rgb(token(blk, 'bg'))));
       const row = over(glass.c, glass.a, sheet);
       assert.ok(ratio(t2, row) >= 4.5, name + ' sheet counts on a row ' + ratio(t2, row).toFixed(2));
-      const versionInk = name === 'light' ? rgb(token(blk, 'text')) : t2;
-      assert.ok(ratio(versionInk, sheet) >= 4.5, name + ' sheet version on the sheet ' + ratio(versionInk, sheet).toFixed(2));
+      assert.ok(ratio(t2, sheet) >= 4.5, name + ' sheet version on the sheet ' + ratio(t2, sheet).toFixed(2));
     });
   });
 
@@ -5287,7 +5289,8 @@ async function runTests(){
     assert.ok(rows[0].includes('<span class="hl-amt money-chip">US$290.50</span>'));
     assert.strictEqual(msft[3][1], '<span class="neg">▼ -1.42%</span>');
     assert.ok(rows[0].includes('<span class="dash-chg down">▼ -1.42%</span>'));
-    assert.ok(msft[7][1].includes('✓ At target') && rows[0].includes('<span class="hl-s">✓ At target · Wait for a pullback</span>'));
+    // (v2.77) the sub line is one target piece (the table's Target cell figure in a chip as its td.num is, with a check mark in front when the price is at it), then the note after a dot
+    assert.ok(msft[7][1].includes('✓ At target') && rows[0].includes('<span class="hl-s"><span class="hl-tgt">✓ Target <span class="money-chip">US$300.00</span></span><span class="hl-nt">· Wait for a pullback</span></span>'));
     assert.ok(rows[0].includes('<span class="hl-t">MSFT <span class="hl-k">· US</span></span>'));
     // a Singapore quote converts to the display currency exactly as the table does
     const o39 = wlTableCells(html, 'O39');
@@ -5295,7 +5298,7 @@ async function runTests(){
     assert.ok(rows[2].includes('class="hl-amt money-chip">US$12.40<') && rows[2].includes('<span class="dash-chg up">▲ +0.50%</span>'));
     assert.strictEqual(rows[2].includes('At target'), false);                       // no target, no flag
     // the row edits the entry, as the table's Edit button does, and Analyse is a link beside it that opens the same page
-    assert.ok(rows[0].includes('<button type="button" class="hl-hit" data-edit-table="watchlist" data-edit-id="w_msft" aria-haspopup="dialog" aria-label="Edit MSFT, US, price US$290.50, day -1.42%, at target price, Wait for a pullback">'));
+    assert.ok(rows[0].includes('<button type="button" class="hl-hit" data-edit-table="watchlist" data-edit-id="w_msft" aria-haspopup="dialog" aria-label="Edit MSFT, US, price US$290.50, day -1.42%, target price US$300.00, at target price, Wait for a pullback">'));
     assert.ok(rows[0].includes('</button><a class="btn btn-sm btn-ghost hl-go" href="../Trading/index.html?symbol=MSFT" target="_blank" rel="noopener" aria-label="Analyse MSFT, opens the chart in a new tab">Analyse</a>'));
     assert.ok(html.includes('href="../Trading/index.html?symbol=MSFT" target="_blank" rel="noopener" title="Open chart analysis for MSFT">Analyse</a>'));
     assert.strictEqual((html.match(/class="btn btn-sm btn-ghost btn-edit" data-edit-table="watchlist"/g) || []).length, 4);   // the table's own Edit buttons are all still there
@@ -5316,7 +5319,7 @@ async function runTests(){
     assert.ok(wlTableCells(html, 'NOPX')[2][1].includes('price-stale') && wlTableCells(html, 'NOPX')[3][1] === '—');
     assert.strictEqual(/NaN|undefined|null/.test(rows.join('')), false);
     // hostile note text is escaped in the visible line and in the spoken label, and never reaches the page as markup
-    assert.ok(rows[1].includes('<span class="hl-s">&lt;b&gt;x&lt;/b&gt; &quot;q&quot; &amp; co</span>'));
+    assert.ok(rows[1].includes('<span class="hl-s"><span class="hl-nt">&lt;b&gt;x&lt;/b&gt; &quot;q&quot; &amp; co</span></span>'));
     assert.strictEqual(/<b>x<\/b>/.test(rows[1]), false);
     // a quote older than a day: the table's (stale) hint, the list's "· stale" in the day line and in the label, a zero move reads as a gain without an arrow
     assert.ok(wlTableCells(html, 'OLD')[2][1].includes('<span class="hint">(stale)</span>'));
@@ -5344,7 +5347,7 @@ async function runTests(){
     const sb = listSandbox({}, 'USD');
     const m = (w, px, ccy) => navPlain(sb._wlListModel({ w, px, ccy: ccy || 'USD' }));
     const hit = m({ id:'w1', symbol:'AAPL', market:'US', targetPrice:100, notes:'  buy  ' }, { price:99, changePct:2, fetchedAt:TODAY_ISO });
-    assert.deepStrictEqual(hit, { id:'w1', sym:'AAPL', market:'US', note:'buy', price:'US$99.00', fx:false, stale:false, day:'▲ +2.00%', dir:'up', atTarget:true, href:'../Trading/index.html?symbol=AAPL' });
+    assert.deepStrictEqual(hit, { id:'w1', sym:'AAPL', market:'US', note:'buy', price:'US$99.00', fx:false, stale:false, day:'▲ +2.00%', dir:'up', atTarget:true, target:'US$100.00', targetFx:false, href:'../Trading/index.html?symbol=AAPL' });
     assert.strictEqual(m({ id:'w', symbol:'A', targetPrice:99 }, { price:99, fetchedAt:TODAY_ISO }).atTarget, true);        // at the target counts
     assert.strictEqual(m({ id:'w', symbol:'A', targetPrice:98.99 }, { price:99, fetchedAt:TODAY_ISO }).atTarget, false);
     assert.strictEqual(m({ id:'w', symbol:'A', targetPrice:null }, { price:1, fetchedAt:TODAY_ISO }).atTarget, false);
@@ -5355,7 +5358,7 @@ async function runTests(){
     assert.strictEqual(m({ id:'w3', symbol:'A' }, { price:5, changePct:-0.4, fetchedAt:TODAY_ISO }).dir, 'down');
     assert.strictEqual(m({ id:'w4', symbol:'A' }, { price:5 }).stale, true);                                              // no fetch time counts as stale, as the table says
     assert.strictEqual(m({ id:'w5', symbol:'A/B C', market:'SGX' }, { price:5, fetchedAt:TODAY_ISO }, 'SGD').href, '../Trading/index.html?symbol=A%2FB%20C');
-    assert.strictEqual(sb._wlLabel(hit), 'Edit AAPL, US, price US$99.00, day +2.00%, at target price, buy');
+    assert.strictEqual(sb._wlLabel(hit), 'Edit AAPL, US, price US$99.00, day +2.00%, target price US$100.00, at target price, buy');
     assert.strictEqual(sb._wlLabel(bare), 'Edit watchlist entry, price not available');
   });
 
@@ -5758,11 +5761,14 @@ async function runTests(){
         assert.ok(ratio(ink, tint) >= 4.5, name + ' --c-' + c + '-ink monogram letter on its tint ' + ratio(ink, tint).toFixed(2));
       });
     });
-    // the hover rule really moves the dim text up a step
-    assert.ok(indexSrc.includes('@media (hover:hover){.hl-row:hover .dash-sub,.hl-row:hover .dash-who-t span,.hl-row:hover .hl-s,.hl-row:hover .price-stale{color:var(--text2)}}'));
+    // the hover rule really moves the dim text up a step (v2.77: the row re-points --text3 at --text2, so the currency prefix and every other dim part follow, on the
+    // desktop dashboard rows as well as the phone lists, and a touch press does the same)
+    assert.ok(indexSrc.includes('@media (hover:hover){.dash-hrow:not(.dash-hhead):hover{--text3:var(--text2)}}'));
+    assert.ok(indexSrc.includes('@media (hover:none){.hl-row:active{background-color:var(--bg3);--text3:var(--text2)}}'));
+    assert.strictEqual(indexSrc.includes('.hl-row:hover .dash-sub'), false);
   });
 
-  test('light --text3 (v2.76) - clears 4.5:1 on the page surfaces, dark keeps its value, the rules that put it on --bg4 step up to --text in light, and the comments quote the real ratios', () => {
+  test('light --text3 (v2.76, kept in v2.77) - clears 4.5:1 on the page surfaces, dark keeps its value, the rules that put dim text on --bg4 take --text2, and the comments quote the real ratios', () => {
     const block = s => { const i = indexSrc.indexOf(s); assert.ok(i > -1, s); return indexSrc.slice(i, indexSrc.indexOf('\n}', i)); };
     const light = block(':root{'), dark = block('html.dark{');
     const token = (blk, name) => { const m = new RegExp('--' + name + ':([^;]+);').exec(blk); assert.ok(m, '--' + name + ' missing'); return m[1].trim(); };
@@ -5779,33 +5785,237 @@ async function runTests(){
       assert.ok(r >= 4.5, 'light --text3 on --' + n + ' ' + r.toFixed(2));
       assert.strictEqual(r.toFixed(2), quoted, n);
     });
-    assert.ok(indexSrc.includes('4.89 on --bg, 5.38 on --bg2, 4.59 on --bg3, 4.55 on --sidebar'));
-    // on --bg4 it is 4.23 and --text2 only 4.48, so the override has to be --text
+    assert.ok(indexSrc.includes('4.89:1 on --bg, 5.38 on --bg2, 4.59 on --bg3 and 4.55 on --sidebar'));
+    // on --bg4 it is 4.23, and the v2.77 --text2 (6.21 there) clears it, so the rules that put dim text on --bg4 take --text2 (v2.76 had to step up to --text, the old --text2 was only 4.48)
     const bg4 = rgb(token(light, 'bg4'));
     assert.strictEqual(ratio(t3, bg4).toFixed(2), '4.23');
-    assert.strictEqual(ratio(rgb(token(light, 'text2')), bg4).toFixed(2), '4.48');
-    assert.ok(ratio(rgb(token(light, 'text')), bg4) >= 4.5);
-    // every rule that sets a --text3 or --tx3 colour and a --bg4 background together has a light-only override to --text
+    assert.strictEqual(ratio(rgb(token(light, 'text2')), bg4).toFixed(2), '6.21');
+    // no rule sets a --text3 or --tx3 colour and a --bg4 background together any more: the not-applicable coverage pill is --text2 in both themes, with no light-only override
     const css = indexSrc.slice(indexSrc.indexOf('<style>'), indexSrc.indexOf('</style>')).replace(/\/\*[\s\S]*?\*\//g, '');
     const rules = Array.from(css.matchAll(/([^{}]+)\{([^{}]*)\}/g)).map(m => ({ sel: m[1].trim(), body: m[2] }));
     const onBg4 = rules.filter(r => /(^|;)\s*background(-color)?:\s*var\(--bg4\)/.test(r.body) && /(^|;)\s*color:\s*var\(--(text3|tx3)\)/.test(r.body));
-    assert.deepStrictEqual(onBg4.map(r => r.sel), ['.cov-pill.na']);
-    onBg4.forEach(r => r.sel.split(',').forEach(sel => assert.ok(rules.some(o => o.sel === 'html:not(.dark) ' + sel.trim() && /(^|;)\s*color:\s*var\(--text\)\s*$/.test(o.body)), 'light override for ' + sel)));
-    // the other one is a hover: the palette pill goes from --bg3 to --bg4 and its label (--text3) rides along
+    assert.deepStrictEqual(onBg4.map(r => r.sel), []);
+    const na = rules.find(r => r.sel === '.cov-pill.na');
+    assert.ok(na && /(^|;)\s*color:\s*var\(--text2\)\s*(;|$)/.test(na.body) && /background:\s*var\(--bg4\)/.test(na.body));
+    assert.strictEqual(rules.some(o => o.sel === 'html:not(.dark) .cov-pill.na'), false);
+    // the other one is a hover: the palette pill goes from --bg3 to --bg4 and its label (--text3) rides along, so the hovered label takes --text2, and in dark the label does at rest too
     assert.ok(rules.some(o => o.sel === '.cb-field-pill:hover' && /background:\s*var\(--bg4\)/.test(o.body)));
     assert.ok(rules.some(o => o.sel === '.cb-field-pill .pill-type' && /color:\s*var\(--text3\)/.test(o.body)));
-    assert.ok(rules.some(o => o.sel === 'html:not(.dark) .cb-field-pill:hover .pill-type' && /^\s*color:\s*var\(--text\)\s*$/.test(o.body)));
+    assert.ok(rules.some(o => o.sel === '.cb-field-pill:hover .pill-type,html.dark .cb-field-pill .pill-type' && /^\s*color:\s*var\(--text2\)\s*$/.test(o.body)));
+    assert.strictEqual(rules.some(o => o.sel === 'html:not(.dark) .cb-field-pill:hover .pill-type'), false);
     // no other rule puts --bg4 behind text of its own, so these are every case (the others are tracks, borders and the skeleton shimmer)
     const bg4Rules = rules.filter(r => /var\(--bg4\)/.test(r.body)).map(r => r.sel);
     assert.deepStrictEqual(bg4Rules.sort(), ['.cb-field-pill:hover', '.cov-pill.na', '.hp-foot .btn:not(.btn-primary):hover', '.kjr-arrange-move:hover:not(:disabled)', '.px-ext-tag', '.skel', '.switch-track', 'td']);
     // the comments that quoted the old ratios say what the ratios are now
     assert.strictEqual(/Light --text3 is only 3\.83:1/.test(indexSrc), false);
     assert.strictEqual(/--text3 is under 4\.5:1 on --bg3 in the light theme/.test(indexSrc), false);
-    assert.ok(indexSrc.includes('--text3 is 4.59:1 on --bg3 in light and 4.26:1 in dark, --text2 is 4.87:1 and 6.14:1'));
+    assert.ok(indexSrc.includes('--text3 is 4.59:1 on --bg3 in light and 4.26:1 in dark, --text2 is 6.74:1 and 6.14:1'));
+    assert.strictEqual(indexSrc.includes('--text2 is 4.87:1 and 6.14:1'), false);
     const dark3 = rgb(token(dark, 'text3')), dark2 = rgb(token(dark, 'text2')), darkBg3 = rgb(token(dark, 'bg3'));
     assert.strictEqual(ratio(dark3, darkBg3).toFixed(2), '4.26');
     assert.strictEqual(ratio(dark2, darkBg3).toFixed(2), '6.14');
-    assert.strictEqual(ratio(rgb(token(light, 'text2')), rgb(token(light, 'bg3'))).toFixed(2), '4.87');
+    assert.strictEqual(ratio(rgb(token(light, 'text2')), rgb(token(light, 'bg3'))).toFixed(2), '6.74');
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     v2.77 polish: the light --text2 step, dim text on the dark tints, and the target on a phone Watchlist row.
+     Light --text2 is #55514a (7.17:1 on --bg), so there are two distinct dim levels again, and the two rules that had to step up to --text on --bg4 go back to --text2.
+     The dark surfaces that carried --text3 under 4.5:1 (--bg3, --bg4, a hovered table row) re-point it at --text2. Ratios come from the declared tokens, composited the way
+     the browser stacks them (the same maths as the v2.76 tests above), and the stylesheet is read as text.
+     ═══════════════════════════════════════════════════════════════════════ */
+  const p277 = (() => {
+    const rgb = h => { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); };
+    const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const lum = c => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+    const ratio = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+    const over = (top, alpha, bottom) => top.map((v, i) => v * alpha + bottom[i] * (1 - alpha));
+    const block = s => { const i = indexSrc.indexOf(s); assert.ok(i > -1, s); return indexSrc.slice(i, indexSrc.indexOf('\n}', i)); };
+    const light = block(':root{'), dark = block('html.dark{');
+    const hex = (blk, name) => { const m = new RegExp('--' + name + ':([^;]+);').exec(blk); assert.ok(m, '--' + name + ' missing'); return m[1].trim(); };
+    const rgba = v => { const m = /rgba\((\d+),(\d+),(\d+),([\d.]+)\)/.exec(v); assert.ok(m, v); return { c:[+m[1], +m[2], +m[3]], a:+m[4] }; };
+    const scrim = +/\.overlay\{[^}]*background:rgba\(0,0,0,([\d.]+)\)/.exec(indexSrc)[1];
+    /* Every surface a text colour can sit on in a theme: the solid tokens, the glass top bar over the page and over a card, and the More sheet and its rows (glass over the scrim). */
+    const surfaces = blk => {
+      const s = {};
+      ['bg', 'bg2', 'bg3', 'bg4', 'sidebar', 'red-soft', 'blue-soft', 'green-soft', 'amber-soft', 'accent-soft'].forEach(n => { s[n] = rgb(hex(blk, n)); });
+      const glass = rgba(hex(blk, 'glass')), strong = rgba(hex(blk, 'glass-strong')), solid = hex(blk, 'surface-solid');
+      s['surface-solid'] = solid.charAt(0) === '#' ? rgb(solid) : over(rgba(solid).c, rgba(solid).a, s.bg);
+      s['bar over bg'] = over(glass.c, glass.a, s.bg);
+      s['bar over bg2'] = over(glass.c, glass.a, s.bg2);
+      s.sheet = over(strong.c, strong.a, over([0, 0, 0], scrim, s.bg));
+      s['sheet row'] = over(glass.c, glass.a, s.sheet);
+      return s;
+    };
+    // the stylesheet without its comments, as flat rules (a rule inside @media is its own entry)
+    const css = indexSrc.slice(indexSrc.indexOf('<style>'), indexSrc.indexOf('</style>')).replace(/\/\*[\s\S]*?\*\//g, '');
+    const rules = Array.from(css.matchAll(/([^{}]+)\{([^{}]*)\}/g)).map(m => ({ sel: m[1].trim(), body: m[2].trim() }));
+    return { rgb, ratio, over, light, dark, hex, rgba, surfaces, rules };
+  })();
+
+  test('light --text2 (v2.77) - a second dim level again: #55514a clears 4.5:1 on every light surface, sits a clear step between --text3 and --text, and the comments and the Design tokens line quote the real figures', () => {
+    const { rgb, ratio, light, dark, hex, surfaces } = p277;
+    assert.strictEqual(hex(light, 'text2').toLowerCase(), '#55514a');
+    assert.strictEqual(hex(light, 'text3').toLowerCase(), '#6f6a60');                // --text3 itself is not touched
+    assert.strictEqual(hex(light, 'text').toLowerCase(), '#1f1d1a');
+    assert.strictEqual(hex(dark, 'text2'), '#9AA4BA');
+    assert.strictEqual(hex(dark, 'text3'), '#7C87A0');
+    const t = rgb(hex(light, 'text')), t2 = rgb(hex(light, 'text2')), t3 = rgb(hex(light, 'text3'));
+    // 4.5:1 or better on every surface a light text colour can sit on, the grey More sheet included
+    const s = surfaces(light);
+    assert.deepStrictEqual(Object.keys(s).sort(), ['accent-soft', 'amber-soft', 'bar over bg', 'bar over bg2', 'bg', 'bg2', 'bg3', 'bg4', 'blue-soft', 'green-soft', 'red-soft', 'sheet', 'sheet row', 'sidebar', 'surface-solid']);
+    Object.keys(s).forEach(n => assert.ok(ratio(t2, s[n]) >= 4.5, 'light --text2 on ' + n + ' ' + ratio(t2, s[n]).toFixed(2)));
+    // the figures the comments quote are the figures the tokens give
+    [['bg', '7.17'], ['bg2', '7.89'], ['bg3', '6.74'], ['bg4', '6.21'], ['sidebar', '6.68'], ['sheet', '5.48'], ['sheet row', '6.86'], ['bar over bg', '7.60'], ['bar over bg2', '7.89']]
+      .forEach(([n, quoted]) => assert.strictEqual(ratio(t2, s[n]).toFixed(2), quoted, n));
+    ['Light --text2 (v2.77) is 7.17:1 on --bg, 6.21 on --bg4 and 5.48 on the grey More sheet', 'so light keeps --text2 (6.68:1)', '--text2 is 7.60:1 and 7.89:1', '--text2 (6.86:1 light, 6.34:1 dark)', 'where --text2 is 5.48:1 in light and 7.19:1 in dark']
+      .forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+    // the step: 6.5 to 7.5:1 on --bg, a clear ratio step either side, and RGB channels well apart (v2.76 had --text2 four channel values from --text3, so the two read as one grey)
+    assert.ok(ratio(t2, s.bg) >= 6.5 && ratio(t2, s.bg) <= 7.5, 'light --text2 on --bg ' + ratio(t2, s.bg).toFixed(2));
+    assert.ok(ratio(t2, s.bg) / ratio(t3, s.bg) >= 1.4);
+    assert.ok(ratio(t, s.bg) / ratio(t2, s.bg) >= 2);
+    [0, 1, 2].forEach(i => { assert.ok(t3[i] - t2[i] >= 20, 'channel ' + i + ' of --text3 over --text2'); assert.ok(t2[i] - t[i] >= 40, 'channel ' + i + ' of --text2 over --text'); });
+    assert.ok(t2[0] >= t2[1] && t2[1] >= t2[2]);                                       // a warm neutral, as --text and --text3 are
+    // dark --text2 clears 4.5:1 on every dark surface too, --bg4 (where --text3 does not) included
+    const ds = surfaces(dark), d2 = rgb(hex(dark, 'text2'));
+    Object.keys(ds).forEach(n => assert.ok(ratio(d2, ds[n]) >= 4.5, 'dark --text2 on ' + n + ' ' + ratio(d2, ds[n]).toFixed(2)));
+    assert.strictEqual(ratio(d2, ds.bg4).toFixed(2), '5.20');
+    // the Design tokens line in the app's CLAUDE.md quotes the new value and no longer the v2.76 workaround
+    const doc = fs.readFileSync(path.join(__dirname, '..', 'CLAUDE.md'), 'utf8');
+    assert.ok(doc.includes('#55514a') && doc.includes('#6f6a60'));
+    assert.strictEqual(doc.includes('steps up to `--text` in light'), false);
+  });
+
+  test('dim text on the --bg3, --bg4 and hover tints (v2.77) - the rules that carried --text3 there take --text2, each pairing clears 4.5:1, and no rule can put --text3 on --bg3 or --bg4 unnoticed', () => {
+    const { rgb, ratio, over, light, dark, hex, rgba, rules } = p277;
+    const pick = (blk, n) => rgb(hex(blk, n));
+    const l2 = pick(light, 'text2'), l3 = pick(light, 'text3'), d2 = pick(dark, 'text2'), d3 = pick(dark, 'text3');
+    // why: dark --text3 is under 4.5:1 on --bg3 and --bg4, light --text3 is under it on --bg4, and --text2 clears all three
+    assert.strictEqual(ratio(d3, pick(dark, 'bg3')).toFixed(2), '4.26');
+    assert.strictEqual(ratio(d3, pick(dark, 'bg4')).toFixed(2), '3.62');
+    assert.strictEqual(ratio(l3, pick(light, 'bg4')).toFixed(2), '4.23');
+    assert.strictEqual(ratio(d2, pick(dark, 'bg3')).toFixed(2), '6.14');
+    assert.strictEqual(ratio(d2, pick(dark, 'bg4')).toFixed(2), '5.20');
+    assert.strictEqual(ratio(l2, pick(light, 'bg4')).toFixed(2), '6.21');
+    // a hovered table row in dark: --surface-solid at 93% and --text at 7% (premultiplied, as color-mix does), over the card
+    const tx = pick(dark, 'text'), sa = rgba(hex(dark, 'surface-solid'));
+    const alpha = 0.93 * sa.a + 0.07, mixed = [0, 1, 2].map(i => (0.93 * sa.c[i] * sa.a + 0.07 * tx[i]) / alpha);
+    const tint = over(mixed, alpha, pick(dark, 'bg2'));
+    assert.strictEqual(ratio(d3, tint).toFixed(2), '4.05');
+    assert.strictEqual(ratio(d2, tint).toFixed(2), '5.83');
+    assert.ok(ratio(d3, tint) < 4.5 && ratio(d2, tint) >= 4.5);
+    ['Dark --text3 is 4.05:1 on that 7% hover tint (--text2 is 5.83:1)', 'Dark --text3 is 4.26:1 on the popover\'s --bg3', 'On --bg4 --text3 is 4.23:1 in light and 3.62:1 in dark, so the pill takes --text2 in both themes (6.21:1 and 5.20:1)']
+      .forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+    const body = sel => { const r = rules.find(o => o.sel === sel); assert.ok(r, sel + ' rule missing'); return r.body; };
+    // the not-applicable coverage pill is --text2 in both themes, and no light-only override is left (v2.76 had two, and the version line)
+    assert.ok(/(^|;)color:var\(--text2\)(;|$)/.test(body('.cov-pill.na')) && /(^|;)background:var\(--bg4\)(;|$)/.test(body('.cov-pill.na')));
+    assert.strictEqual(rules.some(o => /^html:not\(\.dark\) \.(cov-pill\.na|cb-field-pill:hover \.pill-type|sheet-version)/.test(o.sel)), false);
+    // the palette pill's label: --text2 while hovered (on --bg4) in both themes, and at rest in dark (on --bg3), --text3 at rest in light
+    assert.strictEqual(body('.cb-field-pill:hover .pill-type,html.dark .cb-field-pill .pill-type'), 'color:var(--text2)');
+    assert.ok(/(^|;)color:var\(--text3\)(;|$)/.test(body('.cb-field-pill .pill-type')));
+    // the dark surfaces that hold dim parts of their own re-point --text3 (and the --tx3 alias) at --text2 on themselves, so every dim part inside follows without a rule per part
+    const repoint = '--text3:var(--text2);--tx3:var(--text2)';
+    ['html.dark .info-pop', 'html.dark .ins-rider-row td', 'html.dark tbody tr:hover td'].forEach(sel => assert.strictEqual(body(sel), repoint, sel));
+    assert.ok(indexSrc.includes('@media (hover:hover){html.dark tbody tr:hover td{' + repoint + '}}'));
+    // a hovered dashboard or phone row (on --bg3, both themes) and a pressed phone row do the same, and the v2.76 list of named children is gone
+    assert.strictEqual(body('.dash-hrow:not(.dash-hhead):hover'), '--text3:var(--text2)');
+    assert.ok(indexSrc.includes('@media (hover:hover){.dash-hrow:not(.dash-hhead):hover{--text3:var(--text2)}}'));
+    assert.strictEqual(body('.hl-row:active'), 'background-color:var(--bg3);--text3:var(--text2)');
+    assert.strictEqual(indexSrc.includes('.hl-row:hover .'), false);
+    // fence: the only rules that set a --text3 or --tx3 colour on a --bg3 or --bg4 fill themselves are a disabled button and two empty-state icons, which the text rule exempts
+    // (a disabled control is inactive, an icon is a graphic that needs 3:1 and has 4.26:1). Any new rule that does it fails here and has to be thought through.
+    const on = bg => rules.filter(r => new RegExp('(^|;)background(-color)?:var\\(--' + bg + '\\)(;|$)').test(r.body) && /(^|;)color:var\(--(text3|tx3)\)(;|$)/.test(r.body)).map(r => r.sel).sort();
+    assert.deepStrictEqual(on('bg4'), []);
+    assert.deepStrictEqual(on('bg3'), ['.btn:disabled', '.empty-icon', '.hp-empty-icon']);
+    assert.ok(ratio(d3, pick(dark, 'bg3')) >= 3);
+  });
+
+  test('renderWatchlist target (v2.77) - a phone row reads one target piece (a check mark in front when the price is at it, the Target figure the table prints, its amount in a money chip as td.num is) and then the note, prints nothing when no target is set, and the spoken label carries the target and the at-target phrase', () => {
+    const fixture = {
+      watchlist:[
+        { id:'w_msft', symbol:'MSFT', market:'US', targetPrice:300, notes:'Wait for a pullback' },    // price 290.50, at target, with a note
+        { id:'w_above', symbol:'ABOVE', market:'US', targetPrice:250 },                                // price 290, above the target, no note
+        { id:'w_d05', symbol:'D05', market:'SGX', targetPrice:20, notes:'' },                          // an SGX target is in SGD and shows in the display currency
+        { id:'w_noq', symbol:'NOQT', market:'US', targetPrice:12.5 },                                  // a target and no quote
+        { id:'w_str', symbol:'STR', market:'US', targetPrice:'45.5', notes:'string target' },          // a numeric string, read as the table reads it
+        { id:'w_blank', symbol:'BLANK', market:'US', targetPrice:'', notes:'blank' },
+        { id:'w_nan', symbol:'NAN', market:'US', targetPrice:'abc', notes:'not a number' },
+        { id:'w_none', symbol:'NONE', market:'US', notes:'none set' },
+        { id:'w_null', symbol:'NULLT', market:'US', targetPrice:null }
+      ],
+      _priceCache:{
+        MSFT:{ price:290.5, currency:'USD', changePct:-1.42, fetchedAt:TODAY_ISO }, ABOVE:{ price:290, currency:'USD', changePct:1, fetchedAt:TODAY_ISO },
+        D05:{ price:36.4, currency:'SGD', changePct:0.5, fetchedAt:TODAY_ISO }, STR:{ price:50, currency:'USD', changePct:0, fetchedAt:TODAY_ISO }
+      }
+    };
+    const bySym = rows => { const out = {}; rows.forEach(r => { out[/<span class="hl-t">([^<]*)</.exec(r)[1].trim()] = r; }); return out; };
+    const subOf = r => /<span class="hl-s">([\s\S]*?)<\/span><\/span><span class="hl-end">/.exec(r)[1];
+    const labelOf = r => /aria-label="([^"]*)">/.exec(r)[1];
+    const piece = (fig, hit) => '<span class="hl-tgt">' + (hit ? '✓ ' : '') + 'Target <span class="money-chip">' + fig + '</span></span>';   // the one box: check mark, the word, the amount
+    const note = text => '<span class="hl-nt">· ' + text + '</span>';                                                                              // the note after a dot, the only part with an ellipsis
+    const { sb, els } = wlSandbox(fixture, 'USD');
+    sb.renderWatchlist();
+    const html = els['stocks-watchlist'].innerHTML, rows = bySym(wlRowsOf(html));
+    assert.strictEqual(Object.keys(rows).length, 9);
+    // the figure is the table's Target cell figure from the same formatter: the amount before the At target flag
+    const tableTarget = sym => wlTableCells(html, sym)[7][1].split(' <span class="wl-hit">')[0];
+    assert.strictEqual(subOf(rows.MSFT), piece('US$300.00', true) + note('Wait for a pullback'));               // at target: the check mark joins the target in one box, then the note
+    assert.strictEqual(tableTarget('MSFT'), 'US$300.00');
+    assert.strictEqual(subOf(rows.ABOVE), piece('US$250.00'));                                                    // above the target: no check mark, no note, the target alone
+    assert.strictEqual(tableTarget('ABOVE'), 'US$250.00');
+    assert.strictEqual(subOf(rows.D05), piece('US$16.00'));                                                       // 20 SGD at 0.8, as the table's cell does
+    assert.strictEqual(tableTarget('D05'), 'US$16.00');
+    assert.strictEqual(subOf(rows.NOQT), piece('US$12.50'));                                                      // no quote, the target still shows
+    assert.strictEqual(tableTarget('NOQT'), 'US$12.50');
+    assert.strictEqual(subOf(rows.STR), piece('US$45.50') + note('string target'));
+    assert.strictEqual(tableTarget('STR'), 'US$45.50');
+    // the old words are gone from the line (the check mark is the sign, and the spoken label says "at target price"), and the target is never split across boxes
+    assert.strictEqual(/At target/.test(Object.values(rows).map(subOf).join('')), false);
+    assert.strictEqual((subOf(rows.MSFT).match(/hl-tgt/g) || []).length, 1);
+    // the spoken label carries the target, before the at-target phrase and the note
+    assert.strictEqual(labelOf(rows.MSFT), 'Edit MSFT, US, price US$290.50, day -1.42%, target price US$300.00, at target price, Wait for a pullback');
+    assert.strictEqual(labelOf(rows.ABOVE), 'Edit ABOVE, US, price US$290.00, day +1.00%, target price US$250.00');
+    assert.strictEqual(labelOf(rows.NOQT), 'Edit NOQT, US, price not available, target price US$12.50');
+    // Hide amounts: the amount is a chip (blurred as the table's td.num cell is), the check mark and the word Target are not, and nothing else in the sub line is
+    assert.ok(/<span class="hl-tgt">(✓ )?Target <span class="money-chip">[^<]+<\/span><\/span>/.test(subOf(rows.MSFT)));
+    assert.strictEqual((subOf(rows.MSFT).match(/money-chip/g) || []).length, 1);
+    assert.ok(wlTableCells(html, 'MSFT')[7][0] === 'num');
+    // no target set (missing, null, blank, not a number) means no target text, in the line and in the label, and never NaN or a 0.00
+    ['NONE', 'NULLT', 'BLANK', 'NAN'].forEach(sym => {
+      assert.strictEqual(/Target|hl-tgt|NaN|undefined|0\.00/.test(subOf(rows[sym])), false, sym + ' sub line');
+      assert.strictEqual(/target/i.test(labelOf(rows[sym])), false, sym + ' label');
+    });
+    assert.strictEqual(subOf(rows.NONE), '<span class="hl-nt">none set</span>');                                    // a note alone has no dot in front of it
+    assert.strictEqual(subOf(rows.NULLT), '');
+    assert.strictEqual(subOf(rows.BLANK), '<span class="hl-nt">blank</span>');
+    assert.strictEqual(subOf(rows.NAN), '<span class="hl-nt">not a number</span>');
+    // the pure model: an empty target and no FX flag when none is set, the formatter's own text when it is
+    const m = (w, px, ccy) => navPlain(sb._wlListModel({ w, px, ccy: ccy || 'USD' }));
+    assert.deepStrictEqual([m({ id:'a' }, null).target, m({ id:'a' }, null).targetFx, m({ id:'a', targetPrice:'' }, null).target, m({ id:'a', targetPrice:'  ' }, null).target, m({ id:'a', targetPrice:'x' }, null).target], ['', false, '', '', '']);
+    assert.strictEqual(m({ id:'a', targetPrice:99.5 }, null).target, 'US$99.50');
+    // a missing FX rate keeps the native amount in the dim italic (as the price does) and the label says so once
+    const fx = wlSandbox(Object.assign({}, fixture, { settings:{ fxOverrides:{}, fxRates:{} } }), 'SGD');
+    fx.sb.renderWatchlist();
+    const fxRows = bySym(wlRowsOf(fx.els['stocks-watchlist'].innerHTML));
+    assert.strictEqual(subOf(fxRows.MSFT), piece('<span class="price-stale">USD 300.00</span>', true) + note('Wait for a pullback'));
+    assert.strictEqual(labelOf(fxRows.MSFT), 'Edit MSFT, US, price USD 290.50, FX rate missing, day -1.42%, target price USD 300.00, at target price, Wait for a pullback');
+    assert.strictEqual(labelOf(fxRows.NOQT), 'Edit NOQT, US, price not available, target price USD 12.50, FX rate missing');
+    assert.strictEqual(m({ id:'a', targetPrice:5 }, { price:9, fetchedAt:TODAY_ISO }, 'USD').targetFx, false);
+    // at target with no figure to print (a blank target and a price of zero is the one way in): the piece falls back to the words, so the sign is never lost
+    const odd = sb._wlRowHtml(m({ id:'odd', symbol:'ODD', targetPrice:' ' }, { price:0, fetchedAt:TODAY_ISO }));
+    assert.ok(odd.includes('<span class="hl-s"><span class="hl-tgt">✓ At target</span></span>') && /aria-label="[^"]*at target price/.test(odd));
+    // the CSS: the second line is a flex line whose target box wraps out whole (and a clip keeps the wrapped line, with its blur, out of sight), the note is the only part with an
+    // ellipsis, the base .hl-s the other lists use is untouched, and at 480px and below the line takes the row's whole width so the target shows whole at 320px
+    assert.ok(indexSrc.includes('.hl-s{display:block;overflow:hidden;font-size:12px;line-height:1.4;color:var(--text3);text-overflow:ellipsis;white-space:nowrap}'));
+    ['.hl-split .hl-s{display:flex;flex-wrap:wrap;row-gap:3em;max-height:1.4em}', ".hl-split .hl-s:not(:empty)::before{content:'';flex:none;height:1.4em}", '.hl-tgt{flex:none;white-space:nowrap}',
+      '.hl-nt{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}', '.hl-tgt + .hl-nt{margin-left:.25em}']
+      .forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+    assert.strictEqual(indexSrc.includes('.hl-tgt{display:inline-block}'), false);                                // the v2.77 inline-block draft, whose dropped chip still painted a blur
+    const stacked = '@media (max-width:480px){\n  .hl-split .hl-main{display:contents}\n  .hl-split .hl-t{grid-column:1;grid-row:1}\n  .hl-split .hl-end{grid-column:2;grid-row:1}\n  .hl-split .hl-s{grid-column:1 / -1;grid-row:2}\n  .hl-split .hl-s:not(:empty){margin-top:3px}\n}';
+    assert.ok(indexSrc.includes(stacked));
+    assert.ok(indexSrc.indexOf(stacked) > indexSrc.indexOf('.hl-split .hl-s{display:flex'));                      // after the 640px block, so its equal-specificity grid rules win
+    // every typed value still goes through kjrEscape: the target adds no raw interpolation
+    const rowSrc = extractFunction('_wlRowHtml');
+    assert.ok(rowSrc.includes('kjrEscape(m.note)') && rowSrc.includes("'<span class=\"hl-tgt\">' + (m.atTarget ? '✓ ' : '') + 'Target <span class=\"money-chip\">' + m.target + '</span></span>'"));
   });
 
   test('release strings - the display version, the cache name and every script tag agree', () => {
@@ -7733,43 +7943,307 @@ async function runTests(){
     assert.strictEqual(moved.log.toasts.at(-1).m, 'Restored');                                       // from the trash, not a whole-database rollback
   });
 
-  await testAsync('cleanOrphanedTrades - keeps its confirm: a trade whose stock or cash account is gone fails the trash restore, so an Undo for the batch would not be real', async () => {
+  /* ═══ Orphaned trades in Recently deleted: a trade comes back with its stock or cash account, a trade whose parent is gone says so, the trim keeps every parent ═══ */
+
+  /* A sandbox with the real ENTITY_SCHEMAS (so the trade form's Stock and Funded from rules apply), the real undo stack, counted saves and undo steps, every toast
+     and dialog recorded, a fake Recently deleted host so renderTrash can be read, the real kjrEscape, and ids that stay distinct. */
+  function orphanSandbox(db){
+    const sb = realEscape(freshSandbox(Object.assign({ stocks:[], cash:[], stockTxns:[], cashTxns:[], trash:[], insuranceRiders:[] }, db)));
+    vm.runInContext('var _undoStack = [], _redoStack = []; var UNDO_MAX = 20;\n' + [extractFunction('_undoSnapshot'), extractFunction('pushUndo'), extractFunction('undoAction')].join('\n'), sb);
+    sb.SG_INSURERS = [];
+    const start = appSrc.indexOf('const ENTITY_SCHEMAS = '), end = appSrc.indexOf('/* Normalise one externally', start);
+    vm.runInContext(appSrc.slice(start, end).replace('const ENTITY_SCHEMAS =', 'ENTITY_SCHEMAS ='), sb);
+    let n = 0; sb.uid = t => t + '_u' + (++n);
+    const log = { toasts:[], confirms:[], answer:true, saves:0, renders:0 };
+    sb.saveData = () => { log.saves++; vm.runInContext('_localSaveRevision++', sb); return true; };
+    sb.showToast = (m, k, a) => log.toasts.push({ m, k, a });
+    sb.confirm = m => { log.confirms.push(m); return log.answer; };
+    sb.renderAll = () => { log.renders++; };
+    sb.closeEntityModal = () => { sb._modalState = null; };
+    const host = { innerHTML:'' }, meta = { textContent:'' }, emptyBtn = { style:{} };
+    sb.document = { getElementById: id => id === 'trash-list' ? host : id === 'trash-meta' ? meta : id === 'trash-empty-btn' ? emptyBtn : null };
+    return { sb, log, host, stack: () => vm.runInContext('_undoStack.length', sb), payload: () => JSON.stringify(sb.localPersistPayload()) };
+  }
+  const clone = v => JSON.parse(JSON.stringify(v));
+  const AAPL = { id:'s_aapl', symbol:'AAPL', market:'US', sector:'Information Technology', shares:30, avgCost:150, currency:'USD', divPerShare:1, notes:'', createdAt:'2026-01-01T00:00:00.000Z', updatedAt:'2026-01-02T00:00:00.000Z' };
+  const IBKR = { id:'c_ibkr', name:'IBKR USD', account:'Brokerage', amount:0, asOf:'2025-12-31', currency:'USD', notes:'' };
+  const DBS  = { id:'c_dbs', name:'DBS', account:'Savings', amount:1000, asOf:'2025-12-31', currency:'SGD', notes:'' };
+  const SELL = { id:'t_sell', stockId:'s_aapl', date:'2026-03-10', side:'sell', shares:10, price:290, fees:5, cashAccountId:'c_ibkr', notes:'' };
+  const BUY  = { id:'t_buy', stockId:'s_aapl', date:'2026-02-01', side:'buy', shares:5, price:200, fees:1, cashAccountId:'c_ibkr', notes:'' };
+  const CLEAN_CONFIRM = n => 'Move ' + n + ' orphaned trade' + (n > 1 ? 's' : '') + ' to trash? A trade can only be restored from Settings → Recently deleted while the stock or cash account it points to is still there as well.';
+
+  await testAsync('cleanOrphanedTrades - keeps its confirm, worded as it is: one undo step and one save for the batch, no Undo toast, and an orphan whose stock or account is gone is blocked on restore with the reason', async () => {
     const trades = [{ id:'t1', stockId:'ghost', date:'2026-03-01', side:'buy', shares:1, price:1, fees:0 }, { id:'t2', stockId:'s1', date:'2026-03-02', side:'buy', shares:1, price:1, fees:0 },
       { id:'t3', stockId:'s1', cashAccountId:'gone', date:'2026-03-03', side:'buy', shares:1, price:1, fees:0 }];
-    const { sb, log, stack } = undoSandbox({ stocks:[stockRow('s1', 'AAA')], cash:[], stockTxns:JSON.parse(JSON.stringify(trades)) });
-    // the trade form's own rules: the stock and the funding account must be ones that exist now
-    sb.ENTITY_SCHEMAS.stockTxns = { fields:[
-      { key:'stockId', label:'Stock', type:'select', required:true, optionsFn:() => (sb.DB.stocks || []).map(s => [s.id, s.symbol]) },
-      { key:'date', label:'Trade date', type:'date', required:true },
-      { key:'side', label:'Side', type:'select', required:true, options:[['buy', 'Buy'], ['sell', 'Sell']], default:'buy' },
-      { key:'shares', label:'Shares', type:'number', required:true }, { key:'price', label:'Price per share', type:'number', required:true, min:'0' }, { key:'fees', label:'Fees', type:'number', min:'0' },
-      { key:'cashAccountId', label:'Funded from (cash account)', type:'select', optionsFn:() => [['', 'Not linked']].concat((sb.DB.cash || []).map(c => [c.id, c.name])) },
-      { key:'notes', label:'Notes', type:'textarea' }] };
-    const before = JSON.stringify(sb.localPersistPayload());
+    const s1 = { id:'s1', symbol:'AAA', market:'US', shares:3, avgCost:10, currency:'USD' };
+    const { sb, log, stack, payload } = orphanSandbox({ stocks:[clone(s1)], stockTxns:clone(trades) });
+    const before = payload();
     log.answer = false;
     await sb.cleanOrphanedTrades();
     assert.strictEqual(log.confirms.length, 1);
-    assert.strictEqual(log.confirms[0], 'Move 2 orphaned trades to trash? You can restore from Settings → Recently deleted.');
-    assert.strictEqual(JSON.stringify(sb.localPersistPayload()), before); assert.strictEqual(log.toasts.length, 0); assert.strictEqual(stack(), 0);     // a refusal changes nothing
+    assert.strictEqual(log.confirms[0], CLEAN_CONFIRM(2));
+    assert.strictEqual(payload(), before); assert.strictEqual(log.toasts.length, 0); assert.strictEqual(stack(), 0); assert.strictEqual(log.saves, 0);   // a refusal changes nothing
     log.answer = true;
     await sb.cleanOrphanedTrades();
     assert.deepStrictEqual(sb.DB.stockTxns.map(t => t.id), ['t2']);
+    assert.strictEqual(stack(), 1); assert.strictEqual(log.saves, 1);                                                                                   // one step, one save for the batch
     assert.deepStrictEqual([log.toasts.at(-1).m, log.toasts.at(-1).k, log.toasts.at(-1).a], ['Moved 2 orphaned trades to trash', 'success', undefined]);   // a plain toast, no Undo promised
-    // why: each orphan fails the restore's validation, so the trash cannot give them back until the stock or account is added again
+    // each orphan's stock or account is gone (never in the trash), so each is blocked with its reason and nothing moves
     const ids = sb.DB.trash.map(e => e.id);
     assert.strictEqual(ids.length, 2);
+    const snap = payload();
     for (const id of ids) assert.strictEqual(await sb.restoreFromTrash(id), false);
-    assert.strictEqual(sb.DB.trash.length, 2); assert.strictEqual(sb.DB.stockTxns.length, 1);
-    assert.ok(log.toasts.at(-1).m.startsWith('Cannot restore this entry:') && log.toasts.at(-1).m.endsWith('It remains in Recently deleted.'));
+    assert.deepStrictEqual(log.toasts.slice(-2).map(t => [t.m, t.k]), [['This trade cannot be restored: its stock is no longer in Recently deleted.', 'error'], ['This trade cannot be restored: its cash account is no longer in Recently deleted.', 'error']]);
+    assert.strictEqual(payload(), snap); assert.strictEqual(sb.DB.trash.length, 2); assert.strictEqual(sb.DB.stockTxns.length, 1); assert.strictEqual(log.saves, 1); assert.strictEqual(stack(), 1);
+    // Ctrl+Z puts the batch back in one go
+    await sb.undoAction();
+    assert.deepStrictEqual(clone(sb.DB.stockTxns.map(t => t.id)), ['t1', 't2', 't3']); assert.deepStrictEqual(clone(sb.DB.trash), []);
     // nothing orphaned: nothing happens
-    const calm = undoSandbox({ stocks:[stockRow('s1', 'AAA')], stockTxns:[trades[1]] });
+    const calm = orphanSandbox({ stocks:[clone(s1)], stockTxns:[clone(trades[1])] });
     await calm.sb.cleanOrphanedTrades();
-    assert.strictEqual(calm.log.confirms.length + calm.log.toasts.length + calm.stack(), 0);
-    // the source keeps one confirm before any move, and no undo step or Undo toast is wired to it
+    assert.strictEqual(calm.log.confirms.length + calm.log.toasts.length + calm.stack() + calm.log.saves, 0);
+    // the source: one confirm, then the one undo step, then the moves (which do not save), the trim, and the one save, and no Undo toast is wired to it
     const src = extractFunction('cleanOrphanedTrades');
     assert.strictEqual((src.match(/confirm\(/g) || []).length, 1);
-    assert.ok(src.indexOf('confirm(') < src.indexOf("sendToTrash('stockTxns', id)"));
-    assert.ok(!src.includes('pushUndo') && !src.includes('undoDeleteToast'));
+    assert.ok(src.indexOf('confirm(') < src.indexOf('pushUndo();') && src.indexOf('pushUndo();') < src.indexOf("_moveToTrash('stockTxns', id)"));
+    assert.ok(src.indexOf("_moveToTrash('stockTxns', id)") < src.indexOf('_trimTrash();') && src.indexOf('_trimTrash();') < src.indexOf('saveData()'));
+    assert.strictEqual((src.match(/saveData\(/g) || []).length, 1);
+    assert.ok(!src.includes('sendToTrash(') && !src.includes('undoDeleteToast'));
+    assert.ok(extractFunction('sendToTrash').includes('_trimTrash();') && !extractFunction('_moveToTrash').includes('saveData'));
+  });
+
+  await testAsync('Recently deleted - a trade whose stock is in the trash comes back with it in one step: one undo step, one save, ids kept, no stock field invented, the position and the balance as before the delete', async () => {
+    const { sb, log, host, stack } = orphanSandbox({ stocks:[clone(AAPL)], cash:[clone(IBKR)], stockTxns:[clone(BUY), clone(SELL)] });
+    const positionBefore = clone(sb.deriveStockPosition('s_aapl')), balanceBefore = sb.deriveCashBalance(sb.DB.cash[0]);
+    assert.strictEqual(sb.runReconciliation().ok, true);
+    // the stock goes (the cascade dialog says its two trades are left orphaned), then Remove orphaned moves both: one dialog, one undo step, one save
+    sb._modalState = { table:'stocks', item:clone(AAPL), isNew:false };
+    assert.strictEqual(await sb.entityModalDelete(), true);
+    assert.strictEqual(sb.runReconciliation().ok, false);
+    const s1 = stack(), v1 = log.saves;
+    await sb.cleanOrphanedTrades();
+    assert.strictEqual(log.confirms.at(-1), CLEAN_CONFIRM(2));
+    assert.strictEqual(stack(), s1 + 1); assert.strictEqual(log.saves, v1 + 1);
+    assert.deepStrictEqual(sb.DB.stockTxns, []); assert.strictEqual(sb.DB.trash.length, 3);
+    assert.deepStrictEqual(log.toasts.at(-1), { m:'Moved 2 orphaned trades to trash', k:'success', a:undefined });
+    // the list: the trades read AAPL (from the stock's own trash entry), never "?", and their button promises the stock
+    sb.renderTrash();
+    assert.strictEqual(host.innerHTML.includes('?'), false);
+    assert.ok(host.innerHTML.includes('Sell 10 AAPL · 10/03/2026') && host.innerHTML.includes('Buy 5 AAPL · 01/02/2026') && host.innerHTML.includes('AAPL · US'));
+    assert.strictEqual((host.innerHTML.match(/>Restore stock and trade</g) || []).length, 2);
+    assert.strictEqual((host.innerHTML.match(/>Restore</g) || []).length, 1);                                  // the stock's own row
+    assert.strictEqual(host.innerHTML.includes('trash-note'), false);
+    // restore the sell: the stock comes back first, with its id and every field as stored, then the trade, still pointing at it
+    const sellEntry = sb.DB.trash.find(e => e.table === 'stockTxns' && e.data.id === 't_sell');
+    const s2 = stack(), v2 = log.saves;
+    assert.strictEqual(await sb.restoreFromTrash(sellEntry.id), true);
+    assert.strictEqual(stack(), s2 + 1); assert.strictEqual(log.saves, v2 + 1);
+    assert.deepStrictEqual(log.toasts.at(-1), { m:'Restored stock and trade. 1 more trade of AAPL is still in Recently deleted', k:'success', a:undefined });
+    const back = sb.DB.stocks.find(s => s.id === 's_aapl');
+    ['symbol', 'market', 'sector', 'shares', 'avgCost', 'currency', 'divPerShare', 'createdAt'].forEach(k => assert.strictEqual(back[k], AAPL[k], k));
+    const sell = sb.DB.stockTxns.find(t => t.id === 't_sell');
+    ['stockId', 'date', 'side', 'shares', 'price', 'fees', 'cashAccountId'].forEach(k => assert.strictEqual(sell[k], SELL[k], k));
+    assert.deepStrictEqual(sb.DB.trash.map(e => e.data.id), ['t_buy']);
+    // the sibling is one plain click now
+    sb.renderTrash();
+    assert.ok(host.innerHTML.includes('>Restore<') && !host.innerHTML.includes('Restore stock'));
+    assert.strictEqual(await sb.restoreFromTrash(sb.DB.trash[0].id), true);
+    assert.strictEqual(log.toasts.at(-1).m, 'Restored');
+    // money: the position and the balance are what they were before the delete, and the books reconcile
+    assert.deepStrictEqual(clone(sb.deriveStockPosition('s_aapl')), positionBefore);
+    assert.strictEqual(sb.deriveCashBalance(sb.DB.cash[0]), balanceBefore);
+    assert.strictEqual(sb.runReconciliation().ok, true);
+    assert.deepStrictEqual(sb.DB.trash, []);
+  });
+
+  await testAsync('Recently deleted - a trade whose stock is gone from the trash is blocked with a plain reason: nothing changes, nothing is saved, no undo step, and the label reads unknown stock, never "?"', async () => {
+    const { sb, log, host, stack, payload } = orphanSandbox({ cash:[clone(IBKR)], trash:[{ id:'tr_sell', table:'stockTxns', ts:'2026-10-01T00:00:00.000Z', data:clone(SELL) }] });
+    const before = payload();
+    sb.renderTrash();
+    assert.ok(host.innerHTML.includes('Sell 10 unknown stock · 10/03/2026'));
+    assert.strictEqual(host.innerHTML.includes('?'), false);
+    assert.ok(host.innerHTML.includes('<span class="hint trash-note">This trade cannot be restored: its stock is no longer in Recently deleted.</span>'));
+    assert.ok(host.innerHTML.includes('>Restore<') && !host.innerHTML.includes('Restore stock'));
+    assert.strictEqual(await sb.restoreFromTrash('tr_sell'), false);
+    assert.deepStrictEqual(log.toasts.at(-1), { m:'This trade cannot be restored: its stock is no longer in Recently deleted.', k:'error', a:undefined });
+    assert.strictEqual(payload(), before); assert.strictEqual(log.saves, 0); assert.strictEqual(stack(), 0); assert.strictEqual(log.confirms.length, 0);
+    // the toast's Undo fallback inherits the block: it reports false and leaves the entry
+    assert.strictEqual(await sb.undoDeleteToast({ snapshot:'stale', revision:-1, trashIds:['tr_sell'] }), false);
+    assert.strictEqual(payload(), before);
+    // a symbol the row carries is named, and both gone reads as one sentence
+    const two = orphanSandbox({ trash:[{ id:'tr_x', table:'stockTxns', ts:'2026-10-01T00:00:00.000Z', data:Object.assign(clone(SELL), { symbol:'AAPL' }) }] });
+    assert.strictEqual(await two.sb.restoreFromTrash('tr_x'), false);
+    assert.strictEqual(two.log.toasts.at(-1).m, 'This trade cannot be restored: its stock (AAPL) and its cash account are no longer in Recently deleted.');
+    assert.strictEqual(two.sb.trashLabel('stockTxns', two.sb.DB.trash[0].data), 'Sell 10 AAPL · 10/03/2026');
+  });
+
+  await testAsync('Recently deleted - a trade whose cash account is in the trash restores the account and the trade, the balance as before', async () => {
+    const { sb, log, host, stack } = orphanSandbox({ stocks:[clone(AAPL)], cash:[clone(IBKR)], stockTxns:[clone(SELL)] });
+    const balanceBefore = sb.deriveCashBalance(sb.DB.cash[0]), positionBefore = clone(sb.deriveStockPosition('s_aapl'));
+    sb._modalState = { table:'cash', item:clone(IBKR), isNew:false };
+    assert.strictEqual(await sb.entityModalDelete(), true);
+    await sb.cleanOrphanedTrades();
+    assert.strictEqual(log.confirms.at(-1), CLEAN_CONFIRM(1));
+    sb.renderTrash();
+    assert.ok(host.innerHTML.includes('>Restore cash account and trade<') && host.innerHTML.includes('Sell 10 AAPL · 10/03/2026'));
+    const entry = sb.DB.trash.find(e => e.table === 'stockTxns');
+    const s1 = stack(), v1 = log.saves;
+    assert.strictEqual(await sb.restoreFromTrash(entry.id), true);
+    assert.strictEqual(stack(), s1 + 1); assert.strictEqual(log.saves, v1 + 1);
+    assert.deepStrictEqual(log.toasts.at(-1), { m:'Restored cash account and trade', k:'success', a:undefined });
+    assert.deepStrictEqual(sb.DB.cash.map(c => [c.id, c.name, c.account, c.currency, c.amount, c.asOf]), [['c_ibkr', 'IBKR USD', 'Brokerage', 'USD', 0, '2025-12-31']]);
+    assert.deepStrictEqual(sb.DB.stockTxns.map(t => [t.id, t.cashAccountId]), [['t_sell', 'c_ibkr']]);
+    assert.strictEqual(sb.deriveCashBalance(sb.DB.cash[0]), balanceBefore);
+    assert.deepStrictEqual(clone(sb.deriveStockPosition('s_aapl')), positionBefore);
+    assert.strictEqual(sb.runReconciliation().ok, true); assert.deepStrictEqual(sb.DB.trash, []);
+  });
+
+  await testAsync('Recently deleted - a trade missing both comes back with the stock and the cash account in one step (one undo step, one save, ids kept), and a trade whose id is taken gets a new one that still points at them', async () => {
+    const { sb, log, host, stack, payload } = orphanSandbox({ stocks:[clone(AAPL)], cash:[clone(IBKR)], stockTxns:[clone(SELL)] });
+    const positionBefore = clone(sb.deriveStockPosition('s_aapl')), balanceBefore = sb.deriveCashBalance(sb.DB.cash[0]);
+    sb._modalState = { table:'stocks', item:clone(AAPL), isNew:false }; await sb.entityModalDelete();
+    sb._modalState = { table:'cash', item:clone(IBKR), isNew:false }; await sb.entityModalDelete();
+    await sb.cleanOrphanedTrades();
+    assert.strictEqual(sb.DB.trash.length, 3);
+    sb.renderTrash();
+    assert.ok(host.innerHTML.includes('>Restore stock, cash account and trade<'));
+    const entry = sb.DB.trash.find(e => e.table === 'stockTxns');
+    const s1 = stack(), v1 = log.saves, before = payload();
+    assert.strictEqual(await sb.restoreFromTrash(entry.id), true);
+    assert.strictEqual(stack(), s1 + 1); assert.strictEqual(log.saves, v1 + 1);
+    assert.strictEqual(vm.runInContext('_undoStack[_undoStack.length - 1]', sb), before);                   // the one snapshot is the state just before
+    assert.deepStrictEqual(log.toasts.at(-1), { m:'Restored stock, cash account and trade', k:'success', a:undefined });
+    assert.deepStrictEqual([sb.DB.stocks[0].id, sb.DB.cash[0].id, sb.DB.stockTxns[0].id, sb.DB.stockTxns[0].stockId, sb.DB.stockTxns[0].cashAccountId], ['s_aapl', 'c_ibkr', 't_sell', 's_aapl', 'c_ibkr']);
+    assert.deepStrictEqual(clone(sb.deriveStockPosition('s_aapl')), positionBefore);
+    assert.strictEqual(sb.deriveCashBalance(sb.DB.cash[0]), balanceBefore);
+    assert.strictEqual(sb.runReconciliation().ok, true); assert.deepStrictEqual(sb.DB.trash, []);
+    // Ctrl+Z puts the whole step back: all three rows to the trash
+    await sb.undoAction();
+    assert.strictEqual(sb.DB.trash.length, 3); assert.deepStrictEqual(clone([sb.DB.stocks, sb.DB.cash, sb.DB.stockTxns]), [[], [], []]);
+    // a live trade already holds the trashed trade's id: the trade takes a new id, the stock keeps its own, the trade points at it, and the live trade is untouched
+    const other = { id:'t_sell', stockId:'s_other', date:'2026-04-01', side:'buy', shares:1, price:1, fees:0, cashAccountId:'c_ibkr', notes:'' };
+    const col = orphanSandbox({ stocks:[{ id:'s_other', symbol:'OTH', market:'US', shares:1, avgCost:1, currency:'USD' }], cash:[clone(IBKR)], stockTxns:[clone(other)],
+      trash:[{ id:'tr_s', table:'stocks', ts:'2026-10-01T00:00:00.000Z', data:clone(AAPL) }, { id:'tr_t', table:'stockTxns', ts:'2026-10-02T00:00:00.000Z', data:clone(SELL) }] });
+    assert.strictEqual(await col.sb.restoreFromTrash('tr_t'), true);
+    const restored = col.sb.DB.stockTxns.filter(t => t.stockId === 's_aapl');
+    assert.strictEqual(restored.length, 1); assert.notStrictEqual(restored[0].id, 't_sell'); assert.strictEqual(restored[0].cashAccountId, 'c_ibkr');
+    assert.strictEqual(col.sb.DB.stocks.find(s => s.id === 's_aapl').symbol, 'AAPL');
+    assert.deepStrictEqual(col.sb.DB.stockTxns.find(t => t.id === 't_sell').stockId, 's_other');
+    assert.strictEqual(col.sb.runReconciliation().ok, true);
+  });
+
+  await testAsync('Recently deleted - the trade form\'s guards run on a restore: a declined over-sell question, a funding account in another currency or a parent that fails validation leaves everything unchanged, nothing saved, no undo step', async () => {
+    const big = Object.assign(clone(SELL), { shares:50 });
+    const { sb, log, stack, payload } = orphanSandbox({ cash:[clone(IBKR)], trash:[{ id:'tr_s', table:'stocks', ts:'2026-10-01T00:00:00.000Z', data:clone(AAPL) }, { id:'tr_t', table:'stockTxns', ts:'2026-10-02T00:00:00.000Z', data:big }] });
+    const before = payload();
+    log.answer = false;
+    assert.strictEqual(await sb.restoreFromTrash('tr_t'), false);
+    assert.deepStrictEqual(log.confirms, ['This sells 50 shares of AAPL but only 30 were held as of 10/03/2026.\n\nRestore anyway?']);
+    assert.strictEqual(payload(), before); assert.strictEqual(log.saves, 0); assert.strictEqual(stack(), 0); assert.strictEqual(log.toasts.length, 0);
+    assert.deepStrictEqual([sb.DB.stocks, sb.DB.stockTxns], [[], []]);                                           // the staged stock is gone again
+    // a yes goes through, as in the trade form
+    log.answer = true;
+    assert.strictEqual(await sb.restoreFromTrash('tr_t'), true);
+    assert.deepStrictEqual([sb.DB.stocks.length, sb.DB.stockTxns.length, stack(), log.saves, sb.DB.trash.length], [1, 1, 1, 1, 0]);
+    // a USD trade funded from an SGD account is refused with the form's reason
+    const mis = orphanSandbox({ cash:[clone(DBS)], trash:[{ id:'tr_s', table:'stocks', ts:'2026-10-01T00:00:00.000Z', data:clone(AAPL) }, { id:'tr_t', table:'stockTxns', ts:'2026-10-02T00:00:00.000Z', data:Object.assign(clone(SELL), { shares:5, cashAccountId:'c_dbs' }) }] });
+    const before2 = mis.payload();
+    assert.strictEqual(await mis.sb.restoreFromTrash('tr_t'), false);
+    assert.deepStrictEqual(mis.log.toasts.at(-1), { m:'Cannot restore this trade: it is in USD but DBS holds SGD. It remains in Recently deleted.', k:'error', a:undefined });
+    assert.strictEqual(mis.payload(), before2); assert.strictEqual(mis.log.saves, 0); assert.strictEqual(mis.stack(), 0);
+    // a parent that fails its own validation stops the whole step before anything moves
+    const bad = orphanSandbox({ cash:[clone(IBKR)], trash:[{ id:'tr_s', table:'stocks', ts:'2026-10-01T00:00:00.000Z', data:Object.assign(clone(AAPL), { symbol:'<img>' }) }, { id:'tr_t', table:'stockTxns', ts:'2026-10-02T00:00:00.000Z', data:clone(SELL) }] });
+    const before3 = bad.payload();
+    assert.strictEqual(await bad.sb.restoreFromTrash('tr_t'), false);
+    assert.strictEqual(bad.log.toasts.at(-1).m, 'Cannot restore this stock: Symbol is invalid. It remains in Recently deleted.');
+    assert.strictEqual(bad.payload(), before3); assert.strictEqual(bad.log.saves, 0); assert.strictEqual(bad.stack(), 0);
+  });
+
+  await testAsync('_trimTrash - past TRASH_MAX the oldest entries go first but never the stock or cash account a trashed trade points to, a batch of 100 orphans keeps every parent, and the list exceeds the cap only by such parents', async () => {
+    const sb = freshSandbox({ trash:[] });
+    const MAX = vm.runInContext('TRASH_MAX', sb);
+    assert.strictEqual(MAX, 100);
+    const old = (i, table) => ({ id:'tr_old' + i, table:table || 'expenses', ts:'2026-01-01T00:00:00.000Z', data:{ id:'x' + i, amount:1 } });
+    // the stock parent is the oldest entry, 99 expenses after it, then the trade that needs it: the second-oldest expense goes, the stock stays
+    sb.DB.trash = [{ id:'tr_stock', table:'stocks', ts:'2025-12-01T00:00:00.000Z', data:{ id:'s1', symbol:'AAA' } }].concat(Array.from({ length:99 }, (_, i) => old(i)));
+    sb.DB.trash.push({ id:'tr_trade', table:'stockTxns', ts:'2026-02-01T00:00:00.000Z', data:{ id:'t1', stockId:'s1', side:'buy', shares:1 } });
+    sb._trimTrash();
+    assert.strictEqual(sb.DB.trash.length, 100);
+    assert.deepStrictEqual([sb.DB.trash[0].id, sb.DB.trash[1].id, sb.DB.trash.at(-1).id], ['tr_stock', 'tr_old1', 'tr_trade']);
+    // one more delete on the full list: the same rule
+    sb.DB.expenses = [{ id:'e_new', amount:2 }]; sb.saveData = () => true;
+    assert.strictEqual(sb.sendToTrash('expenses', 'e_new'), true);
+    assert.strictEqual(sb.DB.trash.length, 100); assert.strictEqual(sb.DB.trash[0].id, 'tr_stock'); assert.strictEqual(sb.DB.trash.at(-1).data.id, 'e_new');
+    // a batch of 100 orphans on a list already at the cap: the two stocks and the cash account those trades point to stay, the oldest others go
+    const two = freshSandbox({ trash:[], stocks:[], cash:[], stockTxns:[] });
+    two.saveData = () => true; two.confirm = () => true; two.showToast = () => {};
+    let n = 0; two.uid = t => t + '_' + (++n);
+    two.DB.trash = Array.from({ length:MAX - 4 }, (_, i) => old(i));
+    two.DB.trash.push({ id:'tr_s1', table:'stocks', ts:'2026-01-02T00:00:00.000Z', data:{ id:'s1', symbol:'AAA' } });
+    two.DB.trash.push({ id:'tr_s2', table:'stocks', ts:'2026-01-02T00:00:00.000Z', data:{ id:'s2', symbol:'BBB' } });
+    two.DB.trash.push({ id:'tr_c1', table:'cash', ts:'2026-01-02T00:00:00.000Z', data:{ id:'c1', name:'DBS' } });
+    two.DB.trash.push(old(999));
+    assert.strictEqual(two.DB.trash.length, MAX);
+    two.DB.stockTxns = Array.from({ length:100 }, (_, i) => ({ id:'t' + i, stockId: i % 2 ? 's1' : 's2', cashAccountId: i % 3 ? 'c1' : '', date:'2026-03-01', side:'buy', shares:1, price:1, fees:0 }));
+    await two.cleanOrphanedTrades();
+    assert.strictEqual(two.DB.stockTxns.length, 0);
+    assert.strictEqual(two.DB.trash.length, MAX);
+    assert.deepStrictEqual(two.DB.trash.filter(e => e.table !== 'stockTxns').map(e => e.id), ['tr_s1', 'tr_s2', 'tr_c1']);                           // every parent, no expense
+    assert.deepStrictEqual(two.DB.trash.filter(e => e.table === 'stockTxns').slice(0, 2).map(e => e.data.id), ['t3', 't4']);                            // the three oldest of the batch made room, the rest are there
+    // the cap can only be met by dropping a parent: it is raised instead, the list holds every parent and nothing else
+    const three = freshSandbox({ trash:[] });
+    three.DB.trash = [];
+    for (let i = 0; i < MAX + 1; i++){
+      three.DB.trash.push({ id:'tr_s' + i, table:'stocks', ts:'2026-01-01T00:00:00.000Z', data:{ id:'s' + i, symbol:'S' + i } });
+      three.DB.trash.push({ id:'tr_t' + i, table:'stockTxns', ts:'2026-01-02T00:00:00.000Z', data:{ id:'t' + i, stockId:'s' + i, side:'buy', shares:1 } });
+    }
+    three._trimTrash();
+    assert.strictEqual(three.DB.trash.length, MAX + 1);
+    assert.ok(three.DB.trash.every(e => e.table === 'stocks'));
+    three._trimTrash();                                                                                      // nothing points at them now, so the next trim treats them as ordinary entries
+    assert.strictEqual(three.DB.trash.length, MAX);
+    // under the cap nothing moves, and a null entry is dropped first
+    const four = freshSandbox({ trash:[old(1), null, old(2)] });
+    four._trimTrash();
+    assert.strictEqual(four.DB.trash.length, 3);
+    assert.ok(appSrc.slice(appSrc.indexOf('Keep the trash within TRASH_MAX'), appSrc.indexOf('function _trimTrash(')).includes('max(TRASH_MAX, protected parents)'));   // the bound is documented above the function
+  });
+
+  await testAsync('undoDeleteToast - still restores from the trash when the delete step is no longer the newest, and brings a trade\'s trashed stock back with it', async () => {
+    // a plain trade delete, an edit saved in between, Undo: the trade comes back from the trash as before
+    const { sb, log } = orphanSandbox({ stocks:[clone(AAPL)], cash:[clone(IBKR)], stockTxns:[clone(SELL)] });
+    sb._modalState = { table:'stockTxns', item:clone(SELL), isNew:false };
+    assert.strictEqual(await sb.entityModalDelete(), true);
+    assert.strictEqual(log.confirms.length, 0);
+    const toast = log.toasts.at(-1);
+    assert.strictEqual(toast.m, 'Deleted trade');
+    sb.pushUndo(); sb.DB.stocks[0].notes = 'edited'; sb.saveData();
+    assert.strictEqual(await toast.a.fn(), true);
+    assert.strictEqual(log.toasts.at(-1).m, 'Restored');
+    assert.deepStrictEqual(sb.DB.stockTxns.map(t => t.id), ['t_sell']); assert.strictEqual(sb.DB.stocks[0].notes, 'edited'); assert.deepStrictEqual(sb.DB.trash, []);
+    // the stock and its trade both in the trash, a step naming the trade: the compound restore runs through the toast's fallback
+    const two = orphanSandbox({ cash:[clone(IBKR)], trash:[{ id:'tr_s', table:'stocks', ts:'2026-10-01T00:00:00.000Z', data:clone(AAPL) }, { id:'tr_t', table:'stockTxns', ts:'2026-10-02T00:00:00.000Z', data:clone(SELL) }] });
+    assert.strictEqual(await two.sb.undoDeleteToast({ snapshot:'stale', revision:-1, trashIds:['tr_t'] }), true);
+    assert.deepStrictEqual([two.sb.DB.stocks.length, two.sb.DB.stockTxns.length, two.sb.DB.trash.length], [1, 1, 0]);
+    assert.strictEqual(two.log.toasts.at(-1).m, 'Restored stock and trade');
+  });
+
+  test('trashLabel - a trade names its stock from the live row, else the stock\'s trash entry (the newest), else a symbol on the row, else "unknown stock", and never "?"', () => {
+    const sb = freshSandbox({ stocks:[{ id:'s1', symbol:'AAPL' }], trash:[
+      { id:'tr_a', table:'stocks', ts:'2026-01-01T00:00:00.000Z', data:{ id:'s2', symbol:'OLD' } },
+      { id:'tr_b', table:'stocks', ts:'2026-02-01T00:00:00.000Z', data:{ id:'s2', symbol:'NEW' } }] });
+    const label = data => sb.trashLabel('stockTxns', data);
+    assert.strictEqual(label({ stockId:'s1', side:'buy', shares:10, date:'2026-03-01' }), 'Buy 10 AAPL · 01/03/2026');
+    assert.strictEqual(label({ stockId:'s2', side:'sell', shares:3 }), 'Sell 3 NEW');
+    assert.strictEqual(label({ stockId:'s9', side:'buy', shares:1, symbol:'ROW' }), 'Buy 1 ROW');
+    assert.strictEqual(label({ stockId:'s9', side:'buy', shares:1 }), 'Buy 1 unknown stock');
+    assert.strictEqual(label({ side:'buy', shares:1 }), 'Buy 1 unknown stock');
+    assert.strictEqual(label(null), 'Buy 0 unknown stock');
+    [{ stockId:'s1' }, { stockId:'s2' }, { stockId:'s9' }, {}].forEach(d => assert.strictEqual(label(d).includes('?'), false, JSON.stringify(d)));
+    assert.ok(extractFunction('trashLabel').includes("case 'stockTxns': return (data.side === 'sell' ? 'Sell ' : 'Buy ') + (Math.abs(Number(data.shares)||0)) + ' ' + _trashTradeSymbol(data) + d;"));
+    // the row's note sits on its own line, and the restore action is the one handler for both the plain and the compound restore
+    assert.ok(indexSrc.includes('.trash-note{flex-basis:100%}'));
+    assert.ok(extractFunction('renderTrash').includes('data-click="restoreFromTrash"') && !extractFunction('renderTrash').includes('data-click="restoreWith'));
   });
 
   test('Chart.js draws without animation under reduced motion, every chart config asks _reducedMotion for its duration', () => {

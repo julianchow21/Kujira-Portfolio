@@ -8,20 +8,20 @@
    index.html is network-first (self-healing) but the rest are cache-first and
    will be served stale forever otherwise. */
 
-const CACHE_NAME = 'kjr-portfolio-v2.76';
+const CACHE_NAME = 'kjr-portfolio-v2.77';
 const CACHE_PREFIX = 'kjr-portfolio-';
 const CHART_JS_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
 
 const CORE_ASSETS = [
   './index.html',
   './Worker/theme-init.js',
-  './Worker/app.js?v=2.76',
-  './Worker/kjr-core.js?v=2.76',
-  './Worker/kjr-sortable.js?v=2.76',
-  './Worker/kjr-vault.js?v=2.76',
-  './Worker/kjr-migration.js?v=2.76',
-  './Worker/supabase.js?v=2.76',
-  './Worker/kjr-nas.js?v=2.76',
+  './Worker/app.js?v=2.77',
+  './Worker/kjr-core.js?v=2.77',
+  './Worker/kjr-sortable.js?v=2.77',
+  './Worker/kjr-vault.js?v=2.77',
+  './Worker/kjr-migration.js?v=2.77',
+  './Worker/supabase.js?v=2.77',
+  './Worker/kjr-nas.js?v=2.77',
   './Worker/manifest.webmanifest',
   './Worker/whale-icon.png',
   CHART_JS_URL,

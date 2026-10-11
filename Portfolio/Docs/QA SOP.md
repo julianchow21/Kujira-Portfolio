@@ -3,7 +3,7 @@
 How to QA this app after any change, and the mistakes that must never come back.
 Re-run the whole thing whenever a new feature touches money, display, or storage.
 
-Supersedes `QA SOP v1 (4 Jun)`. Last updated: 29/08/2026 (app v2.60).
+Supersedes `QA SOP v1 (4 Jun)`. Last updated: 11/10/2026 (app v2.77).
 
 ---
 
@@ -11,16 +11,21 @@ Supersedes `QA SOP v1 (4 Jun)`. Last updated: 29/08/2026 (app v2.60).
 
 1. **Start the preview.** Launch config `kjr-portfolio` (global `.claude/launch.json`), serves
    the repo root on port 3807. The app lives at `http://localhost:3807/Portfolio/`, not the
-   repo root (the root 404s by design, that is expected).
+   repo root (the root shows a directory listing, that is expected).
 2. **Run the automated checks first** (cheap, catches regressions before you open a browser):
-   - `npm test` from `Portfolio/`, runs `tests/test-core.js` (pure core logic),
-     `tests/test-app.js` (extracted pure helpers from `Worker/app.js`), then
-     `tests/check-release.js` (cache-bust discipline, see below). All three must be green
-     before any manual pass.
-   - Static scan for dead buttons: `grep -oE "^function [a-zA-Z0-9_]+" index.html | sort | uniq -d`
-     (expect blank, no duplicate top-level defs).
-   - Every inline `onclick`/`oninput`/`onchange` handler resolves to a defined function
-     (`document.*` calls are false positives, ignore).
+   - `npm test` from `Portfolio/`, runs the whole chain in `package.json`: `tests/test-core.js`
+     (pure core logic) and `tests/test-app.js` (extracted pure helpers from `Worker/app.js`)
+     first, the other unit and config scripts next, and `tests/check-release.js` (cache-bust
+     discipline, see below) last. Every script must be green before any manual pass.
+   - Static scan for duplicate top-level defs: `grep -oE "^function [a-zA-Z0-9_]+" Worker/app.js | sort | uniq -d`
+     (expect blank, `index.html` holds no functions any more).
+   - Every `data-click`, `data-change` and `data-input` name in `index.html` and `Worker/app.js`
+     is a key of the `ACTIONS` table, so no button points at a missing action (no inline
+     `onclick` handlers remain). Expect blank:
+
+     ```sh
+     comm -23 <(grep -ohE 'data-(click|change|input)="[A-Za-z0-9_]+"' index.html Worker/app.js | sed -E 's/data-[a-z]+="(.*)"/\1/' | sort -u) <(sed -n '/const ACTIONS = {/,/^  };/p' Worker/app.js | grep -oE '^    [A-Za-z0-9_]+:' | tr -d ' :' | sort -u)
+     ```
 3. **Seed a representative dataset** in the browser console (paste directly, do NOT type into
    prod). localhost has no sync URL stored so cloud sync stays off automatically, never paste
    the production Apps Script URL into a localhost session:
@@ -43,27 +48,43 @@ DB = mergeDefaults(seed); saveLocal(); runSalaryEngine({}); renderAll(); })()
 
 4. **Assert numbers, do not eyeball.** Pull computed values via eval and check them against
    the invariant table below. Screenshots are for layout, not for accuracy.
-5. **Walk every tab**: Dashboard, Stocks, Crypto, Real Estate, Insurance, Cash, CPF, Income & spending, Projections, Settings. Check
-   golden path + empty state + both themes (dark default, warm light opt-in) + both currencies
-   (SGD/USD) + mobile widths (430, 390, 375).
+5. **Walk every tab** by sidebar group: Overview (Dashboard, Projections, Explore), Assets
+   (Stocks, Crypto, Cash, CPF, Real estate, Insurance), Money (Income & spending, Watchlist),
+   then Settings (sidebar footer, More sheet on phones). Check golden path + empty state + both
+   themes (dark default, warm light opt-in) + both currencies (SGD/USD, the switch only shows on
+   Stocks and Watchlist, every other page is SGD only) + mobile widths (430, 390, 375).
 6. **Check the console on every tab.** Zero errors is the bar.
 7. **Reset to a clean first-run state** when done: `localStorage.clear(); location.reload()`.
    Never leave seed data behind.
 
 ---
 
-## Invariants this seed must always produce (as of Jul 2026, 6 paydays elapsed)
+## Invariants this seed must always produce (as of Oct 2026, 9 paydays elapsed)
+
+Measured on 11/10/2026 against app v2.77 with the step 3 seed, not worked out by hand.
 
 | Check | Expected |
 |---|---|
 | AAPL position | 20 shares, avg cost 150, realised P&L US$1,395 |
-| DBS balance | 39,200 (20,000 + 6 x 3,200 salary deposits) |
+| DBS balance | 48,800 (20,000 + 9 x 3,200 salary deposits) |
 | IBKR balance | US$2,895, S$3,908.25 |
-| CPF effective | OA 51,040 / SA 22,880 / MA 18,840, total 92,760 |
-| Net worth (with CPF) | S$642,918 |
-| Net worth (ex-CPF) | S$550,158 |
-| Net worth in USD | US$476,236 |
+| CPF effective | OA 56,562.07 / SA 24,318.38 / MA 20,759.55, total 101,640 (75,000 + 9 x 2,960) |
+| Net worth (with CPF) | S$661,398 |
+| Net worth (ex-CPF) | S$559,758 |
+| Net worth in USD | US$489,925 (net worth / 1.35, the dashboard has no USD view) |
 | Reconciliation | `runReconciliation().ok === true` |
+
+How the numbers move: each payday (the last working day of the month, the next is 30/10/2026)
+adds S$3,200 to DBS and S$2,960 to CPF. CPF splits by the CPF Board allocation ratios of the
+contribution (`cpfAllocationForAge`), so a payday adds OA 1,840.23, SA 479.82 and MA 639.95, not
+round percentages of wages. Stocks sit at cost (S$7,050) because the seed has no cached prices.
+
+To refresh the table, run step 3, paste this eval, replace each value with its output and update
+the heading's month and payday count:
+
+```js
+(() => { const dbs = DB.cash.find(c => c.id === 'cash_seed_dbs'), ibkr = DB.cash.find(c => c.id === 'cash_seed_ibkr'); const cpf = _cpfSGD(), nw = currentNetWorthSGD(); return { paydays: DB.income.filter(i => i.auto === 'salary').length, aapl: deriveStockPosition('stock_seed_aapl'), dbs: deriveCashBalance(dbs), ibkrUSD: deriveCashBalance(ibkr), ibkrSGD: toSGD(deriveCashBalance(ibkr), 'USD'), cpf: cpfEffectiveBalances(), cpfTotal: cpf, nw, nwExCpf: roundMoney(nw - cpf), nwUSD: nw / getFx('USD', 'SGD'), recon: runReconciliation().ok }; })()
+```
 
 ---
 
@@ -74,7 +95,8 @@ These are the checks that catch finance bugs. Add a new one whenever a feature a
 - **Dashboard cash == Cash tab total.** Both must use `deriveCashBalance()` (opening +
   movements + linked trade flows). The 04/06 bug was `_cashSGD()` reading the raw `amount`
   field, understating net worth by any brokerage trade proceeds.
-- **Net worth == sum of the asset-class cards.** Stocks + Cash + CPF + Real Estate + Crypto.
+- **Net worth == sum of the asset-class cards.** Stocks + Cash + CPF + Real estate + Crypto +
+  Insurance cash value (`_netWorthValueInfo().classes`).
 - **Stocks: market value minus total cost == unrealised P&L.** Realised P&L comes only from sells.
 - **Partial sell maths.** Open 30 @150, sell 10 @290 fee 5 gives 20 left, avg still 150,
   realised = (290x10 - 5) - 150x10 = 1,395.
@@ -180,7 +202,7 @@ These are the checks that catch finance bugs. Add a new one whenever a feature a
 | 03/07 (theme) | `theme-init.js` did nothing when no theme was stored, so a fresh visitor first-painted light then flipped to dark when `boot()` ran, a visible flash | `theme-init.js` adds the `dark` class unless the stored choice is exactly `'light'` |
 | 03/07 (verification) | verifying a mid-session `Worker/*.js` edit in the preview browser without bumping `?v=` or clearing the service worker, sw.js serves the cache-first stale copy so the edit silently never loads | after any Worker JS edit during a verification session, unregister the service worker and clear caches in the console (or bump `?v=`), then confirm the new code is live via eval before judging |
 
-For wider cross-project rules see `~/Claude Projects/Claude/lessons.md`.
+For wider cross-project rules see `~/.assistant-control/lessons.md`.
 
 ---
 

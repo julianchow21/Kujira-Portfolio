@@ -47,9 +47,9 @@
      tokens below are what most users see at runtime. */
   --bg:#F6F4EE;--bg2:#ffffff;--bg3:#F0EDE4;--bg4:#E8E4D8;
   --border:#E5E1D8;--border2:#D6D1C4;
-  /* Light --text3 clears 4.5:1 on the page surfaces: 4.89 on --bg, 5.38 on --bg2, 4.59 on --bg3, 4.55 on --sidebar. On --bg4 it is 4.23, so the two light rules
-     that set it there (.cov-pill.na and the hovered .cb-field-pill .pill-type) step up to --text. */
-  --text:#1f1d1a;--text2:#6b665e;--text3:#6f6a60;
+  /* Three text levels, two of them dim. Light --text2 (v2.77) is 7.17:1 on --bg, 6.21 on --bg4 and 5.48 on the grey More sheet, so it clears 4.5:1 on every light surface.
+     Light --text3 is 4.89:1 on --bg, 5.38 on --bg2, 4.59 on --bg3 and 4.55 on --sidebar, one clear step below --text2. On --bg4 it is 4.23, so the rules that put dim text there take --text2. */
+  --text:#1f1d1a;--text2:#55514a;--text3:#6f6a60;
   --red:#b13838;--red2:#8f2c2c;--red-soft:#f7e6e6;--red-border:#e6c5c5;
   /* Gain/loss carry P&L and change colouring. Light values are the redesign's
      #13845A/#C7404B darkened ~10% so text clears 4.5:1 on --bg and on its own
@@ -80,7 +80,7 @@
   --surface-solid:#ffffff;
   /* The sidebar surface, a step darker than --bg so the page reads as the main plane. */
   --sidebar:#EFECE4;
-  /* Small dim text on the sidebar. Light --text3 is 4.55:1 on --sidebar (it was 3.83:1 before v2.76), which clears 4.5 with little to spare, so light keeps --text2 (4.82:1). Dark --text3 is 5.39:1 and stays. */
+  /* Small dim text on the sidebar. Light --text3 is 4.55:1 on --sidebar, which clears 4.5 with little to spare, so light keeps --text2 (6.68:1). Dark --text3 is 5.39:1 and stays. */
   --sidebar-dim:var(--text2);
   --glow1:transparent;--glow2:transparent;
   --font-display:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,system-ui,sans-serif;
@@ -140,7 +140,7 @@ a{color:var(--blue);text-decoration:none}
 .ws-btn{display:flex;align-items:center;gap:10px;width:100%;padding:6px 8px;border:0;border-radius:var(--radius);background:none;color:var(--text);font:inherit;text-align:left;cursor:pointer}
 .ws-btn[aria-expanded="true"]{background:color-mix(in srgb,var(--text) 7%,transparent)}
 @media (hover:hover){.ws-btn:hover{background:color-mix(in srgb,var(--text) 7%,transparent)}}
-/* The 6 to 7% hover and open tint takes light --sidebar-dim down to about 4.3:1, so the small text follows its label to --text while hovered or open. */
+/* The 6 to 7% hover and open tint leaves --sidebar-dim at about 5.8:1 in light and 4.7:1 in dark, still over 4.5, so the small text follows its label to --text while hovered or open and the pair reads as one. */
 .ws-btn[aria-expanded="true"] .ws-sub{color:var(--text)}
 @media (hover:hover){.ws-btn:hover .ws-sub{color:var(--text)}}
 .ws-mark{width:32px;height:32px;flex:none;border-radius:9px;background:var(--accent-soft);object-fit:contain;padding:2px}
@@ -188,7 +188,7 @@ html:not(.dark) .tt-light,html.dark .tt-dark{display:none}
 .tb-whale{display:none;width:32px;height:32px;flex:none;border-radius:9px;background:var(--accent-soft);object-fit:contain;padding:2px}
 .tb-text{min-width:0}
 .tb-title{margin:0;font-size:17px;line-height:22px;font-weight:700;letter-spacing:-0.01em;overflow-wrap:anywhere}
-/* --text2, not --text3: the glass bar sits over whatever scrolls behind it, and --text3 measures 4.22:1 in dark (over a card). In light it measured 4.35:1 before v2.76 and is about 5.2:1 now, --text2 stays for the margin. */
+/* --text2, not --text3: the glass bar sits over whatever scrolls behind it, and --text3 measures 4.22:1 in dark (over a card). In light --text3 is 5.18:1 over the page and 5.38:1 over a card, --text2 is 7.60:1 and 7.89:1, and stays for the margin. */
 .tb-sub{margin:0;font-size:12px;line-height:16px;color:var(--text2);overflow-wrap:anywhere}
 .tb-sub:empty{display:none}
 .tb-actions{display:flex;align-items:center;gap:8px;flex:none;margin-left:auto}
@@ -332,6 +332,8 @@ html.privacy td.num:not(.pct){filter:blur(7px);-webkit-user-select:none;user-sel
 .info-tip.dismissed .info-pop{opacity:0;visibility:hidden;pointer-events:none}
 .info-pop-sum{display:flex;flex-direction:column;gap:2px}
 .info-pop-sum:empty{display:none}
+/* Dark --text3 is 4.26:1 on the popover's --bg3, so the summary line (set with an inline --text3) takes --text2 (6.14:1). The token is re-pointed on the popover, so every dim part follows. Light --text3 is 4.59:1 there and stays. */
+html.dark .info-pop{--text3:var(--text2);--tx3:var(--text2)}
 @media (prefers-reduced-motion:reduce){.info-pop,.info-tip-btn{transition:none}}
 .card-body{padding:18px}
 
@@ -353,6 +355,8 @@ th{text-align:left;padding:10px 12px;color:var(--text3);font-weight:500;font-siz
 td{padding:10px 12px;border-top:1px solid var(--bg4);vertical-align:middle;background:var(--surface-solid);transition:background 0.12s ease}
 tbody tr:first-child td{border-top:none}
 @media (hover:hover){tbody tr:hover td{background:color-mix(in srgb,var(--surface-solid) 93%,var(--text) 7%)}}
+/* Dark --text3 is 4.05:1 on that 7% hover tint (--text2 is 5.83:1), so every dim cell of the hovered row (market tags, muted cells, hints) follows its row up to --text2. Light --text3 is 4.68:1 there and stays. */
+@media (hover:hover){html.dark tbody tr:hover td{--text3:var(--text2);--tx3:var(--text2)}}
 .num{font-variant-numeric:tabular-nums;font-size:13px;text-align:right}
 .num-cell{text-align:right}
 /* Sticky first column on horizontal scroll (excludes .holdings, which manages its
@@ -438,13 +442,12 @@ textarea.fi{resize:vertical;min-height:70px}
 .more-sheet-row:last-child{margin-bottom:0}
 .more-sheet-row svg{width:18px;height:18px;flex-shrink:0}
 .more-sheet-row .msr-text{flex:1 1 auto;min-width:0;text-align:left}
-/* The sheet is glass over a dark scrim, so its surfaces are grey in light (rows #efefef, sheet #d7d7d7). On the rows --text3 is 4.68:1 in light (3.93:1 before v2.76) and 4.41:1 in dark, so counts and the arrow keep --text2 (4.95:1 light, 6.34:1 dark), and the version uses --text in light (--text2 is only 3.95:1 on the sheet). */
+/* The sheet is glass over a dark scrim, so its surfaces are grey in light (rows #efefef, sheet #d7d7d7). On the rows --text3 is 4.68:1 in light and 4.41:1 in dark, so counts and the arrow keep --text2 (6.86:1 light, 6.34:1 dark). The version sits on the sheet itself, where --text2 is 5.48:1 in light and 7.19:1 in dark, so it needs no override. */
 .more-sheet-row .msr-count,.more-sheet-row .msr-ext{flex:none;font-size:12px;font-weight:600;color:var(--text2)}
 .more-sheet-row.active{background:var(--accent-soft);border-color:var(--accent-border);color:var(--accent);font-weight:600}
 .more-sheet-row.active .msr-count{color:inherit}
 .msr-sep{height:1px;margin:8px 0 10px;background:var(--border)}
 .sheet-version{margin:12px 0 0;text-align:center;font-size:12px;line-height:16px;color:var(--text2)}
-html:not(.dark) .sheet-version{color:var(--text)}
 
 /* TOAST */
 #toast-host{position:fixed;bottom:24px;right:24px;display:flex;flex-direction:column;gap:8px;z-index:300;pointer-events:none}
@@ -512,9 +515,8 @@ html:not(.dark) .sheet-version{color:var(--text)}
 .cov-pill.covered{color:var(--green);background:var(--green-soft);border-color:var(--green-border)}
 .cov-pill.partial{color:var(--amber);background:var(--amber-soft);border-color:var(--amber-border)}
 .cov-pill.gap{color:var(--red);background:var(--red-soft);border-color:var(--red-border)}
-.cov-pill.na{color:var(--text3);background:var(--bg4);border-color:var(--border2)}
-/* On --bg4 the light --text3 is 4.23:1 and --text2 only 4.48:1, so light steps up to --text (13.23:1), as .sheet-version does. Dark is left as it was. */
-html:not(.dark) .cov-pill.na{color:var(--text)}
+/* On --bg4 --text3 is 4.23:1 in light and 3.62:1 in dark, so the pill takes --text2 in both themes (6.21:1 and 5.20:1). */
+.cov-pill.na{color:var(--text2);background:var(--bg4);border-color:var(--border2)}
 /* Policy document-link icon (register first cell). Muted by default, accent
    on hover, no new raw colours, existing tokens only. */
 .doc-link{display:inline-flex;vertical-align:middle;margin-left:6px;color:var(--text3)}
@@ -525,6 +527,8 @@ html:not(.dark) .cov-pill.na{color:var(--text)}
 .ins-chevron:hover{color:var(--accent)}
 .ins-chevron-spacer{cursor:default}
 .ins-rider-row td{background:var(--bg3)}
+/* Dark --text3 is 4.26:1 on --bg3, so the dim line under Add rider takes --text2 (6.14:1). The token is re-pointed on the cell, so anything dim in it follows. Light --text3 is 4.59:1 there and stays. */
+html.dark .ins-rider-row td{--text3:var(--text2);--tx3:var(--text2)}
 
 /* MARKET / ACCOUNT TAG */
 .tag{display:inline-flex;align-items:center;padding:1px 5px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2)}
@@ -703,6 +707,8 @@ html:not(.dark) .cov-pill.na{color:var(--text)}
 .dash-hold{padding:6px 8px 10px}
 .dash-hrow{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);align-items:center;gap:12px;width:100%;padding:10px 12px;border:0;border-radius:10px;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
 @media (hover:hover){.dash-hrow:hover{background:var(--bg3)}}
+/* Over the --bg3 hover tint --text3 is 4.59:1 in light and 4.26:1 in dark, --text2 is 6.74:1 and 6.14:1, so the dim parts of a hovered row (sub lines, currency prefix, FX note) step up with it. The token is re-pointed on the row. The header row has no tint. */
+@media (hover:hover){.dash-hrow:not(.dash-hhead):hover{--text3:var(--text2)}}
 .dash-hrow:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .dash-hrow.dash-hhead{padding-block:10px 4px;font-size:11px;font-weight:700;line-height:14px;letter-spacing:0.08em;text-transform:uppercase;color:var(--text3);cursor:default}
 .dash-hrow.dash-hhead:hover{background:none}
@@ -744,6 +750,7 @@ html:not(.dark) .cov-pill.na{color:var(--text)}
 .trash-info{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
 .trash-label{font-weight:600;font-size:14px}
 .trash-actions{display:flex;gap:6px;flex-shrink:0}
+.trash-note{flex-basis:100%}
 @media(max-width:640px){.trash-row{flex-direction:column;align-items:stretch}.trash-actions{justify-content:flex-end}}
 .bucket-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:6px}
 .bucket{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
@@ -919,8 +926,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 .cb-field-pill:active{cursor:grabbing;opacity:0.7}
 .cb-field-pill .pill-icon{font-size:13px}
 .cb-field-pill .pill-type{font-size:12px;color:var(--text3);margin-left:auto}
-/* The hovered pill sits on --bg4, where the light --text3 is 4.23:1 (--text2 only 4.48:1), so the type label takes --text while it is hovered. */
-html:not(.dark) .cb-field-pill:hover .pill-type{color:var(--text)}
+/* The hovered pill sits on --bg4, where --text3 is 4.23:1 in light and 3.62:1 in dark, so the type label takes --text2 (6.21:1 and 5.20:1) while it is hovered. Dark --text3 is only 4.26:1 on the resting --bg3 as well, so in dark the label is --text2 all the time (6.14:1). */
+.cb-field-pill:hover .pill-type,html.dark .cb-field-pill .pill-type{color:var(--text2)}
 .cb-pill-dragging{opacity:0.4;border-style:dashed !important}
 .cb-axis-chip{display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:var(--on-accent);border-radius:20px;padding:3px 10px 3px 8px;font-size:12px;font-weight:500}
 .cb-axis-chip button{background:none;border:none;color:var(--on-accent);cursor:pointer;font-size:14px;line-height:1;padding:0 0 0 2px;opacity:0.7}
@@ -1077,7 +1084,7 @@ html:not(.dark) .cb-field-pill:hover .pill-type{color:var(--text)}
 .cp-main{display:flex;flex-direction:column;flex:1 1 auto;min-width:0}
 .cp-t{overflow:hidden;font-size:13.5px;line-height:1.35;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 .cp-s{overflow:hidden;font-size:12px;line-height:1.4;color:var(--text3);text-overflow:ellipsis;white-space:nowrap}
-/* Over the active row's tint the dim text moves up a step: --text3 is 4.59:1 on --bg3 in light and 4.26:1 in dark, --text2 is 4.87:1 and 6.14:1. */
+/* Over the active row's tint the dim text moves up a step: --text3 is 4.59:1 on --bg3 in light and 4.26:1 in dark, --text2 is 6.74:1 and 6.14:1. */
 .cp-opt[aria-selected="true"] .cp-s{color:var(--text2)}
 .cp-mark{background:none;color:var(--accent);font-weight:800}
 .cp-empty{margin:0;padding:28px 16px;text-align:center;font-size:13px;line-height:18px;color:var(--text3)}
@@ -1167,6 +1174,16 @@ html:not(.dark) .cb-field-pill:hover .pill-type{color:var(--text)}
   .hl-k{font-weight:500;color:var(--text2)}
   .hl-t{display:block;overflow:hidden;font-size:13.5px;font-weight:600;line-height:1.35;text-overflow:ellipsis;white-space:nowrap}
   .hl-s{display:block;overflow:hidden;font-size:12px;line-height:1.4;color:var(--text3);text-overflow:ellipsis;white-space:nowrap}
+  /* A Watchlist row's second line (.hl-split .hl-s) is one flex line: the target piece (.hl-tgt, the check mark when the price is at it, the word Target and the amount, one box)
+     and then the note (.hl-nt), the only part that gives way, with an ellipsis of its own. A flex line always keeps its first item, so a ::before as tall as the line (and no wide)
+     goes first and the target is the second: a line too narrow for the target wraps it to a second line that max-height and overflow clip away whole. A figure never shows half,
+     and its blurred chip never paints beside an ellipsis (Chrome paints a filter layer inside an inline that text-overflow dropped). The row-gap keeps the clipped line three
+     lines away, so even the 7px blur of a dropped amount (about 21px of halo) stays outside the visible one. An empty line has no ::before and no height. */
+  .hl-split .hl-s{display:flex;flex-wrap:wrap;row-gap:3em;max-height:1.4em}
+  .hl-split .hl-s:not(:empty)::before{content:'';flex:none;height:1.4em}
+  .hl-tgt{flex:none;white-space:nowrap}
+  .hl-nt{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hl-tgt + .hl-nt{margin-left:.25em}
   .hl-end{display:flex;flex-direction:column;align-items:flex-end;min-width:0;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   .hl-amt{font-size:13px;font-weight:600}
   .hl-amt.up{color:var(--gain)}
@@ -1191,13 +1208,21 @@ html:not(.dark) .cb-field-pill:hover .pill-type{color:var(--text)}
   .hl-group-n{text-align:right;font-weight:500;color:var(--text2);white-space:nowrap}
   /* The dividends card gives its list the width the table had. */
   .card-body.hl-host{padding:0}
-  /* Over the hover tint the dim text moves up a step: --text3 is 4.59:1 on --bg3 in light and 4.26:1 in dark, --text2 is 4.87:1 and 6.14:1. */
-  @media (hover:hover){.hl-row:hover .dash-sub,.hl-row:hover .dash-who-t span,.hl-row:hover .hl-s,.hl-row:hover .price-stale{color:var(--text2)}}
-  @media (hover:none){.hl-row:active{background-color:var(--bg3)}}
+  /* A pressed row takes the same --bg3 tint as a hovered one, so its dim text steps up the same way (see .dash-hrow:hover). */
+  @media (hover:none){.hl-row:active{background-color:var(--bg3);--text3:var(--text2)}}
   /* CPF: the history body gives the list the width the table had. */
   #cpf-history-body{padding:12px 10px 4px}
   #cpf-history-body .h-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 8px}
   #cpf-history-body .hl{padding-inline:0}
+}
+/* A Watchlist row's second line carries the target, which has to show whole. Beside the price a 320px row leaves 80 to 100px and the target piece needs up to 135, so at 480px
+   and below the line takes the row's whole width: the symbol stays beside the price and the day move, and the target line sits under all of them. */
+@media (max-width:480px){
+  .hl-split .hl-main{display:contents}
+  .hl-split .hl-t{grid-column:1;grid-row:1}
+  .hl-split .hl-end{grid-column:2;grid-row:1}
+  .hl-split .hl-s{grid-column:1 / -1;grid-row:2}
+  .hl-split .hl-s:not(:empty){margin-top:3px}
 }
 /* At 360px and below the share drops its words ("of stocks" stays in the row's spoken label) so the symbol keeps room, and the
    freshness pill on Crypto and Cash moves under the buttons, so + Add and More share the first line. */
@@ -2243,12 +2268,12 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.76"></script>
-<script src="Worker/kjr-sortable.js?v=2.76"></script>
-<script src="Worker/kjr-vault.js?v=2.76"></script>
-<script src="Worker/kjr-migration.js?v=2.76"></script>
-<script src="Worker/supabase.js?v=2.76"></script>
-<script src="Worker/kjr-nas.js?v=2.76"></script>
-<script src="Worker/app.js?v=2.76"></script>
+<script src="Worker/kjr-core.js?v=2.77"></script>
+<script src="Worker/kjr-sortable.js?v=2.77"></script>
+<script src="Worker/kjr-vault.js?v=2.77"></script>
+<script src="Worker/kjr-migration.js?v=2.77"></script>
+<script src="Worker/supabase.js?v=2.77"></script>
+<script src="Worker/kjr-nas.js?v=2.77"></script>
+<script src="Worker/app.js?v=2.77"></script>
 </body>
 </html>

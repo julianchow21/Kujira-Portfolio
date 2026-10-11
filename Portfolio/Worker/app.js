@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.76';
-const APP_DISPLAY_VERSION = 'v2.76 (11 Oct)';
+const APP_VERSION = 'v2.77';
+const APP_DISPLAY_VERSION = 'v2.77 (11 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -6523,17 +6523,83 @@ async function refreshCryptoPrices(opts = {}){
    SOFT DELETE — Kujira convention: never hard-delete, push to trash.
    Trash UI ("Recently deleted") lives in Settings: restore, purge, empty.
    ═══════════════════════════════════════════════════════════════════════ */
-const TRASH_MAX = 100; // bound the synced payload; oldest deletions drop first
-function sendToTrash(table, id){
-  if (!DB[table]) return false;
+const TRASH_MAX = 100; // bound the synced payload; oldest deletions drop first, bar the stock or account a trashed trade needs (_trimTrash)
+
+/* Take a row out of its table and into the trash. No save and no trim here: sendToTrash wraps it for one delete, cleanOrphanedTrades for a batch, so a batch
+   saves once. Returns the new trash entry, or null when the row is not there. */
+function _moveToTrash(table, id){
+  if (!DB[table]) return null;
   const idx = DB[table].findIndex(x => x.id === id);
-  if (idx < 0) return false;
+  if (idx < 0) return null;
   const item = DB[table][idx];
   DB[table].splice(idx, 1);
   if (!DB.trash) DB.trash = [];
-  DB.trash.push({ id: uid('tr'), table, ts: new Date().toISOString(), data: item });
-  if (DB.trash.length > TRASH_MAX) DB.trash = DB.trash.slice(-TRASH_MAX);
+  const entry = { id: uid('tr'), table, ts: new Date().toISOString(), data: item };
+  DB.trash.push(entry);
+  return entry;
+}
+
+/* The trash entries a trashed trade still needs: the stock and cash account entries that a trade in the trash points to, by trash entry id. A trade can only be
+   restored together with those (_tradeRestorePlan), so _trimTrash never drops them. */
+function _trashParentIds(){
+  const trash = DB.trash || [];
+  const stockIds = new Set(), cashIds = new Set();
+  trash.forEach(e => {
+    if (!e || e.table !== 'stockTxns' || !e.data) return;
+    if (e.data.stockId) stockIds.add(String(e.data.stockId));
+    if (e.data.cashAccountId) cashIds.add(String(e.data.cashAccountId));
+  });
+  const ids = new Set();
+  trash.forEach(e => {
+    if (!e || !e.data) return;
+    if ((e.table === 'stocks' && stockIds.has(String(e.data.id))) || (e.table === 'cash' && cashIds.has(String(e.data.id)))) ids.add(e.id);
+  });
+  return ids;
+}
+
+/* Keep the trash within TRASH_MAX. The oldest entries go first (array order, the order they were deleted in), but never a stock or cash account that a trade in
+   the trash points to: without it the trade could never be restored, and one Remove orphaned on a big ledger used to push the stock out of the list on the spot.
+   Bound: after a trim the list holds at most max(TRASH_MAX, protected parents) entries, and there are never more protected parents than the distinct stocks and
+   cash accounts the trashed trades point to (at most two per trade), so the list exceeds the cap only by entries that trashed trades need. A parent whose trades
+   have all left the trash is an ordinary entry again on the next trim. */
+function _trimTrash(){
+  const trash = DB.trash || [];
+  if (trash.length <= TRASH_MAX) return;
+  const parents = _trashParentIds();
+  let excess = trash.length - TRASH_MAX;
+  DB.trash = trash.filter(e => {
+    if (excess > 0 && !parents.has(e && e.id)){ excess--; return false; }
+    return true;
+  });
+}
+
+function sendToTrash(table, id){
+  if (!_moveToTrash(table, id)) return false;
+  _trimTrash();
   return saveData();
+}
+
+/* The trash entry holding the row of this table with this id (the newest, should two carry it), or null. */
+function _trashParentEntry(table, id){
+  if (!id) return null;
+  let best = null;
+  (DB.trash || []).forEach(e => {
+    if (!e || e.table !== table || !e.data || String(e.data.id) !== String(id)) return;
+    if (!best || String(e.ts || '') > String(best.ts || '')) best = e;
+  });
+  return best;
+}
+
+/* The symbol of a trashed trade's stock: the live stock, else the stock's own trash entry, else a symbol the trade row itself carries, else "unknown stock".
+   Never a bare "?": an orphaned trade whose stock was deleted used to read "Buy 10 ?". */
+function _trashTradeSymbol(data){
+  data = data || {};
+  const live = (DB.stocks || []).find(s => s.id === data.stockId);
+  if (live && live.symbol) return String(live.symbol);
+  const parent = _trashParentEntry('stocks', data.stockId);
+  if (parent && parent.data.symbol) return String(parent.data.symbol);
+  if (data.symbol) return String(data.symbol);
+  return 'unknown stock';
 }
 
 /* Human label for a trashed entry, by table. Used by the Recently deleted UI. */
@@ -6549,10 +6615,7 @@ function trashLabel(table, data){
     case 'crypto':     return (data.symbol || '?');
     case 'realestate': return data.name || 'property';
     case 'cash':       return (data.name || 'account') + ' · ' + (data.currency || 'SGD');
-    case 'stockTxns': {
-      const sym = ((DB.stocks||[]).find(s => s.id === data.stockId) || {}).symbol || '?';
-      return (data.side === 'sell' ? 'Sell ' : 'Buy ') + (Math.abs(Number(data.shares)||0)) + ' ' + sym + d;
-    }
+    case 'stockTxns': return (data.side === 'sell' ? 'Sell ' : 'Buy ') + (Math.abs(Number(data.shares)||0)) + ' ' + _trashTradeSymbol(data) + d;
     case 'cashTxns':   return (data.type || 'movement') + ' ' + (Number(data.amount)||0) + d;
     case 'cpfHistory': return (data.type || 'entry') + ' ' + (data.account || '') + ' ' + (Number(data.amount)||0) + d;
     case 'income':     return 'Gross ' + (Number(data.gross)||0) + d;
@@ -6576,47 +6639,141 @@ function renderTrash(){
     host.innerHTML = '<div class="hint">Nothing here. Deleted entries land here so you can restore them.</div>';
     return;
   }
-  host.innerHTML = trash.map(e => `
+  // A trade's button promises what its restore does (its stock or cash account comes back with it), and a trade that cannot come back says why on the row.
+  host.innerHTML = trash.map(e => {
+    const plan = e.table === 'stockTxns' ? _tradeRestorePlan(e) : null;
+    return `
     <div class="trash-row">
       <div class="trash-info">
         <span class="tag">${kjrEscape(TRASH_TABLE_NAMES[e.table] || e.table)}</span>
         <span class="trash-label${TRASH_AMOUNT_TABLES.indexOf(e.table) !== -1 ? ' money-chip' : ''}">${kjrEscape(trashLabel(e.table, e.data))}</span>
-        <span class="hint">deleted ${kjrEscape(relTime(e.ts))}</span>
+        <span class="hint">deleted ${kjrEscape(relTime(e.ts))}</span>${plan && plan.blocked ? '<span class="hint trash-note">' + kjrEscape(plan.blocked) + '</span>' : ''}
       </div>
       <div class="trash-actions">
-        <button class="btn btn-sm" data-click="restoreFromTrash" data-a0="${kjrEscape(e.id)}">Restore</button>
+        <button class="btn btn-sm" data-click="restoreFromTrash" data-a0="${kjrEscape(e.id)}">${kjrEscape(plan && plan.parents.length ? plan.action : 'Restore')}</button>
         <button class="btn btn-sm btn-danger" data-click="purgeTrashItem" data-a0="${kjrEscape(e.id)}" title="Delete permanently">✕</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
-/* Put a trashed entry back into its table. Restores its contribution to all
-   derived totals (balances, P&L). Regenerates the id only if it would collide. */
+/* What it takes to restore a trashed trade. Its stock, and its cash account when it is linked, must be live: a missing one that is still in the trash is a parent
+   and comes back first, a missing one that is gone blocks the restore (the trade would fail the trade form's Stock or Funded from rule, and nothing can be
+   invented for it). words names the rows for the button and the toast ("stock and trade"), blocked is the plain reason when it cannot happen. Computed again at
+   the click, so the button's promise and the restore agree. */
+function _tradeRestorePlan(entry){
+  const d = (entry && entry.data) || {};
+  const parents = [], gone = [], names = [];
+  if (d.stockId && !(DB.stocks || []).some(s => s.id === d.stockId)){
+    const p = _trashParentEntry('stocks', d.stockId);
+    if (p){ parents.push(p); names.push('stock'); }
+    else gone.push('its stock' + (d.symbol ? ' (' + String(d.symbol) + ')' : ''));
+  }
+  if (d.cashAccountId && !(DB.cash || []).some(c => c.id === d.cashAccountId)){
+    const p = _trashParentEntry('cash', d.cashAccountId);
+    if (p){ parents.push(p); names.push('cash account'); }
+    else gone.push('its cash account');
+  }
+  const blocked = gone.length ? 'This trade cannot be restored: ' + gone.join(' and ') + (gone.length > 1 ? ' are' : ' is') + ' no longer in Recently deleted.' : '';
+  const what = names.concat('trade');
+  const words = what.length > 2 ? what.slice(0, -1).join(', ') + ' and ' + what[what.length - 1] : what.join(' and ');
+  return { parents, blocked, words, action:'Restore ' + words };
+}
+
+/* The trade form's own guards, for a trade going back into the ledger (entityModalSave runs the same two): a sell beyond the shares held as of its date asks
+   first, since a correcting entry is legitimate, and a funding account in another currency is refused, since the cash leg is not converted. Returns the reason
+   the restore stops ('' when the person declined the question, they chose that), or null to go on. */
+function _tradeRestoreGuard(item){
+  if (item.side === 'sell'){
+    const held = sharesHeldAsOf(item.stockId, item.date, item.id);
+    const qty  = Math.abs(Number(item.shares) || 0);
+    if (qty > held + OVERSOLD_EPSILON){
+      const sym = ((DB.stocks || []).find(s => s.id === item.stockId) || {}).symbol || 'this stock';
+      if (!confirm('This sells ' + qty + ' shares of ' + sym + ' but only ' + (held > 0 ? held : 0) + ' were held as of ' + fmtDateSG(item.date) + '.\n\nRestore anyway?')) return '';
+    }
+  }
+  if (item.cashAccountId){
+    const mismatch = linkedTradeCurrencyMismatch(item);
+    if (mismatch) return 'Cannot restore this trade: it is in ' + mismatch.stockCcy + ' but ' + mismatch.accountName + ' holds ' + mismatch.accountCcy + '. It remains in Recently deleted.';
+  }
+  return null;
+}
+
+/* A restored row goes into its table and its trash entry comes out. */
+function _placeRestoredRow(table, item, trashId){
+  (DB[table] = DB[table] || []).push(item);
+  const i = (DB.trash || []).findIndex(e => e.id === trashId);
+  if (i >= 0) DB.trash.splice(i, 1);
+}
+
+/* Rows placed with a way to put it all back: _prepareTrashRestore stages a restore to check it against the live rules and then reverts, restoreFromTrash places
+   the checked rows for real. The row objects are shared, only the arrays are copied. */
+function _trashStage(){
+  const before = { trash:(DB.trash || []).slice() };
+  return {
+    add(table, item, trashId){
+      if (!before[table]) before[table] = (DB[table] || []).slice();
+      _placeRestoredRow(table, item, trashId);
+    },
+    revert(){ Object.keys(before).forEach(t => { DB[t] = before[t]; }); }
+  };
+}
+
+/* Check a restore of these trash entries, parents first, and keep nothing: each row goes through normaliseEntityRow with the rows before it in place (a trade's
+   Stock and Funded from only accept live rows), a trade then meets the trade form's guards (_tradeRestoreGuard), and the staging is reverted. Returns the rows to
+   place, or the first problem. A row keeps its id unless a live row already has it, so a restored trade still points at its restored stock and account (a parent
+   is only here because no live row has its id). No save and no undo step happen here, so a refusal costs nothing, as in entityModalSave. */
+function _prepareTrashRestore(entries){
+  const stage = _trashStage();
+  const rows = [];
+  let error = null;
+  for (const e of entries){
+    const n = normaliseEntityRow(e.table, e.data);
+    if (!n.ok){
+      const noun = Object.prototype.hasOwnProperty.call(DELETED_NOUNS, e.table) ? DELETED_NOUNS[e.table] : 'entry';
+      error = 'Cannot restore this ' + noun + ': ' + n.error + '. It remains in Recently deleted.'; break;
+    }
+    const item = n.item;
+    if ((DB[e.table] || []).some(x => x.id === item.id)) item.id = uid(e.table);
+    if (e.table === 'stockTxns'){ const stop = _tradeRestoreGuard(item); if (stop !== null){ error = stop; break; } }
+    stage.add(e.table, item, e.id);
+    rows.push({ table:e.table, item, trashId:e.id });
+  }
+  stage.revert();
+  return error === null ? { ok:true, rows } : { ok:false, error };
+}
+
+/* Put a trashed entry back into its table, so its contribution to every derived total (balances, P&L) returns. A trade whose stock or cash account is also in
+   the trash brings it back first, in the one step (_tradeRestorePlan, _prepareTrashRestore): one undo snapshot, one save, and nothing changes unless every row
+   passes. Ids are kept, regenerated only when a live row already has one. Only the trade clicked comes back, its sibling trades stay listed (each now one click
+   from restored, with the stock live) and the toast says how many there are. */
 async function restoreFromTrash(trashId){
-  const trash = DB.trash || [];
-  const idx = trash.findIndex(e => e.id === trashId);
-  if (idx < 0) return false;
-  const entry = trash[idx];
+  const entry = (DB.trash || []).find(e => e.id === trashId);
+  if (!entry) return false;
   if (!ENTITY_SCHEMAS[entry.table]){
     showToast('Cannot restore this entry because its type is not supported', 'error'); return false;
   }
-  const normalised = normaliseEntityRow(entry.table, entry.data);
-  if (!normalised.ok) {
-    showToast('Cannot restore this entry: ' + normalised.error + '. It remains in Recently deleted.', 'error');
+  const plan = entry.table === 'stockTxns' ? _tradeRestorePlan(entry) : { parents:[], blocked:'', words:'' };
+  if (plan.blocked){ showToast(plan.blocked, 'error'); return false; }
+  const prepared = _prepareTrashRestore(plan.parents.concat([entry]));
+  if (!prepared.ok){
+    if (prepared.error) showToast(prepared.error, 'error');
     return false;
   }
-  const item = normalised.item;
-  if (!DB[entry.table]) DB[entry.table] = [];
-  if (DB[entry.table].some(x => x.id === item.id)) item.id = uid(entry.table);
-  item.updatedAt = new Date().toISOString();
   pushUndo();
-  DB[entry.table].push(item);
-  trash.splice(idx, 1);
+  const now = new Date().toISOString();
+  prepared.rows.forEach(r => { r.item.updatedAt = now; _placeRestoredRow(r.table, r.item, r.trashId); });
   const saved = await Promise.resolve(saveData());
   renderAll();
   renderTrash();
   if (!saved) return false;
-  showToast('Restored', 'success');
+  let note = '';
+  const stock = prepared.rows.find(r => r.table === 'stocks');
+  if (stock){
+    const left = (DB.trash || []).filter(e => e && e.table === 'stockTxns' && e.data && e.data.stockId === stock.item.id).length;
+    if (left) note = '. ' + left + ' more trade' + (left > 1 ? 's' : '') + ' of ' + (stock.item.symbol || 'this stock') + (left > 1 ? ' are' : ' is') + ' still in Recently deleted';
+  }
+  showToast(plan.parents.length ? 'Restored ' + plan.words + note : 'Restored', 'success');
   return true;
 }
 
@@ -7683,34 +7840,43 @@ function _cpfRowHtml(v){
    .money-chip wherever the table cell is td.num (so Hide amounts blurs the same things, and a percentage stays readable), a missing figure is an en dash, and a side,
    a gain or a loss is a word or a sign as well as a colour. Every typed value goes through kjrEscape. The empty states are the cards' own, they return before any list is built. */
 
-/* One Watchlist row, from a renderWatchlist row ({ w, px, ccy }): the symbol and market over the note (and the target flag), the price over the day move. */
+/* One Watchlist row, from a renderWatchlist row ({ w, px, ccy }): the symbol and market over the target (with a check mark when the price is at it) and the note, the price over the day move.
+   The target is the table's Target cell figure, from the same formatter (fmtSgdOrNative, through _listMoney so a missing FX rate keeps the short native form). A blank, missing or
+   non-numeric target is no target (target is an empty string, so the row prints nothing for it). */
 function _wlListModel(r){
   const w = r.w || {}, px = r.px || null;
   const hasPrice = !!(px && px.price != null);
   const price = hasPrice ? _listMoney(px.price, r.ccy) : null;
+  const target = w.targetPrice != null && String(w.targetPrice).trim() !== '' && _finiteNum(Number(w.targetPrice)) ? _listMoney(Number(w.targetPrice), r.ccy) : null;
   const day = px && px.changePct != null ? Number(px.changePct) : NaN;
   return { id:w.id, sym:String(w.symbol == null ? '' : w.symbol), market:String(w.market || ''), note:String(w.notes == null ? '' : w.notes).trim(),
     price: price ? price.text : LIST_DASH, fx: !!(price && price.fx), stale: hasPrice && isStale(px.fetchedAt, 24),
     day: _finiteNum(day) ? fmtPct(day) : LIST_DASH, dir: _finiteNum(day) ? (day >= 0 ? 'up' : 'down') : '',
     atTarget: !!(w.targetPrice != null && hasPrice && px.price <= Number(w.targetPrice)),
+    target: target ? target.text : '', targetFx: !!(target && target.fx),
     href: '../Trading/index.html?symbol=' + encodeURIComponent(yahooSymbol(w)) };
 }
 
-/* The spoken form of a Watchlist row. */
+/* The spoken form of a Watchlist row. The target is read as its figure, and a missing FX rate is said once (the price has already said it when there is a quote). */
 function _wlLabel(m){
   const price = m.price === LIST_DASH ? 'price not available' : 'price ' + _plainText(m.price) + (m.fx ? ', FX rate missing' : '') + (m.stale ? ', stale' : '');
   const day = m.day === LIST_DASH ? '' : 'day ' + m.day.replace(/^[▲▼]\s*/, '');
-  return ['Edit ' + (m.sym || 'watchlist entry'), m.market, price, day, m.atTarget ? 'at target price' : '', m.note].filter(Boolean).join(', ');
+  const target = m.target ? 'target price ' + _plainText(m.target) + (m.targetFx && !m.fx ? ', FX rate missing' : '') : '';
+  return ['Edit ' + (m.sym || 'watchlist entry'), m.market, price, day, target, m.atTarget ? 'at target price' : '', m.note].filter(Boolean).join(', ');
 }
 
 /* A Watchlist row is a div of two controls, as the table row has two: the row itself (a button, so the keyboard reaches it) opens the Edit dialog, and Analyse is a link
-   beside it (a link can not sit inside a button). m.price is the formatter's own markup, everything else is escaped here. */
+   beside it (a link can not sit inside a button). m.price and m.target are the formatter's own markup, everything else is escaped here. The sub line is the target piece and then
+   the note after a dot. The target piece is one box, "Target US$380.00", with a check mark in front when the price is at it (a sign as well as the words, never a colour alone,
+   and the spoken label says "at target price"). Its amount sits in a .money-chip, as the table's Target cell (td.num) blurs under Hide amounts, so the words stay readable and
+   the amount does not. The note is the only part that gives way (an ellipsis of its own), and the CSS (.hl-split .hl-s) shows the target whole or hides it whole. */
 function _wlRowHtml(m){
-  const sub = [m.atTarget ? '✓ At target' : '', m.note].filter(Boolean).join(' · ');
+  const piece = m.target ? '<span class="hl-tgt">' + (m.atTarget ? '✓ ' : '') + 'Target <span class="money-chip">' + m.target + '</span></span>' : (m.atTarget ? '<span class="hl-tgt">✓ At target</span>' : '');
+  const sub = piece + (m.note ? '<span class="hl-nt">' + (piece ? '· ' : '') + kjrEscape(m.note) + '</span>' : '');
   return '<div class="dash-hrow hl-row hl-split">'
     + '<button type="button" class="hl-hit" data-edit-table="watchlist" data-edit-id="' + kjrEscape(m.id) + '" aria-haspopup="dialog" aria-label="' + kjrEscape(_wlLabel(m)) + '">'
     + '<span class="hl-main"><span class="hl-t">' + kjrEscape(m.sym) + (m.market ? ' <span class="hl-k">· ' + kjrEscape(m.market) + '</span>' : '') + '</span>'
-    + '<span class="hl-s">' + kjrEscape(sub) + '</span></span>'
+    + '<span class="hl-s">' + sub + '</span></span>'
     + '<span class="hl-end"><span class="hl-amt money-chip">' + m.price + '</span><span class="dash-chg' + (m.dir ? ' ' + m.dir : '') + '">' + kjrEscape(m.day)
     + (m.stale ? ' <span class="price-stale">· stale</span>' : '') + '</span></span></button>'
     + '<a class="btn btn-sm btn-ghost hl-go" href="' + kjrEscape(m.href) + '" target="_blank" rel="noopener" aria-label="' + kjrEscape('Analyse ' + (m.sym || 'watchlist entry') + ', opens the chart in a new tab') + '">Analyse</a></div>';
@@ -12419,14 +12585,17 @@ async function cleanOrphanedTrades(){
     .map(t => t.id);
   if (!orphans.length) return;
   const n = orphans.length;
-  // Step 8b: this confirm stays. Undo is not real here: a trade whose stock or cash account is gone fails the trash restore's
-  // validation (normaliseEntityRow rejects the dangling id), so only a whole-database undo could bring it back, and that is
-  // unsafe once anything else has been saved.
-  if (!confirm('Move ' + n + ' orphaned trade' + (n > 1 ? 's' : '') + ' to trash? You can restore from Settings → Recently deleted.')) return;
-  let saved = true;
-  for (const id of orphans) saved = !!(await Promise.resolve(sendToTrash('stockTxns', id))) && saved;
+  // Step 8b: this confirm stays, and it says what is true: a trade comes back from the trash only together with the stock or cash account it points to
+  // (restoreFromTrash brings a parent that is still in Recently deleted back first), so the batch gets no Undo toast. It is one undo step and one save,
+  // and the trim after the batch never drops a stock or account that a trashed trade needs (_trimTrash).
+  if (!confirm('Move ' + n + ' orphaned trade' + (n > 1 ? 's' : '') + ' to trash? A trade can only be restored from Settings → Recently deleted while the stock or cash account it points to is still there as well.')) return;
+  pushUndo();
+  let moved = 0;
+  for (const id of orphans) if (_moveToTrash('stockTxns', id)) moved++;
+  _trimTrash();
+  const saved = await Promise.resolve(saveData());
   renderAll();
-  if (saved) showToast('Moved ' + n + ' orphaned trade' + (n > 1 ? 's' : '') + ' to trash', 'success');
+  if (saved) showToast('Moved ' + moved + ' orphaned trade' + (moved !== 1 ? 's' : '') + ' to trash', 'success');
 }
 
 /* Last n 'YYYY-MM' months ending with the current month. */
