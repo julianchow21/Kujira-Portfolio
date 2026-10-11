@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.75';
-const APP_DISPLAY_VERSION = 'v2.75 (10 Oct)';
+const APP_VERSION = 'v2.76';
+const APP_DISPLAY_VERSION = 'v2.76 (11 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -6002,6 +6002,9 @@ let _autoRefreshTimer = null;
 let _autoTickInFlight = false;
 let _stockRefreshInFlight = false;   // dedupe manual click vs auto-tick price pulls
 let _cryptoRefreshInFlight = false;
+/* The coins (ids, sorted, comma-joined) the last silent refresh toasted as missing. A background tick that keeps missing the same coin
+   (a typo'd or delisted id) says so once, not on every tick, and says so again if the set changes. Cleared by a silent refresh with none missing. */
+let _cryptoMissingToasted = '';
 
 /* ── Undo / Redo ─────────────────────────────────────────────────────────
    Snapshots of DB taken before each user-initiated mutation (modal save,
@@ -6128,7 +6131,7 @@ async function autoRefreshTick(){
   try {
     const promises = [];
     if ((DB.crypto || []).length) {
-      promises.push(refreshCryptoPrices().catch(err => console.warn('[auto] crypto', err.message)));
+      promises.push(refreshCryptoPrices({ silent: true }).catch(err => console.warn('[auto] crypto', err.message)));
     }
     if (isStockMarketDaySGT()) {
       if ((DB.stocks || []).length || (DB.watchlist || []).length) {
@@ -6439,10 +6442,19 @@ async function refreshFundamentals(symbols){
   } catch (_) { /* nice-to-have columns; quotes and money maths are unaffected */ }
 }
 
-async function refreshCryptoPrices(){
-  if (!DB.crypto.length){ showToast('No coins to refresh'); return; }
-  if (!getSyncUrl()){ showToast('Set the Apps Script URL first', 'error'); return; }
-  if (_cryptoRefreshInFlight){ showToast('Crypto refresh already running'); return; }
+/* opts.silent is the background tick (autoRefreshTick passes it), the same contract as refreshStockPrices. A silent refresh says nothing
+   when it works, logs the two early exits to the console, still toasts a failure, and toasts coins that came back with no price once per
+   set of missing coins (_cryptoMissingToasted). A manual refresh (no opts, every button and menu) keeps every toast. Only an object with a
+   truthy silent counts, so a click event or null passed by mistake stays a manual refresh. */
+async function refreshCryptoPrices(opts = {}){
+  const silent = !!(opts && opts.silent);
+  if (!DB.crypto.length){ if (!silent) showToast('No coins to refresh'); return; }
+  if (!getSyncUrl()){ if (!silent) showToast('Set the Apps Script URL first', 'error'); return; }
+  if (_cryptoRefreshInFlight){
+    if (silent) console.warn('[auto] crypto refresh skipped, one is already running');
+    else showToast('Crypto refresh already running');
+    return;
+  }
   _cryptoRefreshInFlight = true;
   const btn = document.getElementById('btn-refresh-crypto');
   if (btn) btn.disabled = true;
@@ -6452,7 +6464,11 @@ async function refreshCryptoPrices(){
     skeleton = _skeletonOn(true, DB.crypto.map(c => coinIdFor(c.coingeckoId || c.symbol)).filter(Boolean), DB._priceCache);
     if (skeleton) _repaintPriceSurfaces();
     const ids = Array.from(new Set(DB.crypto.map(c => coinIdFor(c.coingeckoId || c.symbol)).filter(Boolean)));
-    if (!ids.length){ showToast('No valid coin ids', 'error'); return; }
+    if (!ids.length){
+      if (silent) console.warn('[auto] crypto refresh skipped, no valid coin ids');
+      else showToast('No valid coin ids', 'error');
+      return;
+    }
     const url = getSyncUrl() + (getSyncUrl().includes('?') ? '&' : '?') +
                 'action=crypto&ids=' + encodeURIComponent(ids.join(',')) + '&vs=sgd,usd';
     const pxBefore = _priceSnapshot(ids);   // the cache write below overwrites the old quotes, so the flash needs them now
@@ -6479,9 +6495,21 @@ async function refreshCryptoPrices(){
     // delisted coingeckoId), not just how many succeeded, so a silent gap
     // in the ledger doesn't hide behind an all-green "N refreshed" toast.
     const missing = ids.length - ok;
-    showToast('Crypto: ' + ok + ' refreshed' + (missing > 0 ? ', ' + missing + ' missing' : ''), missing > 0 ? 'error' : 'success');
+    if (!silent){
+      showToast('Crypto: ' + ok + ' refreshed' + (missing > 0 ? ', ' + missing + ' missing' : ''), missing > 0 ? 'error' : 'success');
+    } else {
+      // Silent: a full refresh says nothing. Coins with no price in the answer toast once for that set, and again only if the set changes.
+      const answered = data.prices || {};
+      const missingIds = ids.filter(id => !Object.prototype.hasOwnProperty.call(answered, id));
+      const missingKey = missingIds.slice().sort().join(',');
+      if (!missingKey) _cryptoMissingToasted = '';
+      else if (missingKey !== _cryptoMissingToasted){
+        _cryptoMissingToasted = missingKey;
+        showToast('Crypto: ' + ok + ' refreshed, ' + missingIds.length + ' missing', 'error');
+      }
+    }
   } catch (err) {
-    showToast('Crypto refresh failed: ' + err.message, 'error');
+    showToast('Crypto refresh failed: ' + err.message, 'error');   // a failure is told in both modes
   } finally {
     _cryptoRefreshInFlight = false;
     if (btn) btn.disabled = false;
@@ -7647,6 +7675,104 @@ function _cpfRowView(h){
 function _cpfRowHtml(v){
   return _ledgerRowHtml({ table:'cpfHistory', id:v.id, title:String(v.account == null ? '' : v.account), kind:v.type, dateText:v.date,
     notes:[v.source, v.notes].filter(Boolean).join(' · '), amount:_plArrow(v.amt) + v.amtTxt, amountSub:'', dir: v.amt >= 0 ? 'up' : 'down' });
+}
+
+/* ── Stocks page ledgers on the phone (v2.76) ───────────────────────────────────────────────────────────────────────────────────────
+   The Watchlist, Upcoming dividends and Trade history cards do what the Cash and CPF ledgers do: the table gets .hd-only and a list of rows (.hl hl-2) sits beside it,
+   both built from the same view in the same render pass, so they can never disagree. Every figure goes through the formatter its table cell uses. An amount sits in
+   .money-chip wherever the table cell is td.num (so Hide amounts blurs the same things, and a percentage stays readable), a missing figure is an en dash, and a side,
+   a gain or a loss is a word or a sign as well as a colour. Every typed value goes through kjrEscape. The empty states are the cards' own, they return before any list is built. */
+
+/* One Watchlist row, from a renderWatchlist row ({ w, px, ccy }): the symbol and market over the note (and the target flag), the price over the day move. */
+function _wlListModel(r){
+  const w = r.w || {}, px = r.px || null;
+  const hasPrice = !!(px && px.price != null);
+  const price = hasPrice ? _listMoney(px.price, r.ccy) : null;
+  const day = px && px.changePct != null ? Number(px.changePct) : NaN;
+  return { id:w.id, sym:String(w.symbol == null ? '' : w.symbol), market:String(w.market || ''), note:String(w.notes == null ? '' : w.notes).trim(),
+    price: price ? price.text : LIST_DASH, fx: !!(price && price.fx), stale: hasPrice && isStale(px.fetchedAt, 24),
+    day: _finiteNum(day) ? fmtPct(day) : LIST_DASH, dir: _finiteNum(day) ? (day >= 0 ? 'up' : 'down') : '',
+    atTarget: !!(w.targetPrice != null && hasPrice && px.price <= Number(w.targetPrice)),
+    href: '../Trading/index.html?symbol=' + encodeURIComponent(yahooSymbol(w)) };
+}
+
+/* The spoken form of a Watchlist row. */
+function _wlLabel(m){
+  const price = m.price === LIST_DASH ? 'price not available' : 'price ' + _plainText(m.price) + (m.fx ? ', FX rate missing' : '') + (m.stale ? ', stale' : '');
+  const day = m.day === LIST_DASH ? '' : 'day ' + m.day.replace(/^[▲▼]\s*/, '');
+  return ['Edit ' + (m.sym || 'watchlist entry'), m.market, price, day, m.atTarget ? 'at target price' : '', m.note].filter(Boolean).join(', ');
+}
+
+/* A Watchlist row is a div of two controls, as the table row has two: the row itself (a button, so the keyboard reaches it) opens the Edit dialog, and Analyse is a link
+   beside it (a link can not sit inside a button). m.price is the formatter's own markup, everything else is escaped here. */
+function _wlRowHtml(m){
+  const sub = [m.atTarget ? '✓ At target' : '', m.note].filter(Boolean).join(' · ');
+  return '<div class="dash-hrow hl-row hl-split">'
+    + '<button type="button" class="hl-hit" data-edit-table="watchlist" data-edit-id="' + kjrEscape(m.id) + '" aria-haspopup="dialog" aria-label="' + kjrEscape(_wlLabel(m)) + '">'
+    + '<span class="hl-main"><span class="hl-t">' + kjrEscape(m.sym) + (m.market ? ' <span class="hl-k">· ' + kjrEscape(m.market) + '</span>' : '') + '</span>'
+    + '<span class="hl-s">' + kjrEscape(sub) + '</span></span>'
+    + '<span class="hl-end"><span class="hl-amt money-chip">' + m.price + '</span><span class="dash-chg' + (m.dir ? ' ' + m.dir : '') + '">' + kjrEscape(m.day)
+    + (m.stale ? ' <span class="price-stale">· stale</span>' : '') + '</span></span></button>'
+    + '<a class="btn btn-sm btn-ghost hl-go" href="' + kjrEscape(m.href) + '" target="_blank" rel="noopener" aria-label="' + kjrEscape('Analyse ' + (m.sym || 'watchlist entry') + ', opens the chart in a new tab') + '">Analyse</a></div>';
+}
+
+/* One Upcoming dividend, from a renderStocks row (r.s the holding, r.shares, r.ccy), read by the table and the list. The estimate is the table's Est. income, the per-share
+   amount its Div/share, and no pay date is an empty payText (the table shows its em dash token, the list an en dash). */
+function _dividendView(r){
+  const per = Number(r.s.divPerShare);
+  return { sym:String(r.s.symbol == null ? '' : r.s.symbol), exText:fmtDateSG(r.s.divExDate), payText: r.s.divPayDate ? fmtDateSG(r.s.divPayDate) : '',
+    sharesText:r.shares.toLocaleString('en-SG', {maximumFractionDigits:4}), perText:fmt(toSGD(per, r.ccy)), incomeText:fmt(roundMoney(toSGD(r.shares * per, r.ccy)), {dp:0}) };
+}
+
+/* A dividend only reads, so its row is a plain div (no tap, nothing to edit here). Symbol and dates on the left (the two dates side by side, wrapping under each other
+   when the row is narrow, so neither is cut off), the estimate on the right over shares x per share, which a screen reader hears in words. */
+function _dividendRowHtml(v){
+  const sharesLine = kjrEscape(v.sharesText) + ' × ' + kjrEscape(v.perText);
+  return '<div class="hl-row"><span class="hl-main"><span class="hl-t">' + kjrEscape(v.sym) + '</span>'
+    + '<span class="hl-s hl-dates"><span>Ex ' + kjrEscape(v.exText) + '</span><span>Pay ' + kjrEscape(v.payText || LIST_DASH) + '</span></span></span>'
+    + '<span class="hl-end"><span class="hl-amt money-chip">' + kjrEscape(v.incomeText) + '</span>'
+    + '<span class="dash-sub money-chip"><span aria-hidden="true">' + sharesLine + '</span><span class="sr-only">' + kjrEscape(v.sharesText) + ' shares at ' + kjrEscape(v.perText) + ' per share</span></span></span></div>';
+}
+
+/* One trade, read by the Trade history table and the list. Shares print as typed, price and fees through fmt (display currency), the value (price x shares, plus
+   fees on a buy and less on a sell) to the dollar, as the table cells do. A sell is a word and a red tag, never only the colour. */
+function _stockTxnView(t, symbolOf, ccyOf){
+  const ccy = ccyOf(t.stockId);
+  const qty = Number(t.shares) || 0;
+  const px = Number(t.price) || 0;
+  const fees = Number(t.fees) || 0;
+  const sell = t.side === 'sell';
+  const value = sell ? px * qty - fees : px * qty + fees;
+  const sym = symbolOf(t.stockId);
+  return { id:t.id, dateText:fmtDateSG(t.date), sym:String(sym == null ? '' : sym), sell, side: sell ? 'Sell' : 'Buy', cls: sell ? 'neg' : 'pos', qty,
+    priceText:fmt(toSGD(px, ccy)), feesText: fees ? fmt(toSGD(fees, ccy)) : '', valueText:fmt(toSGD(value, ccy), {dp:0}), notes:t.notes || '' };
+}
+
+/* A trade row opens the Edit dialog, as the table's Edit button does. Date, fees and note on the second line, the value over the price on the right. showSymbol is
+   false under a stock's own heading in the By stock view (the label still says which stock). */
+function _stockTxnRowHtml(v, showSymbol){
+  const label = ['Edit ' + v.side + ' ' + v.qty + ' ' + v.sym, v.dateText, 'price ' + v.priceText, v.feesText ? 'fees ' + v.feesText : '', 'value ' + v.valueText, v.notes].filter(Boolean).join(', ');
+  const sub = kjrEscape(v.dateText) + (v.feesText ? ' · Fees <span class="money-chip">' + kjrEscape(v.feesText) + '</span>' : '') + (v.notes ? ' · ' + kjrEscape(v.notes) : '');
+  return '<button type="button" class="dash-hrow hl-row" data-edit-table="stockTxns" data-edit-id="' + kjrEscape(v.id) + '" aria-haspopup="dialog" aria-label="' + kjrEscape(label) + '">'
+    + '<span class="hl-main"><span class="hl-t"><span class="' + v.cls + '">' + v.side + '</span> <span class="money-chip">' + kjrEscape(String(v.qty)) + '</span>' + (showSymbol ? ' ' + kjrEscape(v.sym) : '') + '</span>'
+    + '<span class="hl-s">' + sub + '</span></span>'
+    + '<span class="hl-end"><span class="hl-amt money-chip">' + kjrEscape(v.valueText) + '</span><span class="dash-sub money-chip">@ ' + kjrEscape(v.priceText) + '</span></span></button>';
+}
+
+/* The By stock view's position line for one stock (deriveStockPosition's result): shares, average cost and the realised P&L with its arrow and sign, as the subtotal row shows. */
+function _stockPositionView(pos, ccy){
+  return { shares:pos.shares, avgText:fmt(toSGD(pos.avgCost, ccy)), plText:_plArrow(pos.realisedPL) + fmt(toSGD(pos.realisedPL, ccy), {dp:0, signed:true}), plCls: pos.realisedPL >= 0 ? 'pos' : 'neg' };
+}
+
+function _stockPositionRowHtml(v){
+  return '<div class="hl-total"><span class="hl-main"><span class="hl-t">Position</span>'
+    + '<span class="hl-s"><span class="money-chip">' + kjrEscape(String(v.shares)) + '</span> shares · avg <span class="money-chip">' + kjrEscape(v.avgText) + '</span></span></span>'
+    + '<span class="hl-end"><span class="hl-amt money-chip ' + (v.plCls === 'pos' ? 'up' : 'down') + '">' + kjrEscape(v.plText) + '</span><span class="dash-sub">realised P&amp;L</span></span></div>';
+}
+
+/* The By stock view's heading for one stock: the symbol over its count of trades. A heading in the accessibility tree too. */
+function _stockGroupHtml(sym, count){
+  return '<div class="hl-group" role="heading" aria-level="4"><span class="hl-group-t">' + kjrEscape(sym) + '</span><span class="hl-group-n">' + count + ' trade' + (count !== 1 ? 's' : '') + '</span></div>';
 }
 
 /* The phone's More menu: a shell menu of the page's secondary actions. Each item names a whitelisted action, so a stray value in
@@ -9899,76 +10025,86 @@ async function pbRemoveFromDashboard(id){
   if (saved) showToast('Removed from dashboard, still on Explore', '', { label:'Undo', fn: () => pbSetOnDashboard(id, true) });
   return saved;
 }
-function pbDeleteSaved(id){
-  const charts = pbLoadSaved();
-  const cfg = charts.find(c => c.id === id);
-  if (!cfg) return;
-  if (cfg.pinned){ showToast('Pinned — unpin first to delete'); return; }
-  _pbConfirm('Delete "' + kjrEscape(cfg.title) + '"?', async () => {
-    const currentCharts = pbLoadSaved();
-    const currentCfg = currentCharts.find(c => c.id === id);
-    if (!currentCfg) return false;
-    if (currentCfg.pinned){ showToast('Pinned — unpin first to delete'); pbRenderAllSaved(); return false; }
-    const saved = await Promise.resolve(pbPersistSaved(currentCharts.filter(c => c.id !== id)));
-    if (!saved) {
-      pbRenderAllSaved();
-      return false;
-    }
-    const inst = _pbCharts['pb-sc-canvas-'+id]; if (inst){ try{ inst.destroy(); }catch(e){} delete _pbCharts['pb-sc-canvas-'+id]; }
+/* "Deleted "Allocation"": the Undo toast's words for a saved chart, in the voice of _deletedText. The title is the person's own text, so it is quoted,
+   and capped at 40 characters so a long one cannot swell the toast. Plain text (the toast sets textContent). A blank title falls back to the kind of thing. */
+function _pbDeletedText(cfg){
+  let name = String(cfg && cfg.title != null ? cfg.title : '').trim();
+  if (!name) return 'Deleted chart';
+  if (name.length > 40) name = name.slice(0, 39) + '…';
+  return 'Deleted "' + name + '"';
+}
+
+/* The saved charts' ids in their last known order, with the ids of recent deletes left in their places. A delete reads its neighbours from this, so an Undo knows what
+   sat beside its chart even when the chart next to it was deleted first and still waits on its own Undo. Memory only, bounded, and used for nothing but placing an Undo. */
+let _pbOrderMemo = [];
+const PB_ORDER_MEMO_MAX = 60;
+
+/* The current ids in their order, with each id the memo knows and the list has lost put back straight after the memo's neighbour before it. Pure. */
+function _pbOrderWith(ids, memo){
+  const out = ids.slice();
+  let at = -1;
+  (memo || []).forEach(id => {
+    const i = out.indexOf(id);
+    if (i >= 0){ at = i; return; }
+    out.splice(++at, 0, id);
+  });
+  return out;
+}
+
+/* Where an undone delete puts its chart back: straight after the nearest chart that sat before it and is still saved, else straight before the nearest one
+   that sat after it, else at the index it had (kept inside the list). before and after are the ids either side, nearest first, deleted neighbours included
+   (see _pbOrderMemo). So a delete undone after another delete, in either order, or after a chart was added, still lands in its own place. */
+function _pbUndoSlot(charts, idx, before, after){
+  for (const id of before){ const at = charts.findIndex(c => c.id === id); if (at >= 0) return at + 1; }
+  for (const id of after){ const at = charts.findIndex(c => c.id === id); if (at >= 0) return at; }
+  return Math.max(0, Math.min(Number(idx) || 0, charts.length));
+}
+
+/* The Undo for one chart delete. It holds the chart and where it sat (not a shared slot), so two quick deletes each have their own Undo and each comes back, in either
+   order. One restore at a time per Undo (a double tap does nothing the second time), and nothing happens when a chart with that id is already saved, say another
+   device sent it back. A failed save still repaints, with no "restored" toast, as every other chart change does. */
+function _pbRestoreFor(cfg, idx, before, after){
+  let busy = false;
+  return async () => {
+    if (busy) return false;
+    const charts = pbLoadSaved();
+    if (charts.some(c => c.id === cfg.id)) return false;
+    busy = true;
+    let saved = false;
+    try {
+      charts.splice(_pbUndoSlot(charts, idx, before, after), 0, cfg);
+      saved = await Promise.resolve(pbPersistSaved(charts));
+    } catch (err){
+      console.error('[charts] undo delete failed to save', err);
+    } finally { busy = false; }
     pbRenderAllSaved();
-    // Soft-delete: keep the config in memory for 8s and offer an Undo on the
-    // toast (matches the toast's own 8s lifetime).
-    _pbUndoChart = currentCfg; clearTimeout(_pbUndoTimer);
-    _pbUndoTimer = setTimeout(() => { _pbUndoChart = null; }, 8000);
-    showToast('Chart deleted', '', { label:'Undo', fn: pbUndoDelete });
-    return true;
-  });
+    if (saved) showToast('Chart restored', 'success');
+    return !!saved;
+  };
 }
-let _pbUndoChart = null, _pbUndoTimer = null, _pbUndoInFlight = false;
-async function pbUndoDelete(){
-  if (!_pbUndoChart || _pbUndoInFlight) { if (!_pbUndoChart) showToast('Nothing to undo'); return false; }
-  const undoTarget = _pbUndoChart;
+
+/* Delete a saved chart now, with an Undo on the toast and no dialog (Step 8b did the same for a record nothing points at): a chart is a small saved setup,
+   and the Undo holds all of it. A pinned chart still refuses, with the same hint. */
+async function pbDeleteSaved(id){
   const charts = pbLoadSaved();
-  if (!charts.some(c => c.id === undoTarget.id)) charts.push(undoTarget);
-  _pbUndoInFlight = true;
+  const idx = charts.findIndex(c => c.id === id);
+  if (idx < 0) return false;
+  const cfg = charts[idx];
+  if (cfg.pinned){ showToast('Pinned — unpin first to delete'); return false; }
+  // the ids either side, nearest first, for the Undo: the saved list with the recent deletes still in their places (_pbOrderMemo)
+  const ordered = _pbOrderWith(charts.map(c => c.id), _pbOrderMemo);
+  _pbOrderMemo = ordered.length > PB_ORDER_MEMO_MAX ? ordered.slice(-PB_ORDER_MEMO_MAX) : ordered;
+  const at = ordered.indexOf(id);
+  const before = ordered.slice(0, at).reverse();
+  const after = ordered.slice(at + 1);
   let saved = false;
-  try { saved = await Promise.resolve(pbPersistSaved(charts)); }
-  finally { _pbUndoInFlight = false; }
+  try { saved = await Promise.resolve(pbPersistSaved(charts.filter(c => c.id !== id))); }
+  catch (err){ console.error('[charts] delete failed to save', err); }
+  _pbDestroyChart('pb-sc-canvas-' + id);
   pbRenderAllSaved();
-  if (saved && _pbUndoChart === undoTarget) {
-    clearTimeout(_pbUndoTimer); _pbUndoTimer = null;
-    _pbUndoChart = null;
-    showToast('Chart restored', 'success');
-  }
-  return saved;
-}
-function _pbConfirm(msg, onYes){
-  document.getElementById('pb-confirm-ov')?.remove();
-  const ov = document.createElement('div');
-  ov.id = 'pb-confirm-ov';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9900;display:flex;align-items:center;justify-content:center';
-  ov.innerHTML = `<div class="card" role="dialog" aria-modal="true" aria-label="Confirm delete" style="padding:20px 22px;max-width:300px;width:88%">
-    <div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:16px">${msg}</div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-sm" id="pb-cf-no">Cancel</button>
-      <button class="btn btn-sm" id="pb-cf-yes" style="background:var(--red);color:#fff;border-color:var(--red)">Delete</button>
-    </div></div>`;
-  document.body.appendChild(ov);
-  const close = () => ov.remove();
-  ov.querySelector('#pb-cf-no').onclick = close;
-  ov.querySelector('#pb-cf-yes').onclick = () => { close(); onYes(); };
-  ov.addEventListener('click', e => { if (e.target === ov) close(); });
-  // Keyboard access: Escape cancels, focus lands on Cancel, Tab is trapped.
-  ov.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape'){ e.preventDefault(); close(); return; }
-    if (e.key !== 'Tab') return;
-    const btns = Array.from(ov.querySelectorAll('button')).filter(el => el.offsetParent !== null);
-    if (!btns.length) return;
-    const first = btns[0], last = btns[btns.length - 1];
-    if (e.shiftKey){ if (document.activeElement === first){ e.preventDefault(); last.focus(); } }
-    else if (document.activeElement === last){ e.preventDefault(); first.focus(); }
-  });
-  const _pbNo = ov.querySelector('#pb-cf-no'); if (_pbNo) _pbNo.focus();
+  if (!saved) return false;
+  showToast(_pbDeletedText(cfg), 'success', { label:'Undo', fn: _pbRestoreFor(cfg, idx, before, after) });
+  return true;
 }
 
 function pbSetSource(val){
@@ -10224,8 +10360,9 @@ function renderWatchlist(){
     return `<th class="sortable sortable-button${extraCls||''}" data-wl-sort-key="${key}" aria-sort="${ariaSort}"><button type="button" class="sort-button" aria-label="Sort by ${label}">${lbl}${glyph}</button></th>`;
   };
 
+  // The phone list (640px and below) reads the same sorted rows as the table, in the same pass (_wlListModel).
   el.innerHTML = head + `
-    <div class="tbl-wrap"><table class="holdings"><thead><tr>
+    <div class="tbl-wrap hd-only"><table class="holdings"><thead><tr>
       ${wlTh('symbol','Symbol',' tl')}${wlTh('market','Market',' tl')}${wlTh('sector','Sector',' tl')}
       ${wlTh('price','Price')}${wlTh('dayPct','Day %')}${wlTh('pos52w','52w pos')}
       ${wlTh('peTtm','P/E')}${wlTh('pb','P/B')}${wlTh('target','Target')}
@@ -10266,7 +10403,8 @@ function renderWatchlist(){
           </td>
         </tr>`;
       }).join('')}
-    </tbody></table></div></div>
+    </tbody></table></div>
+    <div class="hl hl-2" role="group" aria-label="Watchlist">${wlRows.map(r => _wlRowHtml(_wlListModel(r))).join('')}</div></div>
   `;
 }
 
@@ -10518,27 +10656,27 @@ function renderDividendTimeline(rows){
     return;
   }
 
-  const rows2 = upcoming.map(r => {
-    const estIncome = roundMoney(toSGD(r.shares * Number(r.s.divPerShare), r.ccy));
-    return `<tr>
-      <td class="tl">${kjrEscape(r.s.symbol)}</td>
-      <td class="tl">${fmtDateSG(r.s.divExDate)}</td>
-      <td class="tl">${r.s.divPayDate ? fmtDateSG(r.s.divPayDate) : '—'}</td>
-      <td class="num">${r.shares.toLocaleString('en-SG', {maximumFractionDigits:4})}</td>
-      <td class="num">${fmt(toSGD(Number(r.s.divPerShare), r.ccy))}</td>
-      <td class="num">${fmt(estIncome, {dp:0})}</td>
-    </tr>`;
-  }).join('');
+  // One view per payment (_dividendView), read by the table below and by the phone list, so the two never disagree.
+  const views = upcoming.map(_dividendView);
+  const rows2 = views.map(v => `<tr>
+      <td class="tl">${kjrEscape(v.sym)}</td>
+      <td class="tl">${kjrEscape(v.exText)}</td>
+      <td class="tl">${v.payText ? kjrEscape(v.payText) : '—'}</td>
+      <td class="num">${v.sharesText}</td>
+      <td class="num">${v.perText}</td>
+      <td class="num">${v.incomeText}</td>
+    </tr>`).join('');
 
   el.innerHTML = `<div class="card">
     <div class="card-head"><h3>Upcoming dividends <span class="badge badge-muted">next 90 days</span></h3></div>
-    <div class="card-body p0"><div class="tbl-wrap"><table class="tbl">
+    <div class="card-body p0 hl-host"><div class="tbl-wrap hd-only"><table class="tbl">
       <thead><tr>
         <th class="tl">Symbol</th><th class="tl">Ex-date</th><th class="tl">Pay date</th>
         <th class="num">Shares</th><th class="num">Div/share (SGD)</th><th class="num">Est. income (SGD)</th>
       </tr></thead>
       <tbody>${rows2}</tbody>
     </table></div>
+    <div class="hl hl-2" role="group" aria-label="Upcoming dividends">${views.map(_dividendRowHtml).join('')}</div>
     <div class="card-hint">Update ex-dates after each declaration to keep this current.</div>
     </div></div>`;
 }
@@ -10580,61 +10718,61 @@ function renderStockTxns(){
     return;
   }
 
-  const txnRow = (t, showSymbol) => {
-    const ccy = ccyOf(t.stockId);
-    const qty = Number(t.shares) || 0;
-    const px  = Number(t.price) || 0;
-    const fees = Number(t.fees) || 0;
-    const gross = px * qty;
-    const value = t.side === 'sell' ? gross - fees : gross + fees;
-    const sideCls = t.side === 'sell' ? 'neg' : 'pos';
-    return `<tr>
-      <td class="tl">${fmtDateSG(t.date)}</td>
-      <td class="tl cell-sym">${showSymbol ? kjrEscape(symbolOf(t.stockId)) : ''}</td>
-      <td class="tl"><span class="tag ${sideCls}">${t.side === 'sell' ? 'SELL' : 'BUY'}</span></td>
-      <td class="num">${qty}</td>
-      <td class="num">${fmt(toSGD(px, ccy))}</td>
-      <td class="num muted">${fees ? fmt(toSGD(fees, ccy)) : '—'}</td>
-      <td class="num">${fmt(toSGD(value, ccy), {dp:0})}</td>
-      <td class="tl muted">${kjrEscape(t.notes || '')}</td>
-      <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="stockTxns" data-edit-id="${kjrEscape(t.id)}">Edit</button></td>
+  // One view per trade (_stockTxnView), read by the table row and by the phone list row, so the two never disagree.
+  const txnRow = v => `<tr>
+      <td class="tl">${kjrEscape(v.dateText)}</td>
+      <td class="tl cell-sym">${v.showSymbol ? kjrEscape(v.sym) : ''}</td>
+      <td class="tl"><span class="tag ${v.cls}">${v.sell ? 'SELL' : 'BUY'}</span></td>
+      <td class="num">${v.qty}</td>
+      <td class="num">${v.priceText}</td>
+      <td class="num muted">${v.feesText || '—'}</td>
+      <td class="num">${v.valueText}</td>
+      <td class="tl muted">${kjrEscape(v.notes)}</td>
+      <td class="row-actions"><button class="btn btn-sm btn-ghost btn-edit" data-edit-table="stockTxns" data-edit-id="${kjrEscape(v.id)}">Edit</button></td>
     </tr>`;
-  };
+  const viewOf = (t, showSymbol) => Object.assign(_stockTxnView(t, symbolOf, ccyOf), { showSymbol });
 
   const colHead = `<thead><tr>
     <th class="tl">Date</th><th class="tl">Stock</th><th class="tl">Side</th><th>Shares</th><th>Price</th><th>Fees</th><th>Value</th><th class="tl">Notes</th><th></th>
   </tr></thead>`;
 
-  let bodyHTML = '';
+  let bodyHTML = '', listHTML = '';
   if (flatActive){
-    bodyHTML = txns.map(t => txnRow(t, true)).join('');
+    const views = txns.map(t => viewOf(t, true));
+    bodyHTML = views.map(txnRow).join('');
+    listHTML = views.map(v => _stockTxnRowHtml(v, true)).join('');
   } else {
     // Group by stock, ordered alpha by symbol
     const groups = {};
     allTxns.forEach(t => { (groups[t.stockId] = groups[t.stockId] || []).push(t); });
     const stockOrder = Object.keys(groups).sort((a,b) => symbolOf(a).localeCompare(symbolOf(b)));
-    bodyHTML = stockOrder.map(sid => {
+    stockOrder.forEach(sid => {
       const grpTxns = groups[sid].slice().sort((a,b) => String(a.date||'').localeCompare(String(b.date||'')));
       const sym = symbolOf(sid);
       const ccy = ccyOf(sid);
       const pos = deriveStockPosition(sid);
-      const subtotal = pos
+      const posView = pos ? _stockPositionView(pos, ccy) : null;
+      const views = grpTxns.map(t => viewOf(t, false));
+      const subtotal = posView
         ? `<tr class="subtotal-row">
             <td colspan="3" class="tl muted">Position</td>
-            <td class="num">${pos.shares}</td>
-            <td class="num">${fmt(toSGD(pos.avgCost, ccy))}</td>
+            <td class="num">${posView.shares}</td>
+            <td class="num">${posView.avgText}</td>
             <td></td>
-            <td class="num"><span class="${pos.realisedPL >= 0 ? 'pos' : 'neg'}">${_plArrow(pos.realisedPL)}${fmt(toSGD(pos.realisedPL, ccy), {dp:0,signed:true})}</span></td>
+            <td class="num"><span class="${posView.plCls}">${posView.plText}</span></td>
             <td class="tl muted">realised P&amp;L</td><td></td>
           </tr>`
         : '';
-      return `<tr class="ledger-group-row"><td colspan="9" class="tl"><strong>${kjrEscape(sym)}</strong> <span class="muted">— ${grpTxns.length} trade${grpTxns.length!==1?'s':''}</span></td></tr>
-        ${grpTxns.map(t => txnRow(t, false)).join('')}
+      bodyHTML += `<tr class="ledger-group-row"><td colspan="9" class="tl"><strong>${kjrEscape(sym)}</strong> <span class="muted">— ${grpTxns.length} trade${grpTxns.length!==1?'s':''}</span></td></tr>
+        ${views.map(txnRow).join('')}
         ${subtotal}`;
-    }).join('');
+      // The phone list: the stock's heading, its trades, then its position line, in the table's order.
+      listHTML += _stockGroupHtml(sym, grpTxns.length) + views.map(v => _stockTxnRowHtml(v, false)).join('') + (posView ? _stockPositionRowHtml(posView) : '');
+    });
   }
 
-  el.innerHTML = head + `<div class="tbl-wrap"><table class="holdings">${colHead}<tbody>${bodyHTML}</tbody></table></div></div>`;
+  el.innerHTML = head + `<div class="tbl-wrap hd-only"><table class="holdings">${colHead}<tbody>${bodyHTML}</tbody></table></div>
+    <div class="hl hl-2" role="group" aria-label="Trade history">${listHTML}</div></div>`;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

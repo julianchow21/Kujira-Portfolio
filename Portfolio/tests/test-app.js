@@ -39,7 +39,15 @@ function extractFunction(name, source){
   let start = m.index;
   const prefix = source.slice(Math.max(0, m.index - 6), m.index);
   if (/async\s$/.test(prefix)) start = m.index - 6;
-  let i = source.indexOf('{', m.index);
+  // The body opens at the first brace after the parameter list, so a default value that holds a brace (opts = {}) belongs to the signature.
+  let p = m.index + m[0].length, parens = 1;
+  for (; p < source.length && parens > 0; p++){
+    const c = source[p];
+    if (c === '(') parens++;
+    else if (c === ')') parens--;
+    else if (c === '\'' || c === '"' || c === '`'){ for (p++; p < source.length && source[p] !== c; p++){ if (source[p] === '\\') p++; } }
+  }
+  let i = source.indexOf('{', p);
   if (i === -1) return null;
   let depth = 0;
   let inStr = null;           // ' " ` while inside a string/template literal
@@ -134,11 +142,11 @@ const FUNCTION_TARGETS = [
   'restoreFromTrash', 'runReconciliation',
   '_cancelSyncForReset', 'resetLocalConfirm', '_fxPairsInUse', 'refreshFx',
   '_pbDrawInto', '_pbDrawTimeSeries',
-  'pbPersistSaved', 'pbSaveChart', 'pbTogglePin', 'pbDeleteSaved', 'pbUndoDelete',
+  'pbPersistSaved', 'pbSaveChart', 'pbTogglePin', 'pbDeleteSaved', '_pbDeletedText', '_pbOrderWith', '_pbUndoSlot', '_pbRestoreFor', '_pbDestroyChart',
   '_salaryPayMonths', 'generateAutoSalaryEntries', 'generateAutoSalaryCashEntries', 'generateAutoCpfEntries',
   'deriveStockPosition', '_cpfAnchorDate', 'cpfEffectiveBalances',
   'annualIncomeSGD', 'annualExpensesSGD', 'derivedMonthlySavingsSGD', 'fireNumberSGD',
-  'expenseAmountSgdOrNull', 'renderProjections', 'autoRefreshTick', 'ibkrConfirmImport', 'disableVaultProtection',
+  'expenseAmountSgdOrNull', 'renderProjections', 'autoRefreshTick', 'refreshCryptoPrices', 'ibkrConfirmImport', 'disableVaultProtection',
   // renderProjections calls these shared FIRE helpers (also used by the dashboard Financial independence tile)
   '_fireProgress', '_fireAssumptions', '_fireProjectLiquid', '_fireYearAge',
   // Dashboard rows (v2.70): layout migration, the Where it sits maths, Coming up, and the shared P&L, insurance, dividend and crypto rules
@@ -161,6 +169,9 @@ const FUNCTION_TARGETS = [
   '_plainText', '_finiteNum', '_returnCell', '_listMoney', '_stockListModel', '_cryptoListModel', '_holdingLabel', 'openHoldingDetail',
   '_holdingRowHtml', '_holdingTotalHtml', '_holdingsListHtml', '_cashListModel', '_cashRowHtml', '_cashListHtml',
   '_cashTxnView', '_ledgerRowHtml', '_cashTxnRowHtml', '_cpfRowView', '_cpfRowHtml',
+  // Stocks page ledgers on the phone (v2.76): the Watchlist, Upcoming dividends and Trade history views and rows, and the three real renderers
+  '_wlListModel', '_wlLabel', '_wlRowHtml', '_dividendView', '_dividendRowHtml', '_stockTxnView', '_stockTxnRowHtml', '_stockPositionView', '_stockPositionRowHtml', '_stockGroupHtml',
+  'renderWatchlist', 'renderDividendTimeline', 'renderStockTxns',
   'moreMenuPick', '_moreMenuHtml', '_chipSelectHtml', '_stockSortChipOptions', 'setStockSortTo', 'stocksSortPick',
   '_chipKeep', '_chipRestore', 'cpfChipFilter', 'cpfClearFilters', '_syncCpfChips',
   'fmtSgdOrNative', '_nativeMoneyText', 'fmtPct', '_plArrow', '_moneyHtml', 'fmtDateSG', '_parseDateOnlyLocal', 'cpfTypeLabel',
@@ -183,7 +194,7 @@ const FUNCTION_TARGETS = [
 ];
 const CONST_TARGETS = ['APP_VERSION', 'APP_DISPLAY_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'LIST_DASH', 'CPF_TYPE_LABEL', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState',
   'HP_HISTORY_RANGE', 'HP_TRADES_SHOWN', 'HP_ACTIONS', 'PALETTE_CAP', 'PALETTE_GROUPS', 'CP_PLUS_ICON', 'CP_REFRESH_ICON', 'EYE_SVG', 'EYE_OFF_SVG',
-  'HERO_ROLL_MS', 'PX_FLASH_MS', 'SKEL_BAR', 'SKEL_STATUS', 'DELETED_NOUNS', 'TRASH_MAX', 'TRASH_AMOUNT_TABLES', 'TRASH_TABLE_NAMES'];
+  'HERO_ROLL_MS', 'PX_FLASH_MS', 'SKEL_BAR', 'SKEL_STATUS', 'DELETED_NOUNS', 'TRASH_MAX', 'TRASH_AMOUNT_TABLES', 'TRASH_TABLE_NAMES', 'PB_ORDER_MEMO_MAX'];
 
 const extractedFns = {};
 const missingFns = [];
@@ -263,6 +274,7 @@ function freshSandbox(dbOverrides){
     _round2: core._round2,
     roundMoney: core.roundMoney,
     safeRatio: core.safeRatio,
+    rangePosition: core.rangePosition,
     deriveStockPosition: () => null,
     yahooSymbol: s => s.symbol,
     coinIdFor: id => id,
@@ -293,15 +305,14 @@ function freshSandbox(dbOverrides){
     _autoTickInFlight: false,
     _stockRefreshInFlight: false,
     _cryptoRefreshInFlight: false,
+    _cryptoMissingToasted: '',
+    _pbOrderMemo: [],
     _pxFlashes: new Map(),
     _heroShown: null,
     _heroRoll: null,
     _renderCcy: 'SGD',
     _ibkrImportInFlight: false,
     _pbSaveInFlight: false,
-    _pbUndoChart: null,
-    _pbUndoTimer: null,
-    _pbUndoInFlight: false,
     _pbCharts: {},
     _DATE_FIELDS_BY_TABLE: {},
     _sanitiseInvalidDateCount: 0,
@@ -351,7 +362,6 @@ function freshSandbox(dbOverrides){
     _pbLiveConfig: () => ({ source:'holdings', mode:'crosssec', xFields:['symbol'], yFields:['marketValue'], tsSymbols:[] }),
     pbLoadSaved: () => JSON.parse(JSON.stringify(sandbox.DB.settings.savedCharts || [])),
     pbRenderAllSaved: () => {},
-    _pbConfirm: (_message, onYes) => { sandbox._pbConfirmPromise = Promise.resolve(onYes()); },
     _pbStockRows: () => [],
     _pbCurSym: () => 'S$',
     _isoDateSG: core._isoDateSG,
@@ -429,11 +439,12 @@ function stubNow(sandbox, isoInstant){
    tiny fake dashboard stack, so the onDashboard rules are tested where they live.
    opts: saveResult (what saveData returns, default true), dashboardActive and
    chartLib (default true), oldCards (chart ids already drawn on the stack). */
-const CHART_SANDBOX_CONSTS = ['SAFE_ID_RE', 'PB_SERIES_MODES', 'PB_CLASS_KEYS', 'PB_PERIODS'];
+const CHART_SANDBOX_CONSTS = ['SAFE_ID_RE', 'PB_SERIES_MODES', 'PB_CLASS_KEYS', 'PB_PERIODS', 'PB_ORDER_MEMO_MAX'];
 const CHART_SANDBOX_FNS = [
   'kjrSafeId', 'pbSource', 'pbFields', 'pbLoadSaved', 'pbPersistSaved', 'pbSetOnDashboard',
   'pbToggleOnDashboard', 'pbRemoveFromDashboard', 'pbTogglePin', 'pbSeedDefaults',
-  '_pbSavedDescriptor', '_pbDestroyChart', '_pbRenderDashCharts'
+  '_pbSavedDescriptor', '_pbDestroyChart', '_pbRenderDashCharts',
+  'pbDeleteSaved', '_pbDeletedText', '_pbOrderWith', '_pbUndoSlot', '_pbRestoreFor'
 ];
 const CHART_SANDBOX_SRC = (() => {
   const missing = [];
@@ -473,6 +484,7 @@ function chartSandbox(savedCharts, opts){
       cpf:        { key:'cpf',        label:'CPF',        kind:'series' }
     },
     _pbCharts: {},
+    _pbOrderMemo: [],
     saveData: () => { calls.saves++; return opts.saveResult === undefined ? true : opts.saveResult; },
     showToast: (message, kind, action) => { calls.toasts.push({ message, kind, action }); },
     pbRenderAllSaved: () => { calls.repaints++; },
@@ -1513,62 +1525,244 @@ async function runTests(){
     assert.strictEqual(sb.DB.settings.savedCharts.some(c => c.title === 'Added during pin'), true);
     assert.strictEqual(toasts.some(t => /pinned|unpinned/.test(t.message)), false);
 
-    sb.DB.settings.savedCharts = [{id:'c2',title:'Two',pinned:false}];
-    let confirmDelete;
-    sb._pbConfirm = (_message, onYes) => { confirmDelete = onYes; };
-    sb.pbDeleteSaved('c2');
-    sb.prompt = () => 'Added before confirm';
-    sb.saveData = () => true;
-    assert.strictEqual(await sb.pbSaveChart(), true);
-    assert.strictEqual(await confirmDelete(), true);
-    assert.strictEqual(sb.DB.settings.savedCharts.some(c => c.id === 'c2'), false);
-    assert.strictEqual(sb.DB.settings.savedCharts.some(c => c.title === 'Added before confirm'), true);
-    clearTimeout(sb._pbUndoTimer); sb._pbUndoTimer = null;
-
+    // a delete is immediate (no dialog), and a chart added while its save is pending is kept, the delete failing keeps the change in memory and says nothing
     sb.DB.settings.savedCharts = [{id:'c3',title:'Three',pinned:false}];
-    sb._pbConfirm = (_message, onYes) => { sb._pbConfirmPromise = Promise.resolve(onYes()); };
     let finishDelete;
     saves = 0;
     sb.saveData = () => ++saves === 1 ? new Promise(resolve => { finishDelete = resolve; }) : true;
-    const deletedToastCount = toasts.filter(t => t.message === 'Chart deleted').length;
-    sb.pbDeleteSaved('c3');
+    const deletedToastCount = toasts.filter(t => /^Deleted /.test(t.message)).length;
+    const deleting = sb.pbDeleteSaved('c3');
     sb.prompt = () => 'Added during delete';
     assert.strictEqual(await sb.pbSaveChart(), true);
     finishDelete(false);
-    assert.strictEqual(await sb._pbConfirmPromise, false);
+    assert.strictEqual(await deleting, false);
     assert.strictEqual(sb.DB.settings.savedCharts.some(c => c.id === 'c3'), false);
     assert.strictEqual(sb.DB.settings.savedCharts.some(c => c.title === 'Added during delete'), true);
-    assert.strictEqual(toasts.filter(t => t.message === 'Chart deleted').length, deletedToastCount);
+    assert.strictEqual(toasts.filter(t => /^Deleted /.test(t.message)).length, deletedToastCount);
+  });
 
-    const oldUndo = {id:'c4',title:'Old undo',pinned:false};
-    const newerDelete = {id:'c5',title:'Newer delete',pinned:false};
-    sb.DB.settings.savedCharts = [newerDelete];
-    sb._pbUndoChart = oldUndo;
-    let finishUndo;
-    saves = 0;
-    sb.saveData = () => ++saves === 1 ? new Promise(resolve => { finishUndo = resolve; }) : true;
-    const undoing = sb.pbUndoDelete();
-    sb.pbDeleteSaved('c5');
-    assert.strictEqual(await sb._pbConfirmPromise, true);
-    const restoredToastCount = toasts.filter(t => t.message === 'Chart restored').length;
-    finishUndo(true);
-    assert.strictEqual(await undoing, true);
-    assert.strictEqual(sb._pbUndoChart.id, 'c5');
-    assert.strictEqual(toasts.filter(t => t.message === 'Chart restored').length, restoredToastCount);
-    clearTimeout(sb._pbUndoTimer); sb._pbUndoTimer = null;
+  /* Chart delete is immediate and offers Undo (v2.76): no confirm dialog, the toast's Undo carries the chart and where it sat. These run the REAL load and persist in the chart sandbox. */
+  const pbChart = (id, order) => ({ id, title:'Chart ' + id, source:'networth', pinned:false, onDashboard:true, order });
+  const pbIds = sb => Array.from(sb.DB.settings.savedCharts.map(c => c.id));
 
-    sb.DB.settings.savedCharts = [];
-    sb._pbUndoChart = oldUndo;
-    sb.saveData = () => false;
-    assert.strictEqual(await sb.pbUndoDelete(), false);
-    assert.strictEqual(sb.DB.settings.savedCharts.length, 1);
-    assert.strictEqual(sb._pbUndoChart.id, 'c4');
-    assert.strictEqual(toasts.some(t => t.message === 'Chart restored'), false);
-    sb.saveData = () => true;
-    assert.strictEqual(await sb.pbUndoDelete(), true);
-    assert.strictEqual(sb.DB.settings.savedCharts.length, 1);
-    assert.strictEqual(sb._pbUndoChart, null);
-    assert.strictEqual(toasts.at(-1).message, 'Chart restored');
+  await testAsync('pbDeleteSaved - deletes at once with no dialog, destroys the chart, names it on an Undo toast, and Undo puts it back at its original index', async () => {
+    const sb = chartSandbox([pbChart('a', 999), pbChart('b', 999), pbChart('c', 999), pbChart('d', 999)], { oldCards:['b'] });
+    assert.strictEqual(await sb.pbDeleteSaved('b'), true);
+    assert.deepStrictEqual(pbIds(sb), ['a', 'c', 'd']);
+    assert.strictEqual(sb.calls.saves, 1);
+    assert.strictEqual(sb.calls.repaints, 1);
+    assert.deepStrictEqual(Array.from(sb.calls.destroyed), ['b']);              // the Chart instance is freed, then the list repaints
+    assert.deepStrictEqual(Object.keys(sb._pbCharts), []);
+    const toast = sb.calls.toasts.at(-1);
+    assert.strictEqual(toast.message, 'Deleted "Chart b"');
+    assert.strictEqual(toast.kind, 'success');
+    assert.strictEqual(toast.action.label, 'Undo');
+    assert.strictEqual(typeof toast.action.fn, 'function');
+    assert.strictEqual(await toast.action.fn(), true);
+    assert.deepStrictEqual(pbIds(sb), ['a', 'b', 'c', 'd']);                    // index 1 again
+    assert.strictEqual(sb.calls.saves, 2);
+    assert.strictEqual(sb.calls.repaints, 2);
+    assert.deepStrictEqual(sb.calls.toasts.at(-1), { message:'Chart restored', kind:'success', action:undefined });
+    // the first and the last place come back as well
+    for (const [id, expected] of [['a', ['a', 'b', 'c', 'd']], ['d', ['a', 'b', 'c', 'd']]]) {
+      assert.strictEqual(await sb.pbDeleteSaved(id), true);
+      assert.strictEqual(pbIds(sb).includes(id), false);
+      assert.strictEqual(await sb.calls.toasts.at(-1).action.fn(), true);
+      assert.deepStrictEqual(pbIds(sb), expected);
+    }
+    // the config comes back whole
+    assert.strictEqual(sb.DB.settings.savedCharts.find(c => c.id === 'b').title, 'Chart b');
+    assert.strictEqual(sb.DB.settings.savedCharts.find(c => c.id === 'b').source, 'networth');
+  });
+
+  await testAsync('pbDeleteSaved - two quick deletes each keep their own Undo, so both come back, and a stack undone newest first restores the exact order', async () => {
+    const sb = chartSandbox([pbChart('a', 999), pbChart('b', 999), pbChart('c', 999), pbChart('d', 999)]);
+    assert.strictEqual(await sb.pbDeleteSaved('b'), true);
+    const undoB = sb.calls.toasts.at(-1).action.fn;
+    assert.strictEqual(await sb.pbDeleteSaved('a'), true);
+    const undoA = sb.calls.toasts.at(-1).action.fn;
+    assert.notStrictEqual(undoA, undoB);                                           // one Undo per delete, not one shared slot
+    assert.deepStrictEqual(pbIds(sb), ['c', 'd']);
+    assert.strictEqual(await undoA(), true);                                       // newest first: its own place
+    assert.deepStrictEqual(pbIds(sb), ['a', 'c', 'd']);
+    assert.strictEqual(await undoB(), true);
+    assert.deepStrictEqual(pbIds(sb), ['a', 'b', 'c', 'd']);
+
+    // oldest first: the same exact order, because each delete also remembers the neighbour that was deleted just before it
+    const sb2 = chartSandbox([pbChart('a', 999), pbChart('b', 999), pbChart('c', 999), pbChart('d', 999)]);
+    await sb2.pbDeleteSaved('b'); const first = sb2.calls.toasts.at(-1).action.fn;
+    await sb2.pbDeleteSaved('a'); const second = sb2.calls.toasts.at(-1).action.fn;
+    assert.strictEqual(await first(), true);
+    assert.deepStrictEqual(pbIds(sb2), ['b', 'c', 'd']);
+    assert.strictEqual(await second(), true);
+    assert.deepStrictEqual(pbIds(sb2), ['a', 'b', 'c', 'd']);
+    // three in a row, adjacent, undone in every order: always the original order
+    for (const order of [[0, 1, 2], [2, 1, 0], [1, 0, 2], [1, 2, 0], [0, 2, 1], [2, 0, 1]]) {
+      const sb6 = chartSandbox([pbChart('a', 999), pbChart('b', 999), pbChart('c', 999), pbChart('d', 999), pbChart('e', 999)]);
+      const undos = [];
+      for (const id of ['b', 'c', 'd']) { await sb6.pbDeleteSaved(id); undos.push(sb6.calls.toasts.at(-1).action.fn); }
+      assert.deepStrictEqual(pbIds(sb6), ['a', 'e']);
+      for (const i of order) assert.strictEqual(await undos[i](), true);
+      assert.deepStrictEqual(pbIds(sb6), ['a', 'b', 'c', 'd', 'e'], 'order ' + order.join(''));
+    }
+
+    // two deletes that are not neighbours land exactly, in either order, even though the list changed under each Undo
+    for (const order of [[0, 1], [1, 0]]) {
+      const sb3 = chartSandbox([pbChart('a', 999), pbChart('b', 999), pbChart('c', 999), pbChart('d', 999)]);
+      await sb3.pbDeleteSaved('b'); const undoB3 = sb3.calls.toasts.at(-1).action.fn;
+      await sb3.pbDeleteSaved('d'); const undoD3 = sb3.calls.toasts.at(-1).action.fn;
+      assert.deepStrictEqual(pbIds(sb3), ['a', 'c']);
+      const undos = [undoB3, undoD3];
+      for (const i of order) assert.strictEqual(await undos[i](), true);
+      assert.deepStrictEqual(pbIds(sb3), ['a', 'b', 'c', 'd']);
+    }
+    // a chart added after the delete does not move it: the Undo still lands beside its old neighbour
+    const sb4 = chartSandbox([pbChart('a', 999), pbChart('b', 999), pbChart('c', 999)]);
+    await sb4.pbDeleteSaved('b');
+    sb4.DB.settings.savedCharts = sb4.DB.settings.savedCharts.concat([pbChart('z', 999)]);
+    assert.strictEqual(await sb4.calls.toasts.at(-1).action.fn(), true);
+    assert.deepStrictEqual(pbIds(sb4), ['a', 'b', 'c', 'z']);
+    // the charts' own order key still decides the listing, a seeded chart comes back where its order says
+    const sb5 = chartSandbox([pbChart('def_networth', 0), pbChart('def_alloc', 1), pbChart('sc_1', 999)]);
+    await sb5.pbDeleteSaved('def_alloc');
+    assert.strictEqual(await sb5.calls.toasts.at(-1).action.fn(), true);
+    assert.deepStrictEqual(Array.from(sb5.pbLoadSaved().map(c => c.id)), ['def_networth', 'def_alloc', 'sc_1']);
+  });
+
+  await testAsync('pbDeleteSaved - the order memo stays bounded however many charts are deleted, and the newest Undo still lands in its place', async () => {
+    const many = Array.from({ length:90 }, (_, i) => pbChart('c' + String(i).padStart(2, '0'), 999));
+    const sb = chartSandbox(many);
+    const undos = {};
+    for (const c of many.slice(0, 80)) { await sb.pbDeleteSaved(c.id); undos[c.id] = sb.calls.toasts.at(-1).action.fn; }
+    assert.strictEqual(pbIds(sb).length, 10);
+    assert.ok(sb._pbOrderMemo.length <= vm.runInContext('PB_ORDER_MEMO_MAX', sb), 'memo ' + sb._pbOrderMemo.length);
+    assert.strictEqual(await undos.c79(), true);                                     // the newest delete sat just before c80, and goes back there
+    assert.deepStrictEqual(pbIds(sb).slice(0, 2), ['c79', 'c80']);
+    assert.strictEqual(await undos.c00(), true);                                     // an old one, whatever the memo kept of it, is still restored (its neighbours are long gone)
+    assert.strictEqual(pbIds(sb).includes('c00'), true);
+    assert.strictEqual(sb.DB.settings.savedCharts.length, 12);
+  });
+
+  await testAsync('pbDeleteSaved - a pinned chart refuses with the same hint, an unknown id does nothing, and a failed save repaints with no toast and no Undo', async () => {
+    const sb = chartSandbox([Object.assign(pbChart('p', 999), { pinned:true }), pbChart('q', 999)]);
+    assert.strictEqual(await sb.pbDeleteSaved('p'), false);
+    assert.deepStrictEqual(pbIds(sb), ['p', 'q']);
+    assert.deepStrictEqual(sb.calls.toasts.map(t => t.message), ['Pinned \u2014 unpin first to delete']);   // the existing hint, kept as it was
+    assert.strictEqual(sb.calls.saves, 0);
+    assert.strictEqual(await sb.pbDeleteSaved('nope'), false);
+    assert.strictEqual(sb.calls.saves, 0);
+    assert.strictEqual(sb.calls.toasts.length, 1);
+
+    const failing = chartSandbox([pbChart('a', 999), pbChart('b', 999)], { saveResult:false });
+    assert.strictEqual(await failing.pbDeleteSaved('a'), false);
+    assert.strictEqual(failing.calls.toasts.length, 0);                            // saveData tells the person about a failed save, this adds nothing
+    assert.strictEqual(failing.calls.repaints, 1);
+    assert.deepStrictEqual(pbIds(failing), ['b']);
+
+    // a save that throws is caught, repainted and reported as not deleted, never an unhandled rejection
+    const throwing = chartSandbox([pbChart('a', 999)]);
+    throwing.saveData = () => { throw new Error('quota'); };
+    const errors = [];
+    throwing.console = { error: (...a) => errors.push(a.join(' ')), warn(){}, log(){} };
+    assert.strictEqual(await throwing.pbDeleteSaved('a'), false);
+    assert.strictEqual(throwing.calls.repaints, 1);
+    assert.strictEqual(throwing.calls.toasts.length, 0);
+    assert.strictEqual(errors.length, 1);
+  });
+
+  await testAsync('pbDeleteSaved Undo - skips a chart that is already saved, does one restore at a time, and a failed save repaints with no restored toast', async () => {
+    const sb = chartSandbox([pbChart('a', 999), pbChart('b', 999)]);
+    await sb.pbDeleteSaved('a');
+    const undo = sb.calls.toasts.at(-1).action.fn;
+    // a chart with that id is already back (another device, an earlier Undo): nothing is written, nothing is said
+    sb.DB.settings.savedCharts = sb.DB.settings.savedCharts.concat([pbChart('a', 999)]);
+    const saves = sb.calls.saves, toasts = sb.calls.toasts.length, repaints = sb.calls.repaints;
+    assert.strictEqual(await undo(), false);
+    assert.strictEqual(sb.calls.saves, saves); assert.strictEqual(sb.calls.toasts.length, toasts); assert.strictEqual(sb.calls.repaints, repaints);
+    assert.deepStrictEqual(pbIds(sb), ['b', 'a']);
+
+    // a double tap while the first restore is saving: the second returns at once, one save, one chart
+    const sb2 = chartSandbox([pbChart('a', 999), pbChart('b', 999)]);
+    await sb2.pbDeleteSaved('a');
+    const undo2 = sb2.calls.toasts.at(-1).action.fn;
+    let finish, saves2 = 0;
+    sb2.saveData = () => { saves2++; return new Promise(resolve => { finish = resolve; }); };
+    const first = undo2();
+    assert.strictEqual(await undo2(), false);
+    assert.strictEqual(saves2, 1);
+    finish(true);
+    assert.strictEqual(await first, true);
+    assert.deepStrictEqual(pbIds(sb2), ['a', 'b']);
+    assert.strictEqual(sb2.calls.toasts.filter(t => t.message === 'Chart restored').length, 1);
+    assert.strictEqual(await undo2(), false);                                      // a third tap later finds it saved
+    assert.deepStrictEqual(pbIds(sb2), ['a', 'b']);
+
+    // the restore fails to save: the chart is back in memory, repainted, with no restored toast, and the next try finds it there
+    const sb3 = chartSandbox([pbChart('a', 999), pbChart('b', 999)]);
+    await sb3.pbDeleteSaved('a');
+    const undo3 = sb3.calls.toasts.at(-1).action.fn;
+    sb3.saveData = () => false;
+    const repaints3 = sb3.calls.repaints;
+    assert.strictEqual(await undo3(), false);
+    assert.strictEqual(sb3.calls.repaints, repaints3 + 1);
+    assert.strictEqual(sb3.calls.toasts.some(t => t.message === 'Chart restored'), false);
+    assert.deepStrictEqual(pbIds(sb3), ['a', 'b']);
+
+    // a restore that throws is caught too, and the busy flag clears so a later tap can try again
+    const sb4 = chartSandbox([pbChart('a', 999), pbChart('b', 999)]);
+    await sb4.pbDeleteSaved('a');
+    const undo4 = sb4.calls.toasts.at(-1).action.fn;
+    sb4.console = { error(){}, warn(){}, log(){} };
+    sb4.saveData = () => { throw new Error('quota'); };
+    assert.strictEqual(await undo4(), false);
+    sb4.DB.settings.savedCharts = [pbChart('b', 999)];
+    sb4.saveData = () => true;
+    assert.strictEqual(await undo4(), true);
+    assert.deepStrictEqual(pbIds(sb4), ['a', 'b']);
+  });
+
+  test('_pbUndoSlot and _pbDeletedText - a chart goes back beside its nearest surviving neighbour or at its old index kept in range, and the toast words are quoted, capped and plain', () => {
+    const sb = chartSandbox([]);
+    const ids = (...a) => a.map(id => ({ id }));
+    assert.strictEqual(sb._pbUndoSlot(ids('a', 'c', 'd'), 1, ['a'], ['c', 'd']), 1);       // after its old predecessor
+    assert.strictEqual(sb._pbUndoSlot(ids('c', 'd'), 0, ['a'], ['c', 'd']), 0);             // predecessor gone: before its old successor
+    assert.strictEqual(sb._pbUndoSlot(ids('x', 'y'), 1, ['a'], ['c']), 1);                  // no neighbour left: the old index
+    assert.strictEqual(sb._pbUndoSlot(ids('x'), 7, [], []), 1);                             // kept inside the list
+    assert.strictEqual(sb._pbUndoSlot([], 3, ['a'], ['c']), 0);
+    assert.strictEqual(sb._pbUndoSlot(ids('a', 'b'), -2, [], []), 0);
+    assert.strictEqual(sb._pbUndoSlot(ids('a', 'b'), 'junk', [], []), 0);
+    assert.strictEqual(sb._pbUndoSlot(ids('a', 'b', 'c'), 2, ['b', 'a'], ['c']), 2);        // nearest predecessor first
+    // the memo: the list with the deleted ids put back beside the neighbour the memo had them after
+    const w = (ids, memo) => Array.from(sb._pbOrderWith(ids, memo));
+    assert.deepStrictEqual(w(['c', 'd'], ['a', 'b', 'c', 'd']), ['a', 'b', 'c', 'd']);
+    assert.deepStrictEqual(w(['a', 'c'], ['a', 'b', 'c']), ['a', 'b', 'c']);
+    assert.deepStrictEqual(w(['a', 'c', 'z'], ['a', 'b', 'c']), ['a', 'b', 'c', 'z']);        // a chart added since goes where the list has it
+    assert.deepStrictEqual(w(['c', 'b', 'a'], ['a', 'b', 'c']), ['c', 'b', 'a']);              // the list is the authority for what it holds
+    assert.deepStrictEqual(w(['x'], ['a', 'b']), ['a', 'b', 'x']);                             // nothing in common: the old ids first
+    assert.deepStrictEqual(w(['x', 'y'], []), ['x', 'y']);
+    assert.deepStrictEqual(w([], ['a', 'b']), ['a', 'b']);
+    assert.deepStrictEqual(w(['a'], undefined), ['a']);
+    const ids0 = ['a', 'b']; w(ids0, ['z']); assert.deepStrictEqual(ids0, ['a', 'b']);         // never changes what it was given
+    assert.strictEqual(sb._pbDeletedText({ title:'Allocation' }), 'Deleted "Allocation"');
+    assert.strictEqual(sb._pbDeletedText({ title:'  Net worth  ' }), 'Deleted "Net worth"');
+    assert.strictEqual(sb._pbDeletedText({ title:'<b>x</b> & "q"' }), 'Deleted "<b>x</b> & "q""');   // plain text: the toast sets textContent
+    const long = sb._pbDeletedText({ title:'N'.repeat(200) });
+    assert.strictEqual(long, 'Deleted "' + 'N'.repeat(39) + '…"');
+    assert.strictEqual(sb._pbDeletedText({ title:'' }), 'Deleted chart');
+    assert.strictEqual(sb._pbDeletedText({}), 'Deleted chart');
+    assert.strictEqual(sb._pbDeletedText(null), 'Deleted chart');
+  });
+
+  test('Chart delete - the confirm dialog and the single Undo slot are gone, and the Delete button still reaches pbDeleteSaved through the dispatcher', () => {
+    ['_pbConfirm', 'pb-confirm-ov', '_pbUndoChart', '_pbUndoTimer', '_pbUndoInFlight', 'pbUndoDelete', 'pb-cf-yes', 'pb-cf-no'].forEach(name => {
+      assert.strictEqual(appSrc.includes(name), false, name + ' in app.js');
+      assert.strictEqual(indexSrc.includes(name), false, name + ' in index.html');
+    });
+    assert.ok(appSrc.includes('pbDeleteSaved:       (el) => pbDeleteSaved(A(el)[0]),'));
+    assert.ok(extractFunction('_pbRenderSavedList').includes('data-click="pbDeleteSaved"'));
+    const del = extractFunction('pbDeleteSaved');
+    assert.ok(del.includes("showToast(_pbDeletedText(cfg), 'success', { label:'Undo', fn: _pbRestoreFor(cfg, idx, before, after) })"));
+    assert.ok(del.indexOf('await Promise.resolve(pbPersistSaved(') < del.indexOf('_pbDestroyChart(') && del.indexOf('_pbDestroyChart(') < del.indexOf('pbRenderAllSaved();'));
   });
 
   await testAsync('Chart Builder history - missing FX clears stale charts and same-currency values render', async () => {
@@ -4281,6 +4475,151 @@ async function runTests(){
     sb.DB.expenses = []; await sb.autoRefreshTick(); assert.strictEqual(fx, 2);
   });
 
+  await testAsync('auto refresh asks for a silent crypto refresh, and nothing else in the app calls it with an argument', async () => {
+    const sb = freshSandbox({stocks:[],watchlist:[],cash:[],crypto:[{id:'c1',symbol:'BTC'}],expenses:[],settings:{fxOverrides:{USDSGD:1.4},fxRates:{}}});
+    sb.document = {hidden:false}; sb.autoRefreshEnabled = () => true; sb.isStockMarketDaySGT = () => false;
+    const asked = []; sb.refreshCryptoPrices = async (...args) => { asked.push(args); };
+    await sb.autoRefreshTick();
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(asked)), [[{ silent:true }]]);
+    // every other call in the app is a plain refreshCryptoPrices(): the buttons, the More menu, the dashboard refresh. None can hand it a click event.
+    const calls = (appSrc.match(/refreshCryptoPrices\([^)]*\)/g) || []).filter(c => c !== 'refreshCryptoPrices(opts = {})');
+    assert.deepStrictEqual(calls.slice().sort(), ['refreshCryptoPrices()', 'refreshCryptoPrices()', 'refreshCryptoPrices()', 'refreshCryptoPrices({ silent: true })']);
+    assert.ok(appSrc.includes('  refreshCryptoPrices: () => refreshCryptoPrices(),') && appSrc.includes('    refreshCryptoPrices: () => refreshCryptoPrices(),'));
+    assert.ok(appSrc.includes('if (hasCoins) jobs.push(refreshCryptoPrices());'));
+    assert.ok(indexSrc.includes('data-click="refreshCryptoPrices" id="btn-refresh-crypto"') && indexSrc.includes('data-a0="refreshCryptoPrices"'));
+  });
+
+  /* A crypto refresh in a sandbox of its own: the real refreshCryptoPrices against a fake CoinGecko answer (sb.reply), counting the toasts and console warnings. */
+  function cryptoSandbox(opts){
+    opts = opts || {};
+    const sb = freshSandbox({ crypto:opts.crypto || [{ id:'c1', symbol:'BTC' }, { id:'c2', symbol:'ETH' }], _priceCache:{} });
+    sb.toasts = []; sb.warns = [];
+    sb.showToast = (message, kind) => sb.toasts.push({ message, kind });
+    sb.console = { warn: (...a) => sb.warns.push(a.join(' ')), log(){}, error(){} };
+    sb.renderCrypto = () => {}; sb.refreshHoldingPanel = () => {}; sb._repaintDashAfterPrices = () => {}; sb._repaintPriceSurfaces = () => {};
+    sb.reply = { prices:{ BTC:{ sgd:1, usd:1 }, ETH:{ sgd:2, usd:2 } } };
+    sb.fetches = 0;
+    sb.fetch = async () => { sb.fetches++; return { json: async () => sb.reply }; };
+    return sb;
+  }
+  const BOTH = { BTC:{ sgd:1, usd:1 }, ETH:{ sgd:2, usd:2 } };
+
+  test('extractFunction - a default parameter that holds a brace belongs to the signature, so refreshStockPrices and refreshCryptoPrices can be read whole', () => {
+    ['refreshStockPrices', 'refreshCryptoPrices'].forEach(name => {
+      const src = extractFunction(name);
+      assert.ok(src.startsWith('async function ' + name + '(opts = {}){'), name);
+      assert.ok(src.endsWith('\n}'), name);
+      assert.ok(new vm.Script(src), name + ' parses');
+    });
+    const tricky = 'function f(a = ")", b = {x:1}, c = (1 + (2))){ return "}" + a; }';
+    assert.strictEqual(extractFunction('f', tricky), tricky);
+    assert.strictEqual(extractFunction('f', 'function f(a){ return a; }'), 'function f(a){ return a; }');
+  });
+
+  await testAsync('refreshCryptoPrices - a silent refresh says nothing when it works, a manual one keeps its toast', async () => {
+    const sb = cryptoSandbox();
+    await sb.refreshCryptoPrices({ silent:true });
+    assert.deepStrictEqual(sb.toasts, []);
+    assert.strictEqual(sb.fetches, 1);
+    assert.strictEqual(sb.DB._priceCache.BTC.sgd, 1);                                // the prices still land
+    assert.strictEqual(sb._cryptoMissingToasted, '');
+    assert.strictEqual(sb._cryptoRefreshInFlight, false);
+    await sb.refreshCryptoPrices();
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(sb.toasts)), [{ message:'Crypto: 2 refreshed', kind:'success' }]);
+    // an empty options object, null and a click event are manual refreshes, never silent
+    sb.toasts.length = 0;
+    await sb.refreshCryptoPrices({});
+    await sb.refreshCryptoPrices(null);
+    await sb.refreshCryptoPrices({ type:'click', target:{} });
+    assert.strictEqual(sb.toasts.length, 3);
+    assert.ok(sb.toasts.every(t => t.message === 'Crypto: 2 refreshed' && t.kind === 'success'));
+  });
+
+  await testAsync('refreshCryptoPrices - a silent refresh that fails still toasts the error, and the in-flight flag clears', async () => {
+    const sb = cryptoSandbox();
+    sb.reply = { error:'rate limited' };
+    await sb.refreshCryptoPrices({ silent:true });
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(sb.toasts)), [{ message:'Crypto refresh failed: rate limited', kind:'error' }]);
+    assert.strictEqual(sb._cryptoRefreshInFlight, false);
+    sb.fetch = async () => { throw new Error('offline'); };
+    await sb.refreshCryptoPrices({ silent:true });
+    assert.strictEqual(sb.toasts.at(-1).message, 'Crypto refresh failed: offline');
+    assert.strictEqual(sb.toasts.at(-1).kind, 'error');
+    // the manual refresh reports it the same way
+    await sb.refreshCryptoPrices();
+    assert.strictEqual(sb.toasts.at(-1).message, 'Crypto refresh failed: offline');
+    assert.strictEqual(sb.toasts.length, 3);
+    // a failure leaves the missing-coin memory alone
+    sb._cryptoMissingToasted = 'ETH';
+    await sb.refreshCryptoPrices({ silent:true });
+    assert.strictEqual(sb._cryptoMissingToasted, 'ETH');
+  });
+
+  await testAsync('refreshCryptoPrices - the same set of missing coins toasts once in silent mode, a different set toasts again, and a clean refresh resets it', async () => {
+    const sb = cryptoSandbox();
+    const toastsOf = () => JSON.parse(JSON.stringify(sb.toasts));
+    sb.reply = { prices:{ BTC:BOTH.BTC } };                                           // ETH comes back with no price
+    await sb.refreshCryptoPrices({ silent:true });
+    assert.deepStrictEqual(toastsOf(), [{ message:'Crypto: 1 refreshed, 1 missing', kind:'error' }]);
+    assert.strictEqual(sb._cryptoMissingToasted, 'ETH');
+    await sb.refreshCryptoPrices({ silent:true });
+    await sb.refreshCryptoPrices({ silent:true });
+    assert.strictEqual(sb.toasts.length, 1);                                           // the same gap does not toast again
+    sb.reply = { prices:{ ETH:BOTH.ETH } };                                           // now BTC is the one missing: a different set
+    await sb.refreshCryptoPrices({ silent:true });
+    assert.strictEqual(sb.toasts.length, 2);
+    assert.strictEqual(sb._cryptoMissingToasted, 'BTC');
+    sb.reply = { prices:{} };                                                          // both missing: a third set, in sorted order
+    await sb.refreshCryptoPrices({ silent:true });
+    assert.strictEqual(sb.toasts.length, 3);
+    assert.strictEqual(sb.toasts.at(-1).message, 'Crypto: 0 refreshed, 2 missing');
+    assert.strictEqual(sb._cryptoMissingToasted, 'BTC,ETH');
+    sb.reply = { prices:BOTH };                                                        // all back: quiet, and the memory resets
+    await sb.refreshCryptoPrices({ silent:true });
+    assert.strictEqual(sb.toasts.length, 3);
+    assert.strictEqual(sb._cryptoMissingToasted, '');
+    sb.reply = { prices:{ BTC:BOTH.BTC } };                                           // the old gap returns after a clean run: it toasts again
+    await sb.refreshCryptoPrices({ silent:true });
+    assert.strictEqual(sb.toasts.length, 4);
+    // the missing set is of coin ids, whatever order the coins are listed in
+    const rev = cryptoSandbox({ crypto:[{ id:'c2', symbol:'ETH' }, { id:'c1', symbol:'BTC' }] });
+    rev.reply = { prices:{} };
+    await rev.refreshCryptoPrices({ silent:true });
+    assert.strictEqual(rev._cryptoMissingToasted, 'BTC,ETH');
+    // a manual refresh toasts every time, the same gap or not, and leaves the silent memory alone
+    const man = cryptoSandbox();
+    man.reply = { prices:{ BTC:BOTH.BTC } };
+    await man.refreshCryptoPrices(); await man.refreshCryptoPrices();
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(man.toasts)), [{ message:'Crypto: 1 refreshed, 1 missing', kind:'error' }, { message:'Crypto: 1 refreshed, 1 missing', kind:'error' }]);
+    assert.strictEqual(man._cryptoMissingToasted, '');
+  });
+
+  await testAsync('refreshCryptoPrices - the early exits are quiet in silent mode (a console warning for the two that need one) and keep their toasts when manual', async () => {
+    const pairs = list => Array.from(list.map(t => [t.message, t.kind || '']));
+    const quiet = async (setup, silentWarns, manualToast) => {
+      const sb = cryptoSandbox(); setup(sb);
+      await sb.refreshCryptoPrices({ silent:true });
+      assert.deepStrictEqual(pairs(sb.toasts), [], 'silent toasts');
+      assert.strictEqual(sb.warns.length, silentWarns, 'silent warnings');
+      assert.strictEqual(sb.fetches, 0);
+      const man = cryptoSandbox(); setup(man);
+      await man.refreshCryptoPrices();
+      assert.deepStrictEqual(pairs(man.toasts), [manualToast]);
+      assert.strictEqual(man.fetches, 0);
+    };
+    await quiet(sb => { sb._cryptoRefreshInFlight = true; }, 1, ['Crypto refresh already running', '']);
+    await quiet(sb => { sb.coinIdFor = () => ''; }, 1, ['No valid coin ids', 'error']);
+    await quiet(sb => { sb.DB.crypto = []; }, 0, ['No coins to refresh', '']);
+    await quiet(sb => { sb.getSyncUrl = () => ''; }, 0, ['Set the Apps Script URL first', 'error']);
+    // an early exit leaves the in-flight flag as it found it, and a skipped refresh does not clear a running one
+    const run = cryptoSandbox(); run._cryptoRefreshInFlight = true;
+    await run.refreshCryptoPrices({ silent:true });
+    assert.strictEqual(run._cryptoRefreshInFlight, true);
+    const ids = cryptoSandbox(); ids.coinIdFor = () => '';
+    await ids.refreshCryptoPrices({ silent:true });
+    assert.strictEqual(ids._cryptoRefreshInFlight, false);
+  });
+
   await testAsync('actual app and vault reject a save during enable, then retain the retried edit after reopen', async () => {
     const {webcrypto} = require('node:crypto');
     const {createManager} = require('../Worker/kjr-vault.js');
@@ -4907,6 +5246,303 @@ async function runTests(){
     assert.strictEqual(/aria-label="[^"]*"[^>]*aria-label=/.test(listRowsOf(html)[0]), false);
   });
 
+  /* ═══════════════════════════════════════════════════════════════════════
+     v2.76 Stocks page ledgers on the phone: Watchlist, Upcoming dividends and Trade history.
+     Like the Cash and CPF ledgers, the list is built from the same view as the table, so these run the REAL renderers and hold the list against the table's cells.
+     ═══════════════════════════════════════════════════════════════════════ */
+  const wlFixture = () => ({
+    watchlist:[
+      { id:'w_msft', symbol:'MSFT', market:'US', sector:'Information Technology', targetPrice:300, notes:'Wait for a pullback' },
+      { id:'w_o39', symbol:'O39', market:'SGX', targetPrice:null, notes:'' },
+      { id:'w_nopx', symbol:'NOPX', market:'US', notes:'<b>x</b> "q" & co' },
+      { id:'w_old', symbol:'OLD', market:'US', notes:'' }
+    ],
+    _priceCache:{
+      MSFT:{ price:290.5, currency:'USD', changePct:-1.42, fetchedAt:TODAY_ISO },
+      O39:{ price:15.5, currency:'SGD', changePct:0.5, fetchedAt:TODAY_ISO },
+      OLD:{ price:10, currency:'USD', changePct:0, fetchedAt:'2020-01-01T00:00:00Z' }
+    }
+  });
+  function wlSandbox(db, ccy){
+    const sb = listSandbox(db, ccy || 'USD');
+    sb.priceFor = (table, item) => sb.DB._priceCache[item.symbol] || null;
+    return { sb, els: renderBox(sb, ['stocks-watchlist']) };
+  }
+  const wlRowsOf = html => Array.from(html.matchAll(/<div class="dash-hrow hl-row hl-split">[\s\S]*?<\/a><\/div>/g)).map(m => m[0]);
+  const wlTableCells = (html, sym) => { const m = new RegExp('<tr>\\s*<td class="tl cell-sym">' + sym + '<\\/td>([\\s\\S]*?)<\\/tr>').exec(html); return m ? Array.from(m[1].matchAll(/<td class="([^"]*)">([\s\S]*?)<\/td>/g)).map(c => [c[1], c[2]]) : null; };
+
+  test('renderWatchlist - the phone list reads the same rows as the table, in its order: symbol and market over the note, the price over the day move, Edit on the row and Analyse beside it', () => {
+    const { sb, els } = wlSandbox(wlFixture(), 'USD');
+    sb.renderWatchlist();
+    const html = els['stocks-watchlist'].innerHTML;
+    const rows = wlRowsOf(html);
+    assert.strictEqual(rows.length, 4);
+    assert.ok(html.includes('<div class="tbl-wrap hd-only"><table class="holdings">') && html.includes('<div class="hl hl-2" role="group" aria-label="Watchlist">'));
+    const tableSyms = Array.from(html.matchAll(/<td class="tl cell-sym">([^<]*)<\/td>/g)).map(m => m[1]);
+    assert.deepStrictEqual(tableSyms, ['MSFT', 'NOPX', 'O39', 'OLD']);
+    assert.deepStrictEqual(rows.map(r => /<span class="hl-t">([^<]*)</.exec(r)[1].trim()), tableSyms);
+    // MSFT: the price is the table's Price cell, the day move its Day % cell, with its arrow and sign, and the target flag shows
+    const msft = wlTableCells(html, 'MSFT');
+    assert.strictEqual(msft[2][1], 'US$290.50');
+    assert.ok(rows[0].includes('<span class="hl-amt money-chip">US$290.50</span>'));
+    assert.strictEqual(msft[3][1], '<span class="neg">▼ -1.42%</span>');
+    assert.ok(rows[0].includes('<span class="dash-chg down">▼ -1.42%</span>'));
+    assert.ok(msft[7][1].includes('✓ At target') && rows[0].includes('<span class="hl-s">✓ At target · Wait for a pullback</span>'));
+    assert.ok(rows[0].includes('<span class="hl-t">MSFT <span class="hl-k">· US</span></span>'));
+    // a Singapore quote converts to the display currency exactly as the table does
+    const o39 = wlTableCells(html, 'O39');
+    assert.strictEqual(o39[2][1], 'US$12.40');
+    assert.ok(rows[2].includes('class="hl-amt money-chip">US$12.40<') && rows[2].includes('<span class="dash-chg up">▲ +0.50%</span>'));
+    assert.strictEqual(rows[2].includes('At target'), false);                       // no target, no flag
+    // the row edits the entry, as the table's Edit button does, and Analyse is a link beside it that opens the same page
+    assert.ok(rows[0].includes('<button type="button" class="hl-hit" data-edit-table="watchlist" data-edit-id="w_msft" aria-haspopup="dialog" aria-label="Edit MSFT, US, price US$290.50, day -1.42%, at target price, Wait for a pullback">'));
+    assert.ok(rows[0].includes('</button><a class="btn btn-sm btn-ghost hl-go" href="../Trading/index.html?symbol=MSFT" target="_blank" rel="noopener" aria-label="Analyse MSFT, opens the chart in a new tab">Analyse</a>'));
+    assert.ok(html.includes('href="../Trading/index.html?symbol=MSFT" target="_blank" rel="noopener" title="Open chart analysis for MSFT">Analyse</a>'));
+    assert.strictEqual((html.match(/class="btn btn-sm btn-ghost btn-edit" data-edit-table="watchlist"/g) || []).length, 4);   // the table's own Edit buttons are all still there
+    // Hide amounts: the price is a chip as the td.num cell is, the day move is not (its td is .pct)
+    assert.strictEqual(/money-chip">[^<]*%/.test(rows[0]), false);
+    assert.ok(msft[2][0] === 'num' && msft[3][0] === 'num pct');
+    // the day move is a sign and an arrow as well as a colour
+    assert.ok(rows[0].includes('▼') && rows[2].includes('▲'));
+  });
+
+  test('renderWatchlist - a missing price or day move is an en dash, a stale quote says so, a price with no FX rate keeps its native amount, notes are escaped, and the empty card is the one it was', () => {
+    const { sb, els } = wlSandbox(wlFixture(), 'USD');
+    sb.renderWatchlist();
+    const html = els['stocks-watchlist'].innerHTML, rows = wlRowsOf(html);
+    // NOPX has no quote: dashes in the list where the table has its tokens, never NaN or undefined
+    assert.ok(rows[1].includes('<span class="hl-amt money-chip">' + DASH + '</span>') && rows[1].includes('<span class="dash-chg">' + DASH + '</span>'));
+    assert.ok(rows[1].includes('aria-label="Edit NOPX, US, price not available, &lt;b&gt;x&lt;/b&gt; &quot;q&quot; &amp; co"'));
+    assert.ok(wlTableCells(html, 'NOPX')[2][1].includes('price-stale') && wlTableCells(html, 'NOPX')[3][1] === '—');
+    assert.strictEqual(/NaN|undefined|null/.test(rows.join('')), false);
+    // hostile note text is escaped in the visible line and in the spoken label, and never reaches the page as markup
+    assert.ok(rows[1].includes('<span class="hl-s">&lt;b&gt;x&lt;/b&gt; &quot;q&quot; &amp; co</span>'));
+    assert.strictEqual(/<b>x<\/b>/.test(rows[1]), false);
+    // a quote older than a day: the table's (stale) hint, the list's "· stale" in the day line and in the label, a zero move reads as a gain without an arrow
+    assert.ok(wlTableCells(html, 'OLD')[2][1].includes('<span class="hint">(stale)</span>'));
+    assert.ok(rows[3].includes('<span class="dash-chg up">+0.00% <span class="price-stale">· stale</span></span>') && rows[3].includes('price US$10.00, stale, day +0.00%'));
+    // an FX rate that is missing: the native amount in the dim italic, the reason in the spoken label
+    const fx = wlSandbox(Object.assign(wlFixture(), { settings:{ fxOverrides:{}, fxRates:{} } }), 'SGD');
+    fx.sb.renderWatchlist();
+    const fxRows = wlRowsOf(fx.els['stocks-watchlist'].innerHTML);
+    assert.ok(fxRows[0].includes('<span class="hl-amt money-chip"><span class="price-stale">USD 290.50</span></span>'));
+    assert.ok(fxRows[0].includes('price USD 290.50, FX rate missing'));
+    assert.ok(fx.els['stocks-watchlist'].innerHTML.includes('USD 290.50 · FX missing'));
+    // a sort set on the desktop headers orders the list too
+    sb.DB.settings.watchlistSort = { key:'symbol', dir:'desc' };
+    sb.renderWatchlist();
+    const sorted = els['stocks-watchlist'].innerHTML;
+    assert.deepStrictEqual(Array.from(sorted.matchAll(/<td class="tl cell-sym">([^<]*)<\/td>/g)).map(m => m[1]), ['OLD', 'O39', 'NOPX', 'MSFT']);
+    assert.deepStrictEqual(wlRowsOf(sorted).map(r => /<span class="hl-t">([^<]*)</.exec(r)[1].trim()), ['OLD', 'O39', 'NOPX', 'MSFT']);
+    // an empty watchlist: the same empty card, no table and no list
+    sb.DB.watchlist = [];
+    sb.renderWatchlist();
+    assert.ok(els['stocks-watchlist'].innerHTML.includes('Nothing on watch') && !els['stocks-watchlist'].innerHTML.includes('hl-row') && !els['stocks-watchlist'].innerHTML.includes('hd-only'));
+  });
+
+  test('_wlListModel and _wlLabel - the view of one watchlist row: dashes for what is missing, the target flag, and a label a screen reader can use', () => {
+    const sb = listSandbox({}, 'USD');
+    const m = (w, px, ccy) => navPlain(sb._wlListModel({ w, px, ccy: ccy || 'USD' }));
+    const hit = m({ id:'w1', symbol:'AAPL', market:'US', targetPrice:100, notes:'  buy  ' }, { price:99, changePct:2, fetchedAt:TODAY_ISO });
+    assert.deepStrictEqual(hit, { id:'w1', sym:'AAPL', market:'US', note:'buy', price:'US$99.00', fx:false, stale:false, day:'▲ +2.00%', dir:'up', atTarget:true, href:'../Trading/index.html?symbol=AAPL' });
+    assert.strictEqual(m({ id:'w', symbol:'A', targetPrice:99 }, { price:99, fetchedAt:TODAY_ISO }).atTarget, true);        // at the target counts
+    assert.strictEqual(m({ id:'w', symbol:'A', targetPrice:98.99 }, { price:99, fetchedAt:TODAY_ISO }).atTarget, false);
+    assert.strictEqual(m({ id:'w', symbol:'A', targetPrice:null }, { price:1, fetchedAt:TODAY_ISO }).atTarget, false);
+    assert.strictEqual(m({ id:'w', symbol:'A', targetPrice:5 }, null).atTarget, false);                                  // no quote, no flag
+    const bare = m({ id:'w2' }, null);
+    assert.deepStrictEqual([bare.sym, bare.market, bare.note, bare.price, bare.day, bare.dir, bare.stale, bare.fx], ['', '', '', DASH, DASH, '', false, false]);
+    assert.strictEqual(m({ id:'w3', symbol:'A' }, { price:5, changePct:'x', fetchedAt:TODAY_ISO }).day, DASH);              // a day move that is not a number is a dash
+    assert.strictEqual(m({ id:'w3', symbol:'A' }, { price:5, changePct:-0.4, fetchedAt:TODAY_ISO }).dir, 'down');
+    assert.strictEqual(m({ id:'w4', symbol:'A' }, { price:5 }).stale, true);                                              // no fetch time counts as stale, as the table says
+    assert.strictEqual(m({ id:'w5', symbol:'A/B C', market:'SGX' }, { price:5, fetchedAt:TODAY_ISO }, 'SGD').href, '../Trading/index.html?symbol=A%2FB%20C');
+    assert.strictEqual(sb._wlLabel(hit), 'Edit AAPL, US, price US$99.00, day +2.00%, at target price, buy');
+    assert.strictEqual(sb._wlLabel(bare), 'Edit watchlist entry, price not available');
+  });
+
+  const divDays = n => new Date(Date.now() + n * 86400000);
+  test('renderDividendTimeline - the phone list reads the same payments as the table: symbol and dates on the left, the estimate on the right over shares by per-share, in the same order', () => {
+    const sb = listSandbox({}, 'USD');
+    const els = renderBox(sb, ['stocks-dividends']);
+    const iso = n => sb._isoDateSG(divDays(n));
+    const rows = [
+      { s:{ symbol:'D05', divPerShare:1.8, divExDate:iso(40), divPayDate:'' }, shares:100, ccy:'SGD' },
+      { s:{ symbol:'AAPL', divPerShare:1, divExDate:iso(12), divPayDate:iso(30) }, shares:30, ccy:'USD' },
+      { s:{ symbol:'<b>X</b>', divPerShare:0.5, divExDate:iso(55), divPayDate:iso(75) }, shares:1234.56789, ccy:'USD' },
+      { s:{ symbol:'FAR', divPerShare:1, divExDate:iso(200), divPayDate:iso(210) }, shares:1, ccy:'SGD' }
+    ];
+    sb.renderDividendTimeline(rows);
+    const html = els['stocks-dividends'].innerHTML;
+    const list = Array.from(html.matchAll(/<div class="hl-row"><span class="hl-main">[\s\S]*?<\/span><\/span><\/div>/g)).map(m => m[0]);
+    const table = Array.from(html.matchAll(/<tr>\s*<td class="tl">([\s\S]*?)<\/tr>/g)).map(m => Array.from(('<td class="tl">' + m[1]).matchAll(/<td class="[^"]*">([\s\S]*?)<\/td>/g)).map(c => c[1]));
+    assert.strictEqual(list.length, 3);                                              // FAR is outside the 90 days, in neither
+    assert.strictEqual(table.length, 3);
+    assert.deepStrictEqual(table.map(r => r[0]), ['AAPL', 'D05', '&lt;b&gt;X&lt;/b&gt;']);
+    assert.ok(html.includes('<div class="tbl-wrap hd-only"><table class="tbl">') && html.includes('<div class="hl hl-2" role="group" aria-label="Upcoming dividends">') && html.includes('class="card-body p0 hl-host"'));
+    // each row: symbol, ex-date and pay date (an en dash for none) on the left, the Est. income cell as the amount, shares by Div/share under it
+    table.forEach((cells, i) => {
+      assert.ok(list[i].includes('<span class="hl-t">' + cells[0] + '</span>'), 'symbol ' + i);
+      assert.ok(list[i].includes('<span class="hl-s hl-dates"><span>Ex ' + cells[1] + '</span><span>Pay ' + (cells[2] === '—' ? DASH : cells[2]) + '</span></span>'), 'dates ' + i);
+      assert.ok(list[i].includes('<span class="hl-amt money-chip">' + cells[5] + '</span>'), 'estimate ' + i);
+      assert.ok(list[i].includes('<span aria-hidden="true">' + cells[3] + ' × ' + cells[4] + '</span>'), 'shares by per-share ' + i);
+      assert.ok(list[i].includes('<span class="sr-only">' + cells[3] + ' shares at ' + cells[4] + ' per share</span>'), 'spoken ' + i);
+    });
+    assert.strictEqual(table[1][2], '—');                                            // D05 has no pay date: the table's token, and the list's dash
+    assert.ok(list[1].includes('<span>Pay ' + DASH + '</span>'));
+    assert.strictEqual(table[0][5], 'US$30');                                         // 30 shares of a US$1 dividend
+    assert.ok(list[0].includes('<span aria-hidden="true">30 × US$1.00</span>'));
+    // hostile symbols are escaped, a fractional share count keeps its decimals, and amounts blur under Hide amounts
+    assert.strictEqual(/<b>X<\/b>/.test(list.join('')), false);
+    assert.ok(list[2].includes('&lt;b&gt;X&lt;/b&gt;') && list[2].includes('1,234.5679 × '));
+    assert.ok(list.every(r => (r.match(/money-chip/g) || []).length === 2));
+    // a dividend only reads: no button, no link, nothing to tap
+    assert.strictEqual(/<button|<a /.test(list.join('')), false);
+    // the empty states are the card's own, no list: no holdings, no ex-dates set, none in the next 90 days
+    sb.renderDividendTimeline([]);
+    assert.strictEqual(els['stocks-dividends'].innerHTML, '');
+    sb.renderDividendTimeline([{ s:{ symbol:'A', divPerShare:0 }, shares:1, ccy:'SGD' }]);
+    assert.ok(els['stocks-dividends'].innerHTML.includes('No ex-dates set') && !els['stocks-dividends'].innerHTML.includes('hl-row'));
+    sb.renderDividendTimeline([rows[3]]);
+    assert.ok(els['stocks-dividends'].innerHTML.includes('No payments due in the next 90 days') && !els['stocks-dividends'].innerHTML.includes('hl-row') && !els['stocks-dividends'].innerHTML.includes('hd-only'));
+  });
+
+  const txnFixture = () => ({
+    stocks:[ { id:'s_aapl', symbol:'AAPL', market:'US', currency:'USD', shares:30, avgCost:150 }, { id:'s_d05', symbol:'D05', market:'SGX', currency:'SGD', shares:0, avgCost:0 } ],
+    stockTxns:[
+      { id:'t1', stockId:'s_aapl', date:'2026-03-10', side:'sell', shares:10, price:290, fees:5, notes:'Trim' },
+      { id:'t2', stockId:'s_aapl', date:'2026-01-05', side:'buy', shares:40, price:150, fees:0, notes:'<i>open</i> "q"' },
+      { id:'t3', stockId:'s_d05', date:'2026-02-11', side:'buy', shares:100, price:30, fees:1.5, notes:'' }
+    ]
+  });
+  function txnSandbox(db, view){
+    const sb = listSandbox(db || txnFixture(), 'USD');
+    vm.runInContext("var _ledgerView = '" + (view || 'flat') + "';", sb);
+    return { sb, els: renderBox(sb, ['stocks-ledger']) };
+  }
+  const txnRowsOf = html => Array.from(html.matchAll(/<button type="button" class="dash-hrow hl-row" data-edit-table="stockTxns"[\s\S]*?<\/button>/g)).map(m => m[0]);
+  const txnTableRows = html => Array.from(html.matchAll(/<tr>\s*<td class="tl">([\s\S]*?)<\/tr>/g)).map(m => Array.from(('<td class="tl">' + m[1]).matchAll(/<td class="[^"]*">([\s\S]*?)<\/td>/g)).map(c => c[1]));
+
+  test('renderStockTxns - the flat trade list reads the same trades as the table, newest first: side, quantity and symbol over date, fees and note, the value over the price', () => {
+    const { sb, els } = txnSandbox();
+    sb.renderStockTxns();
+    const html = els['stocks-ledger'].innerHTML;
+    const rows = txnRowsOf(html);
+    const table = txnTableRows(html);
+    assert.strictEqual(rows.length, 3);
+    assert.strictEqual(table.length, 3);
+    assert.deepStrictEqual(table.map(r => r[0]), ['10/03/2026', '11/02/2026', '05/01/2026']);
+    assert.ok(html.includes('<div class="tbl-wrap hd-only"><table class="holdings">') && html.includes('<div class="hl hl-2" role="group" aria-label="Trade history">'));
+    // the sell: a red word and a tag, the table's own quantity, price, fees and value
+    assert.deepStrictEqual(table[0].slice(0, 7), ['10/03/2026', 'AAPL', '<span class="tag neg">SELL</span>', '10', 'US$290.00', 'US$5.00', 'US$2,895']);
+    assert.ok(rows[0].includes('<span class="hl-t"><span class="neg">Sell</span> <span class="money-chip">10</span> AAPL</span>'));
+    assert.ok(rows[0].includes('<span class="hl-s">10/03/2026 · Fees <span class="money-chip">US$5.00</span> · Trim</span>'));
+    assert.ok(rows[0].includes('<span class="hl-amt money-chip">US$2,895</span><span class="dash-sub money-chip">@ US$290.00</span>'));
+    // a buy with no fees has no fees part (the table shows its dash), a Singapore stock converts as the table does
+    assert.deepStrictEqual(table[2].slice(0, 7), ['05/01/2026', 'AAPL', '<span class="tag pos">BUY</span>', '40', 'US$150.00', '—', 'US$6,000']);
+    assert.ok(rows[2].includes('<span class="pos">Buy</span> <span class="money-chip">40</span> AAPL') && !rows[2].includes('Fees'));
+    assert.strictEqual(table[1][4], 'US$24.00');                                      // S$30 in US$ at 1.25
+    assert.ok(rows[1].includes('@ US$24.00') && rows[1].includes('Fees <span class="money-chip">US$1.20</span>') && rows[1].includes('class="hl-amt money-chip">US$2,401<'));
+    // the row edits the trade, as the table's Edit button does, with a label that names everything
+    assert.ok(rows[0].includes('data-edit-table="stockTxns" data-edit-id="t1" aria-haspopup="dialog" aria-label="Edit Sell 10 AAPL, 10/03/2026, price US$290.00, fees US$5.00, value US$2,895, Trim"'));
+    assert.strictEqual((html.match(/class="btn btn-sm btn-ghost btn-edit" data-edit-table="stockTxns"/g) || []).length, 3);
+    // the table keeps its columns
+    assert.ok(html.includes('<th class="tl">Date</th><th class="tl">Stock</th><th class="tl">Side</th><th>Shares</th><th>Price</th><th>Fees</th><th>Value</th><th class="tl">Notes</th>'));
+    // side is a word and colour never alone, quantity and money blur under Hide amounts
+    assert.ok(rows.every(r => /<span class="(pos|neg)">(Buy|Sell)<\/span>/.test(r) && (r.match(/money-chip/g) || []).length >= 3));
+    // hostile note text is escaped in the line and in the label
+    assert.ok(rows[2].includes('&lt;i&gt;open&lt;/i&gt; &quot;q&quot;') && /<i>open/.test(rows.join('')) === false);
+    // the card head keeps its controls wrapping, up to five of them
+    assert.ok(html.includes('style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap"'));
+    assert.strictEqual((html.slice(0, html.indexOf('<div class="tbl-wrap')).match(/<button/g) || []).length, 5);
+    assert.ok(html.includes('type="file" id="ibkr-file-input"'));
+  });
+
+  test('renderStockTxns - By stock: a heading for each stock with its count, its trades without the symbol, then the position line with the realised P&L as an arrow and a sign', () => {
+    const { sb, els } = txnSandbox(null, 'by-stock');
+    sb.renderStockTxns();
+    const html = els['stocks-ledger'].innerHTML;
+    const list = html.slice(html.indexOf('<div class="hl hl-2"'));
+    const groups = Array.from(list.matchAll(/<div class="hl-group" role="heading" aria-level="4"><span class="hl-group-t">([^<]*)<\/span><span class="hl-group-n">([^<]*)<\/span><\/div>/g)).map(m => [m[1], m[2]]);
+    assert.deepStrictEqual(groups, [['AAPL', '2 trades'], ['D05', '1 trade']]);
+    // the list runs heading, trades (oldest first), position, then the next stock, as the table does
+    const order = Array.from(list.matchAll(/hl-group-t">([^<]*)<|data-edit-id="(t\d)"|class="hl-total"/g)).map(m => m[1] || m[2] || 'position');
+    assert.deepStrictEqual(order, ['AAPL', 't2', 't1', 'position', 'D05', 't3', 'position']);
+    const tableOrder = Array.from(html.matchAll(/ledger-group-row"><td colspan="9" class="tl"><strong>([^<]*)<|data-edit-id="(t\d)"|subtotal-row/g)).map(m => m[1] || m[2] || 'position');
+    assert.deepStrictEqual(tableOrder.filter(x => x !== 't2' && x !== 't1' && x !== 't3'), ['AAPL', 'position', 'D05', 'position']);
+    // under its heading a trade drops the symbol from the line (the label still names the stock)
+    const rows = txnRowsOf(html);
+    assert.ok(rows[0].includes('<span class="hl-t"><span class="pos">Buy</span> <span class="money-chip">40</span></span>'));
+    assert.ok(rows[0].includes('aria-label="Edit Buy 40 AAPL, 05/01/2026,'));
+    // the position line: the table's subtotal figures, the realised P&L with its arrow and sign
+    const sub = Array.from(html.matchAll(/<tr class="subtotal-row">[\s\S]*?<\/tr>/g)).map(m => m[0]);
+    assert.ok(sub[0].includes('<td class="num">60</td>') && sub[0].includes('<td class="num"><span class="pos">▲ +US$1,395</span></td>'));
+    const totals = Array.from(list.matchAll(/<div class="hl-total">[\s\S]*?<\/span><\/div>/g)).map(m => m[0]);
+    assert.strictEqual(totals.length, 2);
+    assert.ok(totals[0].includes('<span class="hl-t">Position</span><span class="hl-s"><span class="money-chip">60</span> shares · avg <span class="money-chip">US$150.00</span></span>'));
+    assert.ok(totals[0].includes('<span class="hl-amt money-chip up">▲ +US$1,395</span><span class="dash-sub">realised P&amp;L</span>'));
+    assert.ok(totals[1].includes('<span class="hl-amt money-chip up">US$0</span>'));      // nothing realised yet reads as the table does: the gain class, no arrow
+    // a loss is an arrow and a minus as well as red
+    sb.DB.stockTxns.push({ id:'t4', stockId:'s_aapl', date:'2026-04-01', side:'sell', shares:60, price:100, fees:0, notes:'' });
+    sb.renderStockTxns();
+    const loss = els['stocks-ledger'].innerHTML;
+    assert.ok(/<span class="neg">▼ -US\$[\d,]+<\/span>/.test(loss) && /<span class="hl-amt money-chip down">▼ -US\$[\d,]+<\/span>/.test(loss));
+    // the flat list is back when the view is
+    vm.runInContext("_ledgerView = 'flat';", sb);
+    sb.renderStockTxns();
+    assert.strictEqual(els['stocks-ledger'].innerHTML.includes('hl-group'), false);
+  });
+
+  test('renderStockTxns - the empty states are the card\'s own with no list, and a trade for a stock that is gone still shows, with a dash for the symbol', () => {
+    const { sb, els } = txnSandbox();
+    sb.DB.stockTxns = [];
+    sb.renderStockTxns();
+    assert.ok(els['stocks-ledger'].innerHTML.includes('No trades logged') && !els['stocks-ledger'].innerHTML.includes('hl-row') && !els['stocks-ledger'].innerHTML.includes('hd-only'));
+    assert.ok(els['stocks-ledger'].innerHTML.includes('＋ Add trade'));                 // the head, and its controls, are still there
+    sb.DB.stocks = [];
+    sb.renderStockTxns();
+    assert.strictEqual(els['stocks-ledger'].innerHTML, '');
+    const orphan = txnSandbox({ stocks:[{ id:'s_a', symbol:'AAPL', market:'US', currency:'USD', shares:1, avgCost:1 }], stockTxns:[{ id:'t9', stockId:'s_gone', date:'2026-05-01', side:'buy', shares:2, price:3 }] });
+    orphan.sb.renderStockTxns();
+    const rows = txnRowsOf(orphan.els['stocks-ledger'].innerHTML);
+    assert.strictEqual(rows.length, 1);
+    assert.ok(rows[0].includes('<span class="pos">Buy</span> <span class="money-chip">2</span> ' + '—') && !/undefined|NaN/.test(rows[0]));
+  });
+
+  test('_stockTxnView, _stockPositionView and the row builders - one definition of a trade, hostile text escaped once, an unknown side counts as a buy as the table does', () => {
+    const sb = listSandbox({}, 'USD');
+    const symbolOf = id => ({ a:'AAPL', e:'<b>EVIL</b>' })[id] || '—';
+    const ccyOf = id => id === 'e' ? 'SGD' : 'USD';
+    const v = navPlain(sb._stockTxnView({ id:'t', stockId:'a', date:'2026-05-02', side:'sell', shares:'3', price:'10', fees:'1', notes:null }, symbolOf, ccyOf));
+    assert.deepStrictEqual(v, { id:'t', dateText:'02/05/2026', sym:'AAPL', sell:true, side:'Sell', cls:'neg', qty:3, priceText:'US$10.00', feesText:'US$1.00', valueText:'US$29', notes:'' });
+    const odd = navPlain(sb._stockTxnView({ id:'u', stockId:'e', side:'weird', shares:'x', price:null }, symbolOf, ccyOf));
+    assert.deepStrictEqual([odd.side, odd.cls, odd.qty, odd.feesText, odd.valueText, odd.sym], ['Buy', 'pos', 0, '', 'US$0', '<b>EVIL</b>']);
+    const row = sb._stockTxnRowHtml(Object.assign(odd, { notes:'<script>1</script>', id:'"><x' }), true);
+    assert.strictEqual(/<b>EVIL|<script|<x/.test(row), false);
+    assert.ok(row.includes('&lt;b&gt;EVIL&lt;/b&gt;') && row.includes('&lt;script&gt;1&lt;/script&gt;') && row.includes('data-edit-id="&quot;&gt;&lt;x"'));
+    assert.strictEqual(/aria-label="[^"]*"[^>]*aria-label=/.test(row), false);
+    assert.deepStrictEqual(navPlain(sb._stockPositionView({ shares:12.5, avgCost:100, realisedPL:-40 }, 'USD')), { shares:12.5, avgText:'US$100.00', plText:'▼ -US$40', plCls:'neg' });
+    assert.deepStrictEqual(navPlain(sb._stockPositionView({ shares:1, avgCost:1, realisedPL:0 }, 'SGD')), { shares:1, avgText:'US$0.80', plText:'US$0', plCls:'pos' });
+    assert.strictEqual(sb._stockGroupHtml('<b>x</b>', 1), '<div class="hl-group" role="heading" aria-level="4"><span class="hl-group-t">&lt;b&gt;x&lt;/b&gt;</span><span class="hl-group-n">1 trade</span></div>');
+    assert.ok(sb._stockGroupHtml('A', 0).includes('0 trades') && sb._stockGroupHtml('A', 2).includes('2 trades'));
+  });
+
+  test('Stocks page ledgers - the phone styles live in the 640px block: the Watchlist row is a div of two controls, a trade row a button, the by-stock heading a band, and above 640px none of it shows', () => {
+    const start = indexSrc.indexOf('/* MOBILE LIST ROWS, CHIP FILTERS AND ACTIONS (v2.73)');
+    const css = indexSrc.slice(start, indexSrc.indexOf('</style>', start));
+    const phone = css.slice(css.indexOf('@media (max-width:640px){'), css.indexOf('/* At 360px and below the share drops its words'));
+    ['.hl-split{cursor:default}', '.hl-hit{display:grid;grid-template-columns:minmax(0,1fr) auto;', '.hl-hit:focus-visible{outline:2px solid var(--accent);outline-offset:2px}', '.hl-go{justify-self:end}',
+      '.hl-dates{display:flex;flex-wrap:wrap;column-gap:10px}', '.hl-dates > span{white-space:nowrap}',
+      '.hl-group{margin-top:10px;', '.hl-group-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}', '.card-body.hl-host{padding:0}', '.hl-total .hl-s{font-weight:400}']
+      .forEach(rule => assert.ok(phone.includes(rule), rule));
+    assert.ok(css.includes('.m-actions,.m-more,.chip-row,.hl,.m-fresh{display:none}'));      // above 640px every list is hidden, the tables carry the page
+    // the row of five card-head controls wraps, it never widens the card
+    assert.ok(indexSrc.includes('.card-head{flex-wrap:wrap}'));
+    // no stray inline handlers in the three renderers
+    ['renderWatchlist', 'renderDividendTimeline', 'renderStockTxns', '_wlRowHtml', '_dividendRowHtml', '_stockTxnRowHtml', '_stockPositionRowHtml', '_stockGroupHtml'].forEach(fn => {
+      const src = extractFunction(fn);
+      assert.strictEqual(/\son[a-z]+="/i.test(src.replace(/\bon[A-Z]\w+\s*=/g, '')), false, fn);
+    });
+  });
+
   test('moreMenuPick - runs only a whitelisted action, closes the menu first so focus is back on More, and ignores anything else', () => {
     const sb = freshSandbox();
     const calls = [];
@@ -5031,8 +5667,8 @@ async function runTests(){
   test('mobile list markup - the table stays in the page marked hd-only, the list and chips sit beside it, and there are no inline handlers', () => {
     // every table the list replaces is wrapped as the part the phone hides
     const hidden = (appSrc.match(/<div class="tbl-wrap hd-only">/g) || []).length;
-    assert.strictEqual(hidden, 5);                                                 // Stocks, Crypto, Cash accounts, Cash movements, CPF history
-    ['renderStocks', 'renderCrypto', 'renderCash', 'renderCashTxns', 'renderCpf'].forEach(fn => {
+    assert.strictEqual(hidden, 8);                                                 // Stocks, Crypto, Cash accounts, Cash movements, CPF history, and (v2.76) Watchlist, Upcoming dividends, Trade history
+    ['renderStocks', 'renderCrypto', 'renderCash', 'renderCashTxns', 'renderCpf', 'renderWatchlist', 'renderDividendTimeline', 'renderStockTxns'].forEach(fn => {
       const src = extractFunction(fn);
       assert.ok(src.includes('tbl-wrap hd-only'), fn);
       assert.ok(/_holdingsListHtml|_cashListHtml|class="hl hl-2"/.test(src), fn + ' builds the list');
@@ -5124,6 +5760,52 @@ async function runTests(){
     });
     // the hover rule really moves the dim text up a step
     assert.ok(indexSrc.includes('@media (hover:hover){.hl-row:hover .dash-sub,.hl-row:hover .dash-who-t span,.hl-row:hover .hl-s,.hl-row:hover .price-stale{color:var(--text2)}}'));
+  });
+
+  test('light --text3 (v2.76) - clears 4.5:1 on the page surfaces, dark keeps its value, the rules that put it on --bg4 step up to --text in light, and the comments quote the real ratios', () => {
+    const block = s => { const i = indexSrc.indexOf(s); assert.ok(i > -1, s); return indexSrc.slice(i, indexSrc.indexOf('\n}', i)); };
+    const light = block(':root{'), dark = block('html.dark{');
+    const token = (blk, name) => { const m = new RegExp('--' + name + ':([^;]+);').exec(blk); assert.ok(m, '--' + name + ' missing'); return m[1].trim(); };
+    const rgb = h => { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); };
+    const lin = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const lum = c => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+    const ratio = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+    assert.strictEqual(token(light, 'text3').toLowerCase(), '#6f6a60');
+    assert.strictEqual(token(dark, 'text3'), '#7C87A0');                             // dark is left as it was
+    const t3 = rgb(token(light, 'text3'));
+    // the figures the comments quote are the figures the tokens give
+    [['bg', '4.89'], ['bg2', '5.38'], ['bg3', '4.59'], ['sidebar', '4.55']].forEach(([n, quoted]) => {
+      const r = ratio(t3, rgb(token(light, n)));
+      assert.ok(r >= 4.5, 'light --text3 on --' + n + ' ' + r.toFixed(2));
+      assert.strictEqual(r.toFixed(2), quoted, n);
+    });
+    assert.ok(indexSrc.includes('4.89 on --bg, 5.38 on --bg2, 4.59 on --bg3, 4.55 on --sidebar'));
+    // on --bg4 it is 4.23 and --text2 only 4.48, so the override has to be --text
+    const bg4 = rgb(token(light, 'bg4'));
+    assert.strictEqual(ratio(t3, bg4).toFixed(2), '4.23');
+    assert.strictEqual(ratio(rgb(token(light, 'text2')), bg4).toFixed(2), '4.48');
+    assert.ok(ratio(rgb(token(light, 'text')), bg4) >= 4.5);
+    // every rule that sets a --text3 or --tx3 colour and a --bg4 background together has a light-only override to --text
+    const css = indexSrc.slice(indexSrc.indexOf('<style>'), indexSrc.indexOf('</style>')).replace(/\/\*[\s\S]*?\*\//g, '');
+    const rules = Array.from(css.matchAll(/([^{}]+)\{([^{}]*)\}/g)).map(m => ({ sel: m[1].trim(), body: m[2] }));
+    const onBg4 = rules.filter(r => /(^|;)\s*background(-color)?:\s*var\(--bg4\)/.test(r.body) && /(^|;)\s*color:\s*var\(--(text3|tx3)\)/.test(r.body));
+    assert.deepStrictEqual(onBg4.map(r => r.sel), ['.cov-pill.na']);
+    onBg4.forEach(r => r.sel.split(',').forEach(sel => assert.ok(rules.some(o => o.sel === 'html:not(.dark) ' + sel.trim() && /(^|;)\s*color:\s*var\(--text\)\s*$/.test(o.body)), 'light override for ' + sel)));
+    // the other one is a hover: the palette pill goes from --bg3 to --bg4 and its label (--text3) rides along
+    assert.ok(rules.some(o => o.sel === '.cb-field-pill:hover' && /background:\s*var\(--bg4\)/.test(o.body)));
+    assert.ok(rules.some(o => o.sel === '.cb-field-pill .pill-type' && /color:\s*var\(--text3\)/.test(o.body)));
+    assert.ok(rules.some(o => o.sel === 'html:not(.dark) .cb-field-pill:hover .pill-type' && /^\s*color:\s*var\(--text\)\s*$/.test(o.body)));
+    // no other rule puts --bg4 behind text of its own, so these are every case (the others are tracks, borders and the skeleton shimmer)
+    const bg4Rules = rules.filter(r => /var\(--bg4\)/.test(r.body)).map(r => r.sel);
+    assert.deepStrictEqual(bg4Rules.sort(), ['.cb-field-pill:hover', '.cov-pill.na', '.hp-foot .btn:not(.btn-primary):hover', '.kjr-arrange-move:hover:not(:disabled)', '.px-ext-tag', '.skel', '.switch-track', 'td']);
+    // the comments that quoted the old ratios say what the ratios are now
+    assert.strictEqual(/Light --text3 is only 3\.83:1/.test(indexSrc), false);
+    assert.strictEqual(/--text3 is under 4\.5:1 on --bg3 in the light theme/.test(indexSrc), false);
+    assert.ok(indexSrc.includes('--text3 is 4.59:1 on --bg3 in light and 4.26:1 in dark, --text2 is 4.87:1 and 6.14:1'));
+    const dark3 = rgb(token(dark, 'text3')), dark2 = rgb(token(dark, 'text2')), darkBg3 = rgb(token(dark, 'bg3'));
+    assert.strictEqual(ratio(dark3, darkBg3).toFixed(2), '4.26');
+    assert.strictEqual(ratio(dark2, darkBg3).toFixed(2), '6.14');
+    assert.strictEqual(ratio(rgb(token(light, 'text2')), rgb(token(light, 'bg3'))).toFixed(2), '4.87');
   });
 
   test('release strings - the display version, the cache name and every script tag agree', () => {
@@ -5671,7 +6353,7 @@ async function runTests(){
     assert.strictEqual(doc.activeElement, doc.els['holding-panel']);
     // the same call from every place data moves
     assert.ok(extractFunction('renderAll').includes('refreshHoldingPanel();'));
-    // the two price refreshes (extractFunction can not read refreshStockPrices, its default parameter holds a brace) repaint the panel right after their own render
+    // the two price refreshes repaint the panel right after their own render (checked on the source text)
     assert.ok(appSrc.includes('    renderStocks();\n    refreshHoldingPanel();   // an open holding panel takes the new price'));
     assert.ok(appSrc.includes('    renderCrypto();\n    refreshHoldingPanel();   // an open holding panel takes the new price'));
     // the holding deleted elsewhere: the panel closes, saying so
