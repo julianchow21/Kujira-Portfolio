@@ -9344,22 +9344,118 @@ async function runTests(){
     assert.ok(closest(newD) >= 15 && closest(oldD) - closest(newD) < 1.5, 'dark closest pair ' + closest(newD).toFixed(1));
   });
 
-  test('p280 item 3 - v2.80 is in every place that carries the version: the constants, the cache name, each pre-cached script, the page and browser-test script tags, the pilot tag and the QA runbook line', () => {
+  test('p280 item 3 - the app version is in every place that carries it: the constants, the cache name, each pre-cached script, the page and browser-test script tags, the pilot tag and the QA runbook line (each is read against APP_VERSION, so a release that leaves one behind fails)', () => {
     const { pilot } = p280;
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
     const testsHtml = fs.readFileSync(path.join(__dirname, 'tests.html'), 'utf8');
     const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    assert.ok(appSrc.includes("const APP_VERSION = 'v2.80';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.80 (12 Oct)';"));
-    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.80';"));
+    const version = /const APP_VERSION = 'v(\d+\.\d+)';/.exec(appSrc)[1];                                  // the release number itself is pinned in the newest block (p281 item 5), so this test needs no edit per release
+    assert.ok(appSrc.includes("const APP_DISPLAY_VERSION = 'v" + version + " ("));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v" + version + "';"));
     const assets = Array.from(/CORE_ASSETS = \[([\s\S]*?)\];/.exec(sw)[1].matchAll(/'(\.\/Worker\/[\w.-]+\.js)\?v=([\d.]+)'/g));
     assert.strictEqual(assets.length, 7);                                                                  // app, core, sortable, vault, migration, supabase, nas
-    assets.forEach(m => assert.strictEqual(m[2], '2.80', m[1]));
+    assets.forEach(m => assert.strictEqual(m[2], version, m[1]));
     const tags = Array.from(indexSrc.matchAll(/<script src="(Worker\/[\w.-]+\.js)\?v=([\d.]+)"><\/script>/g));
     assert.deepStrictEqual(tags.map(m => './' + m[1]).sort(), assets.map(m => m[1]).sort());               // the page loads exactly what the worker pre-caches
-    tags.forEach(m => assert.strictEqual(m[2], '2.80', m[1]));
-    assert.ok(testsHtml.includes('<script src="../Worker/kjr-sortable.js?v=2.80"></script>'));
-    assert.ok(pilot.includes('<script src="./Worker/decision-notes-pilot.js?v=2.80"></script>'));
-    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 12/10/2026 (app v2.80).'));
+    tags.forEach(m => assert.strictEqual(m[2], version, m[1]));
+    assert.ok(testsHtml.includes('<script src="../Worker/kjr-sortable.js?v=' + version + '"></script>'));
+    assert.ok(pilot.includes('<script src="./Worker/decision-notes-pilot.js?v=' + version + '"></script>'));
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 12/10/2026 (app v' + version + ').'));
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     p281, v2.81 Settings icons: no emoji on the Settings page. The How it works heading is plain text like every other card heading, each Appearance segment leads with
+     the sidebar switch's own sun or moon drawing (decorative, the visible words Light and Dark stay the accessible names), and the Diagnostics ageing warning says
+     Warning: where it printed a pictograph. The markup and the stylesheet are read as text. Every test name starts with p281 item.
+     ═══════════════════════════════════════════════════════════════════════ */
+  const p281 = (() => {
+    const { body, colour } = p278;
+    const from = indexSrc.indexOf('<section class="page" id="page-settings">');
+    assert.ok(from > -1, 'the Settings section moved');
+    const section = indexSrc.slice(from, indexSrc.indexOf('</section>', from));
+    // Unicode's own pictograph test, so a later sparkle or cross is caught as well as the three glyphs that were here. Arrows count as text (the one after Open the docs is the
+    // external-link mark the More sheet uses too), and so do the check and cross marks, the multiplication sign and the fullwidth plus.
+    const EMOJI = /\p{Extended_Pictographic}|[\u{1F1E6}-\u{1F1FF}\u{FE0F}\u{200D}\u{20E3}]/gu;
+    const emojiIn = s => Array.from(s.matchAll(EMOJI)).map(m => m[0]).filter(ch => !/[\u{2190}-\u{21FF}]/u.test(ch));
+    // the sidebar switch's two drawings, which the More sheet reuses and the Appearance toggle now does too
+    const sun = /<span class="ti ti-sun">(<svg[\s\S]*?<\/svg>)<\/span>/.exec(indexSrc)[1];
+    const moon = /<span class="ti ti-moon">(<svg[\s\S]*?<\/svg>)<\/span>/.exec(indexSrc)[1];
+    return { body, colour, section, emojiIn, sun, moon };
+  })();
+
+  test('p281 item 1 - the Settings markup has no emoji: the How it works heading is plain text like every other card heading, and the open book, sun and crescent moon are gone from the page', () => {
+    const { section, emojiIn } = p281;
+    // the check itself flags a pictograph whether the browser draws it in colour or as a text glyph, and lets the plain marks through
+    ['\u{1F4D6}', '\u{2600}', '\u{1F319}', '\u{26A0}', '\u{2699}', '\u{2728}', '\u{274C}', '\u{1F1F8}\u{1F1EC}'].forEach(ch => assert.ok(emojiIn(ch).length > 0, 'should flag U+' + ch.codePointAt(0).toString(16)));
+    ['\u{2713}', '\u{2715}', '\u{2717}', '\u{2197}', '\u{2192}', '\u{D7}', '\u{FF0B}', '\u{B7}', '\u{25BE}'].forEach(ch => assert.strictEqual(emojiIn(ch).length, 0, 'should allow U+' + ch.codePointAt(0).toString(16)));
+    // the slice is the whole page of cards (first and last card present), then nothing in it is a pictograph
+    assert.ok(section.includes('id="backend-card"') && section.includes('id="diag-output"'));
+    assert.deepStrictEqual(emojiIn(section), []);
+    assert.strictEqual(/[\u{1F4D6}\u{2600}\u{1F319}]/u.test(indexSrc), false);                               // and the page has no other copy of the three
+    // every card heading in Settings is plain words, so the one that had an icon matches the rest
+    const heads = Array.from(section.matchAll(/<h3>([^<]*)<\/h3>/g)).map(m => m[1]);
+    assert.ok(heads.length >= 15 && heads.includes('How it works') && heads.includes('Appearance'), heads.length + ' headings');
+    heads.forEach(h => assert.ok(/^[\x20-\x7e]+$/.test(h), 'heading "' + h + '"'));
+    assert.ok(section.includes('<div class="card-head"><h3>How it works</h3><span class="hint">'));
+  });
+
+  test('p281 item 2 - each Appearance segment is the sidebar switch\'s own drawing plus the word: one decorative svg (aria-hidden, not focusable, stroke currentColor), the visible Light or Dark as the accessible name, and no label or title that would replace it', () => {
+    const { section, sun, moon } = p281;
+    const group = /<div class="theme-toggle" role="group" aria-label="Theme">([\s\S]*?)<\/div>/.exec(section);
+    assert.ok(group, 'the theme toggle moved');
+    const buttons = Array.from(group[1].matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g));
+    assert.strictEqual(buttons.length, 2);
+    [['light', 'Light', sun], ['dark', 'Dark', moon]].forEach(([theme, word, svg], i) => {
+      const attrs = buttons[i][1], inner = buttons[i][2];
+      assert.strictEqual(attrs.trim(), 'type="button" data-theme="' + theme + '" data-click="setThemeChoice" data-a0="' + theme + '"');
+      assert.strictEqual(inner, svg + word);                                                              // the drawing, then the word, and nothing else
+      assert.strictEqual((inner.match(/<svg\b/g) || []).length, 1);
+      assert.ok(inner.startsWith('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">'));
+      assert.strictEqual(inner.replace(/<svg[\s\S]*?<\/svg>/, ''), word);                                 // with the drawing hidden from assistive tech, the name is Light or Dark
+      assert.strictEqual(/aria-label|title=/.test(attrs), false);
+    });
+    // one drawing in the sidebar, the More sheet row (THEME_ICONS, also the palette's) and here
+    assert.ok(appSrc.includes(sun) && appSrc.includes(moon));
+    assert.ok(sun.includes('<circle cx="12" cy="12" r="4"/>') && moon.includes('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'));
+    // a click on the icon is a click on the button: the delegate walks up to the nearest data-click
+    assert.ok(/document\.addEventListener\('click',\s+\(e\) => \{ const el = e\.target\.closest\('\[data-click\]'\);/.test(appSrc));
+  });
+
+  test('p281 item 3 - the icon takes the segment\'s text colour and adds no height: 14px, flex none, no colour of its own, and the v2.80 idle --text2, the hover and the selected segment are as they were', () => {
+    const { body, colour } = p281;
+    assert.strictEqual(body('.theme-toggle button svg'), 'width:14px;height:14px;flex:none');
+    assert.strictEqual(/color|stroke|fill/.test(body('.theme-toggle button svg')), false);                // stroke is currentColor in the markup, so the idle, hover and selected colours all reach it
+    assert.strictEqual(colour('.theme-toggle button'), 'var(--text2)');
+    assert.ok(/display:inline-flex;align-items:center;gap:6px/.test(body('.theme-toggle button')));
+    assert.ok(/(^|;)color:var\(--text\)(;|$)/.test(body('.theme-toggle button:hover')));
+    assert.strictEqual(body('.theme-toggle button.active'), 'background:var(--accent);color:var(--on-accent)');
+    // the selected segment follows data-theme alone, never the label inside the button
+    const sb = freshSandbox();
+    const seg = theme => { const b = { dataset:{ theme }, on:null, classList:{ toggle:(name, on) => { assert.strictEqual(name, 'active'); b.on = !!on; } } }; return b; };
+    const segs = [seg('light'), seg('dark')];
+    sb.document = { querySelectorAll: sel => sel === '.theme-toggle button' ? segs : [] };
+    const updateThemeUI = vm.runInContext('(' + extractFunction('updateThemeUI') + ')', sb);
+    updateThemeUI('dark');
+    assert.deepStrictEqual(segs.map(s => s.on), [false, true]);
+    updateThemeUI('light');
+    assert.deepStrictEqual(segs.map(s => s.on), [true, false]);
+  });
+
+  test('p281 item 4 - the Diagnostics ageing warning says Warning: in words where it printed a warning-sign pictograph, and renderDiagnostics holds no emoji (its check and cross marks are plain text)', () => {
+    const { emojiIn } = p281;
+    const fn = extractFunction('renderDiagnostics');
+    assert.ok(fn, 'renderDiagnostics moved');
+    assert.deepStrictEqual(emojiIn(fn), []);
+    assert.strictEqual(fn.includes('\u{26A0}'), false);
+    assert.ok(fn.includes("warn.textContent = 'Warning: CPF, tax and holiday constants last verified for ' + CONSTANTS_VERIFIED_FOR + '. Verify against CPF Board, IRAS and MOM before trusting '"));
+  });
+
+  test('p281 item 5 - this release is v2.81: the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
+    const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
+    const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
+    assert.ok(appSrc.includes("const APP_VERSION = 'v2.81';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.81 (12 Oct)';"));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.81';"));
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 12/10/2026 (app v2.81).'));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

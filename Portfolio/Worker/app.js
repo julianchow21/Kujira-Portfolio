@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.80';
-const APP_DISPLAY_VERSION = 'v2.80 (12 Oct)';
+const APP_VERSION = 'v2.81';
+const APP_DISPLAY_VERSION = 'v2.81 (12 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -5234,7 +5234,7 @@ function renderDiagnostics(){
     const warn = document.createElement('div');
     warn.id = 'diag-constants-warning';
     warn.style.cssText = 'margin-top:10px;background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber-ink);padding:10px;border-radius:8px;font-size:12px';
-    warn.textContent = '⚠ CPF, tax and holiday constants last verified for ' + CONSTANTS_VERIFIED_FOR + '. Verify against CPF Board, IRAS and MOM before trusting ' + (CONSTANTS_VERIFIED_FOR + 1) + '+ figures.';
+    warn.textContent = 'Warning: CPF, tax and holiday constants last verified for ' + CONSTANTS_VERIFIED_FOR + '. Verify against CPF Board, IRAS and MOM before trusting ' + (CONSTANTS_VERIFIED_FOR + 1) + '+ figures.';
     out.after(warn);
   }
 }

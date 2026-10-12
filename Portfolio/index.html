@@ -486,6 +486,8 @@ html:not(.dark) .modal{--text3:var(--text2);--tx3:var(--text2)}
 .theme-toggle button{padding:7px 16px;border:none;background:transparent;color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 0.15s;display:inline-flex;align-items:center;gap:6px}
 @media (hover:hover){.theme-toggle button:hover{color:var(--text)}}
 .theme-toggle button.active{background:var(--accent);color:var(--on-accent)}
+/* Each segment leads with the sidebar switch's sun or moon at 14px, the size of the icon beside a 13px label in .tb-add. The stroke is currentColor, so the icon takes the segment's idle, hover and selected text colour. */
+.theme-toggle button svg{width:14px;height:14px;flex:none}
 .page.phase2-locked > *:not(.phase2-card){display:none}
 
 /* SETUP WIZARD */
@@ -1591,7 +1593,7 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
     <div class="settings-grid">
 
     <div class="card">
-      <div class="card-head"><h3>📖 How it works</h3><span class="hint">Reference for every feature and the logic behind it.</span></div>
+      <div class="card-head"><h3>How it works</h3><span class="hint">Reference for every feature and the logic behind it.</span></div>
       <div class="card-body">
         <a class="btn btn-primary" href="https://kujira-journal.pages.dev" target="_blank" rel="noopener noreferrer">Open the docs ↗</a>
       </div>
@@ -1609,8 +1611,8 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
       <div class="card-head"><h3>Appearance</h3><span class="hint">Switch between the light and dark look.</span></div>
       <div class="card-body">
         <div class="theme-toggle" role="group" aria-label="Theme">
-          <button type="button" data-theme="light" data-click="setThemeChoice" data-a0="light">☀ Light</button>
-          <button type="button" data-theme="dark" data-click="setThemeChoice" data-a0="dark">🌙 Dark</button>
+          <button type="button" data-theme="light" data-click="setThemeChoice" data-a0="light"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>Light</button>
+          <button type="button" data-theme="dark" data-click="setThemeChoice" data-a0="dark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>Dark</button>
         </div>
       </div>
     </div>
@@ -2284,12 +2286,12 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.80"></script>
-<script src="Worker/kjr-sortable.js?v=2.80"></script>
-<script src="Worker/kjr-vault.js?v=2.80"></script>
-<script src="Worker/kjr-migration.js?v=2.80"></script>
-<script src="Worker/supabase.js?v=2.80"></script>
-<script src="Worker/kjr-nas.js?v=2.80"></script>
-<script src="Worker/app.js?v=2.80"></script>
+<script src="Worker/kjr-core.js?v=2.81"></script>
+<script src="Worker/kjr-sortable.js?v=2.81"></script>
+<script src="Worker/kjr-vault.js?v=2.81"></script>
+<script src="Worker/kjr-migration.js?v=2.81"></script>
+<script src="Worker/supabase.js?v=2.81"></script>
+<script src="Worker/kjr-nas.js?v=2.81"></script>
+<script src="Worker/app.js?v=2.81"></script>
 </body>
 </html>
