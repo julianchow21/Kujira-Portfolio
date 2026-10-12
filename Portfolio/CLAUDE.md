@@ -16,7 +16,7 @@ Personal net-worth tracker: SGX/US stocks, crypto, real estate, insurance, cash,
 - `Worker/theme-init.js`, blocking theme init (FOUC guard)
 - `Worker/apps-script.gs`, Google Apps Script backend deployed as a Web App. Handles `read`, `write`, `backup`, `restore`, `seed`, and `fundamentals` actions. Julian re-deploys manually at script.google.com after every `.gs` change.
 
-Chart.js 4.4.1 (CDN, SRI-pinned). Backend is Google Apps Script + Google Sheets (no Supabase, no auth, no RLS).
+Chart.js 4.4.1 (CDN, SRI-pinned). The live backend is Google Apps Script + Google Sheets, with no sign-in and no row-level security on that path. A private same-origin Supabase NAS candidate ships dormant: `index.html` loads `Worker/supabase.js` and `Worker/kjr-nas.js` on every page, but `NAS_RELEASE_ENABLED` is `false` in `Worker/app.js`, so activation, the NAS controller and every NAS write are refused and no Supabase client is ever created. Its schema, with RLS, is `Supabase/schema.sql` and its deployment kit is `NAS/`.
 
 ## Tabs
 

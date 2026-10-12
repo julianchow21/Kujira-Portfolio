@@ -10,7 +10,7 @@ Monorepo of 3 static SPAs hosted on GitHub Pages. No framework, no bundler, no b
 - **Node unit tests (core logic):** `node Portfolio/tests/test-core.js`
 - **Release consistency check:** `node Portfolio/tests/check-release.js`, run before every ship. Asserts index.html script tags match sw.js CORE_ASSETS exactly (including `?v=` strings), sw.js CACHE_NAME equals `kjr-portfolio-` + APP_VERSION, and APP_VERSION agrees with APP_DISPLAY_VERSION
 - **Browser unit tests (sortable):** open `Portfolio/tests/tests.html` in a browser
-- `Portfolio/package.json` "test" script now runs test-core.js, test-app.js (pure app.js helpers via extraction harness), then check-release.js (`npm test` from `Portfolio/`). The old broken stub is gone.
+- `npm test` from `Portfolio/` chains 14 scripts in `Portfolio/package.json`, `tests/test-core.js` first and `tests/check-release.js` last, and the full order is in `Portfolio/CLAUDE.md`.
 - No lint/typecheck/format scripts. `Portfolio/.eslintrc.json` exists but is not wired to any command.
 
 ## App boundaries

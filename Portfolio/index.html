@@ -59,8 +59,8 @@
   /* Asset-class roles: one colour per class across cards, bars and charts.
      Soft tints resolve per theme because they reference the class token. */
   --c-stocks:#3F62D4;--c-cash:#7A889B;--c-cpf:#7656D3;--c-re:#B5822E;--c-crypto:#CF5E3C;--c-insurance:#A8508E;
-  /* Ink variants: the class colours darkened for small coloured text (monogram letters). The dark theme reuses the class colour as it is. */
-  --c-stocks-ink:#375BD2;--c-cash-ink:#5A6778;--c-cpf-ink:#6E4CD0;--c-re-ink:#845F22;--c-crypto-ink:#A74629;--c-insurance-ink:#984981;
+  /* Ink variants: the class colours darkened for small coloured text (monogram letters). The dark theme reuses the class colour as it is. Each light ink is 4.5:1 or better on its own 16% tint over the plain page colour --bg (4.52 to 4.55:1, it was 4.30 to 4.48 before v2.79), which is what a flat reading sees under the holding panel's solid layer, and 4.92 to 4.96:1 over a card or the panel itself. */
+  --c-stocks-ink:#3558CB;--c-cash-ink:#5A6677;--c-cpf-ink:#6A49C9;--c-re-ink:#835E22;--c-crypto-ink:#A54529;--c-insurance-ink:#93477D;
   --c-stocks-soft:color-mix(in srgb,var(--c-stocks) 16%,transparent);
   --c-cash-soft:color-mix(in srgb,var(--c-cash) 16%,transparent);
   --c-cpf-soft:color-mix(in srgb,var(--c-cpf) 16%,transparent);
@@ -397,6 +397,9 @@ input.fi[type=date]::-webkit-date-and-time-value{text-align:left;margin:0}
 input.fi:focus,select.fi:focus,textarea.fi:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 40%,transparent)}
 input[type=checkbox],input[type=radio]{accent-color:var(--accent)}
 textarea.fi{resize:vertical;min-height:70px}
+/* Placeholder text. The UA grey is #757575 in both themes, which is 4.01:1 on a light modal's input fill, 3.45:1 on a dark modal's, 3.30:1 on the dark glass over a card and 3.76:1 on a dark --bg2. Light takes --text3 (5.38:1 over a card, and a light modal re-points it at --text2 for 6.86:1). Dark takes --text2 (6.08:1 over a card, 6.34:1 in a modal) because dark --text3 is only 4.22:1 on the glass over a card. The dark rule keeps the specificity of the base one (:where() adds none) and comes after it, so the command palette's own .cp-input rule still wins in both themes. opacity:1 stops Firefox dimming it a second time. */
+input::placeholder,textarea::placeholder{color:var(--text3);opacity:1}
+:where(html.dark) input::placeholder,:where(html.dark) textarea::placeholder{color:var(--text2)}
 .hint{font-size:12px;color:var(--text3);line-height:1.5}
 
 /* EMPTY STATE */
@@ -410,9 +413,11 @@ textarea.fi{resize:vertical;min-height:70px}
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
 .overlay.open{display:flex}
 #vault-gate{z-index:300}
-.backend-banner{display:none;margin:0 auto 14px;max-width:1200px;padding:10px 14px;border:1px solid var(--amber-border);border-radius:var(--radius);background:var(--amber-soft);color:var(--amber-ink);font-size:13px;line-height:1.45}
+/* The backend banner shows exactly when renderBackendBanner() clears its hidden attribute, so the base rule is a block and the [hidden] rule below hides it. From v2.64 to v2.78 the base rule was display:none, which kept the read-only and NAS notices out of sight whatever the script did. */
+.backend-banner{display:block;margin:0 auto 14px;max-width:1200px;padding:10px 14px;border:1px solid var(--amber-border);border-radius:var(--radius);background:var(--amber-soft);color:var(--amber-ink);font-size:13px;line-height:1.45}
 .backend-banner[hidden]{display:none}
-.content-col > .backend-banner{margin:14px auto 0;width:calc(100% - 48px)}
+/* Inside the content column the banner lines up with the page: 24px in from each side, and no wider than .main's inner width (1400px less 24px of padding on each side), so on a wide window it meets the cards' edges instead of stopping at 1200px. */
+.content-col > .backend-banner{margin:14px auto 0;width:calc(100% - 48px);max-width:1352px}
 .backend-banner-readonly{border-color:var(--red-border);background:var(--red-soft);color:var(--red);font-weight:600}
 .backend-banner-nas{border-color:var(--accent-border);background:var(--accent-soft);color:var(--accent)}
 .nas-secret{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;user-select:text}
@@ -567,7 +572,7 @@ html:not(.dark) .modal .tag.pos{color:color-mix(in srgb,var(--gain) 65%,var(--te
 .switch[aria-checked="true"] .switch-track::after{transform:translateX(11px);background:var(--on-accent)}
 .switch:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 @media (prefers-reduced-motion:reduce){.switch-track,.switch-track::after{transition:none}}
-.integrity-title{font-weight:700;color:var(--amber);margin-bottom:6px}
+.integrity-title{font-weight:700;color:var(--amber-ink);margin-bottom:6px}
 .integrity-list{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
 .integrity-list li{color:var(--text2);line-height:1.5}
 .integrity-list li.error{color:var(--red)}
@@ -675,7 +680,7 @@ html:not(.dark) .modal .tag.pos{color:color-mix(in srgb,var(--gain) 65%,var(--te
 .dash-aval{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
 .dash-apct{text-align:right;color:var(--text2);font-variant-numeric:tabular-nums}
 .dash-adrift{text-align:right;font-size:12px;font-weight:600;line-height:1.3;font-variant-numeric:tabular-nums;color:var(--text3)}
-.dash-adrift.off{color:var(--amber)}
+.dash-adrift.off{color:var(--amber-ink)}
 .dash-adrift span{display:block;font-size:11.5px;font-weight:500;color:var(--text3)}
 .dash-arow.plain{grid-template-columns:minmax(0,1fr) auto auto}
 .dash-alabel{text-align:right;font-size:12px;color:var(--text3)}
@@ -838,7 +843,6 @@ a.btn,a.btn:hover{text-decoration:none}
 .alloc-key{white-space:nowrap}
 .alloc-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:0}
 .alloc-split{margin-top:8px;font-size:12px;color:var(--text3)}
-.alloc-warn{margin-top:8px;display:inline-block;font-size:12px;color:var(--amber-ink);background:var(--amber-soft);border:1px solid var(--amber-border);border-radius:var(--radius);padding:3px 9px}
 /* Sector class chips in the holdings table */
 .sec-chip{display:inline-block;font-size:12px;font-weight:700;letter-spacing:0.3px;padding:1px 6px;border-radius:var(--radius);vertical-align:1px}
 .sec-cyclical{color:var(--amber-ink);background:var(--amber-soft);border:1px solid var(--amber-border)}
@@ -1615,7 +1619,7 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
       <div class="card-head"><h3>Backend</h3><span class="hint" id="backend-mode-label">Legacy Apps Script</span></div>
       <div class="card-body">
         <p class="hint" style="margin-bottom:12px">Choose where this browser stores and syncs portfolio data. NAS uses the private same-origin Supabase gateway with account sign-in and verified TOTP. Device encryption must be enabled before activation.</p>
-        <p class="hint" id="nas-market-warning" hidden style="margin-bottom:12px;color:var(--amber)">NAS mode currently keeps any cached prices visible, but live quotes, FX, fundamentals, crypto prices and history are unavailable until a private same-origin market proxy is added.</p>
+        <p class="hint" id="nas-market-warning" hidden style="margin-bottom:12px;color:var(--amber-ink)">NAS mode currently keeps any cached prices visible, but live quotes, FX, fundamentals, crypto prices and history are unavailable until a private same-origin market proxy is added.</p>
         <div class="form-grid">
           <div class="form-group">
             <label class="lbl" for="cfg-nas-origin">NAS origin</label>
@@ -1637,7 +1641,7 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
         </div>
         <p class="hint" id="nas-config-status" role="status" style="margin-top:12px"></p>
         <div id="nas-conflict-actions" hidden style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
-          <p class="hint" id="nas-conflict-note" style="margin-bottom:10px;color:var(--amber)">NAS reported a compare-and-swap conflict. Choose how to resolve it, no action is automatic.</p>
+          <p class="hint" id="nas-conflict-note" style="margin-bottom:10px;color:var(--amber-ink)">NAS reported a compare-and-swap conflict. Choose how to resolve it, no action is automatic.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button type="button" class="btn" id="nas-rebase-pending" data-click="rebaseNasPending">Keep queued data</button>
             <button type="button" class="btn btn-danger" id="nas-discard-pending" data-click="discardNasPending">Use current NAS data</button>
@@ -2280,12 +2284,12 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.78"></script>
-<script src="Worker/kjr-sortable.js?v=2.78"></script>
-<script src="Worker/kjr-vault.js?v=2.78"></script>
-<script src="Worker/kjr-migration.js?v=2.78"></script>
-<script src="Worker/supabase.js?v=2.78"></script>
-<script src="Worker/kjr-nas.js?v=2.78"></script>
-<script src="Worker/app.js?v=2.78"></script>
+<script src="Worker/kjr-core.js?v=2.79"></script>
+<script src="Worker/kjr-sortable.js?v=2.79"></script>
+<script src="Worker/kjr-vault.js?v=2.79"></script>
+<script src="Worker/kjr-migration.js?v=2.79"></script>
+<script src="Worker/supabase.js?v=2.79"></script>
+<script src="Worker/kjr-nas.js?v=2.79"></script>
+<script src="Worker/app.js?v=2.79"></script>
 </body>
 </html>

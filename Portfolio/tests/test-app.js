@@ -132,7 +132,7 @@ const FUNCTION_TARGETS = [
   '_cloneLocalValue', '_sameLocalValue', '_localIdMap', '_recordLocalConflict',
   '_mergeLocalValue', 'mergeConcurrentLocalState', '_writeLocalPayload',
   '_reconcileIncomingLocalStorage', '_handleRemovedLocalStorage',
-  'backendMode', 'isNasMode', 'isLegacyReadonlyMode', 'legacyBackendAllowed', 'denyReadonlyMutation',
+  'backendMode', 'isNasMode', 'isLegacyReadonlyMode', 'legacyBackendAllowed', 'denyReadonlyMutation', 'renderBackendBanner',
   '_scheduleCloudAfterLocalSave', 'saveData', '_awaitVaultFlushForRevision',
   '_persistLocalOnly', 'safeJson', 'pushToRemote',
   '_quiesceSavesBeforePull',
@@ -195,7 +195,7 @@ const FUNCTION_TARGETS = [
   'sharesHeldAsOf', '_moveToTrash', '_trashParentIds', '_trimTrash', '_trashParentEntry', '_trashTradeSymbol', '_tradeRestorePlan', '_tradeRestoreGuard',
   '_placeRestoredRow', '_trashStage', '_holdingKey', '_duplicateHoldingGuard', '_prepareTrashRestore', 'renderTrash'
 ];
-const CONST_TARGETS = ['APP_VERSION', 'APP_DISPLAY_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'LIST_DASH', 'CPF_TYPE_LABEL', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState',
+const CONST_TARGETS = ['APP_VERSION', 'APP_DISPLAY_VERSION', 'SCHEMA', 'SCHEMA_VERSION', 'SAFE_ID_RE', 'TICKER_RE', 'PREMIUM_PER_YEAR', 'SYNC_DEBOUNCE_MS', 'PAYLOAD_HARD_CAP', 'PAYLOAD_WARN_AT', 'LK_DB', 'LK_SYNC_URL', 'LK_SYNC_TS', 'LK_SYNC_CONFIRMED_TS', 'LK_SYNC_DIAGNOSTICS', 'LK_LAST_PULL', 'LK_LAST_PULL_SRC', 'LK_RESET_SYNC_BLOCK', 'LK_LOSSY_SYNC_BLOCK', 'LK_UNSAVED', 'LK_CLOUD_DIRTY', 'LK_PRICE_CACHE', 'LK_BACKEND_MODE', 'NAS_MODES', 'NAS_RELEASE_ENABLED', 'PB_PALETTE', 'PB_PERIOD_LABELS', 'MONOGRAM_CLASSES', 'LIST_DASH', 'CPF_TYPE_LABEL', 'DASH_DEFAULT_WIDGETS', 'DASH_LEGACY_WIDGETS', 'DASH_CHART_ID_RE', 'DASH_WIDGET_NAMES', 'PB_MONTHS', 'LK_HERO_RANGE', 'HERO_RANGES', 'HERO_RANGE_LABELS', '_heroState',
   'HP_HISTORY_RANGE', 'HP_TRADES_SHOWN', 'HP_ACTIONS', 'PALETTE_CAP', 'PALETTE_GROUPS', 'CP_PLUS_ICON', 'CP_REFRESH_ICON', 'EYE_SVG', 'EYE_OFF_SVG',
   'HERO_ROLL_MS', 'PX_FLASH_MS', 'SKEL_BAR', 'SKEL_STATUS', 'DELETED_NOUNS', 'TRASH_MAX', 'TRASH_AMOUNT_TABLES', 'TRASH_TABLE_NAMES', 'PB_ORDER_MEMO_MAX'];
 
@@ -2068,7 +2068,7 @@ async function runTests(){
   });
 
   test('Asset-class ink tokens - six light values and six dark aliases sit beside the class colours', () => {
-    assert.ok(indexSrc.includes('--c-stocks-ink:#375BD2;--c-cash-ink:#5A6778;--c-cpf-ink:#6E4CD0;--c-re-ink:#845F22;--c-crypto-ink:#A74629;--c-insurance-ink:#984981;'));
+    assert.ok(indexSrc.includes('--c-stocks-ink:#3558CB;--c-cash-ink:#5A6677;--c-cpf-ink:#6A49C9;--c-re-ink:#835E22;--c-crypto-ink:#A54529;--c-insurance-ink:#93477D;'));
     ['stocks', 'cash', 'cpf', 're', 'crypto', 'insurance'].forEach(name => {
       assert.ok(indexSrc.includes('--c-' + name + '-ink:var(--c-' + name + ')'), name + ' dark ink must alias the class colour');
     });
@@ -6000,9 +6000,12 @@ async function runTests(){
     assert.strictEqual(labelOf(fxRows.MSFT), 'Edit MSFT, US, price USD 290.50, FX rate missing, day -1.42%, target price USD 300.00, at target price, Wait for a pullback');
     assert.strictEqual(labelOf(fxRows.NOQT), 'Edit NOQT, US, price not available, target price USD 12.50, FX rate missing');
     assert.strictEqual(m({ id:'a', targetPrice:5 }, { price:9, fetchedAt:TODAY_ISO }, 'USD').targetFx, false);
-    // at target with no figure to print (a blank target and a price of zero is the one way in): the piece falls back to the words, so the sign is never lost
+    // (v2.79) a blank target and a price of zero is not at target. No target means no figure, no check mark and no at-target words, in the line and in the label (v2.77 read
+    // Number(' ') = 0 and printed a words-only "✓ At target" for it, and that fallback went with the case)
     const odd = sb._wlRowHtml(m({ id:'odd', symbol:'ODD', targetPrice:' ' }, { price:0, fetchedAt:TODAY_ISO }));
-    assert.ok(odd.includes('<span class="hl-s"><span class="hl-tgt">✓ At target</span></span>') && /aria-label="[^"]*at target price/.test(odd));
+    assert.ok(odd.includes('<span class="hl-s"></span>'));
+    assert.strictEqual(/hl-tgt|At target|✓|at target price/.test(odd), false);
+    assert.strictEqual(m({ id:'odd', symbol:'ODD', targetPrice:' ' }, { price:0, fetchedAt:TODAY_ISO }).atTarget, false);
     // the CSS: the second line is a flex line whose target box wraps out whole (and a clip keeps the wrapped line, with its blur, out of sight), the note is the only part with an
     // ellipsis, the base .hl-s the other lists use is untouched, and at 480px and below the line takes the row's whole width so the target shows whole at 320px
     assert.ok(indexSrc.includes('.hl-s{display:block;overflow:hidden;font-size:12px;line-height:1.4;color:var(--text3);text-overflow:ellipsis;white-space:nowrap}'));
@@ -8456,11 +8459,11 @@ async function runTests(){
       assert.strictEqual(m.target !== '', shown, w.symbol);
       if (shown) assert.strictEqual(m.target, cell(w.symbol)[1].split(' <span')[0], w.symbol);
     });
-    // the pure reader: only a finite number (or a numeric string) is a target, a finite zero included (the Edit form turns a zero or negative target into none on save)
+    // the pure reader: only a finite number above zero (or a numeric string of one) is a target (v2.79: the Edit form already turned a zero or negative target into none on save)
     const T = w => sb._wlTarget(w);
     [undefined, null, {}, { targetPrice:null }, { targetPrice:undefined }, { targetPrice:'' }, { targetPrice:' ' }, { targetPrice:'\t\n' }, { targetPrice:'abc' }, { targetPrice:NaN },
       { targetPrice:Infinity }, { targetPrice:-Infinity }, { targetPrice:'1e999' }, { targetPrice:'12abc' }].forEach(w => assert.strictEqual(T(w), null, JSON.stringify(w) + ' ' + String(w && w.targetPrice)));
-    assert.deepStrictEqual([T({ targetPrice:300 }), T({ targetPrice:'45.5' }), T({ targetPrice:' 7 ' }), T({ targetPrice:0 }), T({ targetPrice:'0' }), T({ targetPrice:0.0001 })], [300, 45.5, 7, 0, 0, 0.0001]);
+    assert.deepStrictEqual([T({ targetPrice:300 }), T({ targetPrice:'45.5' }), T({ targetPrice:' 7 ' }), T({ targetPrice:0 }), T({ targetPrice:'0' }), T({ targetPrice:0.0001 })], [300, 45.5, 7, null, null, 0.0001]);
     // the board's Target column reads through the same helper: its cell for a no-target row is the token, a set target is the figure, and it flags only a real target
     const board = vm.runInContext('(' + extractConstBlock('BOARD_COLUMNS').replace(/^const BOARD_COLUMNS = /, '').replace(/;$/, '') + ')', sb);
     const targetCol = board.find(c => c.key === 'target');
@@ -8618,7 +8621,7 @@ async function runTests(){
     assert.ok(extractFunction('renderWatchlist').includes('if (va == null) return 1;\n      if (vb == null) return -1;') && extractFunction('renderBoard').includes('if (va == null) return 1;\n      if (vb == null) return -1;'));
   });
 
-  test('p278 fix 2 - the sibling rules clear 4.5:1 too: dark --red on --red-soft (read-only banner, error toast), the dark danger hover, light amber on --amber-soft (seven rules and the wizard warning through one --amber-ink), and a tag in a light modal', () => {
+  test('p278 fix 2 - the sibling rules clear 4.5:1 too: dark --red on --red-soft (read-only banner, error toast), the dark danger hover, light amber on --amber-soft (six rules and the wizard warning through one --amber-ink), and a tag in a light modal', () => {
     const { light, dark, hex, tok, ratio, over, rgba, f2, body, colour, rules, specificity, modalFill } = p278;
     const L = n => tok(light, n), D = n => tok(dark, n);
     const sels = rules.map(o => o.sel);
@@ -8639,8 +8642,9 @@ async function runTests(){
     assert.deepStrictEqual(specificity(':where(html.dark) .btn-danger:hover'), specificity('.btn-danger:hover'));    // a tie, so the later rule wins and nothing else moves
     assert.ok(sels.indexOf(':where(html.dark) .btn-danger:hover') > sels.indexOf('.btn-danger:hover'));
     assert.ok(ratio(D('red2'), D('red-soft')) >= 2.5);                                                    // still a clear step from the resting fill, and the text flips from --loss to white
-    // 3. light amber on --amber-soft: one --amber-ink, used by seven rules and by the wizard's inline warning, and no rule pairs --amber text with the --amber-soft fill any more
-    const amberRules = ['.backend-banner', '.freshness.stale', '.cov-pill.partial', '.tag.warn', '.alert-warn', '.alloc-warn', '.sec-cyclical'];
+    // 3. light amber on --amber-soft: one --amber-ink, used by six rules and by the wizard's inline warning, and no rule pairs --amber text with the --amber-soft fill any more
+    // (v2.79 deleted a seventh, .alloc-warn: the concentration warning that produced it went in an earlier release, and nothing has built the class since)
+    const amberRules = ['.backend-banner', '.freshness.stale', '.cov-pill.partial', '.tag.warn', '.alert-warn', '.sec-cyclical'];
     amberRules.forEach(sel => { assert.strictEqual(colour(sel), 'var(--amber-ink)', sel); assert.ok(has(sel, 'background:var(--amber-soft)'), sel); });
     const ink = over(L('amber'), 0.8, L('text'));
     assert.strictEqual(f2(ratio(L('amber'), L('amber-soft'))), '4.12');
@@ -8672,6 +8676,338 @@ async function runTests(){
     ['The hover is white on --red, 3.93:1 in dark, so the dark hover fill is --red2 (5.58:1), still a clear step from the soft resting fill. Light keeps --red (6.01:1).',
       'In a light modal a tag sits on the grey fill with only its 10% tint under it, so --gain is 3.51:1 there. A modal\'s tag takes 35% --text mixed in (5.30:1, and 4.55 even over a black backdrop).']
       .forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     p279, v2.79 follow-ups: the backend banner shows when the script un-hides it, the last amber text on the plain light surfaces takes --amber-ink, a Watchlist target of zero or
+     below is no target, the input placeholder and the monogram letter reach 4.5:1, and the notes say what the code does. Ratios come from the declared tokens, composited the way
+     the browser stacks them (the same maths as p277 and p278 above), and the stylesheet is read as text. Every test name starts with p279.
+     ═══════════════════════════════════════════════════════════════════════ */
+  const p279 = (() => {
+    const { rgb, ratio, over, light, dark, hex, rgba, rules } = p277;
+    const { tok, modalFill, body, colour, specificity, f2 } = p278;
+    const sels = rules.map(o => o.sel);
+    const L = n => tok(light, n), D = n => tok(dark, n);
+    const ink = over(L('amber'), 0.8, L('text'));                       // light --amber-ink: color-mix in srgb is a straight blend of the channels
+    // a sandbox holding the real ENTITY_SCHEMAS, so the load sanitiser knows which fields are numbers
+    const schemaSandbox = () => {
+      const sb = freshSandbox();
+      sb.SG_INSURERS = [];
+      const start = appSrc.indexOf('const ENTITY_SCHEMAS = '), end = appSrc.indexOf('/* Normalise one externally', start);
+      vm.runInContext(appSrc.slice(start, end).replace('const ENTITY_SCHEMAS =', 'ENTITY_SCHEMAS ='), sb);
+      return sb;
+    };
+    return { rgb, ratio, over, light, dark, hex, rgba, rules, tok, modalFill, body, colour, specificity, f2, sels, L, D, ink, schemaSandbox };
+  })();
+
+  test('p279 item 1 - the backend banner shows exactly when renderBackendBanner() clears hidden: the base rule is a block, [hidden] hides it, and legacy, read-only and NAS each get the copy and the look the code gives them', () => {
+    const { rules, sels, body, colour, ratio, f2, L, D, ink } = p279;
+    // the CSS. From v2.64 to v2.78 the base rule was display:none, so the script clearing hidden changed nothing a user could see
+    assert.ok(/^display:block;/.test(body('.backend-banner')));
+    assert.strictEqual(/display:none/.test(body('.backend-banner')), false);
+    assert.strictEqual(body('.backend-banner[hidden]'), 'display:none');
+    assert.ok(sels.indexOf('.backend-banner[hidden]') > sels.indexOf('.backend-banner'));
+    assert.ok(indexSrc.includes('From v2.64 to v2.78 the base rule was display:none'));
+    // no variant or placement rule sets a display, so [hidden] wins for every one of them, and the copy wraps instead of running off the row
+    const others = rules.filter(r => /backend-banner/.test(r.sel) && r.sel !== '.backend-banner' && r.sel !== '.backend-banner[hidden]');
+    assert.ok(others.length >= 4);
+    others.forEach(r => assert.strictEqual(/(^|;)display:/.test(r.body), false, r.sel));
+    assert.strictEqual(/nowrap/.test(body('.backend-banner')), false);
+    // in the content column it lines up with the page: 24px in from each side and capped at .main's inner width (its max-width less the padding on both sides), 1352px, not the old 1200px
+    const main = /^padding:(\d+)px;max-width:(\d+)px;/.exec(body('.main'));
+    assert.ok(main);
+    assert.strictEqual(+main[2] - 2 * +main[1], 1352);
+    assert.strictEqual(body('.content-col > .backend-banner'), 'margin:14px auto 0;width:calc(100% - 48px);max-width:1352px');
+    assert.ok(indexSrc.includes("so on a wide window it meets the cards' edges instead of stopping at 1200px"));
+    // the markup starts hidden in a polite live region, and the script touches only hidden and className, so the stylesheet is the one thing that can keep it out of sight
+    assert.ok(indexSrc.includes('<div id="backend-banner" class="backend-banner" role="status" aria-live="polite" hidden>'));
+    const fn = extractFunction('renderBackendBanner');
+    assert.strictEqual(/style\.display|classList|\.show\b/.test(fn), false);
+    // behaviour, in a sandbox with plain elements
+    const sb = freshSandbox();
+    const banner = { hidden:true, className:'backend-banner' }, copy = { textContent:'' };
+    sb.document = { getElementById: id => id === 'backend-banner' ? banner : (id === 'backend-banner-copy' ? copy : null) };
+    const render = (mode, renderer) => {
+      if (mode) sb.localStorage.setItem('kjr-pf-backend-mode-v1', mode); else sb.localStorage.removeItem('kjr-pf-backend-mode-v1');
+      (renderer || sb.renderBackendBanner)();
+      return { hidden:banner.hidden, cls:banner.className, text:copy.textContent };
+    };
+    const GONE = { hidden:true, cls:'backend-banner', text:'' };
+    assert.deepStrictEqual(render(null), GONE);                         // legacy is the shipped mode: nothing to show
+    assert.deepStrictEqual(render('legacy'), GONE);
+    assert.deepStrictEqual(render('nonsense'), GONE);                   // an unknown stored mode reads as legacy
+    // read-only rollback: shown, the red variant, and it says edits are reverted
+    assert.deepStrictEqual(render('legacy-readonly'), { hidden:false, cls:'backend-banner backend-banner-readonly', text:'Read-only legacy rollback. Apps Script is disabled, and edits are reverted to the saved local snapshot.' });
+    assert.deepStrictEqual(render(null), GONE);                         // back to legacy: hidden again, the old copy cleared
+    // NAS with the release gate shut (the shipped constant)
+    assert.strictEqual(vm.runInContext('NAS_RELEASE_ENABLED', sb), false);
+    const NAS = 'backend-banner backend-banner-nas';
+    assert.deepStrictEqual(render('nas'), { hidden:false, cls:NAS, text:'NAS candidate is disabled pending local durability and cancellation review. Legacy Apps Script remains available.' });
+    // NAS with the gate open: queued changes (one and several), a conflict, signed in and not signed in
+    const open = vm.runInContext('(function(NAS_RELEASE_ENABLED){ ' + fn + '\nreturn renderBackendBanner; })(true)', sb);
+    const nas = (pending, state, ready) => { sb._nasPendingCount = pending; sb._nasState = state; sb._nasReady = ready; return render('nas', open); };
+    assert.deepStrictEqual(nas(1, 'local', false), { hidden:false, cls:NAS, text:'1 NAS change queued. Server hydrate is paused until the queue is resolved.' });
+    assert.strictEqual(nas(3, 'local', false).text, '3 NAS changes queued. Server hydrate is paused until the queue is resolved.');
+    assert.strictEqual(nas(0, 'conflict', true).text, 'NAS conflict. Your desired local state is retained in the encrypted queue.');
+    assert.strictEqual(nas(0, 'synced', true).text, 'Authenticated NAS backend.');
+    assert.strictEqual(nas(0, 'local', false).text, 'NAS backend selected. Sign in to open finance data.');
+    assert.deepStrictEqual(render(null, open), GONE);                   // and every one of them clears when the mode goes back to legacy
+    // contrast in both themes. The words carry the message and the colour only dresses it: read-only is --red on --red-soft in light and --loss in dark, NAS is --accent on --accent-soft,
+    // and the plain amber look (the base rule, which a variant with no modifier would get) is --amber-ink on --amber-soft
+    assert.deepStrictEqual([f2(ratio(L('red'), L('red-soft'))), f2(ratio(D('loss'), D('red-soft')))], ['4.99', '5.83']);
+    assert.deepStrictEqual([f2(ratio(L('accent'), L('accent-soft'))), f2(ratio(D('accent'), D('accent-soft')))], ['5.26', '8.74']);
+    assert.deepStrictEqual([f2(ratio(ink, L('amber-soft'))), f2(ratio(D('amber'), D('amber-soft')))], ['5.33', '9.53']);
+    assert.strictEqual(colour('.backend-banner-readonly'), 'var(--red)');
+    assert.strictEqual(body('html.dark :is(.cov-pill.gap,.backend-banner-readonly,.toast.error)'), 'color:var(--loss)');
+    assert.strictEqual(colour('.backend-banner-nas'), 'var(--accent)');
+    assert.strictEqual(colour('.backend-banner'), 'var(--amber-ink)');
+  });
+
+  test('p279 item 2 - every text colour that was plain --amber is --amber-ink: light --amber is 3.7 to 4.7:1 on the plain surfaces and --amber-ink is 4.8 or better on all of them, dark is untouched, and the dead .alloc-warn rule is gone', () => {
+    const { dark, hex, ratio, f2, colour, rules, L, D, ink } = p279;
+    const surfaces = ['bg', 'bg2', 'bg3', 'bg4', 'sidebar', 'amber-soft'];
+    // before: light --amber on the plain surfaces (the figures the QA pass measured)
+    assert.deepStrictEqual(surfaces.map(n => f2(ratio(L('amber'), L(n)))), ['4.29', '4.72', '4.04', '3.72', '4.00', '4.12']);
+    // after: --amber-ink, a fifth of --text mixed into --amber
+    assert.deepStrictEqual(surfaces.map(n => f2(ratio(ink, L(n)))), ['5.56', '6.12', '5.22', '4.81', '5.18', '5.33']);
+    surfaces.forEach(n => assert.ok(ratio(ink, L(n)) >= 4.8, 'light --amber-ink on ' + n));
+    // dark: --amber-ink is --amber, so nothing moves, and it clears 4.5:1 on every dark surface
+    assert.strictEqual(hex(dark, 'amber-ink'), 'var(--amber)');
+    assert.deepStrictEqual(surfaces.map(n => f2(ratio(D('amber'), D(n)))), ['11.42', '10.51', '9.31', '7.90', '11.77', '9.53']);
+    surfaces.forEach(n => assert.ok(ratio(D('amber'), D(n)) >= 4.5, 'dark --amber on ' + n));
+    [[p279.light, 'amber', '#9a6a14'], [p279.light, 'amber-soft', '#f8efd6'], [dark, 'amber', '#F0C36D'], [dark, 'amber-soft', '#2a2213']].forEach(([blk, n, v]) => assert.strictEqual(hex(blk, n), v, n));
+    // the rules: the integrity bar's title and an off-target drift take the ink, and the only rule left that sets plain --amber as a colour is the dashboard insight's icon (a graphic, which needs 3:1)
+    assert.strictEqual(colour('.integrity-title'), 'var(--amber-ink)');
+    assert.strictEqual(colour('.dash-adrift.off'), 'var(--amber-ink)');
+    assert.deepStrictEqual(rules.filter(r => /(^|;)color:var\(--amber\)(;|$)/.test(r.body)).map(r => r.sel), ['.dash-insight-icon']);
+    assert.ok(ratio(L('amber'), L('amber-soft')) >= 3);
+    // the inline styles in the page and in the script
+    const page = indexSrc.slice(indexSrc.indexOf('</style>'));
+    assert.strictEqual(/color:\s*var\(--amber\)/.test(page), false);
+    assert.ok(page.includes('id="nas-market-warning" hidden style="margin-bottom:12px;color:var(--amber-ink)">'));
+    assert.ok(page.includes('id="nas-conflict-note" style="margin-bottom:10px;color:var(--amber-ink)">'));
+    assert.ok(appSrc.includes("modeLabel.style.color = mode === 'legacy' ? '' : 'var(--amber-ink)';"));
+    assert.strictEqual((appSrc.match(/el\.style\.color = sum === 100 \? 'var\(--green\)' : 'var\(--amber-ink\)';/g) || []).length, 2);
+    assert.ok(appSrc.includes("warn.style.cssText = 'margin-top:10px;background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber-ink);padding:10px;border-radius:8px;font-size:12px';"));
+    assert.ok(appSrc.includes('<span style="color:var(--amber-ink)">no data:'));
+    assert.strictEqual(appSrc.includes('var(--amber,#f59e0b)'), false);
+    // what is left of plain --amber in the script is a chart fill, not text
+    const left = appSrc.split('\n').filter(l => /var\(--amber\)/.test(l));
+    assert.strictEqual(left.length, 1);
+    assert.ok(left[0].includes("const PALETTE = ['var(--accent)','var(--blue)','var(--green)','var(--amber)'"));
+    // the dead rule: the concentration warning that built the class is gone, so no markup or script produces it and the CSS goes too
+    assert.strictEqual(/alloc-warn/.test(indexSrc) || /alloc-warn/.test(appSrc), false);
+  });
+
+  test('p279 item 3a - the load sanitiser reads a Watchlist target of zero or below, blank, spaces or not a number as null, keeps a real target as a number, leaves absent and null alone, and changes no other field or table', () => {
+    const { schemaSandbox } = p279;
+    const sb = schemaSandbox();
+    const run = (table, rows) => sb._sanitiseList(rows, table);
+    const target = v => run('watchlist', [{ id:'w1', symbol:'AAA', market:'US', targetPrice:v }])[0].targetPrice;
+    // no target: zero, negative, blank, spaces, text, not finite, a boolean, an array and an object
+    [0, -0, '0', '0.0', '  0  ', -5, '-5', -0.0001, '-1e-9', '', ' ', '\t\n', 'abc', '12abc', NaN, Infinity, -Infinity, '1e999', 'Infinity', true, false, [], [5], {}, { v:1 }]
+      .forEach(v => assert.strictEqual(target(v), null, typeof v + ' ' + String(v)));
+    // a target: a positive number, or a numeric string of one, as a number
+    assert.deepStrictEqual([300, '45.5', ' 7 ', 0.0001, '1e3'].map(target), [300, 45.5, 7, 0.0001, 1000]);
+    // absent stays absent (no key is added) and null stays null
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(run('watchlist', [{ id:'w2', symbol:'BBB', market:'US' }])[0], 'targetPrice'), false);
+    assert.strictEqual(target(null), null);
+    // the rest of the row is exactly as it was
+    assert.deepStrictEqual(clone(run('watchlist', [{ id:'w4', symbol:'DDD', market:'SGX', sector:'Financials', targetPrice:'  ', notes:'keep me' }])[0]),
+      { id:'w4', symbol:'DDD', market:'SGX', sector:'Financials', targetPrice:null, notes:'keep me' });
+    // no other table or field is touched: a present-but-invalid number is still clamped to 0, a blank stays blank, a zero and a negative stay as they are
+    [['stocks', 'shares'], ['stocks', 'avgCost'], ['stocks', 'divPerShare'], ['stockTxns', 'price'], ['stockTxns', 'fees'], ['crypto', 'amount'], ['crypto', 'avgCost'], ['cash', 'amount'], ['cash', 'apy'], ['realestate', 'value']].forEach(([table, key]) => {
+      assert.ok(sb.ENTITY_SCHEMAS[table].fields.some(f => f.key === key && f.type === 'number'), table + '.' + key + ' is a number field');
+      const read = v => run(table, [{ id:'r1', [key]:v }])[0][key];
+      ['abc', '   ', NaN, Infinity, '1e999'].forEach(v => assert.strictEqual(read(v), 0, table + '.' + key + ' ' + String(v)));
+      assert.deepStrictEqual([read(0), read('0'), read(-5), read('12.5'), read(''), read(null)], [0, 0, -5, 12.5, '', null], table + '.' + key);
+    });
+    // a trash entry holding a watchlist row keeps its data as it was (trash has no number fields), and the Edit form's own rule on restore is the same one: zero or below is no target
+    assert.strictEqual(run('trash', [{ id:'tr1', table:'watchlist', data:{ id:'w9', symbol:'ZZZ', targetPrice:0 } }])[0].data.targetPrice, 0);
+    const afterRead = sb.ENTITY_SCHEMAS.watchlist.afterRead;
+    [[0, null], [-3, null], ['', null], [5, 5]].forEach(([v, want]) => { const item = { symbol:' x ', targetPrice:v }; afterRead(item); assert.strictEqual(item.targetPrice, want, String(v)); });
+    // the sanitiser reads through the same helper the display reads through, and the Watchlist is one of the tables mergeDefaults runs it on
+    assert.ok(extractFunction('_sanitiseList').includes("if (table === 'watchlist' && k === 'targetPrice'){ if (v !== undefined && v !== null) safe[k] = _wlTarget(safe); return; }"));
+    assert.ok(/const _LIST_TABLES = \[[^\]]*'watchlist'/.test(appSrc));
+    assert.ok(appSrc.includes('_LIST_TABLES.forEach(t => { out[t] = _sanitiseList(out[t], t); });'));
+  });
+
+  test('p279 item 3b - a Watchlist target of zero or below is no target on every surface: _wlTarget, the desktop table, the board, the phone row and both Target sorts agree (no figure, no flag, last in either direction)', () => {
+    const TOKEN = '\u2014';                                                // the empty token the table prints for a missing value
+    const px = (price, ccy) => ({ price, currency:ccy || 'USD', changePct:0, fetchedAt:TODAY_ISO });
+    const none = ['Z0', 'Z0S', 'NEG', 'NEGS', 'BLANK', 'SPACES', 'ABC', 'NULLT', 'NONE'];
+    const fixture = () => ({
+      watchlist:[
+        { id:'w_a', symbol:'AAA', market:'US', targetPrice:300 },           // 375 SGD at 1.25, price 350, above it
+        { id:'w_hit', symbol:'HIT', market:'US', targetPrice:310 },         // 387.5 SGD, price 290.5, at target
+        { id:'w_c', symbol:'CCC', market:'SGX', targetPrice:20 },           // 20 SGD, price 25, above it
+        { id:'w_z0', symbol:'Z0', market:'US', targetPrice:0 },             // a zero target and a price of zero: v2.78 printed US$0.00 and called it at target
+        { id:'w_z0s', symbol:'Z0S', market:'US', targetPrice:'0' },
+        { id:'w_neg', symbol:'NEG', market:'US', targetPrice:-5 },          // a price of -10 would be under a negative target
+        { id:'w_negs', symbol:'NEGS', market:'US', targetPrice:'-1.5' },
+        { id:'w_blank', symbol:'BLANK', market:'US', targetPrice:'' },
+        { id:'w_space', symbol:'SPACES', market:'US', targetPrice:'   ' },
+        { id:'w_abc', symbol:'ABC', market:'US', targetPrice:'abc' },
+        { id:'w_null', symbol:'NULLT', market:'US', targetPrice:null },
+        { id:'w_none', symbol:'NONE', market:'US' }
+      ],
+      _priceCache:{ AAA:px(350), HIT:px(290.5), CCC:px(25, 'SGD'), Z0:px(0), Z0S:px(0), NEG:px(-10), NEGS:px(0), BLANK:px(0), SPACES:px(0), ABC:px(0), NULLT:px(0), NONE:px(0) }
+    });
+    const fx = fixture();
+    const { sb, els } = wlSandbox(fixture(), 'USD');
+    sb.renderWatchlist();
+    const html = els['stocks-watchlist'].innerHTML;
+    // the pure reader
+    const T = w => sb._wlTarget(w);
+    [0, -0, '0', '0.0', '  0  ', -5, '-5', -0.0001, '-1e-9', '', ' ', 'abc', NaN, Infinity, -Infinity, '1e999', true, false, [], [5], {}].forEach(v => assert.strictEqual(T({ targetPrice:v }), null, typeof v + ' ' + String(v)));
+    assert.deepStrictEqual([300, '45.5', ' 7 ', 0.0001, '1e3'].map(v => T({ targetPrice:v })), [300, 45.5, 7, 0.0001, 1000]);
+    assert.deepStrictEqual([T(null), T(undefined), T({}), T({ targetPrice:null })], [null, null, null, null]);
+    // the desktop table: the figure and the flag for a real target as before, the empty token alone for every other row (its price cell may still print US$0.00, that is its price)
+    const cell = sym => { const c = wlTableCells(html, sym)[7]; assert.ok(c, sym + ' row'); return c; };
+    assert.deepStrictEqual(cell('AAA'), ['num', 'US$300.00']);
+    assert.deepStrictEqual(cell('HIT'), ['num', 'US$310.00 <span class="wl-hit">✓ At target</span>']);
+    assert.deepStrictEqual(cell('CCC'), ['num', 'US$16.00']);
+    none.forEach(sym => assert.deepStrictEqual(cell(sym), ['num', TOKEN], sym));
+    // the board's Target column reads through the same helper
+    const board = vm.runInContext('(' + extractConstBlock('BOARD_COLUMNS').replace(/^const BOARD_COLUMNS = /, '').replace(/;$/, '') + ')', sb);
+    const targetCol = board.find(c => c.key === 'target');
+    assert.ok(targetCol && targetCol.cls === 'num');
+    const boardCell = sym => targetCol.render({ w:fx.watchlist.find(w => w.symbol === sym), px:fx._priceCache[sym], ccy:(fx._priceCache[sym] || {}).currency || 'USD' });
+    none.forEach(sym => assert.strictEqual(boardCell(sym), TOKEN, 'board ' + sym));
+    assert.strictEqual(boardCell('HIT'), 'US$310.00 <span class="wl-hit">✓ At target</span>');
+    assert.strictEqual(boardCell('AAA'), 'US$300.00');
+    // the phone row: no figure, no check mark, no at-target words in the line or in the label for those rows, and the real rows are as they were
+    const rowOf = sym => wlRowsOf(html).find(r => new RegExp('<span class="hl-t">' + sym + '[ <]').test(r));
+    const model = sym => navPlain(sb._wlListModel({ w:fx.watchlist.find(w => w.symbol === sym), px:fx._priceCache[sym], ccy:(fx._priceCache[sym] || {}).currency || 'USD' }));
+    none.forEach(sym => {
+      assert.deepStrictEqual([model(sym).target, model(sym).targetFx, model(sym).atTarget], ['', false, false], sym);
+      const row = rowOf(sym);
+      assert.ok(row, sym + ' row');
+      assert.strictEqual(/hl-tgt|✓|At target|at target price|target price/i.test(row), false, sym + ' row');
+      assert.ok(row.includes('<span class="hl-s"></span>'), sym + ' line');
+    });
+    assert.deepStrictEqual([model('HIT').atTarget, model('HIT').target, model('AAA').atTarget, model('AAA').target], [true, 'US$310.00', false, 'US$300.00']);
+    assert.ok(rowOf('HIT').includes('<span class="hl-tgt">✓ Target <span class="money-chip">US$310.00</span></span>') && /aria-label="[^"]*at target price/.test(rowOf('HIT')));
+    // both sorts put the real targets by their SGD amount and every other row after them, whichever way the column is sorted (the comparator leaves two empty values where they were)
+    const symbols = h => Array.from(h.matchAll(/<td class="tl cell-sym[^"]*">([^<]*)<\/td>/g)).map(m => m[1]);
+    const stocksOrder = dir => { const w = wlSandbox(fixture(), 'USD'); w.sb.DB.settings.watchlistSort = { key:'target', dir }; w.sb.renderWatchlist(); return symbols(w.els['stocks-watchlist'].innerHTML); };
+    const boardOrder = dir => {
+      const w = wlSandbox(fixture(), 'USD');
+      const cols = vm.runInContext('(' + extractConstBlock('BOARD_COLUMNS').replace(/^const BOARD_COLUMNS = /, '').replace(/;$/, '') + ')', w.sb);
+      w.sb.orderedCols = () => cols.map(c => Object.assign({}, c, { visible: c.key === 'target' }));
+      vm.runInContext('var _renderCcy = "USD";', w.sb);
+      const boxes = renderBox(w.sb, ['board-list']);
+      w.sb.DB.settings.boardSort = { key:'target', dir };
+      w.sb.renderBoard();
+      return symbols(boxes['board-list'].innerHTML);
+    };
+    [['Stocks Watchlist', stocksOrder], ['board', boardOrder]].forEach(([name, order]) => {
+      assert.deepStrictEqual(order('asc'), ['CCC', 'AAA', 'HIT'].concat(none), name + ' ascending');
+      assert.deepStrictEqual(order('desc'), ['HIT', 'AAA', 'CCC'].concat(none), name + ' descending');
+    });
+    // one reader serves all of them, and the old per-surface arithmetic is gone
+    assert.ok(extractFunction('_wlListModel').includes('atTarget: targetNum != null && hasPrice && px.price <= targetNum,'));
+    assert.strictEqual(/Number\(w\.targetPrice\)/.test(appSrc), false);
+  });
+
+  test('p279 item 4 - an input placeholder has an explicit colour that clears 4.5:1 on its fill in both themes, light modals included (the UA grey is 4.01:1 on a light modal and 3.45:1 on a dark one)', () => {
+    const { light, dark, hex, rgba, over, ratio, modalFill, f2, body, rules, sels, specificity, tok, L, D } = p279;
+    const UA = [117, 117, 117];                                             // #757575, what the browser paints a placeholder with when no rule sets one (read in the browser)
+    // the fill model: an input is --glass over the surface under it, so over a card, over the page, over --bg3, and in a modal (over the modal fill, itself over the scrim)
+    assert.ok(/(^|;)background:var\(--glass\)(;|$)/.test(body('input.fi,select.fi,textarea.fi')));
+    const fills = blk => {
+      const g = rgba(hex(blk, 'glass')), under = b => over(g.c, g.a, b), T = n => tok(blk, n);
+      return { 'card': under(T('bg2')), 'page': under(T('bg')), 'over --bg3': under(T('bg3')), 'modal over the page': under(modalFill(blk, T('bg'))), 'modal over a card': under(modalFill(blk, T('bg2'))), 'modal over black': under(modalFill(blk, [0, 0, 0])) };
+    };
+    const lf = fills(light), df = fills(dark);
+    // before: the UA grey on those fills
+    assert.deepStrictEqual(Object.values(lf).map(f => f2(ratio(UA, f))), ['4.61', '4.44', '4.33', '4.01', '4.02', '3.78']);
+    assert.deepStrictEqual(Object.values(df).map(f => f2(ratio(UA, f))), ['3.30', '3.66', '2.88', '3.45', '3.35', '3.63']);
+    // after: light takes --text3 (a modal re-points it at --text2), dark takes --text2
+    const lightColour = k => k.indexOf('modal') === 0 ? L('text2') : L('text3');
+    assert.deepStrictEqual(Object.keys(lf).map(k => f2(ratio(lightColour(k), lf[k]))), ['5.38', '5.18', '5.05', '6.86', '6.88', '6.47']);
+    assert.deepStrictEqual(Object.keys(df).map(k => f2(ratio(D('text2'), df[k]))), ['6.08', '6.73', '5.31', '6.34', '6.16', '6.68']);
+    Object.keys(lf).forEach(k => { assert.ok(ratio(lightColour(k), lf[k]) >= 4.5, 'light ' + k); assert.ok(ratio(D('text2'), df[k]) >= 4.5, 'dark ' + k); });
+    // why dark is not --text3: it is 4.22:1 on the glass over a card, and the filter box on the Explore page sits on --bg2 itself (UA grey 3.76:1 there, --text2 6.93:1, light --text3 5.38:1)
+    assert.strictEqual(f2(ratio(D('text3'), df.card)), '4.22');
+    assert.deepStrictEqual([f2(ratio(UA, D('bg2'))), f2(ratio(D('text2'), D('bg2'))), f2(ratio(L('text3'), L('bg2')))], ['3.76', '6.93', '5.38']);
+    // the rules: one explicit colour for every input and textarea, the dark one with the base rule's specificity and after it, and the light modal's re-point is what lifts light inside a modal
+    const base = 'input::placeholder,textarea::placeholder', dk = ':where(html.dark) input::placeholder,:where(html.dark) textarea::placeholder';
+    assert.strictEqual(body(base), 'color:var(--text3);opacity:1');
+    assert.strictEqual(body(dk), 'color:var(--text2)');
+    assert.deepStrictEqual(specificity(dk.split(',')[0]), specificity(base.split(',')[0]));
+    assert.ok(sels.indexOf(dk) > sels.indexOf(base));
+    assert.strictEqual(body('html:not(.dark) .modal'), '--text3:var(--text2);--tx3:var(--text2)');
+    // the palette's own rule is as it was and out-ranks both (a class), and no other rule sets a placeholder colour, so a new one has to be thought through here
+    assert.strictEqual(body('.cp-input::placeholder'), 'color:var(--text3);opacity:1');
+    assert.ok(specificity('.cp-input::placeholder')[1] > specificity(dk.split(',')[0])[1]);
+    assert.deepStrictEqual(rules.filter(r => /::placeholder/.test(r.sel)).map(r => r.sel), [base, dk, '.cp-input::placeholder']);
+    // the comment quotes the real figures
+    assert.ok(indexSrc.includes("which is 4.01:1 on a light modal's input fill, 3.45:1 on a dark modal's, 3.30:1 on the dark glass over a card and 3.76:1 on a dark --bg2"));
+  });
+
+  test('p279 item 4b - the monogram letter clears 4.5:1 on its own 16% tint over --bg as well as over a card and the panel surface, for all six classes (a flat reading of the holding panel gave 4.30:1 for stocks and CPF)', () => {
+    const { light, dark, hex, rgb, rgba, tok, over, ratio, f2, L } = p279;
+    const classes = ['stocks', 'cash', 'cpf', 're', 'crypto', 'insurance'];
+    const OLD = ['#375BD2', '#5A6778', '#6E4CD0', '#845F22', '#A74629', '#984981'];
+    const NEW = ['#3558CB', '#5A6677', '#6A49C9', '#835E22', '#A54529', '#93477D'];
+    // the panel paints --surface-solid over an opaque --bg (the light one is opaque white, so over a card is over the panel), and a flat reading of its background-color sees --bg
+    assert.ok(/\.hp-panel\{[^}]*background:linear-gradient\(var\(--surface-solid\),var\(--surface-solid\)\),var\(--bg\)/.test(indexSrc));
+    assert.strictEqual(hex(light, 'surface-solid'), '#ffffff');
+    const at = (blk, inkRgb, k, surface) => ratio(inkRgb, over(tok(blk, 'c-' + k), 0.16, surface));
+    // before: the v2.78 inks were under 4.5:1 over --bg for every class, 4.30:1 for stocks, CPF and insurance
+    assert.deepStrictEqual(classes.map((k, i) => f2(at(light, rgb(OLD[i]), k, L('bg')))), ['4.30', '4.47', '4.30', '4.48', '4.47', '4.31']);
+    classes.forEach((k, i) => assert.ok(at(light, rgb(OLD[i]), k, L('bg')) < 4.5, 'old ' + k));
+    // after: a few steps darker, so all six clear 4.5:1 over --bg and about 4.9:1 over a card or the panel
+    classes.forEach((k, i) => assert.strictEqual(hex(light, 'c-' + k + '-ink').toUpperCase(), NEW[i], k));
+    assert.deepStrictEqual(classes.map((k, i) => f2(at(light, rgb(NEW[i]), k, L('bg')))), ['4.53', '4.52', '4.55', '4.54', '4.55', '4.52']);
+    assert.deepStrictEqual(classes.map((k, i) => f2(at(light, rgb(NEW[i]), k, L('bg2')))), ['4.94', '4.92', '4.96', '4.95', '4.96', '4.93']);
+    classes.forEach((k, i) => { assert.ok(at(light, rgb(NEW[i]), k, L('bg')) >= 4.5, 'light ' + k + ' over --bg'); assert.ok(at(light, rgb(NEW[i]), k, L('bg2')) >= 4.5, 'light ' + k + ' over a card'); });
+    // the class colours and so the tints are untouched, and the letters stay a darker step of their own class colour (each channel at or under the class colour's)
+    [['stocks', '#3F62D4'], ['cash', '#7A889B'], ['cpf', '#7656D3'], ['re', '#B5822E'], ['crypto', '#CF5E3C'], ['insurance', '#A8508E']].forEach(([k, v]) => assert.strictEqual(hex(light, 'c-' + k), v, k));
+    classes.forEach((k, i) => rgb(NEW[i]).forEach((c, ch) => assert.ok(c <= tok(light, 'c-' + k)[ch], k + ' channel ' + ch)));
+    // dark: the ink is the class colour itself, and it clears 4.5:1 over --bg, a card and the panel (--surface-solid at 94% over --bg)
+    const sol = rgba(hex(dark, 'surface-solid')), panel = over(sol.c, sol.a, tok(dark, 'bg'));
+    classes.forEach(k => {
+      assert.strictEqual(hex(dark, 'c-' + k + '-ink'), 'var(--c-' + k + ')');
+      const inkD = tok(dark, 'c-' + k);
+      [['--bg', tok(dark, 'bg')], ['a card', tok(dark, 'bg2')], ['the panel', panel]].forEach(([name, surface]) => assert.ok(ratio(inkD, over(inkD, 0.16, surface)) >= 4.5, 'dark ' + k + ' over ' + name));
+    });
+    // the comment quotes the real figures
+    assert.ok(indexSrc.includes('(4.52 to 4.55:1, it was 4.30 to 4.48 before v2.79)') && indexSrc.includes('4.92 to 4.96:1 over a card or the panel itself'));
+  });
+
+  test('p279 item 5 - the notes say what the code does: the npm test chain, the dormant Supabase NAS candidate, the QA runbook header, and no stale version on the pilot page', () => {
+    const rootDoc = fs.readFileSync(path.join(__dirname, '..', '..', 'CLAUDE.md'), 'utf8');
+    const appDoc = fs.readFileSync(path.join(__dirname, '..', 'CLAUDE.md'), 'utf8');
+    const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
+    const pilot = fs.readFileSync(path.join(__dirname, '..', 'decision-notes-pilot.html'), 'utf8');
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    // the repo-root note: one line, the real count, and no three-script claim
+    const chain = pkg.scripts.test.split(' && ');
+    assert.strictEqual(chain.length, 14);
+    const line = rootDoc.split('\n').filter(l => l.includes('`npm test` from `Portfolio/`'));
+    assert.deepStrictEqual(line, ['- `npm test` from `Portfolio/` chains ' + chain.length + ' scripts in `Portfolio/package.json`, `tests/test-core.js` first and `tests/check-release.js` last, and the full order is in `Portfolio/CLAUDE.md`.']);
+    assert.ok(chain[0] === 'node tests/test-core.js' && chain[chain.length - 1] === 'node tests/check-release.js');
+    assert.strictEqual(/runs test-core\.js, test-app\.js/.test(rootDoc) || /The old broken stub is gone/.test(rootDoc), false);
+    // the app note: not "no Supabase". The code loads the Supabase client and the NAS controller and keeps them behind a flag that is off
+    assert.strictEqual(appDoc.includes('(no Supabase, no auth, no RLS)'), false);
+    ['`Worker/supabase.js`', '`Worker/kjr-nas.js`', '`NAS_RELEASE_ENABLED` is `false`', 'ships dormant', 'no Supabase client is ever created', '`Supabase/schema.sql`', '`NAS/`'].forEach(frag => assert.ok(appDoc.includes(frag), frag));
+    assert.ok(/<script src="Worker\/supabase\.js/.test(indexSrc) && /<script src="Worker\/kjr-nas\.js/.test(indexSrc));
+    assert.ok(appSrc.includes('const NAS_RELEASE_ENABLED = false;'));
+    assert.ok(extractFunction('createNasController').includes("if (!NAS_RELEASE_ENABLED) throw new Error('NAS candidate is disabled pending local release review');"));
+    assert.ok(extractFunction('activateNasFromForm').includes('if (!NAS_RELEASE_ENABLED) {'));
+    assert.ok(extractFunction('bootNas').includes('if (!NAS_RELEASE_ENABLED) {'));
+    assert.strictEqual((appSrc.match(/window\.supabase\.createClient\(/g) || []).length, 1);                   // one place builds a client, createNasClient
+    assert.strictEqual((appSrc.match(/createNasClient\(/g) || []).length, 2);                                   // its definition and its one call, in createNasController, after the gate above
+    assert.ok(extractFunction('createNasController').indexOf('NAS_RELEASE_ENABLED') < extractFunction('createNasController').indexOf('createNasClient(config)'));
+    assert.ok(fs.existsSync(path.join(__dirname, '..', 'Supabase', 'schema.sql')) && fs.existsSync(path.join(__dirname, '..', 'NAS', 'compose.overlay.yml')));
+    // the QA runbook: the Last updated line moves to this release, the measured line keeps the version the numbers were measured on
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 12/10/2026 (app v2.79).'));
+    assert.ok(sop.includes('Measured on 11/10/2026 against app v2.77 with the step 3 seed'));
+    // the pilot page: no hand-kept version beside the badge (it said v2.67 through v2.78), and the rest of the header is as it was
+    assert.strictEqual(/v\d+\.\d+ \(\d{2} [A-Z][a-z]{2}\)/.test(pilot), false);
+    assert.ok(pilot.includes('<span class="pilot-badge">Synthetic only · local</span>\n        <button type="button" class="btn btn-ghost" id="pilot-theme"'));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

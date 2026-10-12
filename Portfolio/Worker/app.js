@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.78';
-const APP_DISPLAY_VERSION = 'v2.78 (12 Oct)';
+const APP_VERSION = 'v2.79';
+const APP_DISPLAY_VERSION = 'v2.79 (12 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -1931,6 +1931,10 @@ function _sanitiseList(arr, table){
   // Blank/absent stays untouched, several numeric fields are meaningfully
   // optional (e.g. divPerShare "leave blank for non-payers"), only a
   // present-but-invalid value (a string, NaN, Infinity) gets clamped to 0.
+  // The one exception is a Watchlist target price: a target of zero or below,
+  // blank (also only spaces) or not a number is no target, so it becomes null
+  // (as the Edit form saves it and _wlTarget reads it) and can never print as
+  // a US$0.00 target. An absent or null target stays as it is.
   const schema = ENTITY_SCHEMAS[table];
   const numericFields = schema ? schema.fields.filter(f => f.type === 'number').map(f => f.key) : null;
   return arr.map(item => {
@@ -1946,6 +1950,7 @@ function _sanitiseList(arr, table){
     if (numericFields){
       numericFields.forEach(k => {
         const v = safe[k];
+        if (table === 'watchlist' && k === 'targetPrice'){ if (v !== undefined && v !== null) safe[k] = _wlTarget(safe); return; }
         if (v === null || v === undefined || v === '') return;
         const n = Number(v);
         safe[k] = isFinite(n) ? n : 0;
@@ -3834,7 +3839,7 @@ function loadBackendSettingsUI(){
   const legacyControls = document.querySelectorAll('#legacy-sync-card [data-click="saveSyncUrl"], #legacy-sync-card [data-click="manualPull"], #legacy-sync-card [data-click="manualPush"], #legacy-sync-card [data-click="manualSync"]');
   if (modeLabel) {
     modeLabel.textContent = mode === 'nas' ? 'NAS' : (mode === 'legacy-readonly' ? 'Legacy read-only' : 'Legacy Apps Script');
-    modeLabel.style.color = mode === 'legacy' ? '' : 'var(--amber)';
+    modeLabel.style.color = mode === 'legacy' ? '' : 'var(--amber-ink)';
   }
   if (origin) origin.value = location.origin === 'null' ? '' : location.origin;
   if (key && mode !== 'legacy') key.value = '';
@@ -4689,7 +4694,7 @@ function updateTargetSumHint(){
   const sum = ids.reduce((s,id) => { const v = Number((document.getElementById(id)||{}).value); return s + (isFinite(v)?v:0); }, 0);
   if (sum === 0){ el.textContent = 'Set a percentage per class. They should total 100%.'; el.style.color = ''; return; }
   el.textContent = 'Targets total ' + sum + '%' + (sum === 100 ? ' ✓' : ' (should be 100%)');
-  el.style.color = sum === 100 ? 'var(--green)' : 'var(--amber)';
+  el.style.color = sum === 100 ? 'var(--green)' : 'var(--amber-ink)';
 }
 
 async function saveSettingsFromForm(){
@@ -4817,7 +4822,7 @@ function updateRulesSumHint(){
   const sum = rules.reduce((s,r) => s + (Number(r.pct)||0), 0);
   if (!rules.length){ el.textContent = ''; return; }
   el.textContent = 'Allocated ' + sum + '%' + (sum === 100 ? ' ✓' : ' (' + (100 - sum) + '% unallocated)');
-  el.style.color = sum === 100 ? 'var(--green)' : 'var(--amber)';
+  el.style.color = sum === 100 ? 'var(--green)' : 'var(--amber-ink)';
 }
 /* This-month bucket preview: take-home × each rule's pct. */
 function renderBucketPreview(){
@@ -5204,7 +5209,7 @@ function renderDiagnostics(){
   if (thisYear > CONSTANTS_VERIFIED_FOR){
     const warn = document.createElement('div');
     warn.id = 'diag-constants-warning';
-    warn.style.cssText = 'margin-top:10px;background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);padding:10px;border-radius:8px;font-size:12px';
+    warn.style.cssText = 'margin-top:10px;background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber-ink);padding:10px;border-radius:8px;font-size:12px';
     warn.textContent = '⚠ CPF, tax and holiday constants last verified for ' + CONSTANTS_VERIFIED_FOR + '. Verify against CPF Board, IRAS and MOM before trusting ' + (CONSTANTS_VERIFIED_FOR + 1) + '+ figures.';
     out.after(warn);
   }
@@ -7859,18 +7864,20 @@ function _cpfRowHtml(v){
    .money-chip wherever the table cell is td.num (so Hide amounts blurs the same things, and a percentage stays readable), a missing figure is an en dash, and a side,
    a gain or a loss is a word or a sign as well as a colour. Every typed value goes through kjrEscape. The empty states are the cards' own, they return before any list is built. */
 
-/* The target buy price of a Watchlist row as a number, or null when it has none. A missing, null, blank (empty or only spaces) or non-numeric target is no target, so
-   Number('') = 0 can never print as a US$0.00 target. The desktop table's Target cell, the board's Target column and the phone row all read the target through here. */
+/* The target buy price of a Watchlist row as a number, or null when it has none. A target of zero or below, a missing, null, blank (empty or only spaces) or non-numeric one is
+   no target, so Number('') = 0 can never print as a US$0.00 target and a zero typed or imported reads as none, as the Edit form saves it. The desktop table's Target cell, the
+   board's Target column, the phone row, the Target sort and the load sanitiser (_sanitiseList) all read the target through here. */
 function _wlTarget(w){
   const v = w ? w.targetPrice : null;
-  if (v == null || String(v).trim() === '') return null;
+  if (typeof v !== 'number' && typeof v !== 'string') return null;
+  if (String(v).trim() === '') return null;
   const n = Number(v);
-  return _finiteNum(n) ? n : null;
+  return _finiteNum(n) && n > 0 ? n : null;
 }
 
 /* One Watchlist row, from a renderWatchlist row ({ w, px, ccy }): the symbol and market over the target (with a check mark when the price is at it) and the note, the price over the day move.
-   The target is the table's Target cell figure, from the same formatter (fmtSgdOrNative, through _listMoney so a missing FX rate keeps the short native form). A blank, missing or
-   non-numeric target is no target (_wlTarget, so target is an empty string and the row prints nothing for it). */
+   The target is the table's Target cell figure, from the same formatter (fmtSgdOrNative, through _listMoney so a missing FX rate keeps the short native form). A zero or negative,
+   blank, missing or non-numeric target is no target (_wlTarget, so target is an empty string, the row prints nothing for it and atTarget is false). */
 function _wlListModel(r){
   const w = r.w || {}, px = r.px || null;
   const hasPrice = !!(px && px.price != null);
@@ -7881,7 +7888,7 @@ function _wlListModel(r){
   return { id:w.id, sym:String(w.symbol == null ? '' : w.symbol), market:String(w.market || ''), note:String(w.notes == null ? '' : w.notes).trim(),
     price: price ? price.text : LIST_DASH, fx: !!(price && price.fx), stale: hasPrice && isStale(px.fetchedAt, 24),
     day: _finiteNum(day) ? fmtPct(day) : LIST_DASH, dir: _finiteNum(day) ? (day >= 0 ? 'up' : 'down') : '',
-    atTarget: !!(w.targetPrice != null && hasPrice && px.price <= Number(w.targetPrice)),
+    atTarget: targetNum != null && hasPrice && px.price <= targetNum,
     target: target ? target.text : '', targetFx: !!(target && target.fx),
     href: '../Trading/index.html?symbol=' + encodeURIComponent(yahooSymbol(w)) };
 }
@@ -7900,7 +7907,7 @@ function _wlLabel(m){
    and the spoken label says "at target price"). Its amount sits in a .money-chip, as the table's Target cell (td.num) blurs under Hide amounts, so the words stay readable and
    the amount does not. The note is the only part that gives way (an ellipsis of its own), and the CSS (.hl-split .hl-s) shows the target whole or hides it whole. */
 function _wlRowHtml(m){
-  const piece = m.target ? '<span class="hl-tgt">' + (m.atTarget ? '✓ ' : '') + 'Target <span class="money-chip">' + m.target + '</span></span>' : (m.atTarget ? '<span class="hl-tgt">✓ At target</span>' : '');
+  const piece = m.target ? '<span class="hl-tgt">' + (m.atTarget ? '✓ ' : '') + 'Target <span class="money-chip">' + m.target + '</span></span>' : '';
   const sub = piece + (m.note ? '<span class="hl-nt">' + (piece ? '· ' : '') + kjrEscape(m.note) + '</span>' : '');
   return '<div class="dash-hrow hl-row hl-split">'
     + '<button type="button" class="hl-hit" data-edit-table="watchlist" data-edit-id="' + kjrEscape(m.id) + '" aria-haspopup="dialog" aria-label="' + kjrEscape(_wlLabel(m)) + '">'
@@ -9855,7 +9862,7 @@ async function _pbDrawTimeSeries(host, cfg, showEmpty, showChart){
     }
   });
   if (host.summaryEl){
-    const note = dropped.length ? ` · <span style="color:var(--amber,#f59e0b)">no data: ${dropped.map(kjrEscape).join(', ')}</span>` : '';
+    const note = dropped.length ? ` · <span style="color:var(--amber-ink)">no data: ${dropped.map(kjrEscape).join(', ')}</span>` : '';
     host.summaryEl.innerHTML = `<span style="color:var(--text3)">${datasets.filter(d=>!d._avgCost).length} symbols · ${PB_PERIOD_LABELS[cfg.range]} · ${cfg.tsValue==='positionValue'?'position value':'close price'}${note}</span>`;
   }
   return true;
