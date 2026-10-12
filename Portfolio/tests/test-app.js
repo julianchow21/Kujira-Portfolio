@@ -124,7 +124,7 @@ const FUNCTION_TARGETS = [
   '_syncDiagRecordSafe', '_readSyncDiagnostics', '_storeSyncDiagnostics',
   '_recordSyncFailure', '_clearSyncDiagnostic', '_syncDiagReason',
   '_lossyAckReason', '_rejectLossyAck', '_isCanonicalServerTimestamp',
-  '_validWriteAck', '_divergenceSnapshot', '_isMaterialDivergence', 'strictConflictsEnabled', 'lastPullSource', 'overwriteRemoteWithLocal',
+  '_validWriteAck', '_wlTargetAsLoaded', '_divergenceSnapshot', '_isMaterialDivergence', 'strictConflictsEnabled', 'lastPullSource', 'overwriteRemoteWithLocal',
   '_setConfirmedCloudTimestamp', '_confirmedCloudTimestamp', '_displaySyncTimestamp',
   '_markLocalUnsaved', '_clearLocalUnsaved', '_hasLocalUnsaved',
   '_markCloudDirty', '_clearCloudDirty', '_hasCloudDirty',
@@ -2067,9 +2067,11 @@ async function runTests(){
     assert.ok(appSrc.includes('pbToggleOnDashboard:') && appSrc.includes('pbRemoveFromDashboard:'));
   });
 
-  test('Asset-class ink tokens - six light values and six dark aliases sit beside the class colours', () => {
-    assert.ok(indexSrc.includes('--c-stocks-ink:#3558CB;--c-cash-ink:#5A6677;--c-cpf-ink:#6A49C9;--c-re-ink:#835E22;--c-crypto-ink:#A54529;--c-insurance-ink:#93477D;'));
-    ['stocks', 'cash', 'cpf', 're', 'crypto', 'insurance'].forEach(name => {
+  test('Asset-class ink tokens - six light values and, in dark, four aliases of the class colour beside two lighter steps (stocks and CPF, v2.80)', () => {
+    assert.ok(indexSrc.includes('--c-stocks-ink:#3354C3;--c-cash-ink:#566272;--c-cpf-ink:#6646C1;--c-re-ink:#7E5A21;--c-crypto-ink:#9E4227;--c-insurance-ink:#8D4478;'));
+    // dark: the stocks and CPF colours themselves are under 4.5:1 on the --bg3 hover tint, so those two inks are their own lighter steps (p280 item 2 has the ratios)
+    assert.ok(indexSrc.includes('--c-stocks-ink:#7B9EFF;--c-cash-ink:var(--c-cash);--c-cpf-ink:#B094FB;--c-re-ink:var(--c-re);--c-crypto-ink:var(--c-crypto);--c-insurance-ink:var(--c-insurance);'));
+    ['cash', 're', 'crypto', 'insurance'].forEach(name => {
       assert.ok(indexSrc.includes('--c-' + name + '-ink:var(--c-' + name + ')'), name + ' dark ink must alias the class colour');
     });
   });
@@ -8950,7 +8952,6 @@ async function runTests(){
     const { light, dark, hex, rgb, rgba, tok, over, ratio, f2, L } = p279;
     const classes = ['stocks', 'cash', 'cpf', 're', 'crypto', 'insurance'];
     const OLD = ['#375BD2', '#5A6778', '#6E4CD0', '#845F22', '#A74629', '#984981'];
-    const NEW = ['#3558CB', '#5A6677', '#6A49C9', '#835E22', '#A54529', '#93477D'];
     // the panel paints --surface-solid over an opaque --bg (the light one is opaque white, so over a card is over the panel), and a flat reading of its background-color sees --bg
     assert.ok(/\.hp-panel\{[^}]*background:linear-gradient\(var\(--surface-solid\),var\(--surface-solid\)\),var\(--bg\)/.test(indexSrc));
     assert.strictEqual(hex(light, 'surface-solid'), '#ffffff');
@@ -8958,23 +8959,19 @@ async function runTests(){
     // before: the v2.78 inks were under 4.5:1 over --bg for every class, 4.30:1 for stocks, CPF and insurance
     assert.deepStrictEqual(classes.map((k, i) => f2(at(light, rgb(OLD[i]), k, L('bg')))), ['4.30', '4.47', '4.30', '4.48', '4.47', '4.31']);
     classes.forEach((k, i) => assert.ok(at(light, rgb(OLD[i]), k, L('bg')) < 4.5, 'old ' + k));
-    // after: a few steps darker, so all six clear 4.5:1 over --bg and about 4.9:1 over a card or the panel
-    classes.forEach((k, i) => assert.strictEqual(hex(light, 'c-' + k + '-ink').toUpperCase(), NEW[i], k));
-    assert.deepStrictEqual(classes.map((k, i) => f2(at(light, rgb(NEW[i]), k, L('bg')))), ['4.53', '4.52', '4.55', '4.54', '4.55', '4.52']);
-    assert.deepStrictEqual(classes.map((k, i) => f2(at(light, rgb(NEW[i]), k, L('bg2')))), ['4.94', '4.92', '4.96', '4.95', '4.96', '4.93']);
-    classes.forEach((k, i) => { assert.ok(at(light, rgb(NEW[i]), k, L('bg')) >= 4.5, 'light ' + k + ' over --bg'); assert.ok(at(light, rgb(NEW[i]), k, L('bg2')) >= 4.5, 'light ' + k + ' over a card'); });
+    // after (v2.79, darker again in v2.80 for the hover tint, whose exact values and ratios p280 item 2 pins): all six clear 4.5:1 over --bg and over a card or the panel
+    const NOW = classes.map(k => hex(light, 'c-' + k + '-ink'));
+    classes.forEach((k, i) => { assert.ok(at(light, rgb(NOW[i]), k, L('bg')) >= 4.5, 'light ' + k + ' over --bg'); assert.ok(at(light, rgb(NOW[i]), k, L('bg2')) >= 4.5, 'light ' + k + ' over a card'); });
     // the class colours and so the tints are untouched, and the letters stay a darker step of their own class colour (each channel at or under the class colour's)
     [['stocks', '#3F62D4'], ['cash', '#7A889B'], ['cpf', '#7656D3'], ['re', '#B5822E'], ['crypto', '#CF5E3C'], ['insurance', '#A8508E']].forEach(([k, v]) => assert.strictEqual(hex(light, 'c-' + k), v, k));
-    classes.forEach((k, i) => rgb(NEW[i]).forEach((c, ch) => assert.ok(c <= tok(light, 'c-' + k)[ch], k + ' channel ' + ch)));
-    // dark: the ink is the class colour itself, and it clears 4.5:1 over --bg, a card and the panel (--surface-solid at 94% over --bg)
+    classes.forEach((k, i) => rgb(NOW[i]).forEach((c, ch) => assert.ok(c <= tok(light, 'c-' + k)[ch], k + ' channel ' + ch)));
+    // dark: the ink is the class colour itself (a lighter step of it for stocks and CPF since v2.80), and it clears 4.5:1 over --bg, a card and the panel (--surface-solid at 94% over --bg)
     const sol = rgba(hex(dark, 'surface-solid')), panel = over(sol.c, sol.a, tok(dark, 'bg'));
     classes.forEach(k => {
-      assert.strictEqual(hex(dark, 'c-' + k + '-ink'), 'var(--c-' + k + ')');
-      const inkD = tok(dark, 'c-' + k);
-      [['--bg', tok(dark, 'bg')], ['a card', tok(dark, 'bg2')], ['the panel', panel]].forEach(([name, surface]) => assert.ok(ratio(inkD, over(inkD, 0.16, surface)) >= 4.5, 'dark ' + k + ' over ' + name));
+      const inkToken = hex(dark, 'c-' + k + '-ink');
+      const inkD = inkToken === 'var(--c-' + k + ')' ? tok(dark, 'c-' + k) : rgb(inkToken);
+      [['--bg', tok(dark, 'bg')], ['a card', tok(dark, 'bg2')], ['the panel', panel]].forEach(([name, surface]) => assert.ok(ratio(inkD, over(tok(dark, 'c-' + k), 0.16, surface)) >= 4.5, 'dark ' + k + ' over ' + name));
     });
-    // the comment quotes the real figures
-    assert.ok(indexSrc.includes('(4.52 to 4.55:1, it was 4.30 to 4.48 before v2.79)') && indexSrc.includes('4.92 to 4.96:1 over a card or the panel itself'));
   });
 
   test('p279 item 5 - the notes say what the code does: the npm test chain, the dormant Supabase NAS candidate, the QA runbook header, and no stale version on the pilot page', () => {
@@ -9002,12 +8999,367 @@ async function runTests(){
     assert.strictEqual((appSrc.match(/createNasClient\(/g) || []).length, 2);                                   // its definition and its one call, in createNasController, after the gate above
     assert.ok(extractFunction('createNasController').indexOf('NAS_RELEASE_ENABLED') < extractFunction('createNasController').indexOf('createNasClient(config)'));
     assert.ok(fs.existsSync(path.join(__dirname, '..', 'Supabase', 'schema.sql')) && fs.existsSync(path.join(__dirname, '..', 'NAS', 'compose.overlay.yml')));
-    // the QA runbook: the Last updated line moves to this release, the measured line keeps the version the numbers were measured on
-    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 12/10/2026 (app v2.79).'));
+    // the QA runbook: the Last updated line moves to this release (the version is read from APP_VERSION, so a release that forgets it fails), the measured line keeps the version the numbers were measured on
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 12/10/2026 (app ' + /const APP_VERSION = '(v[\d.]+)';/.exec(appSrc)[1] + ').'));
     assert.ok(sop.includes('Measured on 11/10/2026 against app v2.77 with the step 3 seed'));
     // the pilot page: no hand-kept version beside the badge (it said v2.67 through v2.78), and the rest of the header is as it was
     assert.strictEqual(/v\d+\.\d+ \(\d{2} [A-Z][a-z]{2}\)/.test(pilot), false);
     assert.ok(pilot.includes('<span class="pilot-badge">Synthetic only · local</span>\n        <button type="button" class="btn btn-ghost" id="pilot-theme"'));
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     p280sync, sync data-safety follow-up to v2.79: the push-conflict divergence check reads the Watchlist target on both sides as the load sanitiser holds it, so a cloud
+     blob written before v2.79 (a target of 0, '', spaces or -5 where the local copy loaded null) auto-recovers instead of opening a false conflict modal, while a different
+     real target, every other field and every other table still count as divergence exactly as before, and the check writes to neither blob. Every test name starts with p280sync.
+     ═══════════════════════════════════════════════════════════════════════ */
+  const p280sync = (() => {
+    const row = (target, extra) => Object.assign({ id:'w1', symbol:'AAA', market:'US', sector:'', notes:'keep' }, extra || {}, target === undefined ? {} : { targetPrice:target });
+    // a local payload the way pushToRemote compares it (JSON.parse of the body it sent), and a remote the way the GET returns it (the same blob plus _savedAt), each one fresh
+    const local = target => ({ schema:'kujira-portfolio', version:1, schemaVersion:3, appVersion:'v2.79', updatedAt:'2026-10-12T00:00:00.000Z', lastSeenRemoteAt:'2026-10-11T00:00:00.000Z',
+      stocks:[{ id:'s1', symbol:'D05', market:'SGX', shares:100, avgCost:30 }], watchlist:[row(target)], cash:[{ id:'c1', amount:7, currency:'SGD' }],
+      trash:[{ id:'t1', table:'watchlist', data:{ id:'w0', symbol:'ZZZ', targetPrice:null } }], settings:{ fxRates:{ USD:1.3, lastUpdated:'2026-10-12T00:00:00.000Z' } } });
+    const remote = (target, edit) => {
+      const r = Object.assign(local(target), { updatedAt:'2026-10-11T23:00:00.000Z', lastSeenRemoteAt:null, _savedAt:'2026-10-11T23:00:00.000Z' });
+      if (edit) edit(r);
+      return r;
+    };
+    // what the load sanitiser reads as no target (the p279 item 3a matrix)
+    const stale = [0, -0, '0', '0.0', '  0  ', -5, '-5', -0.0001, '-1e-9', '', ' ', '\t\n', 'abc', '12abc', '1e999', 'Infinity', true, false, [], [5], {}, { v:1 }];
+    const label = v => typeof v + ' ' + JSON.stringify(v);
+    return { row, local, remote, stale, label };
+  })();
+
+  test('p280sync item 1 - a cloud target of zero or below, blank, spaces or not a number against a local null is not divergence (both load as null), nor is a numeric string against its number, in either direction, nor an identical blob whose volatile fields differ', () => {
+    const { local, remote, stale, label } = p280sync;
+    const sb = freshSandbox();
+    // the packet's five by name, then the full matrix, each way round
+    [0, -5, '', '  ', 'abc'].forEach(v => assert.strictEqual(sb._isMaterialDivergence(local(null), remote(v)), false, label(v)));
+    stale.forEach(v => {
+      assert.strictEqual(sb._isMaterialDivergence(local(null), remote(v)), false, 'remote ' + label(v));
+      assert.strictEqual(sb._isMaterialDivergence(local(v), remote(null)), false, 'local ' + label(v));
+    });
+    [[250, '250'], [250, ' 250 '], [1000, '1e3'], [0.0001, '0.0001']].forEach(([l, r]) => assert.strictEqual(sb._isMaterialDivergence(local(l), remote(r)), false, JSON.stringify([l, r])));
+    // untouched: the same data read twice (updatedAt, lastSeenRemoteAt, _savedAt and fxRates.lastUpdated differ between the two reads, as they always do)
+    [300, null, undefined].forEach(v => assert.strictEqual(sb._isMaterialDivergence(local(v), remote(v)), false, label(v)));
+    const same = local(300);
+    assert.strictEqual(sb._isMaterialDivergence(same, clone(same)), false);
+    assert.strictEqual(sb._isMaterialDivergence(same, Object.assign(clone(same), { settings:{ fxRates:{ USD:1.3, lastUpdated:'other' } } })), false);
+  });
+
+  test('p280sync item 2 - a different real target is still divergence: 250 against a local 300, 250 against a local null, null against a local 250, a numeric string of 250 against null, and an absent key against null (the load sanitiser keeps absent and null apart)', () => {
+    const { local, remote } = p280sync;
+    const sb = freshSandbox();
+    [[300, 250], [null, 250], [250, null], [null, '250'], [250, 250.0001], [250, '300'], [undefined, null], [null, undefined], [undefined, 0], [undefined, '']]
+      .forEach(([l, r]) => assert.strictEqual(sb._isMaterialDivergence(local(l), remote(r)), true, 'local ' + JSON.stringify(l) + ' remote ' + JSON.stringify(r)));
+  });
+
+  test('p280sync item 3 - every other field and table compares exactly as before: a cash amount of 7 against 8 or "7", a share count, a Watchlist note, symbol, extra or missing row, an FX rate, and a trashed Watchlist row holding a zero target (the load sanitiser leaves trash data alone too), and a stale target hides none of them', () => {
+    const { local, remote } = p280sync;
+    const sb = freshSandbox();
+    const edits = {
+      'cash amount 7 vs 8': r => { r.cash[0].amount = 8; },
+      'cash amount 7 vs "7"': r => { r.cash[0].amount = '7'; },
+      'stock shares 100 vs 101': r => { r.stocks[0].shares = 101; },
+      'stock shares 100 vs "100"': r => { r.stocks[0].shares = '100'; },
+      'watchlist note': r => { r.watchlist[0].notes = 'changed'; },
+      'watchlist symbol': r => { r.watchlist[0].symbol = 'BBB'; },
+      'watchlist extra row': r => { r.watchlist.push({ id:'w2', symbol:'CCC', market:'US', targetPrice:null }); },
+      'watchlist row removed': r => { r.watchlist = []; },
+      'watchlist not an array': r => { r.watchlist = null; },
+      'trash target 0 vs null': r => { r.trash[0].data.targetPrice = 0; },
+      'settings fx rate': r => { r.settings.fxRates.USD = 1.4; }
+    };
+    Object.keys(edits).forEach(name => assert.strictEqual(sb._isMaterialDivergence(local(null), remote(null, edits[name])), true, name));
+    assert.strictEqual(sb._isMaterialDivergence(local(null), remote(0, edits['cash amount 7 vs 8'])), true);
+    assert.strictEqual(sb._isMaterialDivergence(local(null), remote('', edits['watchlist note'])), true);
+    assert.strictEqual(sb._isMaterialDivergence(local(null), remote('  ', edits['watchlist extra row'])), true);
+  });
+
+  test('p280sync item 4 - the check is pure and reads through the load sanitiser\'s own rule: neither blob is written to, _wlTargetAsLoaded returns the row itself when nothing changes and a shallow copy when the target does, agrees with _sanitiseList on every input, is idempotent, and the wiring is as described', () => {
+    const { row, local, remote, stale, label } = p280sync;
+    const sb = freshSandbox();
+    // no mutation: both blobs read the same after the comparison and the remote still holds its raw value by identity
+    stale.forEach(v => {
+      const l = local(null), r = remote(v);
+      const beforeL = JSON.stringify(l), beforeR = JSON.stringify(r);
+      sb._isMaterialDivergence(l, r);
+      assert.strictEqual(JSON.stringify(l), beforeL, label(v));
+      assert.strictEqual(JSON.stringify(r), beforeR, label(v));
+      assert.ok(Object.is(r.watchlist[0].targetPrice, v), label(v));
+    });
+    const r0 = remote('0');
+    sb._divergenceSnapshot(r0);
+    assert.strictEqual(r0.watchlist[0].targetPrice, '0');
+    assert.strictEqual(r0.settings.fxRates.lastUpdated, '2026-10-12T00:00:00.000Z');
+    // the helper: the row itself when the target is absent, null or already a positive number, non-rows pass through, otherwise a copy with the same keys in the same order
+    [row(undefined), row(null), row(250), row(0.0001)].forEach(w => assert.strictEqual(sb._wlTargetAsLoaded(w), w));
+    [null, undefined, 'AAA', 5, [1], true].forEach(w => assert.strictEqual(sb._wlTargetAsLoaded(w), w));
+    const w0 = row(0, { notes:'n' }), out = sb._wlTargetAsLoaded(w0);
+    assert.notStrictEqual(out, w0);
+    assert.strictEqual(w0.targetPrice, 0);
+    assert.strictEqual(out.targetPrice, null);
+    assert.deepStrictEqual(Object.keys(out), Object.keys(w0));
+    assert.deepStrictEqual(Object.assign({}, out, { targetPrice:0 }), w0);
+    // the same answer as the load sanitiser for every input, including a real target, and the same answer again on its own output
+    const ss = p279.schemaSandbox();
+    [...stale, null, undefined, 300, '45.5', ' 7 ', 0.0001, '1e3', NaN, Infinity, -Infinity].forEach(v => {
+      const viaLoad = ss._sanitiseList([row(v)], 'watchlist')[0], viaCheck = sb._wlTargetAsLoaded(row(v));
+      assert.strictEqual(Object.prototype.hasOwnProperty.call(viaCheck, 'targetPrice'), Object.prototype.hasOwnProperty.call(viaLoad, 'targetPrice'), label(v));
+      assert.ok(Object.is(viaCheck.targetPrice, viaLoad.targetPrice), label(v) + ': ' + String(viaCheck.targetPrice) + ' vs ' + String(viaLoad.targetPrice));
+      assert.strictEqual(JSON.stringify(sb._wlTargetAsLoaded(viaCheck)), JSON.stringify(viaCheck), 'idempotent ' + label(v));
+    });
+    // the wiring: the snapshot maps the Watchlist through the helper, the helper and the load sanitiser both read through _wlTarget under the same guard, the compare itself is unchanged
+    assert.ok(extractFunction('_divergenceSnapshot').includes('if (Array.isArray(out.watchlist)) out.watchlist = out.watchlist.map(_wlTargetAsLoaded);'));
+    assert.ok(extractFunction('_wlTargetAsLoaded').includes('if (v === undefined || v === null) return row;') && extractFunction('_wlTargetAsLoaded').includes('const t = _wlTarget(row);'));
+    assert.ok(extractFunction('_sanitiseList').includes("if (table === 'watchlist' && k === 'targetPrice'){ if (v !== undefined && v !== null) safe[k] = _wlTarget(safe); return; }"));
+    assert.strictEqual(extractFunction('_isMaterialDivergence'), 'function _isMaterialDivergence(localObj, remoteObj){\n  return _divergenceSnapshot(localObj) !== _divergenceSnapshot(remoteObj);\n}');
+    assert.ok(extractFunction('pushToRemote').includes('if (_isMaterialDivergence(JSON.parse(body), remoteSnapshot)) {'));
+    assert.strictEqual((appSrc.match(/function _wlTargetAsLoaded\(/g) || []).length, 1);
+    assert.strictEqual((appSrc.match(/\.map\(_wlTargetAsLoaded\)/g) || []).length, 1);
+  });
+
+  await testAsync('p280sync item 5 - through pushToRemote: a conflict against a cloud copy still holding a pre-v2.79 target of 0, blank, spaces, -5, text or a boolean auto-recovers (one GET, one retry against that revision, no modal, the cloud then holds the null), while 250 against a local null or 300, or null against a local 250, still opens the modal and writes nothing', async () => {
+    const run = async (localTarget, remoteTarget) => {
+      const sb = freshSandbox({ watchlist:[{ id:'w1', symbol:'AAA', market:'US', sector:'', targetPrice:localTarget, notes:'' }], cash:[{ id:'base', amount:1 }] });
+      sb._markCloudDirty();
+      sb.setLastPull('2026-10-02T00:00:00.000Z', 'server');
+      let remote = clone(sb.syncPayload()), revision = '2026-10-03T00:00:00.000Z';
+      remote.watchlist[0].targetPrice = remoteTarget;
+      const log = { gets:0, writes:0, conflicts:0, seen:[] };
+      sb.showConflictModal = () => { log.conflicts++; };
+      sb.fetch = async (_url, request) => {
+        let result;
+        if (request.method === 'GET') { log.gets++; result = Object.assign({}, remote, { _savedAt:revision }); }
+        else {
+          log.writes++;
+          const proposed = JSON.parse(request.body);
+          log.seen.push(proposed.lastSeenRemoteAt);
+          if (proposed.lastSeenRemoteAt !== revision) result = { conflict:true, remoteAt:revision, lastSeenRemoteAt:proposed.lastSeenRemoteAt };
+          else { remote = proposed; revision = '2026-10-03T00:00:02.000Z'; result = { ok:true, savedAt:revision }; }
+        }
+        return { status:200, text:async () => JSON.stringify(result) };
+      };
+      const ok = await sb.pushToRemote();
+      return { ok, log, remote, dirty:sb._hasCloudDirty(), confirmed:sb._confirmedCloudTimestamp() };
+    };
+    for (const v of [0, '', '  ', -5, 'abc', '0', '-1e-9', true]) {
+      const r = await run(null, v);
+      assert.strictEqual(r.ok, true, JSON.stringify(v));
+      assert.deepStrictEqual([r.log.gets, r.log.writes, r.log.conflicts], [1, 2, 0], JSON.stringify(v));
+      assert.deepStrictEqual(r.log.seen, ['2026-10-02T00:00:00.000Z', '2026-10-03T00:00:00.000Z'], JSON.stringify(v));
+      assert.strictEqual(r.remote.watchlist[0].targetPrice, null, JSON.stringify(v));
+      assert.strictEqual(r.dirty, false, JSON.stringify(v));
+      assert.strictEqual(r.confirmed, '2026-10-03T00:00:02.000Z', JSON.stringify(v));
+    }
+    for (const [l, v] of [[null, 250], [300, 250], [250, null]]) {
+      const r = await run(l, v);
+      assert.strictEqual(r.ok, false, JSON.stringify([l, v]));
+      assert.deepStrictEqual([r.log.gets, r.log.writes, r.log.conflicts], [1, 1, 1], JSON.stringify([l, v]));
+      assert.strictEqual(r.remote.watchlist[0].targetPrice, v, JSON.stringify([l, v]));
+      assert.strictEqual(r.dirty, true, JSON.stringify([l, v]));
+      assert.strictEqual(r.confirmed, '', JSON.stringify([l, v]));
+    }
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     p280, v2.80 contrast follow-ups: the decision notes pilot page takes --amber-ink for its four amber text rules, matches the app's tokens in both themes and loads its script
+     with the app version, and the monogram letter clears 4.5:1 on the --bg3 tint of a hovered row, a pressed phone row and the active palette option. Ratios come from the
+     declared tokens, composited the way the browser stacks them (the same maths as p277 to p279 above), and the stylesheets are read as text. Every test name starts with p280 item.
+     (The sync tests of the same release are the p280sync block above.)
+     ═══════════════════════════════════════════════════════════════════════ */
+  const p280 = (() => {
+    const { rgb, ratio, over, light, dark, hex, surfaces, rules } = p277;
+    const { f2 } = p278;
+    const classes = ['stocks', 'cash', 'cpf', 're', 'crypto', 'insurance'];
+    const pilot = fs.readFileSync(path.join(__dirname, '..', 'decision-notes-pilot.html'), 'utf8');
+    // the pilot's token blocks: dark is its :root and light is html.light (index.html has them the other way round)
+    const open = s => { const i = pilot.indexOf(s); assert.ok(i > -1, s); return pilot.slice(i, pilot.indexOf('}', i)); };
+    const pilotDark = open(':root{'), pilotLight = open('html.light{');
+    const pilotCss = pilot.slice(pilot.indexOf('<style>'), pilot.indexOf('</style>')).replace(/\/\*[\s\S]*?\*\//g, '');
+    const pilotRules = Array.from(pilotCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)).map(m => ({ sel: m[1].trim(), body: m[2].trim() }));
+    // every --token a block declares, by name, and the value an alias (var(--x)) names
+    const decls = blk => { const o = {}; Array.from(blk.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/--([a-z0-9-]+):([^;}]+)/g)).forEach(m => { o[m[1]] = m[2].trim(); }); return o; };
+    const follow = (o, n) => { const m = /^var\(--([a-z0-9-]+)\)$/.exec(o[n]); return m ? follow(o, m[1]) : o[n]; };
+    // equal values written differently: case, spaces, #fff against #ffffff, 0.14 against .14
+    const norm = v => v.toLowerCase().replace(/\s+/g, '').replace(/#([0-9a-f])([0-9a-f])([0-9a-f])(?![0-9a-f])/g, '#$1$1$2$2$3$3').replace(/(^|[^\d])0\./g, '$1.');
+    // the colour a class ink token names in a theme: its own value, or the class colour when it is an alias
+    const inkRgb = (blk, k) => { const v = hex(blk, 'c-' + k + '-ink'); const m = /^var\(--([a-z-]+)\)$/.exec(v); return rgb(m ? hex(blk, m[1]) : v); };
+    return { rgb, ratio, over, light, dark, hex, surfaces, rules, f2, classes, pilot, pilotDark, pilotLight, pilotRules, decls, follow, norm, inkRgb };
+  })();
+
+  test('p280 item 1 - the pilot page\'s four amber text rules take --amber-ink: light --amber is 4.12:1 on --amber-soft and the ink is 5.33:1, dark is the same colour as before (9.53:1), and no pilot text is plain --amber any more', () => {
+    const { rgb, ratio, over, light, dark, hex, f2, pilotDark, pilotLight, pilotRules } = p280;
+    // the token, written as index.html writes it, in each of the pilot's own blocks
+    assert.strictEqual(hex(pilotLight, 'amber-ink'), 'color-mix(in srgb,var(--amber) 80%,var(--text))');
+    assert.strictEqual(hex(pilotDark, 'amber-ink'), 'var(--amber)');
+    assert.strictEqual(hex(pilotLight, 'amber-ink'), hex(light, 'amber-ink'));
+    assert.strictEqual(hex(pilotDark, 'amber-ink'), hex(dark, 'amber-ink'));
+    const L = n => rgb(hex(pilotLight, n)), D = n => rgb(hex(pilotDark, n));
+    // before: plain --amber text on --amber-soft in light
+    assert.strictEqual(f2(ratio(L('amber'), L('amber-soft'))), '4.12');
+    assert.ok(ratio(L('amber'), L('amber-soft')) < 4.5);
+    // after: a fifth of --text mixed in (color-mix in srgb is a straight blend of the channels), and dark reuses --amber
+    const ink = over(L('amber'), 0.8, L('text'));
+    assert.strictEqual(f2(ratio(ink, L('amber-soft'))), '5.33');
+    assert.strictEqual(f2(ratio(D('amber'), D('amber-soft'))), '9.53');
+    assert.ok(ratio(ink, L('amber-soft')) >= 4.5 && ratio(D('amber'), D('amber-soft')) >= 4.5);
+    // the four rules: the page badge, the warn chip, the stale and unreviewed note badges, and the note warning
+    const body = sel => { const r = pilotRules.find(o => o.sel === sel); assert.ok(r, sel + ' rule missing'); return r.body; };
+    ['.pilot-badge', '.status-warn', '.badge-stale,.badge-unreviewed'].forEach(sel => {
+      assert.ok(/(^|;)color:var\(--amber-ink\)(;|$)/.test(body(sel)), sel);
+      assert.ok(body(sel).includes('background:var(--amber-soft)'), sel);
+    });
+    assert.ok(/(^|;)color:var\(--amber-ink\)!important(;|$)/.test(body('.note-warning')));
+    assert.ok(body('.note-warning').includes('background:var(--amber-soft)'));
+    // no rule of the page sets plain --amber as a text colour, so a fifth rule that pairs it with the soft fill cannot slip in
+    pilotRules.forEach(r => assert.strictEqual(/(^|;)color:var\(--amber\)/.test(r.body), false, r.sel));
+  });
+
+  test('p280 item 1 - the pilot page\'s token blocks match index.html in both themes (its dark --green was #4CAF50 where the app has #43D193), the web font being the one difference', () => {
+    const { rgb, ratio, light, dark, hex, f2, pilot, pilotDark, pilotLight, decls, follow, norm } = p280;
+    const idxLight = decls(light), idxDark = Object.assign({}, idxLight, decls(dark));
+    const needed = ['bg', 'bg2', 'bg3', 'bg4', 'border', 'border2', 'text', 'text2', 'text3', 'red', 'red-soft', 'red-border', 'green', 'green-soft', 'green-border', 'blue', 'blue-soft', 'blue-border',
+      'amber', 'amber-soft', 'amber-border', 'amber-ink', 'accent', 'accent2', 'accent-soft', 'accent-border', 'on-accent', 'surface-solid', 'shadow-card'];
+    [['dark', pilotDark, idxDark], ['light', pilotLight, idxLight]].forEach(([name, blk, idx]) => {
+      const own = decls(blk);
+      needed.forEach(n => assert.ok(own[n] !== undefined, name + ' --' + n + ' is not declared by the pilot'));
+      Object.keys(own).filter(n => n !== 'font-display').forEach(n => {
+        assert.ok(idx[n] !== undefined, name + ' --' + n + ' is not an index.html token');
+        assert.strictEqual(norm(follow(own, n)), norm(follow(idx, n)), name + ' --' + n);
+      });
+    });
+    // the dark green was the one out: #4CAF50 is 5.46:1 on its soft fill, the app's #43D193 is 7.79:1
+    assert.strictEqual(hex(pilotDark, 'green'), '#43D193');
+    assert.strictEqual(f2(ratio(rgb('#4CAF50'), rgb(hex(pilotDark, 'green-soft')))), '5.46');
+    assert.strictEqual(f2(ratio(rgb(hex(pilotDark, 'green')), rgb(hex(pilotDark, 'green-soft')))), '7.79');
+    // the font is the exception on purpose: the page's CSP allows no font source beyond 'self' and data:, and the page links no web font
+    assert.ok(pilot.includes("font-src 'self' data:") && pilot.includes("--font-display:-apple-system,BlinkMacSystemFont,'Inter'"));
+    assert.strictEqual(pilot.includes('fonts.googleapis.com'), false);
+  });
+
+  test('p280 item 1 - the pilot page loads its script with the app version as the ?v= value (it read 2.67 and a build stamp through v2.79), and check-release.js fails a release that leaves it behind', () => {
+    const { pilot } = p280;
+    const version = /const APP_VERSION = 'v([\d.]+)';/.exec(appSrc)[1];
+    assert.deepStrictEqual(pilot.match(/<script\b[^>]*>/g), ['<script src="./Worker/decision-notes-pilot.js?v=' + version + '">']);
+    assert.strictEqual(pilot.includes('build='), false);
+    assert.ok(indexSrc.includes('<script src="Worker/app.js?v=' + version + '"></script>'));              // the same ?v= as the app's own script tag
+    // the guard really fails: run check-release.js against a copy of the release files whose pilot tag is current, stale, or missing
+    const cp = require('child_process'), os = require('os');
+    const root = path.join(__dirname, '..');
+    const runCheck = pilotHtml => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kjr-release-'));
+      try {
+        fs.mkdirSync(path.join(dir, 'Worker'));
+        fs.mkdirSync(path.join(dir, 'tests'));
+        ['index.html', 'sw.js'].forEach(f => fs.copyFileSync(path.join(root, f), path.join(dir, f)));
+        fs.copyFileSync(path.join(root, 'Worker', 'app.js'), path.join(dir, 'Worker', 'app.js'));
+        fs.writeFileSync(path.join(dir, 'Worker', 'decision-notes-pilot.js'), '');
+        ['check-release.js', 'tests.html'].forEach(f => fs.copyFileSync(path.join(root, 'tests', f), path.join(dir, 'tests', f)));
+        fs.writeFileSync(path.join(dir, 'decision-notes-pilot.html'), pilotHtml);
+        return cp.spawnSync(process.execPath, [path.join(dir, 'tests', 'check-release.js')], { encoding: 'utf8' });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    };
+    const current = runCheck(pilot);
+    assert.strictEqual(current.status, 0, current.stdout + current.stderr);
+    assert.ok(current.stdout.includes('decision-notes-pilot.html script "./Worker/decision-notes-pilot.js?v=' + version + '" matches APP_VERSION "v' + version + '"'));
+    const stale = runCheck(pilot.replace('?v=' + version + '"', '?v=2.67&amp;build=1790096102"'));
+    assert.strictEqual(stale.status, 1);
+    assert.ok(stale.stderr.includes('decision-notes-pilot.html loads "./Worker/decision-notes-pilot.js?v=2.67&amp;build=1790096102" but Worker/app.js APP_VERSION is "v' + version + '"'), stale.stderr);
+    const missing = runCheck(pilot.replace(/<script\b[^>]*><\/script>/, ''));
+    assert.strictEqual(missing.status, 1);
+    assert.ok(missing.stderr.includes('should load Worker/decision-notes-pilot.js exactly once, found 0'), missing.stderr);
+  });
+
+  test('p280 item 2 - the monogram letter clears 4.5:1 on its tint over --bg3, the surface of a hovered row, a pressed phone row and the active palette option, for all six classes in both themes and at rest (light was 4.27 to 4.31:1, dark stocks 4.28 and CPF 4.42)', () => {
+    const { rgb, ratio, over, light, dark, hex, surfaces, rules, f2, classes, inkRgb } = p280;
+    // the premise: those three states all paint --bg3, as a flat opaque fill
+    const fill = sel => { const r = rules.find(o => o.sel === sel); assert.ok(r, sel + ' rule missing'); const m = /(^|;)background(?:-color)?:([^;]+)/.exec(r.body); assert.ok(m, sel + ' paints no background'); return m[2].trim(); };
+    ['.dash-hrow:hover', '.hl-row:active', '.cp-opt[aria-selected="true"]'].forEach(sel => assert.strictEqual(fill(sel), 'var(--bg3)', sel));
+    assert.ok(indexSrc.includes('@media (hover:hover){.dash-hrow:hover{background:var(--bg3)}}'));
+    assert.ok(indexSrc.includes('@media (hover:none){.hl-row:active{background-color:var(--bg3);--text3:var(--text2)}}'));
+    assert.ok(/^#[0-9a-f]{6}$/i.test(hex(light, 'bg3')) && /^#[0-9a-f]{6}$/i.test(hex(dark, 'bg3')));
+    // a monogram's tint is 16% of its class colour over the surface under it: the page, a card, the holding panel and palette, or the hovered row
+    const SURFACES = [['bg', 'the page'], ['bg2', 'a card'], ['surface-solid', 'the panel and palette'], ['bg3', 'a hovered row or active option']];
+    const raw = (blk, inks) => { const s = surfaces(blk), t = {}; SURFACES.forEach(([n]) => { t[n] = classes.map((k, i) => ratio(inks[i], over(rgb(hex(blk, 'c-' + k)), 0.16, s[n]))); }); return t; };
+    const pins = t => { const o = {}; SURFACES.forEach(([n]) => { o[n] = t[n].map(f2); }); return o; };
+    const V279 = ['#3558CB', '#5A6677', '#6A49C9', '#835E22', '#A54529', '#93477D'].map(rgb);                // the v2.79 light inks
+    const beforeL = raw(light, V279), beforeD = raw(dark, classes.map(k => rgb(hex(dark, 'c-' + k))));      // v2.79 dark: the ink was the class colour
+    const afterL = raw(light, classes.map(k => inkRgb(light, k))), afterD = raw(dark, classes.map(k => inkRgb(dark, k)));
+    // before: the hover and active surface was under 4.5:1 for every light class and for dark stocks and CPF, and every other surface was fine
+    assert.deepStrictEqual(pins(beforeL), { bg: ['4.53', '4.52', '4.55', '4.54', '4.55', '4.52'], bg2: ['4.94', '4.92', '4.96', '4.95', '4.96', '4.93'], 'surface-solid': ['4.94', '4.92', '4.96', '4.95', '4.96', '4.93'], bg3: ['4.28', '4.28', '4.30', '4.30', '4.31', '4.27'] });
+    assert.deepStrictEqual(pins(beforeD), { bg: ['5.41', '6.86', '5.58', '7.42', '5.91', '5.90'], bg2: ['4.88', '6.17', '5.04', '6.68', '5.36', '5.33'], 'surface-solid': ['4.91', '6.21', '5.07', '6.73', '5.39', '5.37'], bg3: ['4.28', '5.40', '4.42', '5.87', '4.72', '4.69'] });
+    beforeL.bg3.forEach((r, i) => assert.ok(r < 4.5, 'old light ' + classes[i]));
+    assert.deepStrictEqual(beforeD.bg3.map((r, i) => r < 4.5 ? classes[i] : null).filter(Boolean), ['stocks', 'cpf']);
+    // after: every class clears 4.5:1 on every surface, in both themes
+    assert.deepStrictEqual(pins(afterL), { bg: ['4.83', '4.81', '4.83', '4.84', '4.86', '4.81'], bg2: ['5.27', '5.24', '5.27', '5.26', '5.30', '5.25'], 'surface-solid': ['5.27', '5.24', '5.27', '5.26', '5.30', '5.25'], bg3: ['4.56', '4.55', '4.56', '4.58', '4.60', '4.55'] });
+    assert.deepStrictEqual(pins(afterD), { bg: ['5.77', '6.86', '5.96', '7.42', '5.91', '5.90'], bg2: ['5.20', '6.17', '5.38', '6.68', '5.36', '5.33'], 'surface-solid': ['5.24', '6.21', '5.41', '6.73', '5.39', '5.37'], bg3: ['4.57', '5.40', '4.72', '5.87', '4.72', '4.69'] });
+    [['light', afterL], ['dark', afterD]].forEach(([theme, t]) => SURFACES.forEach(([n, what]) => t[n].forEach((r, i) => assert.ok(r >= 4.5, theme + ' ' + classes[i] + ' on ' + what + ' ' + r.toFixed(3)))));
+    // the rule behind the numbers: a light ink is the v2.79 ink at 96% (still a darker step of its class colour), dark stocks and CPF sit 6% of the way to white, the other four dark inks are unchanged
+    classes.forEach((k, i) => assert.deepStrictEqual(inkRgb(light, k), V279[i].map(c => Math.round(c * 0.96)), k));
+    classes.forEach(k => inkRgb(light, k).forEach((c, ch) => assert.ok(c <= rgb(hex(light, 'c-' + k))[ch], k + ' channel ' + ch)));
+    ['stocks', 'cpf'].forEach(k => assert.deepStrictEqual(inkRgb(dark, k), rgb(hex(dark, 'c-' + k)).map(v => Math.round(v + (255 - v) * 0.06)), k));
+    ['cash', 're', 'crypto', 'insurance'].forEach(k => assert.strictEqual(hex(dark, 'c-' + k + '-ink'), 'var(--c-' + k + ')', k));
+    // the class colours themselves, and so the tints, swatches and chart colours, are untouched
+    [['stocks', '#3F62D4'], ['cash', '#7A889B'], ['cpf', '#7656D3'], ['re', '#B5822E'], ['crypto', '#CF5E3C'], ['insurance', '#A8508E']].forEach(([k, v]) => assert.strictEqual(hex(light, 'c-' + k), v, k));
+    [['stocks', '#7398FF'], ['cash', '#A9B6CA'], ['cpf', '#AB8DFB'], ['re', '#E2B66D'], ['crypto', '#EF8768'], ['insurance', '#D98BC2']].forEach(([k, v]) => assert.strictEqual(hex(dark, 'c-' + k), v, k));
+    // the comment in :root quotes the real figures
+    const sorted = a => a.map(f2).sort((x, y) => x - y);
+    const span = a => sorted(a)[0] + ' to ' + sorted(a)[5];
+    [
+      'light ' + span(afterL.bg3) + ':1 (' + span(beforeL.bg3) + ' before v2.80), dark ' + span(afterD.bg3) + ':1 (stocks was ' + f2(beforeD.bg3[0]) + ' and CPF ' + f2(beforeD.bg3[2]) + ')',
+      'light is ' + span(afterL.bg) + ':1, and ' + span(afterL.bg2) + ':1 over a card or the panel itself',
+      'A light ink is the v2.79 ink at 96%.',
+      'except stocks and CPF, which sit 6% of the way to white.'
+    ].forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+  });
+
+  test('p280 item 2 - the six monogram hues stay apart: each ink is within 2 degrees of the hue it replaces, and no two of the six are closer than 15 in CIE Lab (they were 17.2 and 18.9 at the closest, stocks and CPF)', () => {
+    const { rgb, light, dark, hex, classes, inkRgb } = p280;
+    const hue = c => {
+      const [r, g, b] = c.map(v => v / 255), mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+      if (d === 0) return 0;
+      const h = mx === r ? ((g - b) / d + (g < b ? 6 : 0)) : (mx === g ? (b - r) / d + 2 : (r - g) / d + 4);
+      return h * 60;
+    };
+    const gap = (a, b) => { const d = Math.abs(a - b); return Math.min(d, 360 - d); };
+    const lab = c => {
+      const f = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      const [r, g, b] = c.map(f);
+      const t = v => v > 0.008856 ? Math.cbrt(v) : 7.787 * v + 16 / 116;
+      const x = t((0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047), y = t(0.2126729 * r + 0.7151522 * g + 0.072175 * b), z = t((0.0193339 * r + 0.119192 * g + 0.9503041 * b) / 1.08883);
+      return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+    };
+    const closest = inks => { let m = Infinity; for (let i = 0; i < inks.length; i++) for (let j = i + 1; j < inks.length; j++) m = Math.min(m, Math.hypot(...lab(inks[i]).map((v, n) => v - lab(inks[j])[n]))); return m; };
+    const V279 = ['#3558CB', '#5A6677', '#6A49C9', '#835E22', '#A54529', '#93477D'].map(rgb);
+    const oldD = classes.map(k => rgb(hex(dark, 'c-' + k)));
+    const newL = classes.map(k => inkRgb(light, k)), newD = classes.map(k => inkRgb(dark, k));
+    classes.forEach((k, i) => {
+      assert.ok(gap(hue(newL[i]), hue(V279[i])) <= 2, 'light ' + k + ' hue moved ' + gap(hue(newL[i]), hue(V279[i])).toFixed(1));
+      assert.ok(gap(hue(newD[i]), hue(oldD[i])) <= 2, 'dark ' + k + ' hue moved ' + gap(hue(newD[i]), hue(oldD[i])).toFixed(1));
+    });
+    assert.ok(closest(V279) > 17 && closest(oldD) > 18.5);
+    assert.ok(closest(newL) >= 15 && closest(V279) - closest(newL) < 1.5, 'light closest pair ' + closest(newL).toFixed(1));
+    assert.ok(closest(newD) >= 15 && closest(oldD) - closest(newD) < 1.5, 'dark closest pair ' + closest(newD).toFixed(1));
+  });
+
+  test('p280 item 3 - v2.80 is in every place that carries the version: the constants, the cache name, each pre-cached script, the page and browser-test script tags, the pilot tag and the QA runbook line', () => {
+    const { pilot } = p280;
+    const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
+    const testsHtml = fs.readFileSync(path.join(__dirname, 'tests.html'), 'utf8');
+    const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
+    assert.ok(appSrc.includes("const APP_VERSION = 'v2.80';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.80 (12 Oct)';"));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.80';"));
+    const assets = Array.from(/CORE_ASSETS = \[([\s\S]*?)\];/.exec(sw)[1].matchAll(/'(\.\/Worker\/[\w.-]+\.js)\?v=([\d.]+)'/g));
+    assert.strictEqual(assets.length, 7);                                                                  // app, core, sortable, vault, migration, supabase, nas
+    assets.forEach(m => assert.strictEqual(m[2], '2.80', m[1]));
+    const tags = Array.from(indexSrc.matchAll(/<script src="(Worker\/[\w.-]+\.js)\?v=([\d.]+)"><\/script>/g));
+    assert.deepStrictEqual(tags.map(m => './' + m[1]).sort(), assets.map(m => m[1]).sort());               // the page loads exactly what the worker pre-caches
+    tags.forEach(m => assert.strictEqual(m[2], '2.80', m[1]));
+    assert.ok(testsHtml.includes('<script src="../Worker/kjr-sortable.js?v=2.80"></script>'));
+    assert.ok(pilot.includes('<script src="./Worker/decision-notes-pilot.js?v=2.80"></script>'));
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 12/10/2026 (app v2.80).'));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

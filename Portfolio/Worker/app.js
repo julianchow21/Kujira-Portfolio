@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.79';
-const APP_DISPLAY_VERSION = 'v2.79 (12 Oct)';
+const APP_VERSION = 'v2.80';
+const APP_DISPLAY_VERSION = 'v2.80 (12 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -2476,6 +2476,27 @@ async function safeJson(resp){
    schemaVersion, version. */
 const _DIVERGENCE_TABLES = ['stocks','stockTxns','watchlist','crypto','realestate','cash','cashTxns',
   'cpfBalances','cpfHistory','income','expenses','snapshots','categories','settings','trash','insurance','insuranceRiders'];
+/* A Watchlist row with its target as the load sanitiser holds it. Since v2.79
+   _sanitiseList reads a present target through _wlTarget on every load
+   (mergeDefaults, so loadLocal, pullFromRemote and the cross-tab merge): zero
+   or below, blank, spaces or not a number is null, a numeric string is its
+   number, absent stays absent and null stays null. That is the one load-time
+   coercion that changes what a stored value IS, not only its type, so a cloud
+   blob written before v2.79 still holds 0, '' or -5 where the local copy
+   loaded null, and until the first push after the upgrade the raw remote
+   looked like a different edit (a false conflict modal, no data at risk).
+   _divergenceSnapshot reads both sides through here, the same rule under the
+   same guard as _sanitiseList, so two targets compare equal exactly when they
+   would be identical after a pull, and a different real target (250 vs 300,
+   250 vs none) still differs. Nothing else is touched: every other field and
+   table compares exactly as before. Pure: a copy only when the target changes. */
+function _wlTargetAsLoaded(row){
+  if (!row || typeof row !== 'object') return row;
+  const v = row.targetPrice;
+  if (v === undefined || v === null) return row;
+  const t = _wlTarget(row);
+  return t === v ? row : Object.assign({}, row, { targetPrice: t });
+}
 function _divergenceSnapshot(obj){
   const src = obj || {};
   const out = {};
@@ -2490,6 +2511,9 @@ function _divergenceSnapshot(obj){
     });
     delete out.settings.fxRates.lastUpdated;
   }
+  // Watchlist targets as they load (see _wlTargetAsLoaded). A new array, the
+  // caller's rows are never written to.
+  if (Array.isArray(out.watchlist)) out.watchlist = out.watchlist.map(_wlTargetAsLoaded);
   return JSON.stringify(out);
 }
 function _isMaterialDivergence(localObj, remoteObj){

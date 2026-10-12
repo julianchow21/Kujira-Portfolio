@@ -14,6 +14,8 @@ const INDEX_HTML_PATH = path.join(ROOT, 'index.html');
 const SW_JS_PATH = path.join(ROOT, 'sw.js');
 const APP_JS_PATH = path.join(ROOT, 'Worker', 'app.js');
 const TESTS_HTML_PATH = path.join(__dirname, 'tests.html');
+const PILOT_HTML_PATH = path.join(ROOT, 'decision-notes-pilot.html');
+const PILOT_JS_PATH = path.join(ROOT, 'Worker', 'decision-notes-pilot.js');
 
 let failures = 0;
 function fail(msg) {
@@ -28,6 +30,7 @@ const indexHtml = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
 const swJs = fs.readFileSync(SW_JS_PATH, 'utf8');
 const appJs = fs.readFileSync(APP_JS_PATH, 'utf8');
 const testsHtml = fs.readFileSync(TESTS_HTML_PATH, 'utf8');
+const pilotHtml = fs.readFileSync(PILOT_HTML_PATH, 'utf8');
 
 /* ─── 1. Every local <script src> in index.html appears verbatim in sw.js
    CORE_ASSETS. "Local" excludes absolute URLs (the Chart.js CDN tag), which
@@ -114,6 +117,39 @@ const testsHtml = fs.readFileSync(TESTS_HTML_PATH, 'utf8');
   } else {
     pass('tests.html sortable script matches index.html: "' + indexMatch[1] + '"');
   }
+})();
+
+/* ─── 1d. The decision-notes pilot page is in neither index.html nor sw.js
+   CORE_ASSETS, so the checks above never see its script tag. It loads
+   Worker/decision-notes-pilot.js with a ?v= value, and that value must be
+   this release's version (APP_VERSION without its leading v, the way
+   index.html writes its own). Otherwise a returning visitor keeps the cached
+   pilot script of an older release. The tag read ?v=2.67&build=... until
+   v2.79. ────────────────────────────────────────────────────────────── */
+(function checkPilotAsset() {
+  const appVersionMatch = appJs.match(/const\s+APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
+  if (!appVersionMatch) {
+    fail('could not find APP_VERSION in Worker/app.js');
+    return;
+  }
+  const expected = './Worker/decision-notes-pilot.js?v=' + appVersionMatch[1].replace(/^v/, '');
+  const tags = [];
+  const tagRe = /<script\s+[^>]*src=["']([^"']*decision-notes-pilot\.js[^"']*)["'][^>]*>/gi;
+  let m;
+  while ((m = tagRe.exec(pilotHtml))) tags.push(m[1]);
+  if (tags.length !== 1) {
+    fail('decision-notes-pilot.html should load Worker/decision-notes-pilot.js exactly once, found ' + tags.length + ' script tag(s)');
+    return;
+  }
+  if (tags[0] !== expected) {
+    fail(
+      'decision-notes-pilot.html loads "' + tags[0] + '" but Worker/app.js APP_VERSION is "' + appVersionMatch[1] + '". ' +
+      'Expected "' + expected + '". Bump it with the other script tags every deploy.'
+    );
+  } else {
+    pass('decision-notes-pilot.html script "' + tags[0] + '" matches APP_VERSION "' + appVersionMatch[1] + '"');
+  }
+  if (!fs.existsSync(PILOT_JS_PATH)) fail('Worker/decision-notes-pilot.js does not exist, but decision-notes-pilot.html loads it');
 })();
 
 /* ─── 2. sw.js CACHE_NAME equals 'kjr-portfolio-' + APP_VERSION. ────────

@@ -59,8 +59,8 @@
   /* Asset-class roles: one colour per class across cards, bars and charts.
      Soft tints resolve per theme because they reference the class token. */
   --c-stocks:#3F62D4;--c-cash:#7A889B;--c-cpf:#7656D3;--c-re:#B5822E;--c-crypto:#CF5E3C;--c-insurance:#A8508E;
-  /* Ink variants: the class colours darkened for small coloured text (monogram letters). The dark theme reuses the class colour as it is. Each light ink is 4.5:1 or better on its own 16% tint over the plain page colour --bg (4.52 to 4.55:1, it was 4.30 to 4.48 before v2.79), which is what a flat reading sees under the holding panel's solid layer, and 4.92 to 4.96:1 over a card or the panel itself. */
-  --c-stocks-ink:#3558CB;--c-cash-ink:#5A6677;--c-cpf-ink:#6A49C9;--c-re-ink:#835E22;--c-crypto-ink:#A54529;--c-insurance-ink:#93477D;
+  /* Ink variants: the class colours stepped away from the surface for small coloured text (monogram letters). Each ink is 4.5:1 or better on its own 16% tint over every surface a monogram sits on. The tightest is the --bg3 tint of a hovered row (.dash-hrow), a pressed phone row (.hl-row) and the active palette option (.cp-opt): light 4.55 to 4.60:1 (4.27 to 4.31 before v2.80), dark 4.57 to 5.87:1 (stocks was 4.28 and CPF 4.42). Over the plain page colour --bg, which is what a flat reading sees under the holding panel's solid layer, light is 4.81 to 4.86:1, and 5.24 to 5.30:1 over a card or the panel itself. A light ink is the v2.79 ink at 96%. The dark theme reuses the class colour as it is, except stocks and CPF, which sit 6% of the way to white. */
+  --c-stocks-ink:#3354C3;--c-cash-ink:#566272;--c-cpf-ink:#6646C1;--c-re-ink:#7E5A21;--c-crypto-ink:#9E4227;--c-insurance-ink:#8D4478;
   --c-stocks-soft:color-mix(in srgb,var(--c-stocks) 16%,transparent);
   --c-cash-soft:color-mix(in srgb,var(--c-cash) 16%,transparent);
   --c-cpf-soft:color-mix(in srgb,var(--c-cpf) 16%,transparent);
@@ -96,7 +96,7 @@ html.dark{
   --gain:#43D193;--loss:#F2707A;--gain-soft:rgba(67,209,147,0.12);--loss-soft:rgba(242,112,122,0.12);
   --green-soft:#152a20;--green-border:#243a2e;
   --c-stocks:#7398FF;--c-cash:#A9B6CA;--c-cpf:#AB8DFB;--c-re:#E2B66D;--c-crypto:#EF8768;--c-insurance:#D98BC2;
-  --c-stocks-ink:var(--c-stocks);--c-cash-ink:var(--c-cash);--c-cpf-ink:var(--c-cpf);--c-re-ink:var(--c-re);--c-crypto-ink:var(--c-crypto);--c-insurance-ink:var(--c-insurance);
+  --c-stocks-ink:#7B9EFF;--c-cash-ink:var(--c-cash);--c-cpf-ink:#B094FB;--c-re-ink:var(--c-re);--c-crypto-ink:var(--c-crypto);--c-insurance-ink:var(--c-insurance);
   --blue:#4a9eff;--blue-soft:#101f33;--blue-border:#1a2f43;
   --amber:#F0C36D;--amber-soft:#2a2213;--amber-border:#3a3220;
   --amber-ink:var(--amber);
@@ -2284,12 +2284,12 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.79"></script>
-<script src="Worker/kjr-sortable.js?v=2.79"></script>
-<script src="Worker/kjr-vault.js?v=2.79"></script>
-<script src="Worker/kjr-migration.js?v=2.79"></script>
-<script src="Worker/supabase.js?v=2.79"></script>
-<script src="Worker/kjr-nas.js?v=2.79"></script>
-<script src="Worker/app.js?v=2.79"></script>
+<script src="Worker/kjr-core.js?v=2.80"></script>
+<script src="Worker/kjr-sortable.js?v=2.80"></script>
+<script src="Worker/kjr-vault.js?v=2.80"></script>
+<script src="Worker/kjr-migration.js?v=2.80"></script>
+<script src="Worker/supabase.js?v=2.80"></script>
+<script src="Worker/kjr-nas.js?v=2.80"></script>
+<script src="Worker/app.js?v=2.80"></script>
 </body>
 </html>
