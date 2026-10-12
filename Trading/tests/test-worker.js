@@ -1,5 +1,5 @@
 // Trading v-tests: zero-dependency Node test suite for
-// "Trading/Worker/MU Yahoo Worker v3 (13 Jun).js" (the Cloudflare Worker proxy).
+// "Trading/Worker/Yahoo Worker.js" (the Cloudflare Worker proxy).
 // House style: plain Node, tiny assert helpers, PASS/FAIL per test, summary count,
 // non-zero exit on failure, no npm dependencies. Mirrors Portfolio/tests/test-core.js.
 //
@@ -17,7 +17,7 @@ const vm = require('vm');
 const assert = require('assert');
 const { webcrypto } = require('crypto');
 
-const SRC_PATH = path.join(__dirname, '..', 'Worker', 'MU Yahoo Worker v3 (13 Jun).js');
+const SRC_PATH = path.join(__dirname, '..', 'Worker', 'Yahoo Worker.js');
 const TRADING_HTML_PATH = path.join(__dirname, '..', 'index.html');
 const src = fs.readFileSync(SRC_PATH, 'utf8');
 const tradingSrc = fs.readFileSync(TRADING_HTML_PATH, 'utf8');

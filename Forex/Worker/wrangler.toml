@@ -2,7 +2,7 @@
 # Billing stays disabled unless an operator supplies all explicit test-mode
 # secrets and vars. Never put Stripe or Supabase server secrets in this file.
 name = "kjr-forex-stripe"
-main = "Stripe Webhook Worker v0 (1 Aug).js"
+main = "Stripe Webhook.js"
 compatibility_date = "2026-08-01"
 
 # Required server-only secrets, set with `wrangler secret put` in the target

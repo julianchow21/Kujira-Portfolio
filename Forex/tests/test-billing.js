@@ -10,7 +10,7 @@ const vm = require('vm');
 const { webcrypto } = require('crypto');
 const { TextEncoder, TextDecoder } = require('util');
 
-const WORKER_PATH = path.join(__dirname, '..', 'Worker', 'Stripe Webhook Worker v0 (1 Aug).js');
+const WORKER_PATH = path.join(__dirname, '..', 'Worker', 'Stripe Webhook.js');
 const source = fs.readFileSync(WORKER_PATH, 'utf8');
 const workerCode = source.replace('export default {', 'const workerDefault = {')
   + '\nthis.workerDefault = workerDefault;\n';

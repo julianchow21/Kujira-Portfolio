@@ -1,6 +1,6 @@
 // ===========================================================================
 // NYSE holidays and half-days — SINGLE source of truth, shared by:
-//   - the Cloudflare Worker (esm import, see MU Yahoo Worker v3 isMarketWindow)
+//   - the Cloudflare Worker (esm import, see Yahoo Worker.js isMarketWindow)
 //   - the dashboard frontend (loaded as a module script in index.html that
 //     assigns window.KjrNyse; the market clock reads it lazily)
 // Extend these lists with the next year's dates before 2028 lapses, otherwise

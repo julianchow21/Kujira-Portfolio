@@ -57,7 +57,7 @@ Ported from Investment Tracker: `--bg/bg2/bg3/bg4`, `--green` (gains) / `--red` 
 ## Files
 
 - `index.html`, the dashboard (runtime name)
-- `Worker/`, Cloudflare Worker proxy (`MU Yahoo Worker v3 (13 Jun).js`) plus the optional Apps Script chart-action snippet
+- `Worker/`, Cloudflare Worker proxy (`Yahoo Worker.js`) plus the optional Apps Script chart-action snippet (`Chart Action.js`)
 - `Docs/`, point-in-time reports and specs (disposable once actioned)
 
 ## Hosting
