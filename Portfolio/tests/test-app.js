@@ -8999,7 +8999,7 @@ async function runTests(){
     assert.strictEqual((appSrc.match(/createNasClient\(/g) || []).length, 2);                                   // its definition and its one call, in createNasController, after the gate above
     assert.ok(extractFunction('createNasController').indexOf('NAS_RELEASE_ENABLED') < extractFunction('createNasController').indexOf('createNasClient(config)'));
     assert.ok(fs.existsSync(path.join(__dirname, '..', 'Supabase', 'schema.sql')) && fs.existsSync(path.join(__dirname, '..', 'NAS', 'compose.overlay.yml')));
-    // the QA runbook: the Last updated line moves to this release (the version is read from APP_VERSION, so a release that forgets it fails, and the date is pinned in the newest block, p282 item 6), the measured line keeps the version the numbers were measured on
+    // the QA runbook: the Last updated line moves to this release (the version is read from APP_VERSION, so a release that forgets it fails, and the date is pinned in the newest block, p283 item 5), the measured line keeps the version the numbers were measured on
     assert.ok(new RegExp('Supersedes `QA SOP v1 \\(4 Jun\\)`\\. Last updated: \\d{2}/\\d{2}/\\d{4} \\(app ' + /const APP_VERSION = '(v[\d.]+)';/.exec(appSrc)[1].replace(/\./g, '\\.') + '\\)\\.').test(sop));
     assert.ok(sop.includes('Measured on 11/10/2026 against app v2.77 with the step 3 seed'));
     // the pilot page: no hand-kept version beside the badge (it said v2.67 through v2.78), and the rest of the header is as it was
@@ -9349,7 +9349,7 @@ async function runTests(){
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
     const testsHtml = fs.readFileSync(path.join(__dirname, 'tests.html'), 'utf8');
     const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    const version = /const APP_VERSION = 'v(\d+\.\d+)';/.exec(appSrc)[1];                                  // the release number itself is pinned in the newest block (p282 item 6), so this test needs no edit per release
+    const version = /const APP_VERSION = 'v(\d+\.\d+)';/.exec(appSrc)[1];                                  // the release number itself is pinned in the newest block (p283 item 5), so this test needs no edit per release
     assert.ok(appSrc.includes("const APP_DISPLAY_VERSION = 'v" + version + " ("));
     assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v" + version + "';"));
     const assets = Array.from(/CORE_ASSETS = \[([\s\S]*?)\];/.exec(sw)[1].matchAll(/'(\.\/Worker\/[\w.-]+\.js)\?v=([\d.]+)'/g));
@@ -9450,7 +9450,7 @@ async function runTests(){
     assert.ok(fn.includes("warn.textContent = 'Warning: CPF, tax and holiday constants last verified for ' + CONSTANTS_VERIFIED_FOR + '. Verify against CPF Board, IRAS and MOM before trusting '"));
   });
 
-  test('p281 item 5 - the constants, the cache name and the QA runbook line agree on one version (the release number itself is pinned in the newest block, p282 item 6, and p280 item 3 holds every other place to APP_VERSION)', () => {
+  test('p281 item 5 - the constants, the cache name and the QA runbook line agree on one version (the release number itself is pinned in the newest block, p283 item 5, and p280 item 3 holds every other place to APP_VERSION)', () => {
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
     const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
     const version = /const APP_VERSION = 'v(\d+\.\d+)';/.exec(appSrc)[1];
@@ -9577,12 +9577,13 @@ async function runTests(){
     ['id="nas-auth-signout" data-click="signOutNas" hidden', 'id="nas-readonly-escape" data-click="openLegacyReadonlyEscape" hidden'].forEach(frag => assert.ok(indexSrc.includes(frag), frag));
   });
 
-  test('p282 item 6 - this release is v2.82 (13 Oct): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
+  test('p282 item 6 - the constants, the cache name and the QA runbook line agree on one version (the release number itself is pinned in the newest block, p283 item 5, and p280 item 3 holds every other place to APP_VERSION)', () => {
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
     const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    assert.ok(appSrc.includes("const APP_VERSION = 'v2.82';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.82 (13 Oct)';"));
-    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.82';"));
-    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 13/10/2026 (app v2.82).'));
+    const version = /const APP_VERSION = 'v(\d+\.\d+)';/.exec(appSrc)[1];
+    assert.ok(appSrc.includes("const APP_DISPLAY_VERSION = 'v" + version + " ("));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v" + version + "';"));
+    assert.ok(sop.includes('(app v' + version + ').'));
   });
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -9682,6 +9683,82 @@ async function runTests(){
     assert.strictEqual(el.hidden, false);
     assert.ok(/disabled pending local durability and cancellation review/.test(copy.textContent), copy.textContent);
     assert.strictEqual(/sign[ -]?in/i.test(copy.textContent), false);
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     p283, v2.83 hidden buttons, a nameless cross and two clipped previews: a .btn with the hidden attribute stayed on screen because .btn sets display (the NAS conflict panel
+     showed Retry queued sync beside its three choices), the Chart Builder's chip remove button was a bare cross to a screen reader, and the IBKR and insurance import previews
+     cut off their last column (the dup tick box, the Premium) because the holdings grid's 760px floor is wider than the modal's table wrapper. The stylesheet and the sources
+     are read as text and the chip renderer is run. Every test name starts with p283 item.
+     ═══════════════════════════════════════════════════════════════════════ */
+  test('p283 item 1 - a hidden .btn hides: .btn sets display, which beats the browser\'s own [hidden] rule, so .btn[hidden] (0,2,0) sets display:none after it, no other rule gives a .btn a display, and the NAS conflict panel\'s four toggled buttons are the ones it fixes', () => {
+    const { rules, body, specificity } = p278;
+    const sels = rules.map(r => r.sel);
+    // the cause: the base rule sets a display, and an author rule beats the browser's [hidden] whatever its specificity
+    assert.ok(/(^|;)display:inline-flex(;|$)/.test(body('.btn')));
+    // the fix: one rule, more specific than .btn and later in the sheet, so specificity and source order both win
+    assert.strictEqual(body('.btn[hidden]'), 'display:none');
+    assert.deepStrictEqual(specificity('.btn'), [0, 1, 0]);
+    assert.deepStrictEqual(specificity('.btn[hidden]'), [0, 2, 0]);
+    assert.ok(sels.indexOf('.btn[hidden]') > sels.lastIndexOf('.btn'));
+    // nothing else gives a .btn a display (.btn-sm and the other variants are other classes), so no later or stronger rule can show a hidden one again
+    assert.deepStrictEqual(rules.filter(r => /\.btn(?![\w-])/.test(r.sel) && /(^|;)display:/.test(r.body)).map(r => r.sel), ['.btn', '.btn[hidden]']);
+    // the gate's own rule stays, p282 item 5 holds its body and specificity
+    assert.ok(sels.indexOf('#nas-auth-gate [hidden]') > -1);
+    // the buttons it fixes: the panel ships Retry hidden, and setNasConflictActions toggles hidden on all four of its .btn
+    assert.ok(indexSrc.includes('<button type="button" class="btn btn-primary" id="nas-retry-conflict" data-click="retryNasConflict" hidden>Retry queued sync</button>'));
+    const fn = extractFunction('setNasConflictActions');
+    ['keep.hidden = !active || _nasConflictRetryReady;', 'discard.hidden = !active || _nasConflictRetryReady;', 'restore.hidden = !active || _nasConflictRetryReady;', 'retry.hidden = !active || !_nasConflictRetryReady;']
+      .forEach(frag => assert.ok(fn.includes(frag), frag));
+    ['nas-rebase-pending', 'nas-discard-pending', 'nas-restore-recovery', 'nas-retry-conflict']
+      .forEach(id => assert.ok(new RegExp('<button type="button" class="btn[^"]*" id="' + id + '"').test(indexSrc), id));
+  });
+
+  test('p283 item 2 - each Chart Builder chip\'s remove button names itself "Remove <chip label>" (escaped for the attribute), the cross stays the visible mark, and the tooltip, handler and data attributes are as they were', () => {
+    // the markup in the source
+    const fn = extractFunction('pbRenderChips');
+    assert.ok(fn.includes('data-a1="${key}" title="Remove" aria-label="Remove ${kjrEscape(f.label)}">×</button>'));
+    // the renderer, run: a label with an ampersand, one without, and a key the field list no longer holds (its fallback label)
+    const sb = realEscape(freshSandbox());
+    const chips = { x:{ innerHTML:'' }, y:{ innerHTML:'' } }, holders = { x:{ style:{} }, y:{ style:{} } };
+    sb.document = { getElementById: id => ({ 'pb-x-chips':chips.x, 'pb-y-chips':chips.y, 'pb-x-placeholder':holders.x, 'pb-y-placeholder':holders.y })[id] || null };
+    sb.pbFields = () => ({ sector:{ label:'Sector' }, unrealPnl:{ label:'Unrealised P&L' }, pnlPct:{ label:'P&L %' } });
+    sb.pbState = { x:['sector'], y:['unrealPnl', 'pnlPct', 'retired'] };
+    vm.runInContext(fn, sb);
+    sb.pbRenderChips('x');
+    sb.pbRenderChips('y');
+    assert.strictEqual(chips.x.innerHTML, '<span class="cb-axis-chip">Sector<button data-click="pbRemoveField" data-a0="x" data-a1="sector" title="Remove" aria-label="Remove Sector">×</button></span>');
+    // &amp; is the attribute form, the browser reads it back as "Remove Unrealised P&L"
+    assert.deepStrictEqual(Array.from(chips.y.innerHTML.matchAll(/aria-label="([^"]*)"/g)).map(m => m[1]), ['Remove Unrealised P&amp;L', 'Remove P&amp;L %', 'Remove (?) retired']);
+    // every cross keeps its tooltip, its handler and its data attributes
+    assert.strictEqual((chips.y.innerHTML.match(/<button /g) || []).length, 3);
+    assert.strictEqual((chips.y.innerHTML.match(/<button data-click="pbRemoveField" data-a0="y" data-a1="[^"]*" title="Remove" aria-label="Remove [^"]*">×<\/button>/g) || []).length, 3);
+  });
+
+  test('p283 item 3 - the IBKR import preview table drops the holdings grid\'s 760px floor (min-width:0), so its Status column with the dup tick box is not cut off in the 666px wrapper, and the wrapper keeps its vertical cap and its sideways scroll', () => {
+    const fn = extractFunction('ibkrShowPreview');
+    assert.ok(fn.includes('<div class="tbl-wrap" style="max-height:340px;overflow-y:auto">\n          <table class="holdings" style="font-size:.8rem;min-width:0">'));
+    // the sideways scroll that remains for a phone comes from .tbl-wrap, which the inline style leaves alone
+    assert.ok(/(^|;)overflow-x:auto(;|$)/.test(p278.body('.tbl-wrap')));
+    // the column that was cut off is the last of seven, and it carries the dup tick box
+    assert.ok(fn.includes('<th>Shares</th><th>Price</th><th>Fees</th><th>Status</th>'));
+    assert.ok(fn.includes('data-ibkr-dup="${idx}"'));
+  });
+
+  test('p283 item 4 - the insurance import preview table drops the 760px floor too (min-width:0), so its Premium column is not cut off in the 606px wrapper, and its wrapper keeps its vertical cap and its sideways scroll', () => {
+    const fn = extractFunction('insuranceImportShowPreview');
+    assert.ok(fn.includes('<div class="tbl-wrap" style="max-height:320px;overflow-y:auto"><table class="holdings" style="font-size:.8rem;min-width:0">'));
+    assert.ok(/(^|;)overflow-x:auto(;|$)/.test(p278.body('.tbl-wrap')));
+    // the column that was cut off is the last of five
+    assert.ok(fn.includes('<th>Death cover</th><th>Premium</th></tr></thead>'));
+  });
+
+  test('p283 item 5 - this release is v2.83 (13 Oct): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
+    const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
+    const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
+    assert.ok(appSrc.includes("const APP_VERSION = 'v2.83';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.83 (13 Oct)';"));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.83';"));
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 13/10/2026 (app v2.83).'));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

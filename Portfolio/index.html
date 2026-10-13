@@ -370,6 +370,8 @@ tbody tr:first-child td{border-top:none}
 
 /* BUTTONS */
 .btn{padding:7px 14px;border-radius:var(--radius);border:1px solid var(--glass-border);background:var(--glass);cursor:pointer;font-size:13px;color:var(--text);transition:background 0.15s ease,border-color 0.15s ease,color 0.15s ease,box-shadow 0.15s ease;display:inline-flex;align-items:center;gap:6px;font-family:inherit;white-space:nowrap}
+/* .btn sets display, which beats the browser's own [hidden] rule, so a .btn with the hidden attribute stayed on screen (the NAS conflict panel showed Retry queued sync beside its three choices, and kept the choices once a retry was ready). This rule follows .btn and is the more specific, so every hidden .btn hides. */
+.btn[hidden]{display:none}
 @media (hover:hover){.btn:hover{background:var(--glass-strong)}}
 .btn:focus{outline:none}
 .btn:focus-visible{box-shadow:0 0 0 2px var(--accent)}
@@ -426,7 +428,7 @@ input::placeholder,textarea::placeholder{color:var(--text3);opacity:1}
 .backend-banner-readonly{border-color:var(--red-border);background:var(--red-soft);color:var(--red);font-weight:600}
 .backend-banner-nas{border-color:var(--accent-border);background:var(--accent-soft);color:var(--accent)}
 .nas-secret{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;user-select:text}
-/* The gate's footer buttons carry the hidden attribute, and .btn sets display, which beats the browser's own [hidden] rule, so the blocked gate showed Sign out and a dead Sign in. Scoped to the gate, so no other button changes. */
+/* The gate's footer buttons carry the hidden attribute, and .btn sets display, which beats the browser's own [hidden] rule, so the blocked gate showed Sign out and a dead Sign in. Scoped to the gate, and since v2.83 the general .btn[hidden] rule after .btn hides every other hidden button too. */
 #nas-auth-gate [hidden]{display:none}
 .modal{background:var(--glass-strong);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);width:100%;max-width:560px;max-height:90vh;max-height:calc(90vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));max-height:90dvh;max-height:calc(90dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,0.5),inset 0 1px 0 var(--glass-hi);display:flex;flex-direction:column}
 .modal-head{padding:16px 20px;border-bottom:1px solid var(--glass-border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
@@ -2295,12 +2297,12 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.82"></script>
-<script src="Worker/kjr-sortable.js?v=2.82"></script>
-<script src="Worker/kjr-vault.js?v=2.82"></script>
-<script src="Worker/kjr-migration.js?v=2.82"></script>
-<script src="Worker/supabase.js?v=2.82"></script>
-<script src="Worker/kjr-nas.js?v=2.82"></script>
-<script src="Worker/app.js?v=2.82"></script>
+<script src="Worker/kjr-core.js?v=2.83"></script>
+<script src="Worker/kjr-sortable.js?v=2.83"></script>
+<script src="Worker/kjr-vault.js?v=2.83"></script>
+<script src="Worker/kjr-migration.js?v=2.83"></script>
+<script src="Worker/supabase.js?v=2.83"></script>
+<script src="Worker/kjr-nas.js?v=2.83"></script>
+<script src="Worker/app.js?v=2.83"></script>
 </body>
 </html>
