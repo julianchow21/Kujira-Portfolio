@@ -382,6 +382,9 @@ tbody tr:first-child td{border-top:none}
 /* The hover is white on --red, 3.93:1 in dark, so the dark hover fill is --red2 (5.58:1), still a clear step from the soft resting fill. Light keeps --red (6.01:1). */
 @media (hover:hover){.btn-danger:hover{background:var(--red);color:#fff}:where(html.dark) .btn-danger:hover{background:var(--red2)}}
 .btn-sm{padding:4px 10px;font-size:12px}
+/* A button's leading icon is the sidebar's own drawing, 14px beside the 13px label and 13px in .btn-sm beside 12px, the sizes .tb-add and the theme switch use. The stroke is currentColor, so the icon takes the button's idle, hover and disabled colours. */
+.btn svg{width:14px;height:14px;flex:none}
+.btn-sm svg{width:13px;height:13px}
 .btn-ghost{background:transparent;border-color:transparent}
 @media (hover:hover){.btn-ghost:hover{background:color-mix(in srgb,var(--text) 7%,transparent);border-color:transparent}}
 
@@ -401,6 +404,8 @@ textarea.fi{resize:vertical;min-height:70px}
 input::placeholder,textarea::placeholder{color:var(--text3);opacity:1}
 :where(html.dark) input::placeholder,:where(html.dark) textarea::placeholder{color:var(--text2)}
 .hint{font-size:12px;color:var(--text3);line-height:1.5}
+/* An icon set in a line of text (the warning before a notice, the play mark in a step) is 1em square on the text's baseline. Its stroke is currentColor, so it takes the line's colour and clears the contrast the text does (amber ink is 4.25:1 on the light modal, so the icon adds no colour of its own). An icon standing alone, a table cell or a column flag, sits in a span.ico-warn with role="img" and its own aria-label. */
+.ico{width:1em;height:1em;vertical-align:-0.15em;flex:none}
 
 /* EMPTY STATE */
 .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:64px 20px;text-align:center;color:var(--text3)}
@@ -421,6 +426,8 @@ input::placeholder,textarea::placeholder{color:var(--text3);opacity:1}
 .backend-banner-readonly{border-color:var(--red-border);background:var(--red-soft);color:var(--red);font-weight:600}
 .backend-banner-nas{border-color:var(--accent-border);background:var(--accent-soft);color:var(--accent)}
 .nas-secret{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;user-select:text}
+/* The gate's footer buttons carry the hidden attribute, and .btn sets display, which beats the browser's own [hidden] rule, so the blocked gate showed Sign out and a dead Sign in. Scoped to the gate, so no other button changes. */
+#nas-auth-gate [hidden]{display:none}
 .modal{background:var(--glass-strong);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);width:100%;max-width:560px;max-height:90vh;max-height:calc(90vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));max-height:90dvh;max-height:calc(90dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,0.5),inset 0 1px 0 var(--glass-hi);display:flex;flex-direction:column}
 .modal-head{padding:16px 20px;border-bottom:1px solid var(--glass-border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .modal-head h3{font-size:15px;font-weight:600}
@@ -989,6 +996,8 @@ tfoot .totals-row td{border-top:2px solid var(--border);font-weight:700}
 .kjr-drag-handle:hover{filter:brightness(1.1)}
 .kjr-drag-handle:active{cursor:grabbing}
 .kjr-drag-handle:focus-visible,.kjr-arrange-move:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+/* The grip is the sidebar-style drawing at the 15px the trigram glyph had, centred by the handle's own flex box. */
+.kjr-drag-handle svg{width:15px;height:15px;flex:none}
 /* The move buttons are a keyboard and click alternative to pointer dragging.
    The existing direct-handle form stays supported while the dashboard renders
    into the controls wrapper in arrange mode. */
@@ -1399,10 +1408,10 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
   <!-- WATCHLIST+ BOARD, Yahoo-style customisable view over the watchlist tickers -->
   <section class="page" id="page-board">
     <div class="page-head">
-      <div class="ph-text"><h2 class="page-title">Watchlist+</h2><div class="page-sub">Your watchlist tickers in a customisable board. Pick and reorder columns with ⚙ Columns.</div></div>
+      <div class="ph-text"><h2 class="page-title">Watchlist+</h2><div class="page-sub">Your watchlist tickers in a customisable board. Pick and reorder columns with the Columns button.</div></div>
       <div class="h-toolbar">
         <button class="btn" data-click="refreshStockPrices">↻ Refresh prices</button>
-        <button class="btn" data-click="openColumns" data-a0="board" id="btn-board-cols">⚙ Columns</button>
+        <button class="btn" data-click="openColumns" data-a0="board" id="btn-board-cols"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Columns</button>
       </div>
     </div>
     <div id="board-list"></div>
@@ -2286,12 +2295,12 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.81"></script>
-<script src="Worker/kjr-sortable.js?v=2.81"></script>
-<script src="Worker/kjr-vault.js?v=2.81"></script>
-<script src="Worker/kjr-migration.js?v=2.81"></script>
-<script src="Worker/supabase.js?v=2.81"></script>
-<script src="Worker/kjr-nas.js?v=2.81"></script>
-<script src="Worker/app.js?v=2.81"></script>
+<script src="Worker/kjr-core.js?v=2.82"></script>
+<script src="Worker/kjr-sortable.js?v=2.82"></script>
+<script src="Worker/kjr-vault.js?v=2.82"></script>
+<script src="Worker/kjr-migration.js?v=2.82"></script>
+<script src="Worker/supabase.js?v=2.82"></script>
+<script src="Worker/kjr-nas.js?v=2.82"></script>
+<script src="Worker/app.js?v=2.82"></script>
 </body>
 </html>

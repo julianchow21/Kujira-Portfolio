@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.81';
-const APP_DISPLAY_VERSION = 'v2.81 (12 Oct)';
+const APP_VERSION = 'v2.82';
+const APP_DISPLAY_VERSION = 'v2.82 (13 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -3088,7 +3088,7 @@ function showConflictModal(opts){
   wrap.className = 'overlay open';
   wrap.innerHTML = `
     <div class="modal" style="max-width:520px" role="dialog" aria-modal="true">
-      <div class="modal-head"><h3>⚠ Sync conflict</h3></div>
+      <div class="modal-head"><h3>${WARN_ICON} Sync conflict</h3></div>
       <div class="modal-body">
         <div style="color:var(--text2);line-height:1.6">Someone (or another tab) updated the cloud sheet ${kjrEscape(remoteAgo)}. Your local edits haven't been saved yet.</div>
         <div class="stat-box y" style="margin-top:14px;font-size:12px;color:var(--text2);line-height:1.7">
@@ -3466,7 +3466,7 @@ function _refreshSyncAge(){
 function updateSyncStatusPill(){
   if (isNasMode()) {
     _nasStatus(_nasState === 'synced' && !_nasPendingCount ? 'synced' : (_nasPendingCount ? 'queued' : 'local'),
-      _nasPendingCount ? _nasPendingCount + ' change' + (_nasPendingCount === 1 ? '' : 's') + ' queued for NAS sync' : 'Sign in to sync with NAS');
+      _nasPendingCount ? _nasPendingCount + ' change' + (_nasPendingCount === 1 ? '' : 's') + ' queued for NAS sync' : (NAS_RELEASE_ENABLED ? 'Sign in to sync with NAS' : 'NAS sync is held pending local release review'));
     return;
   }
   if (isLegacyReadonlyMode()) {
@@ -3626,7 +3626,7 @@ function renderSetupWizardStep(){
         <li>Delete whatever code is already there.</li>
         <li>Open the backend code (button below), click <strong>Copy raw file</strong>, and paste it in.</li>
         <li>Click <strong>Save</strong> (disk icon).</li>
-        <li>Click the function dropdown, pick <code>initOnce</code>, then <strong>▶ Run</strong>. Grant the permissions Google asks for, it needs to read/write your sheet and call Yahoo Finance / CoinGecko.</li>
+        <li>Click the function dropdown, pick <code>initOnce</code>, then <strong>${PLAY_ICON} Run</strong>. Grant the permissions Google asks for, it needs to read/write your sheet and call Yahoo Finance / CoinGecko.</li>
       </ol>
       <div class="actions">
         <a class="btn btn-primary" href="https://github.com/julianchow21/Kujira-Portfolio/blob/main/Portfolio/Worker/apps-script.gs" target="_blank" rel="noopener noreferrer">Open the backend code</a>
@@ -3645,7 +3645,7 @@ function renderSetupWizardStep(){
         <li>Click <strong>Deploy</strong> and copy the Web app URL (ends in <code>/exec</code>).</li>
       </ol>
       <p style="background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber-ink);padding:10px;border-radius:8px;font-size:12px">
-        ⚠ The URL is your credential. Treat it like a password. Anyone with the URL can read and write your sheet. Don't share it.
+        ${WARN_ICON} The URL is your credential. Treat it like a password. Anyone with the URL can read and write your sheet. Don't share it.
       </p>
     </div>`;
   } else if (_swStep === 4){
@@ -4196,6 +4196,16 @@ function renderNasAuthStep(step, opts){
   if (signout) signout.hidden = step === 'signin' && !opts.showSignout;
 }
 
+/* The gate's heading and helper line, wording only, no auth path reads them. The blocked gate offers no sign-in (its form is hidden and its button gone), so it says the service is unavailable instead of asking for an account. showNasAuthGate sets the sign-in wording back, the same words index.html ships. */
+function _nasSetGateText(blocked){
+  const title = document.getElementById('nas-auth-title');
+  const copy = document.getElementById('nas-auth-copy');
+  if (title) title.textContent = blocked ? 'Cloud sync unavailable' : 'Open NAS portfolio';
+  if (copy) copy.textContent = blocked
+    ? 'NAS finance data stays closed until this is resolved.'
+    : 'Your account and a verified authenticator challenge are required before finance data opens.';
+}
+
 function showNasAuthGate(){
   const gate = document.getElementById('nas-auth-gate');
   if (!gate) return;
@@ -4204,8 +4214,11 @@ function showNasAuthGate(){
   _nasAuthSessionPresent = false;
   const escape = document.getElementById('nas-readonly-escape');
   const replacement = document.getElementById('nas-blocked-config');
+  const submit = document.getElementById('nas-auth-submit');
   if (escape) escape.hidden = true;
   if (replacement) replacement.hidden = true;
+  if (submit) submit.hidden = false;
+  _nasSetGateText(false);
   renderNasAuthStep('signin');
   _nasSetGateMessage('Sign in with your NAS account. A verified TOTP challenge is required.', false);
   const email = document.getElementById('nas-email');
@@ -4219,13 +4232,14 @@ function showNasBlockedGate(message){
   clearNasAuthFields();
   _nasAuthSessionPresent = false;
   renderNasAuthStep('signin');
+  _nasSetGateText(true);
   const signin = document.getElementById('nas-signin-panel');
   const submit = document.getElementById('nas-auth-submit');
   const signout = document.getElementById('nas-auth-signout');
   const escape = document.getElementById('nas-readonly-escape');
   const replacement = document.getElementById('nas-blocked-config');
   if (signin) signin.hidden = true;
-  if (submit) submit.disabled = true;
+  if (submit) { submit.disabled = true; submit.hidden = true; }
   if (signout) signout.hidden = true;
   if (escape) escape.hidden = false;
   if (replacement) replacement.hidden = !nasVaultReady();
@@ -4803,7 +4817,7 @@ function renderSalaryRulesEditor(){
         <input class="fi" type="text" value="${kjrEscape(r.name||'')}" placeholder="Bucket name" data-rule-field="name" data-input="onSalaryRuleInput">
         <input class="fi" type="number" step="1" min="0" max="100" value="${r.pct==null?'':Number(r.pct)}" placeholder="%" data-rule-field="pct" data-input="onSalaryRuleInput">
         <input class="fi" type="text" value="${kjrEscape(r.dest||'')}" placeholder="Destination (optional)" data-rule-field="dest" data-input="onSalaryRuleInput">
-        <button class="btn btn-sm btn-danger" data-click="removeSalaryRule" data-a0="${i}" title="Remove">✕</button>
+        <button class="btn btn-sm btn-danger" data-click="removeSalaryRule" data-a0="${i}" title="Remove" aria-label="Remove salary rule ${i + 1}">✕</button>
       </div>`).join('');
   }
   updateRulesSumHint();
@@ -5290,6 +5304,11 @@ const FOREX_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 /* Both theme icons ship in every theme switch, CSS shows the one that offers the other theme (sun in dark, moon in light). */
 const THEME_ICONS = '<span class="ti ti-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg></span>'
   + '<span class="ti ti-moon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></span>';
+
+/* Warning, play and grip icons for notices and controls, drawn like the sidebar's (24 box, 2px stroke, currentColor, hidden from assistive tech, so the words or the aria-label beside one name it). They replaced the warning-sign, play and trigram glyphs, which a platform's emoji font can draw in colour. A control's gear is _navIcon('settings'), the sidebar's own drawing. */
+const WARN_ICON = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/></svg>';
+const PLAY_ICON = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M6 4l14 8-14 8z"/></svg>';
+const GRIP_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M3 6h18M3 12h18M3 18h18"/></svg>';
 
 /* The bottom-bar sheet that is open (or was last opened). */
 let _moreSheetGroup = 'more';
@@ -6681,7 +6700,7 @@ function renderTrash(){
       </div>
       <div class="trash-actions">
         <button class="btn btn-sm" data-click="restoreFromTrash" data-a0="${kjrEscape(e.id)}">${kjrEscape(plan && plan.parents.length ? plan.action : 'Restore')}</button>
-        <button class="btn btn-sm btn-danger" data-click="purgeTrashItem" data-a0="${kjrEscape(e.id)}" title="Delete permanently">✕</button>
+        <button class="btn btn-sm btn-danger" data-click="purgeTrashItem" data-a0="${kjrEscape(e.id)}" title="Delete permanently" aria-label="Delete permanently: ${kjrEscape(trashLabel(e.table, e.data))}">✕</button>
       </div>
     </div>`;
   }).join('');
@@ -8248,7 +8267,7 @@ function ibkrShowPreview(matched, skippedCount){
       <td class="num">${t.shares}</td>
       <td class="num">${ccySym}${t.price.toFixed(4)}</td>
       <td class="num muted">${t.fees ? ccySym + t.fees.toFixed(2) : '—'}</td>
-      <td class="tl">${statusCell}${ccyMismatch ? ' ⚠' : ''}</td>
+      <td class="tl">${statusCell}${ccyMismatch ? ' <span class="ico-warn" role="img" aria-label="Currency mismatch" title="Currency mismatch">' + WARN_ICON + '</span>' : ''}</td>
     </tr>`;
   }).join('');
 
@@ -8886,7 +8905,7 @@ function renderStocks(){
     <button class="btn btn-primary btn-sm" data-click="openEntity" data-a0="stocks">＋ Add stock</button>
     <button class="btn btn-sm" data-click="exportHoldingsCSV">Export CSV</button>
     <button class="btn btn-sm" data-click="refreshStockPrices" id="btn-refresh-stocks">↻ Refresh prices</button>
-    <button class="btn btn-sm" data-click="openStockColumns" id="btn-stock-cols">⚙ Columns</button>
+    <button class="btn btn-sm" data-click="openStockColumns" id="btn-stock-cols">${_navIcon('settings')}Columns</button>
     <span class="freshness${_sfCls}" id="freshness-stocks">${kjrEscape(_sfText)}</span>
   </div>`;
 
@@ -10647,7 +10666,7 @@ function renderBoard(){
   const list = DB.watchlist || [];
 
   if (!list.length){
-    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('board')}</div><div class="empty-title">No tickers yet</div><div class="empty-sub">This board mirrors your Watchlist. Add tickers on the Stocks tab (under Watchlist), then shape the columns here with ⚙ Columns. Symbols refresh together with your holdings.</div></div></div></div>`;
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><div class="empty-icon">${_emptyIcon('board')}</div><div class="empty-title">No tickers yet</div><div class="empty-sub">This board mirrors your Watchlist. Add tickers on the Stocks tab (under Watchlist), then shape the columns here with the Columns button. Symbols refresh together with your holdings.</div></div></div></div>`;
     return;
   }
 
@@ -10764,7 +10783,7 @@ function renderColsPanel(setKey){
   const anyBackend = cols.some(c => c.backend);
   body.innerHTML = cols.map((c, i) => {
     const lbl = cs.labels[c.key] || c.key;
-    const warn = c.backend ? ' <span class="hint" title="Populated on price refresh. Requires apps-script.gs v1.2 or later deployed.">⚠</span>' : '';
+    const warn = c.backend ? ' <span class="hint ico-warn" role="img" aria-label="Needs the updated Apps Script" title="Populated on price refresh. Requires apps-script.gs v1.2 or later deployed.">' + WARN_ICON + '</span>' : '';
     return `<div class="col-mgr-row">
       <span class="col-mgr-move">
         <button class="btn btn-ghost btn-xs" title="Move up" aria-label="Move ${lbl} up" data-click="moveCol" data-a0="${setKey}" data-a1="${c.key}" data-a2="-1" ${i===0?'disabled':''}>↑</button>
@@ -10773,7 +10792,7 @@ function renderColsPanel(setKey){
       <label class="col-mgr-lbl"><input type="checkbox" ${c.visible?'checked':''} data-change="toggleCol" data-a0="${setKey}" data-a1="${c.key}"> <span>${lbl}${warn}</span></label>
     </div>`;
   }).join('') + (anyBackend
-    ? `<div class="hint" style="margin-top:10px;font-size:12px">⚠ Day range, 52-week range and volume need the updated Apps Script. Redeploy the backend (see README) to fill them, otherwise they show the empty token.</div>`
+    ? `<div class="hint" style="margin-top:10px;font-size:12px">${WARN_ICON} Day range, 52-week range and volume need the updated Apps Script. Redeploy the backend (see README) to fill them, otherwise they show the empty token.</div>`
     : '');
 }
 /* Same focus-trap pattern as openEntityModal: keydown scoped to the overlay
@@ -12867,7 +12886,7 @@ function _dashDecorate(){
     handle.className = 'kjr-drag-handle';
     handle.title = 'Drag ' + name + ' to reorder';
     handle.setAttribute('aria-hidden', 'true');
-    handle.textContent = '☰';
+    handle.innerHTML = GRIP_ICON;
     controls.appendChild(handle);
 
     const moves = document.createElement('div');
@@ -13978,7 +13997,7 @@ function renderDashboard(opts){
     if (intEl) intEl.innerHTML = '';
   } else {
     if (intEl) intEl.innerHTML = `<div class="integrity-bar bad">
-      <div class="integrity-title">⚠ ${rec.issues.length} thing${rec.issues.length > 1 ? 's' : ''} to check</div>
+      <div class="integrity-title">${WARN_ICON} ${rec.issues.length} thing${rec.issues.length > 1 ? 's' : ''} to check</div>
       <ul class="integrity-list">${rec.issues.map(i =>
         `<li class="${i.level}">${_chipAmounts(kjrEscape(i.msg))}${i.fixFn
           ? ` <button class="btn btn-sm btn-danger" style="margin-left:8px;padding:1px 8px;font-size:12px" data-click="callFixFn" data-a0="${kjrEscape(i.fixFn)}">Remove orphaned</button>`

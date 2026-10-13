@@ -207,7 +207,7 @@ FUNCTION_TARGETS.forEach(name => {
   else extractedFns[name] = src;
 });
 // Multi-line navigation constants (v2.72), pulled out whole.
-const CONST_BLOCK_TARGETS = ['TABS', 'PHASE_2_TABS', 'NAV_GROUPS', 'MOBILE_GROUPS', 'NAV_COUNT_TABLES', 'ADD_MENU_ITEMS', 'MORE_SHEET_ICON', 'BOOK_ICON', 'TRADING_ICON', 'FOREX_ICON', 'THEME_ICONS', 'SHELL_MENUS',
+const CONST_BLOCK_TARGETS = ['TABS', 'PHASE_2_TABS', 'NAV_GROUPS', 'MOBILE_GROUPS', 'NAV_COUNT_TABLES', 'ADD_MENU_ITEMS', 'MORE_SHEET_ICON', 'BOOK_ICON', 'TRADING_ICON', 'FOREX_ICON', 'THEME_ICONS', 'WARN_ICON', 'PLAY_ICON', 'GRIP_ICON', 'SHELL_MENUS',
   'CASH_TYPE_LABEL', 'MORE_MENU_ACTIONS', 'STOCK_SORT_CHIPS', 'STOCK_SORT_VALS', 'STOCK_COL_LABEL', 'STOCK_COLUMNS', 'GICS_SECTOR_OPTIONS'];
 const extractedConstBlocks = {};
 CONST_BLOCK_TARGETS.forEach(name => {
@@ -4963,7 +4963,7 @@ async function runTests(){
     // desktop controls: the same ids, handlers and labels as before, now inside .hd-actions
     assert.ok(html.includes('<div class="hd-actions">'));
     ['id="sf-market" class="fi fi-sm" data-change="stocksFilterMarket" aria-label="Filter stocks by market"', 'id="sf-sector" class="fi fi-sm" data-change="stocksFilterSector" aria-label="Filter stocks by sector"',
-      'data-click="exportHoldingsCSV">Export CSV', 'data-click="refreshStockPrices" id="btn-refresh-stocks">↻ Refresh prices', 'data-click="openStockColumns" id="btn-stock-cols">⚙ Columns', 'id="freshness-stocks"']
+      'data-click="exportHoldingsCSV">Export CSV', 'data-click="refreshStockPrices" id="btn-refresh-stocks">↻ Refresh prices', 'data-click="openStockColumns" id="btn-stock-cols"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24"', '</svg>Columns</button>', 'id="freshness-stocks"']
       .forEach(frag => assert.ok(html.includes(frag), frag));
     assert.strictEqual(/<div class="card-head"><h3>Holdings[^]*?style="display:flex/.test(html), false);   // the inline flex style became the class
     // chips: a native select each, the same ACTIONS the desktop selects use, and a Sort chip on its own action
@@ -8999,8 +8999,8 @@ async function runTests(){
     assert.strictEqual((appSrc.match(/createNasClient\(/g) || []).length, 2);                                   // its definition and its one call, in createNasController, after the gate above
     assert.ok(extractFunction('createNasController').indexOf('NAS_RELEASE_ENABLED') < extractFunction('createNasController').indexOf('createNasClient(config)'));
     assert.ok(fs.existsSync(path.join(__dirname, '..', 'Supabase', 'schema.sql')) && fs.existsSync(path.join(__dirname, '..', 'NAS', 'compose.overlay.yml')));
-    // the QA runbook: the Last updated line moves to this release (the version is read from APP_VERSION, so a release that forgets it fails), the measured line keeps the version the numbers were measured on
-    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 12/10/2026 (app ' + /const APP_VERSION = '(v[\d.]+)';/.exec(appSrc)[1] + ').'));
+    // the QA runbook: the Last updated line moves to this release (the version is read from APP_VERSION, so a release that forgets it fails, and the date is pinned in the newest block, p282 item 6), the measured line keeps the version the numbers were measured on
+    assert.ok(new RegExp('Supersedes `QA SOP v1 \\(4 Jun\\)`\\. Last updated: \\d{2}/\\d{2}/\\d{4} \\(app ' + /const APP_VERSION = '(v[\d.]+)';/.exec(appSrc)[1].replace(/\./g, '\\.') + '\\)\\.').test(sop));
     assert.ok(sop.includes('Measured on 11/10/2026 against app v2.77 with the step 3 seed'));
     // the pilot page: no hand-kept version beside the badge (it said v2.67 through v2.78), and the rest of the header is as it was
     assert.strictEqual(/v\d+\.\d+ \(\d{2} [A-Z][a-z]{2}\)/.test(pilot), false);
@@ -9349,7 +9349,7 @@ async function runTests(){
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
     const testsHtml = fs.readFileSync(path.join(__dirname, 'tests.html'), 'utf8');
     const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    const version = /const APP_VERSION = 'v(\d+\.\d+)';/.exec(appSrc)[1];                                  // the release number itself is pinned in the newest block (p281 item 5), so this test needs no edit per release
+    const version = /const APP_VERSION = 'v(\d+\.\d+)';/.exec(appSrc)[1];                                  // the release number itself is pinned in the newest block (p282 item 6), so this test needs no edit per release
     assert.ok(appSrc.includes("const APP_DISPLAY_VERSION = 'v" + version + " ("));
     assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v" + version + "';"));
     const assets = Array.from(/CORE_ASSETS = \[([\s\S]*?)\];/.exec(sw)[1].matchAll(/'(\.\/Worker\/[\w.-]+\.js)\?v=([\d.]+)'/g));
@@ -9360,7 +9360,7 @@ async function runTests(){
     tags.forEach(m => assert.strictEqual(m[2], version, m[1]));
     assert.ok(testsHtml.includes('<script src="../Worker/kjr-sortable.js?v=' + version + '"></script>'));
     assert.ok(pilot.includes('<script src="./Worker/decision-notes-pilot.js?v=' + version + '"></script>'));
-    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 12/10/2026 (app v' + version + ').'));
+    assert.ok(new RegExp('Supersedes `QA SOP v1 \\(4 Jun\\)`\\. Last updated: \\d{2}/\\d{2}/\\d{4} \\(app v' + version.replace('.', '\\.') + '\\)\\.').test(sop));   // the date is pinned in the newest block, so a release moves it there
   });
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -9450,12 +9450,238 @@ async function runTests(){
     assert.ok(fn.includes("warn.textContent = 'Warning: CPF, tax and holiday constants last verified for ' + CONSTANTS_VERIFIED_FOR + '. Verify against CPF Board, IRAS and MOM before trusting '"));
   });
 
-  test('p281 item 5 - this release is v2.81: the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
+  test('p281 item 5 - the constants, the cache name and the QA runbook line agree on one version (the release number itself is pinned in the newest block, p282 item 6, and p280 item 3 holds every other place to APP_VERSION)', () => {
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
     const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    assert.ok(appSrc.includes("const APP_VERSION = 'v2.81';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.81 (12 Oct)';"));
-    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.81';"));
-    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 12/10/2026 (app v2.81).'));
+    const version = /const APP_VERSION = 'v(\d+\.\d+)';/.exec(appSrc)[1];
+    assert.ok(appSrc.includes("const APP_DISPLAY_VERSION = 'v" + version + " ("));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v" + version + "';"));
+    assert.ok(sop.includes('(app v' + version + ').'));
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     p282, v2.82 no emoji outside Settings: both Columns buttons lead with the sidebar's gear, the warning, play and grip glyphs are drawings in the sidebar's style, the
+     decision notes pilot script holds no hand-kept version, and the blocked NAS gate stops offering a sign-in. The markup, the sources and the stylesheet are read as text
+     (the gate's behaviour is run in test-nas-app.js). Every test name starts with p282 item.
+     ═══════════════════════════════════════════════════════════════════════ */
+  const p282 = (() => {
+    const { body, specificity } = p278;
+    const { emojiIn } = p281;
+    const sideGear = /id="side-settings"[^>]*>\s*(<svg[\s\S]*?<\/svg>)/.exec(indexSrc)[1];                 // the sidebar footer's Settings drawing
+    const shapes = svg => /^<svg[^>]*>([\s\S]*)<\/svg>$/.exec(svg)[1];                                       // what is drawn inside, whatever order the attributes sit in
+    const css = indexSrc.slice(indexSrc.indexOf('<style>'), indexSrc.indexOf('</style>'));
+    return { body, specificity, emojiIn, sideGear, shapes, css };
+  })();
+
+  test('p282 item 1 - no pictograph is left in the page or the app: index.html and Worker/app.js hold none (every renderer, modal and hint), by the same Unicode test p281 runs on Settings, and the gear, warning sign, play and trigram are named so a failure says which one came back', () => {
+    const { emojiIn } = p282;
+    assert.deepStrictEqual(emojiIn(indexSrc), []);
+    assert.deepStrictEqual(emojiIn(appSrc), []);
+    [['\u{2699}', 'gear'], ['\u{26A0}', 'warning sign'], ['\u{25B6}', 'play'], ['\u{2630}', 'trigram']].forEach(([ch, name]) => {
+      assert.strictEqual(indexSrc.includes(ch), false, name + ' in index.html');
+      assert.strictEqual(appSrc.includes(ch), false, name + ' in app.js');
+    });
+  });
+
+  test('p282 item 2 - both Columns buttons lead with the sidebar\'s own gear (14px, 13px in a small button), and the two sentences that named the button by its glyph name it in words', () => {
+    const { sideGear, shapes, css, body } = p282;
+    // one drawing: the sidebar footer, the TABS list the nav helper reads, and the board button carry the same shapes
+    const tabGear = vm.runInContext("TABS.find(t => t.key === 'settings').icon", freshSandbox());
+    assert.ok(shapes(sideGear).startsWith('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65'));
+    assert.strictEqual(shapes(tabGear), shapes(sideGear));
+    assert.ok(sideGear.startsWith('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">'));
+    // Watchlist+ header (static markup): the drawing then the word, and the sentence beside it says the button by name
+    assert.ok(indexSrc.includes('<button class="btn" data-click="openColumns" data-a0="board" id="btn-board-cols">' + sideGear + 'Columns</button>'));
+    assert.ok(indexSrc.includes('<div class="page-sub">Your watchlist tickers in a customisable board. Pick and reorder columns with the Columns button.</div>'));
+    // Stocks toolbar, rendered: through _navIcon, so the same drawing, hidden from assistive tech and not focusable, then the word
+    const sb = listSandbox(stockFixture(), 'USD'), els = stocksBox(sb);
+    sb.renderStocks();
+    const navGear = vm.runInContext("_navIcon('settings')", sb);
+    assert.ok(els['stocks-body'].innerHTML.includes('<button class="btn btn-sm" data-click="openStockColumns" id="btn-stock-cols">' + navGear + 'Columns</button>'));
+    assert.ok(navGear.startsWith('<svg aria-hidden="true" focusable="false" ') && shapes(navGear) === shapes(sideGear));
+    // the empty board names the button in words too
+    assert.ok(extractFunction('renderBoard').includes('then shape the columns here with the Columns button. Symbols refresh together with your holdings.'));
+    // stylesheet: 14px beside the 13px label and 13px beside a small button's 12px, the small rule after the base one (equal specificity, the later rule wins), the button's own gap spaces it
+    assert.strictEqual(body('.btn svg'), 'width:14px;height:14px;flex:none');
+    assert.strictEqual(body('.btn-sm svg'), 'width:13px;height:13px');
+    assert.ok(css.indexOf('.btn-sm{padding') < css.indexOf('.btn svg{') && css.indexOf('.btn svg{') < css.indexOf('.btn-sm svg{'));
+    assert.ok(/display:inline-flex;align-items:center;gap:6px/.test(body('.btn')));
+  });
+
+  test('p282 item 3 - the warning, play and grip drawings follow the sidebar\'s style (24 box, 2px stroke, currentColor, hidden from assistive tech, not focusable), every site that printed a glyph uses one, and the two icon-only sites carry their own label', () => {
+    const { css, body } = p282;
+    const sb = freshSandbox();
+    const [warn, play, grip] = ['WARN_ICON', 'PLAY_ICON', 'GRIP_ICON'].map(n => vm.runInContext(n, sb));
+    const attrs = ' viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">';
+    assert.ok(warn.startsWith('<svg class="ico"' + attrs) && play.startsWith('<svg class="ico"' + attrs) && grip.startsWith('<svg' + attrs));
+    [warn, play, grip].forEach(svg => {
+      assert.strictEqual((svg.match(/<svg\b/g) || []).length, 1);
+      assert.ok(svg.endsWith('</svg>'));
+      assert.strictEqual(/<(script|image|text|foreignObject|use)\b|\son\w+=|style=|href=/i.test(svg), false);   // a drawing, nothing that runs or loads
+    });
+    // the warning is a rounded triangle, a stem and a dot, the dot filled with the text colour so the theme controls it
+    assert.ok(warn.includes('<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/>'));
+    // every site: the conflict heading, the credential hint and the Run step, the currency flag and the two Columns notes, the integrity title, the drag grip
+    assert.ok(extractFunction('showConflictModal').includes('<div class="modal-head"><h3>${WARN_ICON} Sync conflict</h3></div>'));
+    const wiz = extractFunction('renderSetupWizardStep');
+    assert.ok(wiz.includes('${WARN_ICON} The URL is your credential. Treat it like a password.') && wiz.includes('<strong>${PLAY_ICON} Run</strong>'));
+    assert.ok(extractFunction('ibkrShowPreview').includes(`' <span class="ico-warn" role="img" aria-label="Currency mismatch" title="Currency mismatch">' + WARN_ICON + '</span>'`));
+    const cols = extractFunction('renderColsPanel');
+    assert.ok(cols.includes(`' <span class="hint ico-warn" role="img" aria-label="Needs the updated Apps Script" title="Populated on price refresh. Requires apps-script.gs v1.2 or later deployed.">' + WARN_ICON + '</span>'`));
+    assert.ok(cols.includes('<div class="hint" style="margin-top:10px;font-size:12px">${WARN_ICON} Day range, 52-week range and volume need the updated Apps Script.'));
+    assert.ok(extractFunction('renderDashboard').includes('<div class="integrity-title">${WARN_ICON} ${rec.issues.length} thing${'));
+    const deco = extractFunction('_dashDecorate');
+    assert.ok(deco.includes('handle.innerHTML = GRIP_ICON;') && deco.includes("handle.setAttribute('aria-hidden', 'true');"));     // the handle stays decorative, the move buttons beside it are the accessible way
+    // stylesheet: .ico is 1em on the baseline, the grip is 15px (the trigram's own size), and neither adds a colour, a stroke or a fill
+    assert.strictEqual(body('.ico'), 'width:1em;height:1em;vertical-align:-0.15em;flex:none');
+    assert.strictEqual(body('.kjr-drag-handle svg'), 'width:15px;height:15px;flex:none');
+    assert.strictEqual(/color|stroke|fill/.test(body('.ico') + body('.kjr-drag-handle svg')), false);
+    assert.ok(css.indexOf('.hint{font-size') < css.indexOf('.ico{width') && css.indexOf('.kjr-drag-handle:focus-visible') < css.indexOf('.kjr-drag-handle svg{'));
+    assert.strictEqual(/\.ico-warn\{/.test(css), false);                                                  // the label hook has no colour rule: amber ink is 4.25:1 on the light modal, so the icon takes the text colour the glyph did
+  });
+
+  test('p282 item 4 - the decision notes pilot script keeps no version of its own (it said v2.67 through v2.81 and nothing read it): no APP_VERSION and no vN.N literal in the script or its test, and the page still takes its version from the ?v= tag that check-release.js holds to APP_VERSION', () => {
+    const pilotJs = fs.readFileSync(path.join(__dirname, '..', 'Worker', 'decision-notes-pilot.js'), 'utf8');
+    const pilotTest = fs.readFileSync(path.join(__dirname, 'test-decision-notes-pilot.js'), 'utf8');
+    [pilotJs, pilotTest].forEach(src => {
+      assert.strictEqual(/APP_VERSION/.test(src), false);
+      assert.strictEqual(/['"`]v\d+\.\d+(\.\d+)?['"`]/.test(src), false);
+    });
+    const version = /const APP_VERSION = 'v([\d.]+)';/.exec(appSrc)[1];
+    assert.ok(p280.pilot.includes('<script src="./Worker/decision-notes-pilot.js?v=' + version + '"></script>'));
+  });
+
+  test('p282 item 5 - the blocked NAS gate stops offering a sign-in: one helper sets the gate wording and both openers call it, the sign-in words are the ones index.html ships, the dead Sign in button is hidden while still disabled, and the gate\'s own [hidden] rule makes its .btn footer buttons actually hide', () => {
+    const { body, specificity } = p282;
+    const text = extractFunction('_nasSetGateText');
+    assert.ok(text, '_nasSetGateText moved');
+    // the sign-in wording is the page's own, so the two copies cannot drift
+    assert.ok(indexSrc.includes('<h3 id="nas-auth-title">Open NAS portfolio</h3>'));
+    const copy = /<p class="hint" id="nas-auth-copy"[^>]*>([^<]*)<\/p>/.exec(indexSrc)[1];
+    assert.ok(text.includes("title.textContent = blocked ? 'Cloud sync unavailable' : 'Open NAS portfolio';"));
+    assert.ok(text.includes(": '" + copy + "';"));
+    // the blocked wording asks for no account, password or sign-in
+    const blockedWords = [/'Cloud sync unavailable'/.exec(text)[0], /\? '([^']*)'\n\s*:/.exec(text)[1]];
+    blockedWords.forEach(w => assert.strictEqual(/sign|account|password|authenticator|email/i.test(w), false, w));
+    const blocked = extractFunction('showNasBlockedGate'), opener = extractFunction('showNasAuthGate');
+    assert.ok(blocked.includes('_nasSetGateText(true);') && opener.includes('_nasSetGateText(false);'));
+    assert.ok(blocked.includes('if (submit) { submit.disabled = true; submit.hidden = true; }'));         // hidden and still disabled, so Enter in the replacement key field submits nothing
+    assert.ok(opener.includes('if (submit) submit.hidden = false;'));                                     // the sign-in gate puts it back, as it already did for the two panels
+    // the auth path itself reads none of it: the step renderer is as it was
+    assert.ok(extractFunction('renderNasAuthStep').includes("submit.textContent = step === 'signin' ? 'Sign in' : 'Verify and open portfolio';"));
+    assert.strictEqual(/_nasSetGateText/.test(extractFunction('submitNasAuth') + extractFunction('signOutNas') + extractFunction('loadNasFinance')), false);
+    // [hidden] on a .btn: .btn sets display (0,1,0) and beats the browser's own [hidden] rule, so the gate has its own, an id and an attribute (1,1,0) that sets no display of its own
+    assert.ok(/(^|;)display:inline-flex(;|$)/.test(body('.btn')));
+    assert.strictEqual(body('#nas-auth-gate [hidden]'), 'display:none');
+    assert.deepStrictEqual(specificity('#nas-auth-gate [hidden]'), [1, 1, 0]);
+    ['id="nas-auth-signout" data-click="signOutNas" hidden', 'id="nas-readonly-escape" data-click="openLegacyReadonlyEscape" hidden'].forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+  });
+
+  test('p282 item 6 - this release is v2.82 (13 Oct): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
+    const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
+    const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
+    assert.ok(appSrc.includes("const APP_VERSION = 'v2.82';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.82 (13 Oct)';"));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.82';"));
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 13/10/2026 (app v2.82).'));
+  });
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     p282a11y, v2.82 accessible names and the NAS sync wording: the salary rule remove button and the Recently deleted purge button were a bare cross (a screen reader says the
+     symbol, not what the button does), and the sync row said "Sign in to sync with NAS" while the release flag is off and no sign-in is offered anywhere. The renderers are
+     run, and how far the flag reaches is read from the source. Every test name starts with p282a11y item.
+     ═══════════════════════════════════════════════════════════════════════ */
+  test('p282a11y item 1 - each salary rule\'s remove button names itself "Remove salary rule N" (N is its row), the cross stays the visible mark, and the tooltip, handler and row index are as they were', () => {
+    const sb = realEscape(freshSandbox({ settings:{ salaryRules:[{ id:'r1', name:'Invest', pct:25, dest:'' }, { id:'r2', name:'Save "x" <b>', pct:10, dest:'' }, { id:'r3', name:'', pct:0, dest:'' }] } }));
+    const host = { innerHTML:'' };
+    sb.document = { getElementById: id => id === 'cfg-salary-rules' ? host : null };
+    sb.updateRulesSumHint = () => {};
+    sb.renderBucketPreview = () => {};
+    vm.runInContext(extractFunction('renderSalaryRulesEditor'), sb);
+    sb.renderSalaryRulesEditor();
+    const buttons = Array.from(host.innerHTML.matchAll(/<button class="btn btn-sm btn-danger"[^>]*>✕<\/button>/g)).map(m => m[0]);
+    assert.strictEqual(buttons.length, 3);
+    buttons.forEach((b, i) => assert.strictEqual(b, '<button class="btn btn-sm btn-danger" data-click="removeSalaryRule" data-a0="' + i + '" title="Remove" aria-label="Remove salary rule ' + (i + 1) + '">✕</button>'));
+    // the name is the row number and never the rule's own text: that is typed live and the button is not repainted, so a name here would go stale
+    assert.strictEqual(/aria-label="[^"]*(Invest|Save)/.test(host.innerHTML), false);
+    // no rules, no button
+    sb.DB.settings.salaryRules = [];
+    sb.renderSalaryRulesEditor();
+    assert.strictEqual(host.innerHTML.includes('removeSalaryRule'), false);
+  });
+
+  test('p282a11y item 2 - each Recently deleted row\'s purge button says what it does and to which entry ("Delete permanently: " then the row\'s own label, escaped like the visible one), and a hostile name cannot leave the attribute', () => {
+    const evil = { id:'s_evil', symbol:'A"><img src=x onerror=alert(1)>', market:'US' };
+    const { sb, host } = orphanSandbox({ trash:[
+      { id:'tr_stock', table:'stocks', ts:'2026-10-03T00:00:00.000Z', data:clone(AAPL) },
+      { id:'tr_exp', table:'expenses', ts:'2026-10-02T00:00:00.000Z', data:{ id:'e1', category:'food', amount:45, date:'2026-10-02' } },
+      { id:'tr_evil', table:'stocks', ts:'2026-10-01T00:00:00.000Z', data:evil }
+    ] });
+    sb.renderTrash();
+    const html = host.innerHTML;
+    const purge = Array.from(html.matchAll(/<button class="btn btn-sm btn-danger" data-click="purgeTrashItem"[^>]*>✕<\/button>/g)).map(m => m[0]);
+    assert.strictEqual(purge.length, 3);
+    const entries = [['tr_stock', 'stocks', AAPL], ['tr_exp', 'expenses', { id:'e1', category:'food', amount:45, date:'2026-10-02' }], ['tr_evil', 'stocks', evil]];
+    entries.forEach(([id, table, data], i) => {
+      const label = sb.kjrEscape(sb.trashLabel(table, data));
+      assert.strictEqual(purge[i], '<button class="btn btn-sm btn-danger" data-click="purgeTrashItem" data-a0="' + id + '" title="Delete permanently" aria-label="Delete permanently: ' + label + '">✕</button>');
+      assert.ok(html.includes('>' + label + '</span>'), 'the visible label is the one the button names');
+    });
+    assert.ok(purge[0].includes('aria-label="Delete permanently: AAPL · US"') && purge[1].includes('aria-label="Delete permanently: food 45 · 02/10/2026"'));
+    // the hostile symbol is escaped inside the attribute: one aria-label per button, no raw tag, no quote that ends it early
+    assert.strictEqual(purge.some(b => /aria-label="[^"]*"[^>]*aria-label=/.test(b)), false);
+    assert.strictEqual(html.includes('<img'), false);
+    assert.ok(purge[2].includes('A&quot;&gt;&lt;img src=x onerror=alert(1)&gt;'));
+  });
+
+  test('p282a11y item 3 - no bare cross button is left without a name: index.html\'s six and the two renderers\' each carry an aria-label', () => {
+    const bare = src => Array.from(src.matchAll(/<button\b[^>]*>✕<\/button>/g)).map(m => m[0]);
+    const inPage = bare(indexSrc), inApp = bare(appSrc);
+    assert.strictEqual(inPage.length, 6);
+    assert.strictEqual(inApp.length, 2);
+    inPage.concat(inApp).forEach(b => assert.ok(/\saria-label="[^"]+"/.test(b), b));
+  });
+
+  test('p282a11y item 4 - with the NAS release flag off, the sync row says NAS sync is held and never "Sign in to sync with NAS", while the sign-in wording stays for the flag being on', () => {
+    assert.ok(appSrc.includes('const NAS_RELEASE_ENABLED = false;'));                                      // the value is not this release's to change
+    const sb = freshSandbox();
+    const calls = [];
+    sb._nasStatus = (state, detail) => calls.push([state, detail]);
+    sb.window.localStorage.setItem('kjr-pf-backend-mode-v1', 'nas');
+    sb.updateSyncStatusPill();
+    assert.deepStrictEqual(calls, [['local', 'NAS sync is held pending local release review']]);
+    assert.strictEqual(/sign[ -]?(in|out)|account|password|authenticator/i.test(calls[0][1]), false);
+    // queued changes report their count as before (a queue only exists once someone has signed in), and a synced NAS is untouched
+    calls.length = 0;
+    sb._nasPendingCount = 3;
+    sb.updateSyncStatusPill();
+    assert.deepStrictEqual(calls, [['queued', '3 changes queued for NAS sync']]);
+    // the one place the wording lives: the flag decides, the old words are the flag-on branch
+    assert.ok(extractFunction('updateSyncStatusPill').includes("(NAS_RELEASE_ENABLED ? 'Sign in to sync with NAS' : 'NAS sync is held pending local release review')"));
+    // legacy mode is not touched by any of it
+    const legacy = freshSandbox();
+    installSyncStatusDom(legacy);
+    const legacyCalls = [];
+    legacy._nasStatus = (state, detail) => legacyCalls.push([state, detail]);
+    legacy.updateSyncStatusPill();
+    assert.deepStrictEqual(legacyCalls, []);
+  });
+
+  test('p282a11y item 5 - the other sign-in wording that NAS mode can reach sits behind the flag already: the backend banner returns its flag-off words before the sign-in line, the sign-in gate opens only after bootNas has checked the flag, and the banner, run in NAS mode with the flag off, asks for no sign-in', () => {
+    const banner = extractFunction('renderBackendBanner');
+    const flagOff = banner.indexOf('if (!NAS_RELEASE_ENABLED) {');
+    assert.ok(flagOff > -1 && flagOff < banner.indexOf('Sign in to open finance data'));
+    assert.ok(/if \(!NAS_RELEASE_ENABLED\) \{\s*copy\.textContent = [^;]*;\s*\} else if/.test(banner));      // an else-if chain: the sign-in line is only reached with the flag on
+    const boot = extractFunction('bootNas');
+    assert.ok(boot.indexOf('if (!NAS_RELEASE_ENABLED) {') > -1 && boot.indexOf('if (!NAS_RELEASE_ENABLED) {') < boot.indexOf('showNasAuthGate()'));
+    assert.ok(boot.indexOf('showNasBlockedGate(') < boot.indexOf('return false;') && boot.indexOf('return false;') < boot.indexOf('showNasAuthGate()'));
+    const sb = freshSandbox();
+    const el = fakeEl({ class:'backend-banner' }), copy = fakeEl({});
+    sb.document = { getElementById: id => id === 'backend-banner' ? el : (id === 'backend-banner-copy' ? copy : null) };
+    sb.window.localStorage.setItem('kjr-pf-backend-mode-v1', 'nas');
+    sb.renderBackendBanner();
+    assert.strictEqual(el.hidden, false);
+    assert.ok(/disabled pending local durability and cancellation review/.test(copy.textContent), copy.textContent);
+    assert.strictEqual(/sign[ -]?in/i.test(copy.textContent), false);
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

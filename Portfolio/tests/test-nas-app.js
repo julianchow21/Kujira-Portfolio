@@ -49,7 +49,8 @@ const TARGETS = [
   '_nasQueuedCount', 'loadNasFinance', 'denyReadonlyMutation',
   'resetLocalConfirm', 'importBackupFromFile', 'signOutNas',
   '_vaultSetMessage', '_importVaultEnvelope', '_resetEncryptedBrowserData', 'showVaultUnlockGate',
-  'ibkrConfirmImport', 'insuranceImportConfirm'
+  'ibkrConfirmImport', 'insuranceImportConfirm',
+  'renderNasAuthStep', '_nasSetGateText', '_nasSetGateMessage', 'showNasAuthGate', 'showNasBlockedGate'
 ];
 const FUNCTIONS = TARGETS.map(extractFunction).join('\n\n');
 
@@ -179,6 +180,33 @@ function makeVaultGateDocument() {
     'vault-gate', 'vault-unlock-form', 'vault-unlock-passphrase', 'vault-unlock-btn',
     'vault-export-btn', 'vault-import-btn', 'vault-import-input', 'vault-reset-btn'
   ].forEach((id) => { nodes[id] = makeNode(); });
+  return { nodes, getElementById(id) { return nodes[id] || null; } };
+}
+
+/* The NAS gate as index.html ships it: each element's text and whether it carries the hidden attribute are read from the page, so the fake cannot drift from it. */
+function makeNasGateDocument() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const gate = html.slice(html.indexOf('<div class="overlay" id="nas-auth-gate"'), html.indexOf('<!-- PERSISTENT SYNC DETAILS'));
+  assert.ok(gate.includes('id="nas-auth-submit"'), 'the gate markup moved');
+  const nodes = {};
+  [
+    'nas-auth-gate', 'nas-auth-title', 'nas-auth-copy', 'nas-signin-panel', 'nas-factor-panel', 'nas-auth-submit',
+    'nas-auth-signout', 'nas-readonly-escape', 'nas-blocked-config', 'nas-auth-status', 'nas-email'
+  ].forEach((id) => {
+    const open = new RegExp('<(\\w+)([^>]*)\\sid="' + id + '"([^>]*)>').exec(gate);
+    assert.ok(open, id + ' is missing from the gate markup');
+    const attrs = open[2] + ' ' + open[3];
+    const inner = new RegExp('<' + open[1] + '[^>]*\\sid="' + id + '"[^>]*>([^<]*)<').exec(gate);
+    nodes[id] = {
+      hidden: /(^|\s)hidden(\s|$)/.test(attrs),
+      disabled: false,
+      textContent: inner ? inner[1].trim() : '',
+      style: {},
+      focusCalls: 0,
+      focus() { this.focusCalls += 1; },
+      classList: { on: new Set(), add(n) { this.on.add(n); }, remove(n) { this.on.delete(n); }, contains(n) { return this.on.has(n); } }
+    };
+  });
   return { nodes, getElementById(id) { return nodes[id] || null; } };
 }
 
@@ -454,6 +482,51 @@ async function run() {
     assert.strictEqual(stageCalls, 0);
     assert.strictEqual(storage.map.has(appKey), false);
     assert.strictEqual(storage.map.get('kjr-pf-local-unsaved-v1'), '1');
+  })) passed += 1; else failed += 1;
+
+  if (await test('blocked NAS gate offers no sign-in: neutral wording, the dead Sign in and the Sign out buttons hidden, the read-only escape kept, and the sign-in gate puts it all back', async () => {
+    const doc = makeNasGateDocument();
+    const n = doc.nodes;
+    // the page as shipped: the sign-in wording, and the four elements that carry hidden
+    assert.strictEqual(n['nas-auth-title'].textContent, 'Open NAS portfolio');
+    assert.ok(/account and a verified authenticator/.test(n['nas-auth-copy'].textContent));
+    assert.strictEqual(n['nas-auth-submit'].textContent, 'Sign in');
+    assert.deepStrictEqual(['nas-factor-panel', 'nas-auth-signout', 'nas-readonly-escape', 'nas-blocked-config'].map(id => n[id].hidden), [true, true, true, true]);
+    const { sandbox } = makeSandbox({ document: doc });
+    const reason = 'The NAS candidate is disabled pending local durability, reload recovery and cancellation review. Legacy Apps Script remains available.';
+    sandbox.showNasBlockedGate(reason);
+    assert.strictEqual(n['nas-auth-gate'].classList.contains('open'), true);
+    // wording: the heading and helper line say unavailable, the status line carries the reason in the error colour
+    assert.strictEqual(n['nas-auth-title'].textContent, 'Cloud sync unavailable');
+    assert.strictEqual(n['nas-auth-copy'].textContent, 'NAS finance data stays closed until this is resolved.');
+    assert.strictEqual(n['nas-auth-status'].textContent, reason);
+    assert.strictEqual(n['nas-auth-status'].style.color, 'var(--red)');
+    // visibility: the form, the factor panel, the dead Sign in and Sign out are hidden (the gate's [hidden] rule hides them), the read-only escape is the one action left
+    assert.deepStrictEqual(['nas-signin-panel', 'nas-factor-panel', 'nas-auth-submit', 'nas-auth-signout'].map(id => n[id].hidden), [true, true, true, true]);
+    assert.strictEqual(n['nas-auth-submit'].disabled, true);                                          // still disabled, so Enter in the replacement key field submits nothing
+    assert.strictEqual(n['nas-readonly-escape'].hidden, false);
+    assert.strictEqual(n['nas-blocked-config'].hidden, false);                                        // the vault is ready in this sandbox, so the replacement key block shows
+    // nothing visible asks for a sign-in: every element left showing has no sign in, sign out, account, password or authenticator wording
+    const showing = Object.keys(n).filter(id => id !== 'nas-auth-gate' && !n[id].hidden).map(id => n[id].textContent).filter(Boolean);
+    assert.ok(showing.length >= 4, showing.join(' | '));
+    showing.forEach(text => assert.strictEqual(/sign[ -]?(in|out)|account|password|authenticator/i.test(text), false, text));
+    // a locked or absent vault: no replacement key block
+    sandbox.nasVaultReady = () => false;
+    sandbox.showNasBlockedGate('NAS requires device encryption to be enabled and unlocked. Enable it in the legacy Settings view, then activate NAS again.');
+    assert.strictEqual(n['nas-blocked-config'].hidden, true);
+    assert.strictEqual(n['nas-auth-title'].textContent, 'Cloud sync unavailable');
+    sandbox.nasVaultReady = () => true;
+    // the sign-in gate puts the wording and the button back, and hides the blocked-only controls
+    sandbox.showNasAuthGate();
+    assert.strictEqual(n['nas-auth-title'].textContent, 'Open NAS portfolio');
+    assert.ok(/account and a verified authenticator/.test(n['nas-auth-copy'].textContent));
+    assert.deepStrictEqual([n['nas-auth-submit'].hidden, n['nas-auth-submit'].disabled, n['nas-auth-submit'].textContent], [false, false, 'Sign in']);
+    assert.deepStrictEqual(['nas-signin-panel', 'nas-factor-panel', 'nas-auth-signout', 'nas-readonly-escape', 'nas-blocked-config'].map(id => n[id].hidden), [false, true, true, true, true]);
+    assert.strictEqual(n['nas-auth-status'].textContent, 'Sign in with your NAS account. A verified TOTP challenge is required.');
+    assert.strictEqual(n['nas-auth-status'].style.color, '');
+    // the factor step is as it was: its own label, Sign out available, the form hidden
+    sandbox.renderNasAuthStep('factor');
+    assert.deepStrictEqual([n['nas-auth-submit'].textContent, n['nas-auth-signout'].hidden, n['nas-signin-panel'].hidden, n['nas-factor-panel'].hidden], ['Verify and open portfolio', false, true, false]);
   })) passed += 1; else failed += 1;
 
   console.log(`NAS app behavioural tests: ${passed} passed, ${failed} failed`);
