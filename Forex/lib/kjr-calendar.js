@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   KUJIRA SHARED — kjr-calendar.js   (KJR_CALENDAR_VERSION 1.0)
+   KUJIRA SHARED, kjr-calendar.js   (KJR_CALENDAR_VERSION 1.0)
    One month-calendar engine, configured per app, never forked.
    Loaded by a plain <script src="kjr-calendar.js?v=1.0"> after kjr-format.js.
    Exposes window.KjrCalendar.mount(el, opts) -> { refresh, goToMonth, today, destroy }.
@@ -27,7 +27,7 @@
      title                         header title (default 'Calendar')
 
    Per-app variation lives in this config. Re-skin via CSS tokens, never fork.
-   Vendored copy — improve the master in the template, bump the version, re-vendor.
+   Vendored copy, improve the master in the template, bump the version, re-vendor.
    ═══════════════════════════════════════════════════════════════════════ */
 (function (root) {
   'use strict';
