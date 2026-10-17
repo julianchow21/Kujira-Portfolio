@@ -2,7 +2,7 @@
 
 Monorepo of 3 static SPAs hosted on GitHub Pages. No framework, no bundler, no build step. Open any `.html` directly or serve from repo root.
 
-> Master rules also apply from `~/.assistant-control/AGENTS.md` (Julian's identity, formatting, workflow, skills, GitHub push, file naming, folder cleanliness, version badge, UI quality standard). That file loads separately and is not duplicated here. This file covers repo-specific architecture, commands, constraints, and gotchas no agent could infer from filenames alone.
+> Master rules also apply from `~/.assistant-control/AGENTS.md` (Julian's identity, formatting, workflow, skills, GitHub push, file naming, files and hygiene, version badge, UI quality standard). That file loads separately and is not duplicated here. This file covers repo-specific architecture, commands, constraints, and gotchas no agent could infer from filenames alone.
 
 ## Commands
 
@@ -96,7 +96,7 @@ These are hard-learned loss classes; every data-storing app must uphold them:
 
 These extend or override the master `CLAUDE.md` rules for this repo.
 
-### Folder cleanliness
+### Files and hygiene
 
 - **No Backups/ folders.** Master rules forbid backup snapshots. If `Backups/` directories appear in this repo, delete them to Trash. Git history is the archive.
 - **Point-in-time docs are disposable.** QA reports, gap reviews, and implementation specs get this footer when created: `*Disposable point-in-time doc. Delete once fully actioned (see CLAUDE.md).*` Delete them once actioned. Living docs (runbooks, SOPs, CLAUDE.md, AGENTS.md) stay.

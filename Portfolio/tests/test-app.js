@@ -9717,7 +9717,7 @@ async function runTests(){
   test('p283 item 2 - each Chart Builder chip\'s remove button names itself "Remove <chip label>" (escaped for the attribute), the cross stays the visible mark, and the tooltip, handler and data attributes are as they were', () => {
     // the markup in the source
     const fn = extractFunction('pbRenderChips');
-    assert.ok(fn.includes('data-a1="${key}" title="Remove" aria-label="Remove ${kjrEscape(f.label)}">×</button>'));
+    assert.ok(fn.includes('data-a1="${kjrEscape(key)}" title="Remove" aria-label="Remove ${kjrEscape(f.label)}">×</button>'));
     // the renderer, run: a label with an ampersand, one without, and a key the field list no longer holds (its fallback label)
     const sb = realEscape(freshSandbox());
     const chips = { x:{ innerHTML:'' }, y:{ innerHTML:'' } }, holders = { x:{ style:{} }, y:{ style:{} } };
@@ -9733,6 +9733,21 @@ async function runTests(){
     // every cross keeps its tooltip, its handler and its data attributes
     assert.strictEqual((chips.y.innerHTML.match(/<button /g) || []).length, 3);
     assert.strictEqual((chips.y.innerHTML.match(/<button data-click="pbRemoveField" data-a0="y" data-a1="[^"]*" title="Remove" aria-label="Remove [^"]*">×<\/button>/g) || []).length, 3);
+  });
+
+  test('p284 - pbRenderChips escapes the chip label, the axis and the key, so a hostile field label or key renders as inert text', () => {
+    const fn = extractFunction('pbRenderChips');
+    const sb = realEscape(freshSandbox());
+    const chips = { x:{ innerHTML:'' } };
+    sb.document = { getElementById: id => ({ 'pb-x-chips':chips.x })[id] || null };
+    sb.pbFields = () => ({ evil:{ label:'<img src=x onerror=alert(1)>' } });
+    sb.pbState = { x:['evil', '"><b>k</b>'] };
+    vm.runInContext(fn, sb);
+    sb.pbRenderChips('x');
+    assert.ok(!/<img|<b>/.test(chips.x.innerHTML), chips.x.innerHTML);
+    assert.ok(chips.x.innerHTML.includes('<span class="cb-axis-chip">&lt;img src=x onerror=alert(1)&gt;<button'));
+    assert.ok(chips.x.innerHTML.includes('data-a1="&quot;&gt;&lt;b&gt;k&lt;/b&gt;"'));
+    assert.ok(chips.x.innerHTML.includes('(?) &quot;&gt;&lt;b&gt;k&lt;/b&gt;<button'));
   });
 
   test('p283 item 3 - the IBKR import preview table drops the holdings grid\'s 760px floor (min-width:0), so its Status column with the dup tick box is not cut off in the 666px wrapper, and the wrapper keeps its vertical cap and its sideways scroll', () => {
@@ -9753,12 +9768,12 @@ async function runTests(){
     assert.ok(fn.includes('<th>Death cover</th><th>Premium</th></tr></thead>'));
   });
 
-  test('p283 item 5 - this release is v2.83 (13 Oct): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
+  test('p284 release - this release is v2.84 (18 Oct): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
     const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    assert.ok(appSrc.includes("const APP_VERSION = 'v2.83';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.83 (13 Oct)';"));
-    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.83';"));
-    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 13/10/2026 (app v2.83).'));
+    assert.ok(appSrc.includes("const APP_VERSION = 'v2.84';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.84 (18 Oct)';"));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.84';"));
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 18/10/2026 (app v2.84).'));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

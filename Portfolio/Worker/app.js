@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.83';
-const APP_DISPLAY_VERSION = 'v2.83 (13 Oct)';
+const APP_VERSION = 'v2.84';
+const APP_DISPLAY_VERSION = 'v2.84 (18 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -9639,7 +9639,7 @@ function pbRenderChips(axis){
   const flds = pbFields(pbState);
   chipsEl.innerHTML = pbState[axis].map(key => {
     const f = flds[key] || { label:'(?) ' + key };
-    return `<span class="cb-axis-chip">${f.label}<button data-click="pbRemoveField" data-a0="${axis}" data-a1="${key}" title="Remove" aria-label="Remove ${kjrEscape(f.label)}">×</button></span>`;
+    return `<span class="cb-axis-chip">${kjrEscape(f.label)}<button data-click="pbRemoveField" data-a0="${kjrEscape(axis)}" data-a1="${kjrEscape(key)}" title="Remove" aria-label="Remove ${kjrEscape(f.label)}">×</button></span>`;
   }).join('');
   if (ph) ph.style.display = pbState[axis].length ? 'none' : '';
 }
