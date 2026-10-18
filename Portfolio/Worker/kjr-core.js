@@ -397,6 +397,47 @@ function safeRatio(num, denom, scale){
   return n / d * (scale != null ? scale : 100);
 }
 
+/* Journal Home glance (v2.85): the one object the Journal Home Portfolio card reads, schema
+   journal-home-glance/v1 (Journal's lib/home/glance-contract.mjs, which is strict and fails closed,
+   so this builds exactly its shape). A summary only: a net worth figure, the day P&L, the largest
+   mover. No holding list, quantity, account or cost leaves the app.
+   input: { netWorth, exCpf, incomplete, holdings:[{ symbol, daySgd, dayPct }], now }
+   netWorth is the figure the dashboard headline shows. incomplete is the valuation's own flag (a known
+   subtotal). holdings carry the day move in S$ and percent, null where no quote has loaded. Day P&L is
+   left out when no holding has a day move, so the card says "unavailable" rather than showing a made
+   up zero. Pure, no clock of its own: `now` is passed in. */
+function kjrBuildJournalGlance(input){
+  const i = input || {};
+  const nowMs = i.now instanceof Date ? i.now.getTime() : Number(i.now);
+  const empty = {
+    schema: 'journal-home-glance/v1', provider: 'portfolio', status: 'empty',
+    sourceUpdatedAt: null, asOf: null, currency: null,
+    summary: { netWorth: null, exCpf: null, incomplete: null }
+  };
+  const netWorth = Number(i.netWorth);
+  if (i.netWorth === null || i.netWorth === undefined || !isFinite(netWorth) || !isFinite(nowMs)) return empty;
+  const stamp = new Date(nowMs).toISOString();
+  const summary = { netWorth: roundMoney(netWorth), exCpf: !!i.exCpf, incomplete: !!i.incomplete };
+  const moves = (Array.isArray(i.holdings) ? i.holdings : [])
+    .filter(h => h && h.daySgd !== null && h.daySgd !== undefined && isFinite(Number(h.daySgd)));
+  if (moves.length){
+    summary.dayPnl = roundMoney(moves.reduce((sum, h) => sum + Number(h.daySgd), 0));
+    let best = null;
+    moves.forEach(h => {
+      const symbol = String(h.symbol == null ? '' : h.symbol).toUpperCase().replace(/[^A-Z0-9.^=-]/g, '').slice(0, 16);
+      if (!/^[A-Z0-9]/.test(symbol)) return;
+      const day = roundMoney(Number(h.daySgd));
+      if (Math.abs(day) < 0.005) return;
+      if (!best || Math.abs(day) > Math.abs(best.dayPnl)) best = { symbol, dayPnl: day, dayPct: h.dayPct != null && isFinite(Number(h.dayPct)) && Math.abs(Number(h.dayPct)) <= 1000 ? roundMoney(Number(h.dayPct)) : null };
+    });
+    if (best) summary.topMover = best;
+  }
+  return {
+    schema: 'journal-home-glance/v1', provider: 'portfolio', status: summary.incomplete ? 'incomplete' : 'ready',
+    sourceUpdatedAt: stamp, asOf: stamp, currency: 'SGD', summary
+  };
+}
+
 /* Take-home for an income entry: the typed net if it's a real finite value
    (0 included, so a genuine zero net-take-home isn't discarded), else gross
    minus employee CPF. Never falls back to full gross, an income row with a
@@ -754,6 +795,6 @@ if (typeof module !== 'undefined' && module.exports) {
     computeStockPosition,
     parseCSV, ibkrNum, ibkrExtractTrades, ibkrMatchTrades,
     kjrChartAggregate, kjrFmtMeasure, kjrFmtAxis,
-    kjrValidDate
+    kjrValidDate, kjrBuildJournalGlance
   };
 }

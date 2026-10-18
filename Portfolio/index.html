@@ -1758,6 +1758,17 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
     </div>
 
     <div class="card">
+      <div class="card-head"><h3>Journal Home glance</h3><span class="hint">A small summary for your Journal Home.</span></div>
+      <div class="card-body">
+        <p class="hint" style="margin-bottom:12px">Copies your net worth, today's P&amp;L and the biggest mover as one short block of text. Paste it into a code block on a private page called Home Glance Portfolio in your own Journal. Nothing is sent from here, no holdings or accounts are included, and the figure follows the Include CPF switch on the dashboard. Refresh prices first for a day P&amp;L.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn" data-click="copyJournalGlance">Copy Journal glance</button>
+          <span class="hint" id="glance-meta"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-head"><h3>Recently deleted</h3><span class="hint" id="trash-meta"></span></div>
       <div class="card-body">
         <p class="hint" style="margin-bottom:12px">Deleted entries are kept here so you can put them back. Restoring an item returns it to its tab and its figures to your totals. Emptying is permanent. Keeps the last 100 deletions.</p>
@@ -2297,12 +2308,12 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.84"></script>
-<script src="Worker/kjr-sortable.js?v=2.84"></script>
-<script src="Worker/kjr-vault.js?v=2.84"></script>
-<script src="Worker/kjr-migration.js?v=2.84"></script>
-<script src="Worker/supabase.js?v=2.84"></script>
-<script src="Worker/kjr-nas.js?v=2.84"></script>
-<script src="Worker/app.js?v=2.84"></script>
+<script src="Worker/kjr-core.js?v=2.85"></script>
+<script src="Worker/kjr-sortable.js?v=2.85"></script>
+<script src="Worker/kjr-vault.js?v=2.85"></script>
+<script src="Worker/kjr-migration.js?v=2.85"></script>
+<script src="Worker/supabase.js?v=2.85"></script>
+<script src="Worker/kjr-nas.js?v=2.85"></script>
+<script src="Worker/app.js?v=2.85"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@
 How to QA this app after any change, and the mistakes that must never come back.
 Re-run the whole thing whenever a new feature touches money, display, or storage.
 
-Supersedes `QA SOP v1 (4 Jun)`. Last updated: 18/10/2026 (app v2.84).
+Supersedes `QA SOP v1 (4 Jun)`. Last updated: 18/10/2026 (app v2.85).
 
 ---
 

@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.84';
-const APP_DISPLAY_VERSION = 'v2.84 (18 Oct)';
+const APP_VERSION = 'v2.85';
+const APP_DISPLAY_VERSION = 'v2.85 (18 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -5108,6 +5108,55 @@ function exportBackup(){
   } catch (e) {
     showToast('Export failed: ' + (e && e.message ? e.message : e), 'error');
   }
+}
+
+/* Journal Home glance (v2.85). Copies one small summary object to the clipboard for the owner to paste
+   into the private "Home Glance Portfolio" page in their own Journal. Nothing is sent anywhere by the
+   app: no endpoint, no token, no network call, so the summary only ever reaches Journal through
+   Journal's own signed-in, owner-only storage. It carries the net worth figure the dashboard headline
+   shows (with or without CPF, as the Include CPF switch says), the day P&L and the largest mover, and
+   no holdings, quantities or accounts. The object is built by the pure kjrBuildJournalGlance. */
+async function copyJournalGlance(){
+  let text;
+  let hasDayMove = false;
+  try {
+    const valuation = _netWorthValueInfo();
+    const netExCpf = roundMoney(valuation.total - valuation.classes.cpf);
+    const rows = _dashHoldingRows(buildStockChartRows());
+    // A portfolio with no asset of any kind is the empty state, not a ready S$0.
+    const hasAssets = Object.keys(valuation.classes).some(k => Number(valuation.classes[k]) !== 0);
+    const payload = kjrBuildJournalGlance({
+      netWorth: hasAssets ? (_dashShowCpf ? valuation.total : netExCpf) : null,
+      exCpf: !_dashShowCpf,
+      incomplete: valuation.incomplete,
+      holdings: rows.map(r => ({ symbol: r.sym, daySgd: r.daySgd, dayPct: r.dayPct })),
+      now: new Date()
+    });
+    hasDayMove = payload.summary && payload.summary.dayPnl !== undefined;
+    text = JSON.stringify(payload);
+  } catch (e) {
+    showToast('Could not build the summary: ' + (e && e.message ? e.message : e), 'error');
+    return;
+  }
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    copied = true;
+  } catch (e) {
+    // No clipboard permission (or no secure context): fall back to the old selection copy.
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(area);
+    area.select();
+    try { copied = document.execCommand('copy'); } catch (e2) { copied = false; }
+    document.body.removeChild(area);
+  }
+  if (!copied){ showToast('Could not copy. Allow clipboard access and try again.', 'error'); return; }
+  const meta = document.getElementById('glance-meta');
+  if (meta) meta.textContent = 'Copied ' + _isoDateSG(new Date());
+  showToast(hasDayMove ? 'Journal glance copied' : 'Journal glance copied without a day P&L, refresh prices for one', 'success');
 }
 
 function importBackupFromFile(input){
@@ -15170,6 +15219,7 @@ function installEventDelegation(){
     emptyTrash:          () => emptyTrash(),
     // import / export / backup
     exportBackup:        () => exportBackup(),
+    copyJournalGlance:   () => copyJournalGlance(),
     exportHoldingsCSV:   () => exportHoldingsCSV(),
     exportLedgerCSV:     () => exportLedgerCSV(),
     exportInsuranceCSV:  () => exportInsuranceCSV(),

@@ -9768,12 +9768,34 @@ async function runTests(){
     assert.ok(fn.includes('<th>Death cover</th><th>Premium</th></tr></thead>'));
   });
 
-  test('p284 release - this release is v2.84 (18 Oct): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
+  test('p285 - the Journal Home glance: a Settings card and an action that copy one pure summary, with no network call', () => {
+    const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    assert.ok(indexHtml.includes('<button class="btn" data-click="copyJournalGlance">Copy Journal glance</button>'));
+    assert.ok(indexHtml.includes('id="glance-meta"'));
+    assert.ok(/copyJournalGlance:\s+\(\) => copyJournalGlance\(\),/.test(appSrc));
+    const start = appSrc.indexOf('async function copyJournalGlance(){');
+    const body = appSrc.slice(start, appSrc.indexOf('function importBackupFromFile(input){', start));
+    assert.ok(start > 0 && body.includes('kjrBuildJournalGlance({'));
+    // nothing leaves the app: clipboard only
+    assert.ok(!/fetch\(|XMLHttpRequest|sendBeacon|WebSocket|script\.google|pushToRemote/.test(body));
+    assert.ok(body.includes('navigator.clipboard.writeText(text)'));
+    // only the summary inputs go to the builder: a symbol and the day move, never a holding row, quantity or cost
+    assert.ok(body.includes('holdings: rows.map(r => ({ symbol: r.sym, daySgd: r.daySgd, dayPct: r.dayPct }))'));
+    assert.ok(!/shares|costBasis|account|quantity/.test(body.slice(body.indexOf('kjrBuildJournalGlance({'), body.indexOf('hasDayMove ='))));
+    // the figure follows the dashboard's Include CPF switch and says which it is
+    assert.ok(body.includes('netWorth: hasAssets ? (_dashShowCpf ? valuation.total : netExCpf) : null,') && body.includes('exCpf: !_dashShowCpf,'));
+    // no asset of any kind is the empty state, never a ready S$0
+    assert.ok(body.includes("const hasAssets = Object.keys(valuation.classes).some(k => Number(valuation.classes[k]) !== 0);"));
+    // the card is read-only, so a read-only or locked app state needs no gate, and the action never writes the DB
+    assert.ok(!/DB\.|saveLocal|pushToRemote|markDirty/.test(body));
+  });
+
+  test('p285 release - this release is v2.85 (18 Oct): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
     const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    assert.ok(appSrc.includes("const APP_VERSION = 'v2.84';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.84 (18 Oct)';"));
-    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.84';"));
-    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 18/10/2026 (app v2.84).'));
+    assert.ok(appSrc.includes("const APP_VERSION = 'v2.85';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.85 (18 Oct)';"));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.85';"));
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 18/10/2026 (app v2.85).'));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

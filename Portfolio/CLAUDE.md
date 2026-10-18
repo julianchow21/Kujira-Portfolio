@@ -76,6 +76,10 @@ Glass layer (both themes): `--glass`, `--glass-strong`, `--glass-border`, `--gla
 - `../Trading/` and `../Forex/`, sibling apps with their own CLAUDE.md, cross-linked with relative paths
 - Repo-root `CLAUDE.md` documents monorepo-wide commands and app boundaries, `AGENTS.md` is a symlink to it
 
+## Journal Home glance (v2.85)
+
+Settings has a Journal Home glance card with a Copy Journal glance button (`copyJournalGlance` in `Worker/app.js`). It copies one short JSON summary to the clipboard, built by the pure `kjrBuildJournalGlance` in `Worker/kjr-core.js`: net worth as the dashboard headline shows it (with or without CPF, as the Include CPF switch says), the day P&L, and the largest mover (symbol, S$ move, percent). Julian pastes it into a code block on a private page called `Home Glance Portfolio` in his own Journal, and Journal Home reads that page through his signed-in, owner-only session. The app makes no network call and holds no Journal credential, the summary reaches Journal only by that paste. The shape is Journal's `lib/home/glance-contract.mjs` (schema `journal-home-glance/v1`, fail-closed, unknown fields rejected), so a change to either side needs the other updated. Holdings, quantities, costs and accounts must never be added to it. Journal marks a summary stale 3 days after its `sourceUpdatedAt`.
+
 ## Gotchas
 
 - `kjr-core.js` must stay side-effect-free. Any DOM or storage touch belongs in app code

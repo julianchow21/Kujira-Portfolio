@@ -958,6 +958,90 @@ function runTests() {
     assert.strictEqual(core._round2(-123.456), -123.46);
   });
 
+  // 30. Testing kjrBuildJournalGlance (the Journal Home glance, v2.85)
+  const GLANCE_NOW = new Date('2026-10-18T04:00:00.000Z');
+  const glance = input => core.kjrBuildJournalGlance(Object.assign({ netWorth: 250000, exCpf: false, incomplete: false, holdings: [], now: GLANCE_NOW }, input));
+
+  test('kjrBuildJournalGlance - a ready summary has exactly the contract fields and nothing else', () => {
+    const g = glance({ holdings: [{ symbol: 'NVDA', daySgd: 400, dayPct: 3.1 }, { symbol: 'D05.SI', daySgd: -50.255, dayPct: -0.5 }] });
+    assert.deepStrictEqual(Object.keys(g), ['schema', 'provider', 'status', 'sourceUpdatedAt', 'asOf', 'currency', 'summary']);
+    assert.strictEqual(g.schema, 'journal-home-glance/v1');
+    assert.strictEqual(g.provider, 'portfolio');
+    assert.strictEqual(g.status, 'ready');
+    assert.strictEqual(g.currency, 'SGD');
+    assert.strictEqual(g.sourceUpdatedAt, '2026-10-18T04:00:00.000Z');
+    assert.strictEqual(g.asOf, g.sourceUpdatedAt);
+    assert.deepStrictEqual(Object.keys(g.summary).sort(), ['dayPnl', 'exCpf', 'incomplete', 'netWorth', 'topMover']);
+    assert.strictEqual(g.summary.netWorth, 250000);
+    assert.strictEqual(g.summary.exCpf, false);
+    assert.strictEqual(g.summary.dayPnl, 349.75); // 400 - 50.255 rounded to cents
+    assert.deepStrictEqual(g.summary.topMover, { symbol: 'NVDA', dayPnl: 400, dayPct: 3.1 });
+  });
+
+  test('kjrBuildJournalGlance - no holding names, quantities or costs can leak into the output', () => {
+    const g = glance({ holdings: [{ symbol: 'NVDA', daySgd: 10, dayPct: 1, shares: 7777, costBasis: 4242, name: 'Secret Fund', account: 'IBKR-1234' }] });
+    const text = JSON.stringify(g);
+    ['shares', 'costBasis', 'Secret', 'IBKR', '7777', '4242'].forEach(word => assert.ok(!text.includes(word), word));
+  });
+
+  test('kjrBuildJournalGlance - the top mover is the largest absolute S$ move, a loss included', () => {
+    const g = glance({ holdings: [{ symbol: 'AAA', daySgd: 100, dayPct: 1 }, { symbol: 'bbb', daySgd: -300, dayPct: -2 }, { symbol: 'CCC', daySgd: 299.99, dayPct: 9 }] });
+    assert.deepStrictEqual(g.summary.topMover, { symbol: 'BBB', dayPnl: -300, dayPct: -2 });
+    assert.strictEqual(g.summary.dayPnl, 99.99);
+  });
+
+  test('kjrBuildJournalGlance - no day move at all leaves the day P&L and mover out, never a fake zero', () => {
+    [[], [{ symbol: 'A', daySgd: null, dayPct: null }], [{ symbol: 'A', daySgd: undefined }], null, undefined].forEach(holdings => {
+      const g = glance({ holdings });
+      assert.strictEqual(g.status, 'ready');
+      assert.ok(!('dayPnl' in g.summary));
+      assert.ok(!('topMover' in g.summary));
+    });
+  });
+
+  test('kjrBuildJournalGlance - a quiet day keeps the real zero P&L but names no mover', () => {
+    const g = glance({ holdings: [{ symbol: 'A', daySgd: 0, dayPct: 0 }, { symbol: 'B', daySgd: 0.004, dayPct: 0 }] });
+    assert.strictEqual(g.summary.dayPnl, 0);
+    assert.ok(!('topMover' in g.summary));
+  });
+
+  test('kjrBuildJournalGlance - an incomplete valuation says so and a CPF-free figure says so', () => {
+    const g = glance({ incomplete: true, exCpf: true, netWorth: 1234.567 });
+    assert.strictEqual(g.status, 'incomplete');
+    assert.strictEqual(g.summary.incomplete, true);
+    assert.strictEqual(g.summary.exCpf, true);
+    assert.strictEqual(g.summary.netWorth, 1234.57);
+  });
+
+  test('kjrBuildJournalGlance - a missing or non-finite net worth, or no clock, gives the empty state', () => {
+    [null, undefined, NaN, Infinity, 'abc'].forEach(netWorth => {
+      const g = glance({ netWorth });
+      assert.strictEqual(g.status, 'empty');
+      assert.strictEqual(g.currency, null);
+      assert.strictEqual(g.sourceUpdatedAt, null);
+      assert.deepStrictEqual(g.summary, { netWorth: null, exCpf: null, incomplete: null });
+    });
+    assert.strictEqual(glance({ now: undefined }).status, 'empty');
+    assert.strictEqual(glance({ now: 'soon' }).status, 'empty');
+    assert.strictEqual(glance({ netWorth: 0 }).status, 'ready'); // a genuine zero is not empty
+  });
+
+  test('kjrBuildJournalGlance - symbols are cleaned to the contract alphabet, bad ones are never the mover', () => {
+    const g = glance({ holdings: [{ symbol: '<img>', daySgd: 900, dayPct: 1 }, { symbol: 'd05.si ', daySgd: 5, dayPct: 1 }] });
+    assert.strictEqual(g.summary.topMover.symbol, 'IMG'); // markup characters stripped, never passed through
+    const empty = glance({ holdings: [{ symbol: '!!!', daySgd: 900, dayPct: 1 }, { symbol: 'D05.SI', daySgd: 5, dayPct: 1 }] });
+    assert.strictEqual(empty.summary.topMover.symbol, 'D05.SI');
+    assert.strictEqual(empty.summary.dayPnl, 905); // the move still counts toward the total
+    const long = glance({ holdings: [{ symbol: 'A'.repeat(30), daySgd: 5, dayPct: 1 }] });
+    assert.strictEqual(long.summary.topMover.symbol.length, 16);
+  });
+
+  test('kjrBuildJournalGlance - an absurd or missing percentage becomes null, the S$ move stays', () => {
+    const g = glance({ holdings: [{ symbol: 'A', daySgd: 10, dayPct: 5000 }] });
+    assert.deepStrictEqual(g.summary.topMover, { symbol: 'A', dayPnl: 10, dayPct: null });
+    assert.strictEqual(glance({ holdings: [{ symbol: 'A', daySgd: 10 }] }).summary.topMover.dayPct, null);
+  });
+
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
 
   if (failed > 0) process.exit(1);
