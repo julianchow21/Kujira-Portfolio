@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.85';
-const APP_DISPLAY_VERSION = 'v2.85 (18 Oct)';
+const APP_VERSION = 'v2.86';
+const APP_DISPLAY_VERSION = 'v2.86 (26 Oct)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -5110,53 +5110,88 @@ function exportBackup(){
   }
 }
 
-/* Journal Home glance (v2.85). Copies one small summary object to the clipboard for the owner to paste
+/* Copies text to the clipboard and says whether it landed: resolves true or false, never rejects. The async Clipboard
+   API goes first. Without it (no secure context, no permission) the old selection copy runs on an off-screen textarea.
+   That field must not be readonly and is selected with setSelectionRange(0, length), because iOS Safari ignores
+   select() on a readonly one. It is removed again and focus goes back to whatever held it, so a keyboard user is
+   not left at the top of the page. */
+async function _copyText(text){
+  const value = String(text == null ? '' : text);
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch (e) {
+    // fall through to the selection copy
+  }
+  const previous = document.activeElement;
+  const area = document.createElement('textarea');
+  let copied = false;
+  try {
+    area.value = value;
+    area.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0;font-size:16px';
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    area.setSelectionRange(0, value.length);
+    copied = !!document.execCommand('copy');
+  } catch (e2) {
+    copied = false;
+  } finally {
+    if (area.parentNode) area.parentNode.removeChild(area);
+    if (previous && typeof previous.focus === 'function'){
+      try { previous.focus({ preventScroll:true }); } catch (e3) { /* focus is a courtesy, the copy result stands */ }
+    }
+  }
+  return copied;
+}
+
+/* Journal Home glance (v2.85, reworked v2.86). Copies one small summary object to the clipboard for the owner to paste
    into the private "Home Glance Portfolio" page in their own Journal. Nothing is sent anywhere by the
    app: no endpoint, no token, no network call, so the summary only ever reaches Journal through
-   Journal's own signed-in, owner-only storage. It carries the net worth figure the dashboard headline
-   shows (with or without CPF, as the Include CPF switch says), the day P&L and the largest mover, and
-   no holdings, quantities or accounts. The object is built by the pure kjrBuildJournalGlance. */
+   Journal's own signed-in, owner-only storage. It carries net worth EXCLUDING CPF, always (the dashboard's Include CPF
+   switch has no say, Julian 26/10/2026), the day P&L and the largest mover of the open STOCKS only (crypto is left out
+   of both), and no holdings, quantities or accounts. The object is built by the pure kjrBuildJournalGlance. */
 async function copyJournalGlance(){
   let text;
-  let hasDayMove = false;
+  let payload;
+  let openStocks = 0;
   try {
     const valuation = _netWorthValueInfo();
-    const netExCpf = roundMoney(valuation.total - valuation.classes.cpf);
-    const rows = _dashHoldingRows(buildStockChartRows());
-    // A portfolio with no asset of any kind is the empty state, not a ready S$0.
-    const hasAssets = Object.keys(valuation.classes).some(k => Number(valuation.classes[k]) !== 0);
-    const payload = kjrBuildJournalGlance({
-      netWorth: hasAssets ? (_dashShowCpf ? valuation.total : netExCpf) : null,
-      exCpf: !_dashShowCpf,
-      incomplete: valuation.incomplete,
-      holdings: rows.map(r => ({ symbol: r.sym, daySgd: r.daySgd, dayPct: r.dayPct })),
+    const exCpf = _allocationData(valuation.classes, false);
+    // Open stock positions only (a closed one has no value, move or quote to date), each with the quote that valued it:
+    // when it was fetched, and the app's own stale verdict on it. A stock with no live quote has quotedAt null.
+    const stocks = buildStockChartRows().filter(r => Math.abs(Number(r.shares) || 0) > OVERSOLD_EPSILON).map(r => {
+      const move = _stockDayMove(r);
+      return { symbol: r.s.symbol, daySgd: move.sgd, dayPct: move.pct, quotedAt: (r.px && r.px.price != null) ? r.px.fetchedAt : null, stale: r.stale };
+    });
+    openStocks = stocks.length;
+    // A coin valued at cost is a cost estimate inside the net worth, flagged as the dashboard's own estimate note flags it.
+    const incomplete = valuation.incomplete || valuation.cryptoInfo.estimatedCount > 0;
+    payload = kjrBuildJournalGlance({
+      // Nothing held outside CPF is the empty state. Assets that cannot be valued (no FX rate, no price) are not nothing:
+      // that is incomplete, never empty.
+      netWorth: (exCpf.hasValues || incomplete || openStocks > 0) ? exCpf.total : null,
+      incomplete,
+      holdings: stocks,
       now: new Date()
     });
-    hasDayMove = payload.summary && payload.summary.dayPnl !== undefined;
     text = JSON.stringify(payload);
   } catch (e) {
     showToast('Could not build the summary: ' + (e && e.message ? e.message : e), 'error');
     return;
   }
-  let copied = false;
-  try {
-    await navigator.clipboard.writeText(text);
-    copied = true;
-  } catch (e) {
-    // No clipboard permission (or no secure context): fall back to the old selection copy.
-    const area = document.createElement('textarea');
-    area.value = text;
-    area.setAttribute('readonly', '');
-    area.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
-    document.body.appendChild(area);
-    area.select();
-    try { copied = document.execCommand('copy'); } catch (e2) { copied = false; }
-    document.body.removeChild(area);
-  }
-  if (!copied){ showToast('Could not copy. Allow clipboard access and try again.', 'error'); return; }
+  if (!(await _copyText(text))){ showToast('Could not copy. Allow clipboard access and try again.', 'error'); return; }
   const meta = document.getElementById('glance-meta');
   if (meta) meta.textContent = 'Copied ' + _isoDateSG(new Date());
-  showToast(hasDayMove ? 'Journal glance copied' : 'Journal glance copied without a day P&L, refresh prices for one', 'success');
+  // Say what was copied: a flagged summary is told as such, never passed off as a clean one.
+  const caveat = {
+    empty: 'Journal glance copied, but it is empty because nothing is held outside CPF yet',
+    incomplete: 'Journal glance copied, but marked incomplete because some holdings have no live price or FX rate',
+    stale: 'Journal glance copied, but the prices are over a day old, refresh prices and copy again'
+  }[payload.status];
+  if (caveat){ showToast(caveat); return; }
+  if (payload.summary.dayPnl !== undefined) showToast('Journal glance copied', 'success');
+  else showToast(openStocks ? 'Journal glance copied without a day P&L, refresh prices for one' : 'Journal glance copied without a day P&L, as you hold no stocks', 'success');
 }
 
 function importBackupFromFile(input){

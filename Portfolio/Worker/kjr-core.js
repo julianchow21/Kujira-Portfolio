@@ -397,18 +397,34 @@ function safeRatio(num, denom, scale){
   return n / d * (scale != null ? scale : 100);
 }
 
-/* Journal Home glance (v2.85): the one object the Journal Home Portfolio card reads, schema
+/* Journal Home glance (v2.85, reworked v2.86): the one object the Journal Home Portfolio card reads, schema
    journal-home-glance/v1 (Journal's lib/home/glance-contract.mjs, which is strict and fails closed,
    so this builds exactly its shape). A summary only: a net worth figure, the day P&L, the largest
    mover. No holding list, quantity, account or cost leaves the app.
-   input: { netWorth, exCpf, incomplete, holdings:[{ symbol, daySgd, dayPct }], now }
-   netWorth is the figure the dashboard headline shows. incomplete is the valuation's own flag (a known
-   subtotal). holdings carry the day move in S$ and percent, null where no quote has loaded. Day P&L is
-   left out when no holding has a day move, so the card says "unavailable" rather than showing a made
-   up zero. Pure, no clock of its own: `now` is passed in. */
+   input: { netWorth, incomplete, holdings:[{ symbol, daySgd, dayPct, quotedAt, stale }], now }
+   netWorth is net worth EXCLUDING CPF, always (the output says exCpf: true, there is no switch), or null
+   when nothing is held outside CPF. incomplete is the valuation's own flag (a known subtotal, or a figure
+   resting on a cost estimate). holdings are the open STOCK positions only, never crypto. quotedAt is when
+   the live quote behind a stock was fetched (ISO string, Date or ms), null when it has none and sits at
+   cost, and stale is the app's own verdict on that quote. A stock reaches the day P&L, the mover and the
+   data age only through a dated quote, and one without makes the summary incomplete. sourceUpdatedAt and
+   asOf are the oldest dated quote (never after `now`) so Journal's staleness check reads the age of the
+   prices, the copy time only when no stock has a quote to date. Status: empty (no net worth), incomplete,
+   stale (complete, but a quote is stale, the contract allows stale only when not incomplete), else ready.
+   Day P&L is left out when no counted stock has a day move, so the card says "unavailable" rather than
+   showing a made up zero. Pure, no clock of its own: `now` is passed in and must be a real time, else empty. */
 function kjrBuildJournalGlance(input){
   const i = input || {};
-  const nowMs = i.now instanceof Date ? i.now.getTime() : Number(i.now);
+  // A usable time: a number, ISO date string or Date that is after 1970 and inside the four digit years the contract's
+  // timestamp pattern takes. Null, '' and false are not 1970, and a string the engine merely guesses at ('1') is not a date.
+  const toMs = v => {
+    let t = NaN;
+    if (typeof v === 'number') t = new Date(v).getTime();
+    else if (typeof v === 'string') t = /^\d{4}-\d{2}-\d{2}/.test(v) ? new Date(v).getTime() : NaN;
+    else if (v && typeof v.getTime === 'function') t = Number(v.getTime());
+    return t > 0 && t <= 253402300799999 ? t : NaN;
+  };
+  const nowMs = toMs(i.now);
   const empty = {
     schema: 'journal-home-glance/v1', provider: 'portfolio', status: 'empty',
     sourceUpdatedAt: null, asOf: null, currency: null,
@@ -416,10 +432,19 @@ function kjrBuildJournalGlance(input){
   };
   const netWorth = Number(i.netWorth);
   if (i.netWorth === null || i.netWorth === undefined || !isFinite(netWorth) || !isFinite(nowMs)) return empty;
-  const stamp = new Date(nowMs).toISOString();
-  const summary = { netWorth: roundMoney(netWorth), exCpf: !!i.exCpf, incomplete: !!i.incomplete };
-  const moves = (Array.isArray(i.holdings) ? i.holdings : [])
-    .filter(h => h && h.daySgd !== null && h.daySgd !== undefined && isFinite(Number(h.daySgd)));
+  const dated = [];   // stocks a live quote with a known fetch time stands behind
+  let undated = 0;    // open stocks without one: valued at cost, or a quote of unknown age
+  (Array.isArray(i.holdings) ? i.holdings : []).forEach(h => {
+    if (!h || typeof h !== 'object') return;
+    const at = toMs(h.quotedAt);
+    if (isFinite(at)) dated.push({ h, at: Math.min(at, nowMs) });   // a quote stamped after the clock (skew) is read as now
+    else undated++;
+  });
+  const incomplete = !!i.incomplete || undated > 0;
+  const stamp = new Date(dated.length ? Math.min.apply(null, dated.map(d => d.at)) : nowMs).toISOString();
+  const summary = { netWorth: roundMoney(netWorth), exCpf: true, incomplete };
+  const moves = dated.map(d => d.h)
+    .filter(h => h.daySgd !== null && h.daySgd !== undefined && isFinite(Number(h.daySgd)));
   if (moves.length){
     summary.dayPnl = roundMoney(moves.reduce((sum, h) => sum + Number(h.daySgd), 0));
     let best = null;
@@ -432,8 +457,9 @@ function kjrBuildJournalGlance(input){
     });
     if (best) summary.topMover = best;
   }
+  const stale = !incomplete && dated.some(d => !!d.h.stale);
   return {
-    schema: 'journal-home-glance/v1', provider: 'portfolio', status: summary.incomplete ? 'incomplete' : 'ready',
+    schema: 'journal-home-glance/v1', provider: 'portfolio', status: incomplete ? 'incomplete' : (stale ? 'stale' : 'ready'),
     sourceUpdatedAt: stamp, asOf: stamp, currency: 'SGD', summary
   };
 }

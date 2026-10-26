@@ -187,6 +187,8 @@ const FUNCTION_TARGETS = [
   '_paletteOptHtml', '_paletteHtml', '_paletteSyncActive', '_paletteRender', '_commandPaletteBlocked', 'openCommandPalette', 'closeCommandPalette',
   'paletteQuery', '_paletteMove', '_paletteIndex', 'paletteHover', '_paletteRunAction', 'runPaletteItem', 'paletteKeydown', '_isPaletteShortcut', 'paletteShortcut',
   '_dashHoldingRows', '_dashHoldings',
+  // Journal Home glance (v2.85, reworked v2.86): the copy action and its clipboard helper, and the valuation sums the action reads
+  '_copyText', 'copyJournalGlance', '_netWorthValueInfo', '_cashSGDInfo', '_cpfSGD', '_realestateSGDInfo', 'insuranceCashValueSGDInfo',
   // Motion and feedback (Step 8b): the reduced-motion check, the hero roll maths and runner, the price diff and flash, the loading skeletons, and Undo on a delete toast
   '_reducedMotion', '_easeOutCubic', '_rollValue', '_heroRollPlan', '_heroValueHtml', '_heroRollCancel', '_heroRollStart',
   '_quotePrice', '_priceSnapshot', '_priceDiff', '_pxFlashNote', '_pxFlashPaint', '_pxAttr', '_skeletonOn', '_skelIf', '_pricesLoading',
@@ -368,6 +370,7 @@ function freshSandbox(dbOverrides){
     _pbStockRows: () => [],
     _pbCurSym: () => 'S$',
     _isoDateSG: core._isoDateSG,
+    kjrBuildJournalGlance: core.kjrBuildJournalGlance,
     displayCcy: () => 'SGD',
     fetchStockHistory: async () => ({}),
     _pbMountChart: () => {},
@@ -9768,34 +9771,321 @@ async function runTests(){
     assert.ok(fn.includes('<th>Death cover</th><th>Premium</th></tr></thead>'));
   });
 
-  test('p285 - the Journal Home glance: a Settings card and an action that copy one pure summary, with no network call', () => {
+  test('p285 - the Journal Home glance: a Settings card and an action that copy one pure summary, with no network call (pins reworked for v2.86)', () => {
     const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     assert.ok(indexHtml.includes('<button class="btn" data-click="copyJournalGlance">Copy Journal glance</button>'));
     assert.ok(indexHtml.includes('id="glance-meta"'));
     assert.ok(/copyJournalGlance:\s+\(\) => copyJournalGlance\(\),/.test(appSrc));
-    const start = appSrc.indexOf('async function copyJournalGlance(){');
-    const body = appSrc.slice(start, appSrc.indexOf('function importBackupFromFile(input){', start));
-    assert.ok(start > 0 && body.includes('kjrBuildJournalGlance({'));
-    // nothing leaves the app: clipboard only
+    const body = extractFunction('copyJournalGlance');
+    assert.ok(body && body.includes('kjrBuildJournalGlance({'));
+    // nothing leaves the app: clipboard only, and that sits in the one helper
     assert.ok(!/fetch\(|XMLHttpRequest|sendBeacon|WebSocket|script\.google|pushToRemote/.test(body));
-    assert.ok(body.includes('navigator.clipboard.writeText(text)'));
-    // only the summary inputs go to the builder: a symbol and the day move, never a holding row, quantity or cost
-    assert.ok(body.includes('holdings: rows.map(r => ({ symbol: r.sym, daySgd: r.daySgd, dayPct: r.dayPct }))'));
-    assert.ok(!/shares|costBasis|account|quantity/.test(body.slice(body.indexOf('kjrBuildJournalGlance({'), body.indexOf('hasDayMove ='))));
-    // the figure follows the dashboard's Include CPF switch and says which it is
-    assert.ok(body.includes('netWorth: hasAssets ? (_dashShowCpf ? valuation.total : netExCpf) : null,') && body.includes('exCpf: !_dashShowCpf,'));
-    // no asset of any kind is the empty state, never a ready S$0
-    assert.ok(body.includes("const hasAssets = Object.keys(valuation.classes).some(k => Number(valuation.classes[k]) !== 0);"));
+    assert.ok(body.includes('await _copyText(text)') && !body.includes('navigator.clipboard') && !body.includes('execCommand'));
+    assert.ok(extractFunction('_copyText').includes('navigator.clipboard.writeText(value)'));
+    // only the summary inputs go to the builder: a symbol, the day move, and the quote's fetch time and stale verdict, never a holding row, quantity or cost
+    assert.ok(body.includes('return { symbol: r.s.symbol, daySgd: move.sgd, dayPct: move.pct, quotedAt: (r.px && r.px.price != null) ? r.px.fetchedAt : null, stale: r.stale };'));
+    assert.ok(!/costBasis|avgCost|account|quantity/.test(body));
     // the card is read-only, so a read-only or locked app state needs no gate, and the action never writes the DB
     assert.ok(!/DB\.|saveLocal|pushToRemote|markDirty/.test(body));
   });
 
-  test('p285 release - this release is v2.85 (18 Oct): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
+  /* p286, the Journal Home glance after review. These run the real copyJournalGlance and _copyText, with the valuation sums they read, in the
+     extraction sandbox against a stub clipboard, toast and document, so the payload that would reach Journal is what is under test. */
+  const glanceHoursAgo = n => new Date(Date.now() - n * 3600000).toISOString();
+  // A live stock quote in SGD: price, the move since the previous close, and a fetch time `hoursAgo` hours back.
+  const glanceQuote = (price, change, hoursAgo) => ({ price, previousClose: price - change, change, changePct: change / (price - change) * 100, currency:'SGD', fetchedAt: glanceHoursAgo(hoursAgo) });
+  const glanceStock = (id, symbol, shares, extra) => Object.assign({ id, symbol, market:'SGX', currency:'SGD', shares, avgCost:10 }, extra);
+  // A document stub: a recorded log of the textarea fallback, an element that was focused before it, and a copy command that returns execResult (or throws).
+  function glanceDom(execResult){
+    const log = [];
+    const body = { appended:[], appendChild(el){ el.parentNode = body; body.appended.push(el); log.push('append'); }, removeChild(el){ body.appended = body.appended.filter(e => e !== el); el.parentNode = null; log.push('remove'); } };
+    const area = { value:'', style:{}, attrs:{}, parentNode:null, setAttribute(k, v){ this.attrs[k] = v; }, focus(){ log.push('area.focus'); }, select(){ log.push('select'); }, setSelectionRange(a, b){ log.push('range:' + a + ',' + b); } };
+    const previous = { focus(opts){ log.push('previous.focus:' + JSON.stringify(opts)); } };
+    return {
+      log, body, area, previous, activeElement:previous, getElementById: () => null,
+      createElement(tag){ log.push('create:' + tag); return area; },
+      execCommand(cmd){ log.push('exec:' + cmd + ':' + (area.parentNode === body ? 'attached' : 'detached')); if (execResult === 'throw') throw new Error('blocked'); return execResult; }
+    };
+  }
+  async function runGlance(db, opts){
+    opts = opts || {};
+    const sb = freshSandbox(db);
+    const run = { sb, text:null, toasts:[], meta:{ textContent:'' } };
+    const dom = glanceDom(!opts.copyFails);
+    dom.getElementById = id => id === 'glance-meta' ? run.meta : null;
+    sb.document = dom;
+    sb.showToast = (msg, kind) => run.toasts.push({ msg, kind });
+    sb.navigator = { clipboard: { writeText: async text => { if (opts.copyFails) throw new Error('denied'); run.text = text; } } };
+    if (opts.showCpf !== undefined) sb._dashShowCpf = opts.showCpf;
+    if (opts.prepare) opts.prepare(sb);
+    await sb.copyJournalGlance();
+    run.dom = dom;
+    run.payload = run.text === null ? null : JSON.parse(run.text);
+    return run;
+  }
+
+  await testAsync('p286 item 3 - assets that exist but cannot be converted (no FX rate) are an incomplete S$0, never the empty state', async () => {
+    const yen = { id:'c1', name:'Yen', amount:500000, currency:'JPY' };
+    const run = await runGlance({
+      cash:[yen],
+      stocks:[glanceStock('s1', 'AAPL', 5, { market:'US', currency:'USD' })],
+      _priceCache:{ AAPL:{ price:200, previousClose:198, change:2, changePct:1.01, currency:'USD', fetchedAt: glanceHoursAgo(1) } }
+    });
+    assert.strictEqual(run.payload.status, 'incomplete');
+    assert.strictEqual(run.payload.summary.incomplete, true);
+    assert.strictEqual(run.payload.summary.netWorth, 0);
+    assert.strictEqual(run.payload.summary.exCpf, true);
+    assert.ok(run.payload.sourceUpdatedAt && run.payload.currency === 'SGD');
+    // the same with only the yen account: still assets that exist, still not empty
+    const only = await runGlance({ cash:[yen] });
+    assert.strictEqual(only.payload.status, 'incomplete');
+    assert.strictEqual(only.payload.summary.netWorth, 0);
+    // and an FX rate in place makes it a plain ready figure again
+    const rated = await runGlance({ cash:[yen], settings:{ fxRates:{ JPYSGD:0.009 }, fxOverrides:{} } });
+    assert.strictEqual(rated.payload.status, 'ready');
+    assert.strictEqual(rated.payload.summary.netWorth, 4500);
+  });
+
+  await testAsync('p286 item 4 - a CPF-only portfolio is the empty state with the Include CPF switch off or on, and so is a portfolio with nothing in it, never a ready S$0', async () => {
+    for (const showCpf of [false, true]){
+      for (const db of [{ cpfBalances:{ OA:80000, SA:20000, MA:5000, RA:0 } }, {}]){
+        const run = await runGlance(db, { showCpf });
+        assert.strictEqual(run.payload.status, 'empty', JSON.stringify(db) + ' showCpf ' + showCpf);
+        assert.deepStrictEqual(run.payload.summary, { netWorth:null, exCpf:null, incomplete:null });
+        assert.strictEqual(run.payload.sourceUpdatedAt, null);
+        assert.strictEqual(run.payload.currency, null);
+      }
+    }
+    // a closed position (no shares left) and a zero balance are still nothing held
+    const closed = await runGlance({ stocks:[glanceStock('s1', 'D05', 0)], cash:[{ id:'c1', name:'Empty', amount:0, currency:'SGD' }], cpfBalances:{ OA:1000 } });
+    assert.strictEqual(closed.payload.status, 'empty');
+  });
+
+  await testAsync('p286 item 5 and 10 - net worth is always excluding CPF whatever the Include CPF switch says, and it is the dashboard figure with CPF off (one formula, _allocationData)', async () => {
+    const db = {
+      cash:[{ id:'c1', name:'DBS', amount:20000, currency:'SGD' }],
+      realestate:[{ id:'r1', name:'Flat', value:500000, currency:'SGD' }],
+      cpfBalances:{ OA:80000, SA:20000, MA:10000, RA:0 },
+      stocks:[glanceStock('s1', 'D05', 100, { avgCost:30 })],
+      _priceCache:{ D05: glanceQuote(35, 1, 1) }
+    };
+    const off = await runGlance(db, { showCpf:false });
+    const on = await runGlance(db, { showCpf:true });
+    assert.strictEqual(off.payload.summary.netWorth, 20000 + 500000 + 100 * 35);
+    assert.deepStrictEqual(on.payload.summary, off.payload.summary);
+    assert.strictEqual(on.payload.summary.exCpf, true);
+    // the very figure the dashboard headline shows with the switch off, while with the switch on the dashboard counts CPF and the glance still does not
+    off.sb._dashShowCpf = false;
+    assert.strictEqual(off.payload.summary.netWorth, off.sb._hpNetWorth().displayNet);
+    off.sb._dashShowCpf = true;
+    assert.strictEqual(off.sb._hpNetWorth().displayNet, 523500 + 110000);
+    assert.strictEqual(on.payload.summary.netWorth, 523500);
+  });
+
+  await testAsync('p286 item 6 - day P&L and the top mover are stocks only: a coin with a huge 24 hour move changes neither, and stays in the net worth', async () => {
+    const run = await runGlance({
+      stocks:[glanceStock('s1', 'D05', 10), glanceStock('s2', 'Z74', 100)],
+      crypto:[{ id:'k1', symbol:'BTC', coingeckoId:'bitcoin', amount:1, avgCost:50000, currency:'SGD' }],
+      _priceCache:{ D05: glanceQuote(100, 2, 1), Z74: glanceQuote(3, -0.05, 1), bitcoin:{ sgd:100000, change24h:10, fetchedAt: glanceHoursAgo(1) } }
+    });
+    // D05 +2 x 10 shares = +20, Z74 -0.05 x 100 shares = -5, the coin's +9,090.91 is nowhere in it
+    assert.strictEqual(run.payload.status, 'ready');
+    assert.strictEqual(run.payload.summary.dayPnl, 15);
+    assert.strictEqual(run.payload.summary.topMover.symbol, 'D05');
+    assert.strictEqual(run.payload.summary.topMover.dayPnl, 20);
+    assert.strictEqual(run.payload.summary.topMover.dayPct, 2.04);
+    assert.strictEqual(run.payload.summary.netWorth, 1000 + 300 + 100000);
+    // coins only: no day P&L and no mover at all, not a coin's
+    const coinsOnly = await runGlance({
+      crypto:[{ id:'k1', symbol:'BTC', coingeckoId:'bitcoin', amount:1, avgCost:50000, currency:'SGD' }],
+      _priceCache:{ bitcoin:{ sgd:100000, change24h:10, fetchedAt: glanceHoursAgo(1) } }
+    });
+    assert.ok(!('dayPnl' in coinsOnly.payload.summary) && !('topMover' in coinsOnly.payload.summary));
+    assert.strictEqual(coinsOnly.payload.summary.netWorth, 100000);
+  });
+
+  await testAsync('p286 item 2 - a stock valued at cost (no live quote) or a coin at cost makes the glance incomplete, a closed position does not, and the day P&L sums the quoted stocks only', async () => {
+    const quoted = glanceStock('s1', 'D05', 10);
+    const atCost = glanceStock('s2', 'Z74', 100);
+    const closed = glanceStock('s3', 'C31', 0);
+    const cache = { D05: glanceQuote(100, 2, 1) };
+    const run = await runGlance({ stocks:[quoted, atCost, closed], _priceCache:cache });
+    assert.strictEqual(run.payload.status, 'incomplete');
+    assert.strictEqual(run.payload.summary.incomplete, true);
+    assert.strictEqual(run.payload.summary.dayPnl, 20);
+    assert.strictEqual(run.payload.summary.netWorth, 1000 + 1000);   // D05 at its quote, Z74 at cost (100 x 10)
+    const clean = await runGlance({ stocks:[quoted, closed], _priceCache:cache });
+    assert.strictEqual(clean.payload.status, 'ready');
+    assert.strictEqual(clean.payload.summary.incomplete, false);
+    // every open stock at cost: incomplete, and no day move to report
+    const allCost = await runGlance({ stocks:[atCost] });
+    assert.strictEqual(allCost.payload.status, 'incomplete');
+    assert.ok(!('dayPnl' in allCost.payload.summary));
+    // a coin valued at cost is a cost estimate inside the net worth too
+    const coin = await runGlance({ crypto:[{ id:'k1', symbol:'ETH', coingeckoId:'ethereum', amount:2, avgCost:1000, currency:'SGD' }] });
+    assert.strictEqual(coin.payload.status, 'incomplete');
+    assert.strictEqual(coin.payload.summary.netWorth, 2000);
+  });
+
+  await testAsync('p286 item 1 - sourceUpdatedAt and asOf are the oldest live stock quote used, not the copy time, and a quote the app calls stale makes a complete glance stale', async () => {
+    const fresh = glanceQuote(100, 2, 2);
+    const older = glanceQuote(3, 0.1, 5);
+    const stocks = [glanceStock('s1', 'D05', 10), glanceStock('s2', 'Z74', 100)];
+    const run = await runGlance({ stocks, _priceCache:{ D05: fresh, Z74: older } });
+    assert.strictEqual(run.payload.status, 'ready');
+    assert.strictEqual(run.payload.sourceUpdatedAt, older.fetchedAt);
+    assert.strictEqual(run.payload.asOf, older.fetchedAt);
+    assert.ok(Date.now() - Date.parse(run.payload.sourceUpdatedAt) > 4.9 * 3600000, 'the age of the prices, not of the copy');
+    // past the app's own 24 hour stale line (isStale): stale, and still complete, dated by that quote so Journal can age it
+    const old = glanceQuote(3, 0.1, 72);
+    const stale = await runGlance({ stocks, _priceCache:{ D05: fresh, Z74: old } });
+    assert.strictEqual(stale.payload.status, 'stale');
+    assert.strictEqual(stale.payload.summary.incomplete, false);
+    assert.strictEqual(stale.payload.sourceUpdatedAt, old.fetchedAt);
+    // a quote with no fetch time is of unknown age: not fresh, so incomplete, and its move is not counted
+    const unknown = Object.assign({}, fresh);
+    delete unknown.fetchedAt;
+    const noTime = await runGlance({ stocks:[stocks[0]], _priceCache:{ D05: unknown } });
+    assert.strictEqual(noTime.payload.status, 'incomplete');
+    assert.ok(!('dayPnl' in noTime.payload.summary) && !('topMover' in noTime.payload.summary));
+    // nothing market priced to age (cash only): ready, dated now
+    const cash = await runGlance({ cash:[{ id:'c1', name:'DBS', amount:1000, currency:'SGD' }] });
+    assert.strictEqual(cash.payload.status, 'ready');
+    assert.ok(Math.abs(Date.now() - Date.parse(cash.payload.sourceUpdatedAt)) < 60000);
+  });
+
+  await testAsync('p286 item 8 - each state has its own toast: empty, incomplete and stale say what they are, a clean glance is a plain success, and no stocks says why there is no day P&L', async () => {
+    const stock = glanceStock('s1', 'D05', 10);
+    const empty = await runGlance({ cpfBalances:{ OA:1000 } });
+    assert.deepStrictEqual(empty.toasts, [{ msg:'Journal glance copied, but it is empty because nothing is held outside CPF yet', kind:undefined }]);
+    const incomplete = await runGlance({ stocks:[stock] });
+    assert.deepStrictEqual(incomplete.toasts, [{ msg:'Journal glance copied, but marked incomplete because some holdings have no live price or FX rate', kind:undefined }]);
+    const stale = await runGlance({ stocks:[stock], _priceCache:{ D05: glanceQuote(100, 2, 72) } });
+    assert.deepStrictEqual(stale.toasts, [{ msg:'Journal glance copied, but the prices are over a day old, refresh prices and copy again', kind:undefined }]);
+    const clean = await runGlance({ stocks:[stock], _priceCache:{ D05: glanceQuote(100, 2, 1) } });
+    assert.deepStrictEqual(clean.toasts, [{ msg:'Journal glance copied', kind:'success' }]);
+    // a fresh quote with no previous close or change gives no day move: the old advice still applies
+    const noMove = await runGlance({ stocks:[stock], _priceCache:{ D05:{ price:100, currency:'SGD', fetchedAt: glanceHoursAgo(1) } } });
+    assert.deepStrictEqual(noMove.toasts, [{ msg:'Journal glance copied without a day P&L, refresh prices for one', kind:'success' }]);
+    // no stocks at all: refreshing prices cannot help, so it does not say to
+    const noStocks = await runGlance({ cash:[{ id:'c1', name:'DBS', amount:1000, currency:'SGD' }] });
+    assert.deepStrictEqual(noStocks.toasts, [{ msg:'Journal glance copied without a day P&L, as you hold no stocks', kind:'success' }]);
+    // the empty and incomplete states never say to refresh prices for a day P&L (the v2.85 wording for every state)
+    [empty, incomplete].forEach(run => assert.ok(!run.toasts[0].msg.includes('refresh prices for one')));
+    // the Copied line is set only once a copy has landed
+    assert.ok(/^Copied \d{4}-\d{2}-\d{2}$/.test(clean.meta.textContent));
+  });
+
+  await testAsync('p286 item 8 - a failed build or a failed copy is an error toast, writes nothing and leaves the Copied line alone', async () => {
+    const stock = glanceStock('s1', 'D05', 10);
+    const blocked = await runGlance({ stocks:[stock], _priceCache:{ D05: glanceQuote(100, 2, 1) } }, { copyFails:true });
+    assert.deepStrictEqual(blocked.toasts, [{ msg:'Could not copy. Allow clipboard access and try again.', kind:'error' }]);
+    assert.strictEqual(blocked.meta.textContent, '');
+    assert.strictEqual(blocked.text, null);
+    const broken = await runGlance({}, { prepare: sb => { sb._netWorthValueInfo = () => { throw new Error('boom'); }; } });
+    assert.deepStrictEqual(broken.toasts, [{ msg:'Could not build the summary: boom', kind:'error' }]);
+    assert.strictEqual(broken.text, null);
+  });
+
+  await testAsync('p286 - the copied text is only the contract summary: no holding name, quantity, cost or account reaches it', async () => {
+    const run = await runGlance({
+      stocks:[glanceStock('s1', 'D05', 7777, { name:'Secret Fund', avgCost:4242.5 })],
+      cash:[{ id:'c1', name:'IBKR-1234', account:'Brokerage', amount:100, currency:'SGD' }],
+      _priceCache:{ D05: Object.assign(glanceQuote(35, 1, 1), { shortName:'Secret Fund Ltd' }) }
+    });
+    assert.deepStrictEqual(Object.keys(run.payload), ['schema', 'provider', 'status', 'sourceUpdatedAt', 'asOf', 'currency', 'summary']);
+    Object.keys(run.payload.summary).forEach(k => assert.ok(['netWorth', 'exCpf', 'incomplete', 'dayPnl', 'topMover'].includes(k), k));
+    ['shares', 'avgCost', 'costBasis', 'Secret', 'IBKR', 'Brokerage', 'name', 'account'].forEach(word => assert.ok(!run.text.includes(word), word));
+  });
+
+  await testAsync('p286 item 7 - _copyText uses the Clipboard API when it works, and makes no textarea', async () => {
+    const sb = freshSandbox();
+    const dom = glanceDom(true);
+    let written = null;
+    sb.document = dom;
+    sb.navigator = { clipboard:{ writeText: async t => { written = t; } } };
+    assert.strictEqual(await sb._copyText('S$ 1,234'), true);
+    assert.strictEqual(written, 'S$ 1,234');
+    assert.deepStrictEqual(dom.log, []);
+  });
+
+  await testAsync('p286 item 7 - _copyText falls back (API refused, throwing or missing) to an off-screen textarea that is not readonly, selected with setSelectionRange(0, length), removed again, with focus put back', async () => {
+    const text = '{"summary":"S$ 1,234 ✓ café"}';
+    for (const clipboard of [{ writeText: async () => { throw new Error('denied'); } }, { writeText: () => { throw new Error('sync denial'); } }, undefined]){
+      const sb = freshSandbox();
+      const dom = glanceDom(true);
+      sb.document = dom;
+      sb.navigator = { clipboard };
+      assert.strictEqual(await sb._copyText(text), true);
+      assert.deepStrictEqual(dom.log, ['create:textarea', 'append', 'area.focus', 'select', 'range:0,' + text.length, 'exec:copy:attached', 'remove', 'previous.focus:{"preventScroll":true}']);
+      assert.strictEqual(dom.area.value, text);
+      assert.ok(!('readonly' in dom.area.attrs) && dom.area.readOnly !== true, 'a readonly field cannot be selected on iOS Safari');
+      assert.ok(/position:fixed/.test(dom.area.style.cssText) && /left:-9999px/.test(dom.area.style.cssText), 'off-screen');
+      assert.strictEqual(dom.body.appended.length, 0, 'the textarea is gone');
+    }
+  });
+
+  await testAsync('p286 item 7 - _copyText: a copy command that fails or throws is false, the textarea is still removed and focus still restored, and focus that cannot move back does not undo a landed copy', async () => {
+    for (const result of [false, 'throw']){
+      const sb = freshSandbox();
+      const dom = glanceDom(result);
+      sb.document = dom;
+      sb.navigator = {};
+      assert.strictEqual(await sb._copyText('x'), false, String(result));
+      assert.strictEqual(dom.body.appended.length, 0);
+      assert.strictEqual(dom.log[dom.log.length - 1], 'previous.focus:{"preventScroll":true}');
+    }
+    const stuck = freshSandbox();
+    const stuckDom = glanceDom(true);
+    stuckDom.previous.focus = () => { throw new Error('detached'); };
+    stuck.document = stuckDom;
+    stuck.navigator = {};
+    assert.strictEqual(await stuck._copyText('x'), true);
+    // nothing was focused before: no focus call is attempted
+    const bare = freshSandbox();
+    const bareDom = glanceDom(true);
+    bareDom.activeElement = null;
+    bare.document = bareDom;
+    bare.navigator = {};
+    assert.strictEqual(await bare._copyText('x'), true);
+    assert.ok(!bareDom.log.some(entry => entry.startsWith('previous.focus')));
+  });
+
+  test('p286 item 7 and 10 - source pins: the fallback field is never readonly, the net worth is the shared ex-CPF total with no second formula, the switch is not read, and the switch itself is untouched', () => {
+    const copy = extractFunction('_copyText');
+    assert.ok(copy.includes('area.setSelectionRange(0, value.length)') && copy.includes('previous.focus('));
+    assert.ok(!/readonly/i.test(copy));
+    const body = extractFunction('copyJournalGlance');
+    assert.ok(body.includes('_allocationData(valuation.classes, false)'));
+    assert.ok(body.includes('netWorth: (exCpf.hasValues || incomplete || openStocks > 0) ? exCpf.total : null,'));
+    assert.ok(!body.includes('_dashShowCpf') && !body.includes('netExCpf') && !body.includes('valuation.total') && !body.includes('Object.keys(valuation.classes)'));
+    assert.ok(!body.includes('_dashHoldingRows') && body.includes('buildStockChartRows()'), 'stocks only');
+    assert.ok(/let _dashShowCpf\s+= false;/.test(appSrc));
+    assert.ok(extractFunction('toggleDashCpf').includes('_dashShowCpf = !_dashShowCpf;'));
+  });
+
+  test('p286 item 5 - the Settings card and the CLAUDE.md section say the glance is net worth excluding CPF, stocks only for the P&L, and no longer say it follows the switch', () => {
+    const heading = indexSrc.indexOf('<h3>Journal Home glance</h3>');
+    const card = indexSrc.slice(indexSrc.indexOf('<p class="hint"', heading), indexSrc.indexOf('</p>', heading));
+    assert.ok(card.includes('Copies your net worth excluding CPF, today\'s P&amp;L on your stocks and the biggest stock mover'));
+    assert.ok(card.includes('CPF is always left out, whatever the Include CPF switch on the dashboard says, and crypto is left out of the P&amp;L and the mover.'));
+    assert.ok(!/follows the Include CPF switch/.test(card));
+    // house style for UI copy: no em-dash or horizontal bar (built from char codes so this file never holds one), no semicolon
+    const banned = new RegExp('[' + String.fromCharCode(0x2014, 0x2015) + ';]');
+    assert.ok(!banned.test(card.replace(/&amp;/g, '&').replace(/&#?\w+;/g, '')), 'no em-dash and no semicolon in the card copy');
+    const doc = fs.readFileSync(path.join(__dirname, '..', 'CLAUDE.md'), 'utf8');
+    const section = doc.slice(doc.indexOf('## Journal Home glance'), doc.indexOf('## Gotchas'));
+    assert.ok(section.includes('net worth EXCLUDING CPF, always') && section.includes('open STOCKS only'));
+    assert.ok(!/as the Include CPF switch says|stale 3 days after/.test(section));
+    assert.ok(section.includes('stale 1 day after its `sourceUpdatedAt`'));
+  });
+
+  test('p286 release - this release is v2.86 (26 Oct): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
     const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    assert.ok(appSrc.includes("const APP_VERSION = 'v2.85';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.85 (18 Oct)';"));
-    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.85';"));
-    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 18/10/2026 (app v2.85).'));
+    assert.ok(appSrc.includes("const APP_VERSION = 'v2.86';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.86 (26 Oct)';"));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.86';"));
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 26/10/2026 (app v2.86).'));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

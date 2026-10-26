@@ -958,9 +958,54 @@ function runTests() {
     assert.strictEqual(core._round2(-123.456), -123.46);
   });
 
-  // 30. Testing kjrBuildJournalGlance (the Journal Home glance, v2.85)
+  // 30. Testing kjrBuildJournalGlance (the Journal Home glance, v2.85, reworked in v2.86)
   const GLANCE_NOW = new Date('2026-10-18T04:00:00.000Z');
-  const glance = input => core.kjrBuildJournalGlance(Object.assign({ netWorth: 250000, exCpf: false, incomplete: false, holdings: [], now: GLANCE_NOW }, input));
+  // The time of a live quote fetched `hoursAgo` before GLANCE_NOW, the way the app hands in px.fetchedAt.
+  const glanceQuote = hoursAgo => new Date(GLANCE_NOW.getTime() - hoursAgo * 3600000).toISOString();
+  // A holding handed in without a quotedAt is read as quoted at GLANCE_NOW, so the cases that are not about quote times need not repeat one.
+  // quotedAt: null (or undefined) given on purpose stays, and is a stock with no live quote.
+  const glance = input => {
+    const i = Object.assign({ netWorth: 250000, incomplete: false, holdings: [], now: GLANCE_NOW }, input);
+    if (Array.isArray(i.holdings)) i.holdings = i.holdings.map(h => (h && typeof h === 'object') ? Object.assign({ quotedAt: GLANCE_NOW.toISOString() }, h) : h);
+    return core.kjrBuildJournalGlance(i);
+  };
+  // A compact mirror of the portfolio rules in Journal's lib/home/glance-contract.mjs (kept in step by hand, the real module is
+  // exercised in Journal). Lists every rule a payload breaks, empty when it would pass.
+  const glanceContractErrors = g => {
+    const errs = [];
+    const only = (obj, keys, label) => Object.keys(obj).forEach(k => { if (!keys.includes(k)) errs.push(label + ' key ' + k); });
+    only(g, ['schema', 'provider', 'status', 'sourceUpdatedAt', 'asOf', 'currency', 'summary'], 'top');
+    if (g.schema !== 'journal-home-glance/v1') errs.push('schema');
+    if (g.provider !== 'portfolio') errs.push('provider');
+    if (!['ready', 'empty', 'stale', 'incomplete', 'disconnected', 'error'].includes(g.status)) errs.push('status');
+    const iso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
+    const active = ['ready', 'stale', 'incomplete'].includes(g.status);
+    if (active){
+      if (!iso.test(g.sourceUpdatedAt || '') || !iso.test(g.asOf || '')) errs.push('timestamps');
+      if (!/^[A-Z]{3}$/.test(g.currency || '')) errs.push('currency');
+    } else if (g.sourceUpdatedAt !== null || g.asOf !== null || g.currency !== null) errs.push('inactive metadata');
+    const s = g.summary;
+    only(s, ['netWorth', 'exCpf', 'incomplete', 'dayPnl', 'topMover'], 'summary');
+    if (!active){
+      ['netWorth', 'exCpf', 'incomplete'].forEach(k => { if (s[k] !== null) errs.push('empty ' + k); });
+      if ('topMover' in s || ('dayPnl' in s && s.dayPnl !== null)) errs.push('empty detail');
+      return errs;
+    }
+    if (typeof s.netWorth !== 'number' || !isFinite(s.netWorth) || Math.abs(s.netWorth) > 1e15) errs.push('netWorth');
+    if (typeof s.exCpf !== 'boolean') errs.push('exCpf');
+    if (typeof s.incomplete !== 'boolean') errs.push('incomplete');
+    if ('dayPnl' in s && s.dayPnl !== null && (typeof s.dayPnl !== 'number' || !isFinite(s.dayPnl) || Math.abs(s.dayPnl) > 1e15)) errs.push('dayPnl');
+    if (g.status === 'incomplete' && s.incomplete !== true) errs.push('incomplete needs the flag');
+    if ((g.status === 'ready' || g.status === 'stale') && s.incomplete !== false) errs.push(g.status + ' needs no flag');
+    if ('topMover' in s && s.topMover !== null){
+      const m = s.topMover;
+      only(m, ['symbol', 'dayPnl', 'dayPct'], 'mover');
+      if (typeof m.symbol !== 'string' || !/^[A-Z0-9][A-Z0-9.^=-]{0,15}$/.test(m.symbol)) errs.push('mover symbol');
+      if (typeof m.dayPnl !== 'number' || !isFinite(m.dayPnl)) errs.push('mover dayPnl');
+      if (m.dayPct !== null && (typeof m.dayPct !== 'number' || !isFinite(m.dayPct) || Math.abs(m.dayPct) > 1000)) errs.push('mover dayPct');
+    }
+    return errs;
+  };
 
   test('kjrBuildJournalGlance - a ready summary has exactly the contract fields and nothing else', () => {
     const g = glance({ holdings: [{ symbol: 'NVDA', daySgd: 400, dayPct: 3.1 }, { symbol: 'D05.SI', daySgd: -50.255, dayPct: -0.5 }] });
@@ -973,7 +1018,7 @@ function runTests() {
     assert.strictEqual(g.asOf, g.sourceUpdatedAt);
     assert.deepStrictEqual(Object.keys(g.summary).sort(), ['dayPnl', 'exCpf', 'incomplete', 'netWorth', 'topMover']);
     assert.strictEqual(g.summary.netWorth, 250000);
-    assert.strictEqual(g.summary.exCpf, false);
+    assert.strictEqual(g.summary.exCpf, true);    // always net worth excluding CPF (v2.86)
     assert.strictEqual(g.summary.dayPnl, 349.75); // 400 - 50.255 rounded to cents
     assert.deepStrictEqual(g.summary.topMover, { symbol: 'NVDA', dayPnl: 400, dayPct: 3.1 });
   });
@@ -1005,8 +1050,8 @@ function runTests() {
     assert.ok(!('topMover' in g.summary));
   });
 
-  test('kjrBuildJournalGlance - an incomplete valuation says so and a CPF-free figure says so', () => {
-    const g = glance({ incomplete: true, exCpf: true, netWorth: 1234.567 });
+  test('kjrBuildJournalGlance - an incomplete valuation says so, and the figure says it is CPF-free', () => {
+    const g = glance({ incomplete: true, netWorth: 1234.567 });
     assert.strictEqual(g.status, 'incomplete');
     assert.strictEqual(g.summary.incomplete, true);
     assert.strictEqual(g.summary.exCpf, true);
@@ -1040,6 +1085,129 @@ function runTests() {
     const g = glance({ holdings: [{ symbol: 'A', daySgd: 10, dayPct: 5000 }] });
     assert.deepStrictEqual(g.summary.topMover, { symbol: 'A', dayPnl: 10, dayPct: null });
     assert.strictEqual(glance({ holdings: [{ symbol: 'A', daySgd: 10 }] }).summary.topMover.dayPct, null);
+  });
+
+  // v2.86: the review of the v2.85 glance
+
+  test('kjrBuildJournalGlance - net worth is always excluding CPF, the output says so whatever the caller passes (v2.86)', () => {
+    [{}, { exCpf: false }, { exCpf: true }, { exCpf: undefined }, { exCpf: 'no' }].forEach(extra => {
+      const g = glance(extra);
+      assert.strictEqual(g.summary.exCpf, true, JSON.stringify(extra));
+      assert.strictEqual(g.summary.netWorth, 250000);
+    });
+    assert.deepStrictEqual(Object.keys(glance({ incomplete: true }).summary).sort(), ['exCpf', 'incomplete', 'netWorth']);
+  });
+
+  test('kjrBuildJournalGlance - sourceUpdatedAt and asOf are the oldest live stock quote used, not the copy time (v2.86)', () => {
+    const g = glance({ holdings: [
+      { symbol: 'A', daySgd: 1, dayPct: 1, quotedAt: glanceQuote(2) },
+      { symbol: 'B', daySgd: 1, dayPct: 1, quotedAt: glanceQuote(20) },
+      { symbol: 'C', daySgd: 1, dayPct: 1, quotedAt: glanceQuote(5) }
+    ] });
+    assert.strictEqual(g.status, 'ready');
+    assert.strictEqual(g.sourceUpdatedAt, glanceQuote(20));
+    assert.strictEqual(g.asOf, glanceQuote(20));
+    assert.notStrictEqual(g.sourceUpdatedAt, GLANCE_NOW.toISOString());
+    // an ISO string, a Date and a millisecond count are read the same
+    const at = GLANCE_NOW.getTime() - 5 * 3600000;
+    [glanceQuote(5), new Date(at), at].forEach(quotedAt => {
+      assert.strictEqual(glance({ holdings: [{ symbol: 'A', daySgd: 1, dayPct: 1, quotedAt }] }).sourceUpdatedAt, glanceQuote(5));
+    });
+  });
+
+  test('kjrBuildJournalGlance - a complete summary whose quote the app calls stale is stale, dated by that quote, and an incomplete one stays incomplete (v2.86)', () => {
+    const g = glance({ holdings: [
+      { symbol: 'A', daySgd: 5, dayPct: 1, quotedAt: glanceQuote(72), stale: true },
+      { symbol: 'B', daySgd: 5, dayPct: 1, quotedAt: glanceQuote(1), stale: false }
+    ] });
+    assert.strictEqual(g.status, 'stale');
+    assert.strictEqual(g.summary.incomplete, false);          // the contract allows stale only when complete
+    assert.strictEqual(g.sourceUpdatedAt, glanceQuote(72));   // so Journal's age check reads the old prices
+    assert.strictEqual(g.summary.dayPnl, 10);
+    assert.strictEqual(glance({ holdings: [{ symbol: 'A', daySgd: 5, dayPct: 1, quotedAt: glanceQuote(1), stale: false }] }).status, 'ready');
+    // incomplete wins, the contract has no stale-and-incomplete
+    const both = glance({ incomplete: true, holdings: [{ symbol: 'A', daySgd: 5, dayPct: 1, quotedAt: glanceQuote(72), stale: true }] });
+    assert.strictEqual(both.status, 'incomplete');
+    assert.strictEqual(both.sourceUpdatedAt, glanceQuote(72));
+    // a stale flag with no live quote behind it is not a stale summary, it is an incomplete one
+    assert.strictEqual(glance({ holdings: [{ symbol: 'A', daySgd: null, dayPct: null, quotedAt: null, stale: true }] }).status, 'incomplete');
+  });
+
+  test('kjrBuildJournalGlance - a quote stamped after the clock is read as now, never a future time Journal would reject (v2.86)', () => {
+    [new Date(GLANCE_NOW.getTime() + 3600000), GLANCE_NOW.getTime() + 300000, new Date(GLANCE_NOW.getTime() + 86400000).toISOString()].forEach(quotedAt => {
+      assert.strictEqual(glance({ holdings: [{ symbol: 'A', daySgd: 1, dayPct: 1, quotedAt }] }).sourceUpdatedAt, GLANCE_NOW.toISOString());
+    });
+  });
+
+  test('kjrBuildJournalGlance - a stock with no dated live quote makes it incomplete and adds no day move, it never claims fresh data (v2.86)', () => {
+    // a stock valued at cost has no live quote, even though the valuation itself said complete
+    const atCost = glance({ incomplete: false, holdings: [
+      { symbol: 'A', daySgd: 100, dayPct: 1, quotedAt: glanceQuote(3) },
+      { symbol: 'B', daySgd: null, dayPct: null, quotedAt: null }
+    ] });
+    assert.strictEqual(atCost.status, 'incomplete');
+    assert.strictEqual(atCost.summary.incomplete, true);
+    assert.strictEqual(atCost.summary.dayPnl, 100);   // only the dated quote's move
+    // a quote with no usable fetch time is no better: its age is unknown, so it is not counted and the summary is not fresh
+    [null, undefined, '', 'soon', '1', 0, -5, NaN, Infinity, false, true, {}].forEach(quotedAt => {
+      const g = glance({ holdings: [
+        { symbol: 'A', daySgd: 500, dayPct: 5, quotedAt },
+        { symbol: 'B', daySgd: 7, dayPct: 1, quotedAt: glanceQuote(3) }
+      ] });
+      assert.strictEqual(g.status, 'incomplete', String(quotedAt));
+      assert.strictEqual(g.summary.dayPnl, 7, String(quotedAt));
+      assert.strictEqual(g.summary.topMover.symbol, 'B', String(quotedAt));
+      assert.strictEqual(g.sourceUpdatedAt, glanceQuote(3), String(quotedAt));
+      assert.deepStrictEqual(glanceContractErrors(JSON.parse(JSON.stringify(g))), [], String(quotedAt));
+    });
+    // no stock has a dated quote: incomplete, no day move, no mover, and the copy time is all there is to date it by
+    const none = glance({ holdings: [{ symbol: 'A', daySgd: 100, dayPct: 1, quotedAt: null }] });
+    assert.strictEqual(none.status, 'incomplete');
+    assert.ok(!('dayPnl' in none.summary) && !('topMover' in none.summary));
+    assert.strictEqual(none.sourceUpdatedAt, GLANCE_NOW.toISOString());
+    // no stock at all (cash, property) has no price to age, so it is ready and dated now
+    const cash = glance({ holdings: [] });
+    assert.strictEqual(cash.status, 'ready');
+    assert.strictEqual(cash.sourceUpdatedAt, GLANCE_NOW.toISOString());
+  });
+
+  test('kjrBuildJournalGlance - a null, zero, negative, non-finite or out of range clock is the empty state, never a 1970 ready summary (v2.86)', () => {
+    [null, undefined, 0, -1, -86400000, NaN, Infinity, -Infinity, '', ' ', 'soon', '1', false, true, {}, [], new Date(NaN), new Date(0), 253402300800000, 1e20].forEach(now => {
+      const g = glance({ now });
+      assert.strictEqual(g.status, 'empty', String(now));
+      assert.strictEqual(g.sourceUpdatedAt, null);
+      assert.strictEqual(g.asOf, null);
+      assert.deepStrictEqual(g.summary, { netWorth: null, exCpf: null, incomplete: null });
+    });
+    // a real clock in any of its three forms still builds the summary
+    [GLANCE_NOW, GLANCE_NOW.getTime(), GLANCE_NOW.toISOString()].forEach(now => {
+      const g = glance({ now });
+      assert.strictEqual(g.status, 'ready');
+      assert.strictEqual(g.sourceUpdatedAt, '2026-10-18T04:00:00.000Z');
+    });
+    assert.strictEqual(core.kjrBuildJournalGlance({ netWorth: 5, now: null }).status, 'empty');   // no holdings key at all
+    assert.strictEqual(core.kjrBuildJournalGlance().status, 'empty');                              // and no input at all
+  });
+
+  test('kjrBuildJournalGlance - every state it can build passes the contract rules, and the mirror does catch a bad payload (v2.86)', () => {
+    const states = {
+      ready: glance({ holdings: [{ symbol: 'NVDA', daySgd: 400, dayPct: 3.1, quotedAt: glanceQuote(1) }] }),
+      readyNoMove: glance({ holdings: [] }),
+      stale: glance({ holdings: [{ symbol: 'A', daySgd: 5, dayPct: 1, quotedAt: glanceQuote(50), stale: true }] }),
+      incompleteFx: glance({ incomplete: true, netWorth: 0 }),
+      incompleteCost: glance({ holdings: [{ symbol: 'A', quotedAt: null }] }),
+      empty: glance({ netWorth: null }),
+      noClock: glance({ now: null })
+    };
+    Object.keys(states).forEach(k => assert.deepStrictEqual(glanceContractErrors(JSON.parse(JSON.stringify(states[k]))), [], k));
+    assert.deepStrictEqual(Object.keys(states).map(k => states[k].status), ['ready', 'ready', 'stale', 'incomplete', 'incomplete', 'empty', 'empty']);
+    // the mirror is not vacuous
+    const flagged = JSON.parse(JSON.stringify(states.ready));
+    flagged.summary.incomplete = true;
+    assert.ok(glanceContractErrors(flagged).length > 0);
+    const extra = JSON.parse(JSON.stringify(states.ready));
+    extra.summary.holdings = [];
+    assert.ok(glanceContractErrors(extra).length > 0);
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
