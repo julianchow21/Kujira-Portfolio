@@ -4,6 +4,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 const configApi = require('../config.js');
 const authApi = require('../lib/auth-client.js');
 
@@ -237,6 +238,54 @@ test('source distinguishes server denial from unavailable hosted features', () =
   assert.match(indexSrc, /Number\(result\.skipped_existing\)/);
   assert.match(indexSrc, /lib\/supabase-2\.117\.2\.umd\.js\?v=2\.117\.2/);
   assert.match(indexSrc, /integrity="sha384-Rj26LVGvoeRVR6\+mwQmFfcR3QOBEwT\+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok"/);
+});
+
+// O6. The 218 KB SDK is an inert tag (the browser never fetches type="text/plain") plus a loader that re-emits it only when
+// the resolved config says Auth is enabled. These tests run the real loader from index.html against the real config.js.
+const sdkLoaderSource = (/id="supabase-sdk"[^>]*><\/script>\s*<script>([\s\S]*?)<\/script>/.exec(indexSrc) || [])[1] || '';
+function runSdkLoader({ config, withTag = true, kjr = configApi } = {}) {
+  const written = [];
+  const attributes = { src: 'lib/supabase-2.117.2.umd.js?v=2.117.2', integrity: 'sha384-synthetic' };
+  const context = {
+    document: { getElementById: (id) => (withTag && id === 'supabase-sdk' ? { getAttribute: (name) => attributes[name] || null } : null), write: (html) => written.push(html) },
+    location: { origin: 'https://forex.synthetic.test' }
+  };
+  context.window = context;
+  if (kjr) context.KjrForexConfig = kjr;
+  if (config) context.__KJR_FOREX_CONFIG__ = config;
+  vm.runInNewContext(sdkLoaderSource, context);
+  return written;
+}
+
+test('the Supabase SDK tag is inert and keeps its path, version and SRI hash', () => {
+  assert.ok(sdkLoaderSource.length > 0, 'the SDK loader must follow the inert SDK tag');
+  assert.match(indexSrc, /<script id="supabase-sdk" type="text\/plain" src="lib\/supabase-2\.117\.2\.umd\.js\?v=2\.117\.2" integrity="sha384-[^"]+" crossorigin="anonymous"><\/script>/);
+  assert.strictEqual((indexSrc.match(/<script\b[^>]*\bsrc="lib\/supabase-/g) || []).length, 1, 'one SDK tag only');
+  assert.ok(indexSrc.indexOf('id="supabase-sdk"') < indexSrc.indexOf('<script src="lib/auth-client.js'), 'the SDK must be in place before auth-client.js');
+  assert.ok(indexSrc.indexOf('<script src="config.js') < indexSrc.indexOf('id="supabase-sdk"'), 'config.js must run before the loader reads it');
+});
+
+test('the Auth preview fixture can still strip the SDK tag from the app source', () => {
+  const literal = (/const sdkTag = (\/.+\/[a-z]*);/.exec(previewSrc) || [])[1];
+  assert.ok(literal, 'auth-preview.html must define its sdkTag pattern');
+  const sdkTag = vm.runInNewContext(literal);
+  assert.ok(sdkTag.test(indexSrc), 'the fixture pattern must still find the SDK tag in index.html');
+  assert.ok(!/id="supabase-sdk"/.test(indexSrc.replace(sdkTag, '')), 'stripping it removes the tag the loader needs, so the synthetic SDK is never overwritten');
+});
+
+test('the SDK loader writes nothing while Auth is off, unset, broken or unreadable', () => {
+  assert.deepStrictEqual(runSdkLoader(), [], 'default offline config');
+  assert.deepStrictEqual(runSdkLoader({ config: { authEnabled: false, supabaseUrl: 'https://example.invalid', supabaseAnonKey: 'synthetic-public-key' } }), [], 'Auth switched off');
+  assert.deepStrictEqual(runSdkLoader({ config: { authEnabled: true, supabaseUrl: 'https://example.invalid' } }), [], 'Auth on but the anon key is missing, so the app resolves broken and never builds a client');
+  assert.deepStrictEqual(runSdkLoader({ config: { authEnabled: true, supabaseUrl: 'https://example.invalid', supabaseAnonKey: 'k' }, withTag: false }), [], 'no inert tag, nothing to re-emit');
+  assert.deepStrictEqual(runSdkLoader({ kjr: null }), [], 'config.js missing');
+  assert.deepStrictEqual(runSdkLoader({ kjr: { resolve() { throw new Error('boom'); } } }), [], 'a throwing resolver must not break the page');
+});
+
+test('the SDK loader re-emits the tag once, with its SRI hash, when Auth is enabled', () => {
+  const written = runSdkLoader({ config: { authEnabled: true, supabaseUrl: 'https://example.invalid', supabaseAnonKey: 'synthetic-public-key' } });
+  assert.strictEqual(written.length, 1);
+  assert.strictEqual(written[0], '<script src="lib/supabase-2.117.2.umd.js?v=2.117.2" integrity="sha384-synthetic" crossorigin="anonymous"></script>');
 });
 
 test('unconfigured account and billing controls stay disabled', () => {

@@ -24,6 +24,14 @@ function connectDirective(policy) {
   return (/(?:^|;)\s*connect-src\s+([^;]+)/i.exec(policy) || [])[1] || '';
 }
 
+// Sources only the app page carries, for chart data (the Trading Worker on workers.dev). The public pages never
+// fetch charts, so pricing.html deliberately leaves them out and the pricing-versus-index contract ignores them.
+const APP_ONLY_CONNECT_SOURCES = Object.freeze(['https://*.workers.dev']);
+
+function connectSources(policy, ignore = []) {
+  return connectDirective(policy).split(/\s+/).filter((source) => source && !ignore.includes(source));
+}
+
 function normaliseOrigin(value) {
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error('--origin requires an application origin URL');
@@ -137,7 +145,11 @@ function checkSourceShape(publicConfig, sourceRoot = DEFAULT_SOURCE_ROOT) {
   const pricingCsp = cspFrom(pricing);
   assert.ok(connectDirective(indexCsp), 'index CSP must declare connect-src');
   assert.ok(connectDirective(pricingCsp), 'pricing CSP must declare connect-src');
-  assert.equal(connectDirective(pricingCsp), connectDirective(indexCsp), 'pricing connect-src must match index contract');
+  assert.equal(
+    connectSources(pricingCsp).join(' '),
+    connectSources(indexCsp, APP_ONLY_CONNECT_SOURCES).join(' '),
+    'pricing connect-src must match index contract'
+  );
   for (const page of ['welcome.html', 'pricing.html']) {
     assert.match(read(page, sourceRoot), /href="lib\/public\.css\?v=0\.14"/);
   }
@@ -225,9 +237,11 @@ function main(argv = process.argv.slice(2), output = console) {
 if (require.main === module) process.exitCode = main();
 
 module.exports = {
+  APP_ONLY_CONNECT_SOURCES,
   DEFAULT_ORIGIN,
   LEGAL_PAGES,
   VM_TIMEOUT_MS,
+  connectSources,
   evaluateLaunch,
   checkSourceShape,
   loadConfigApi,

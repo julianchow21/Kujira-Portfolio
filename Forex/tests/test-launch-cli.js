@@ -54,8 +54,8 @@ function writeReadyFixture() {
     proPriceMonthly: 12.34,
     proPriceAnnual: 123.45,
     proFeatures: ['Unlimited trades', 'Simulator'],
-    signUpHref: './index.html?v=0.14#signup',
-    signInHref: './index.html?v=0.14#account',
+    signUpHref: './index.html#signup',
+    signInHref: './index.html#account',
     checkoutEnabled: true
   };
   fs.writeFileSync(path.join(fixture, 'public-config.js'), `globalThis.KJR_PUBLIC_CONFIG = Object.freeze(${JSON.stringify(publicConfig)});\n`);

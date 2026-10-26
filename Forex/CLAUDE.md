@@ -49,6 +49,8 @@ Shared with Portfolio and Trading (see the repo-root `CLAUDE.md`, Cross-app link
 
 Static, GitHub Pages from the Kujira/Portfolio repo at `/Forex/`. Phase 2 adds a Cloudflare Worker for Stripe webhooks.
 
+`frame-ancestors` only works as a response header, which GitHub Pages cannot send, so framing protection is not available on this host. Keep it out of the meta CSPs, browsers ignore it there and log a console error on every load.
+
 ## Build status
 
 Phase 1 (single-user) is implemented, QA-verified and shipped as v0.13 on 29/08/2026. Phase 2 (multi-user authentication, cloud cutover and billing) remains deliberately disabled. Milestones M5 to M10 are tracked in `~/.assistant-control/tasks/todo.md`.

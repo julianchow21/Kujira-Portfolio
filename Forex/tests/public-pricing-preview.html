@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0f0f0f">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://project.synthetic.supabase.co https://billing.synthetic.test; base-uri 'none'; object-src 'none'; frame-ancestors 'none';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://project.synthetic.supabase.co https://billing.synthetic.test; base-uri 'none'; object-src 'none';">
 <title>Synthetic pricing preview</title>
 <script>
 window.__KJR_FOREX_CONFIG__ = {
@@ -54,7 +54,7 @@ window.KJR_PUBLIC_CONFIG = Object.freeze({
     <div class="pricing-grid">
       <article class="pricing-card" data-local-plan><div class="plan-kicker" data-local-kicker>Available now</div><h3>Local journal</h3><div class="price-display">On this device</div><p data-local-copy>Loading</p><ul class="plan-list"><li data-local-access>Loading</li></ul><a class="button button-primary" data-local-cta href="#synthetic-local">Open local journal</a></article>
       <article class="pricing-card"><div class="plan-kicker" data-free-kicker>Planned</div><h3>Free account</h3><div class="price-display" data-free-price>Loading</div><p data-free-copy>Loading</p><ul class="plan-list"><li data-free-availability>Loading</li></ul><a class="button" data-free-cta href="#synthetic-signup">View account options</a></article>
-      <article class="pricing-card featured"><div class="plan-kicker" data-pro-kicker>Planned</div><h3>Pro</h3><div class="price-display" data-pro-price-monthly>Loading</div><p data-pro-copy>Loading</p><div class="price-alt" data-pro-price-annual>Loading</div><ul class="plan-list" data-pro-features></ul><a class="button button-muted" data-checkout-link data-checkout-state aria-disabled="true" href="#synthetic-signup">Checkout unavailable</a></article>
+      <article class="pricing-card featured"><div class="plan-kicker" data-pro-kicker>Planned</div><h3>Pro</h3><div class="price-display" data-pro-price-monthly>Loading</div><p data-pro-copy>Loading</p><div class="price-alt" data-pro-price-annual>Loading</div><ul class="plan-list" data-pro-features></ul><button type="button" class="button button-muted" data-checkout-unavailable disabled>Checkout unavailable</button><a class="button button-primary" data-checkout-link hidden href="#synthetic-signup">View account options</a></article>
     </div>
   </section>
   <section class="section"><div class="entry-card"><div><div class="eyebrow">Fixture control</div><h2 data-entry-title>Loading</h2><p data-entry-copy>Loading</p></div><div class="entry-actions"><button class="button" id="show-preview" type="button">Show preview state</button></div></div></section>

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f0f0f">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://api.anthropic.com https://corsproxy.io; base-uri 'none'; object-src 'none'; frame-ancestors 'none';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://api.anthropic.com https://corsproxy.io; base-uri 'none'; object-src 'none';">
 <title>Plans and pricing | Kujira Forex</title>
 <script src="lib/theme-init.js?v=1.0"></script>
 <script src="config.js?v=1.0"></script>
@@ -21,7 +21,7 @@
   <nav class="public-nav" aria-label="Primary">
     <a href="./welcome.html">Welcome</a>
     <a href="./pricing.html" aria-current="page">Plans</a>
-    <a class="button button-primary nav-primary" href="./index.html?v=0.14">Open local journal</a>
+    <a class="button button-primary nav-primary" href="./index.html">Open local journal</a>
   </nav>
   <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle colour theme" title="Toggle colour theme">◐</button>
 </header>
@@ -34,8 +34,8 @@
       <h1 id="pricing-title">A plan for the way you keep a journal.</h1>
       <p class="pricing-copy" data-pricing-copy>Use the local journal on this device today. Online accounts and paid plans remain unavailable in this preview.</p>
       <div class="hero-actions">
-        <a class="button button-primary" data-signup-link href="./index.html?v=0.14#signup">View account options</a>
-        <a class="button" data-signin-link href="./index.html?v=0.14#account">Sign in</a>
+        <a class="button button-primary" data-signup-link href="./index.html#signup">View account options</a>
+        <a class="button" data-signin-link href="./index.html#account">Sign in</a>
       </div>
     </div>
     <aside class="pricing-callout" aria-label="Preview availability">
@@ -58,7 +58,7 @@
         <div class="price-display">On this device</div>
         <p data-local-copy>Record and review trades in the local preview without an account or payment step.</p>
         <ul class="plan-list"><li>Local-first journal</li><li>Review views and notes</li><li data-local-access>No account required for this preview</li></ul>
-        <a class="button button-primary" data-local-cta href="./index.html?v=0.14">Open local journal</a>
+        <a class="button button-primary" data-local-cta href="./index.html">Open local journal</a>
       </article>
       <article class="pricing-card">
         <div class="plan-kicker" data-free-kicker>Planned</div>
@@ -66,7 +66,7 @@
         <div class="price-display" data-free-price>When online accounts open</div>
         <p data-free-copy>Up to 50 saved trades when online accounts become available.</p>
         <ul class="plan-list"><li>Up to 50 saved trades</li><li>Open and closed trades count towards the limit</li><li data-free-availability>Availability to be announced</li></ul>
-        <a class="button" data-signup-link data-free-cta href="./index.html?v=0.14#signup">View account options</a>
+        <a class="button" data-signup-link data-free-cta href="./index.html#signup">View account options</a>
       </article>
       <article class="pricing-card featured">
         <div class="plan-kicker" data-pro-kicker>Planned</div>
@@ -75,7 +75,8 @@
         <p data-pro-copy>Pro is planned. Checkout is unavailable in this preview.</p>
         <div class="price-alt"><span data-pro-price-annual>To be announced</span></div>
         <ul class="plan-list" data-pro-features></ul>
-        <a class="button button-muted" data-checkout-link data-checkout-state aria-disabled="true" href="./index.html?v=0.14#signup">Checkout unavailable</a>
+        <button type="button" class="button button-muted" data-checkout-unavailable disabled>Checkout unavailable</button>
+        <a class="button button-primary" data-checkout-link hidden href="./index.html#signup">View account options</a>
       </article>
     </div>
   </section>
@@ -83,7 +84,7 @@
   <section class="section" aria-labelledby="signup-title">
     <div class="entry-card">
       <div><div class="eyebrow">Online accounts</div><h2 id="signup-title" data-entry-title>Online accounts are planned</h2><p data-entry-copy>The local preview opens the account entry point without sending a sign-up request.</p></div>
-      <div class="entry-actions"><a class="button button-primary" data-signup-link href="./index.html?v=0.14#signup">View account options</a><a class="button" data-signin-link href="./index.html?v=0.14#account">Sign in</a></div>
+      <div class="entry-actions"><a class="button button-primary" data-signup-link href="./index.html#signup">View account options</a><a class="button" data-signin-link href="./index.html#account">Sign in</a></div>
     </div>
   </section>
 </main>

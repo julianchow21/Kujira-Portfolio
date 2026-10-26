@@ -26,8 +26,8 @@
       'Chart markers',
       'CSV import'
     ]),
-    signUpHref: './index.html?v=0.14#signup',
-    signInHref: './index.html?v=0.14#account',
+    signUpHref: './index.html#signup',
+    signInHref: './index.html#account',
     checkoutEnabled: false
   });
 }(typeof globalThis !== 'undefined' ? globalThis : this));

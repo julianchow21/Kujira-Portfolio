@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://api.anthropic.com https://corsproxy.io; base-uri 'none'; object-src 'none'; frame-ancestors 'none';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://api.anthropic.com https://corsproxy.io https://*.workers.dev; base-uri 'none'; object-src 'none';">
 <meta name="theme-color" content="#0f0f0f">
 <title>Kujira Forex</title>
 <script src="lib/theme-init.js?v=1.0"></script>
@@ -173,6 +173,11 @@ th.sortable.desc::after{content:'\25BC'}
 .frow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .tag-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
 .tag-row:last-child{border:none}
+/* A very long tag name must not push the rename box and the buttons out of the dialog. The chip may shrink and truncate (the full name is in its title and in the rename box), capped so the rename box keeps most of the row. */
+.tag-row .tag{flex:0 1 auto;min-width:0;max-width:45%;overflow:hidden;text-overflow:ellipsis}
+/* The same for the Undo button in the footer, its label carries the deleted tag's name. */
+.modal-foot .undo-btn{min-width:0;max-width:100%}
+.modal-foot .undo-btn span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* TOAST */
 #toasts{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:300;width:max-content;max-width:90vw}
@@ -297,6 +302,11 @@ th.sortable.desc::after{content:'\25BC'}
   th,td{padding:8px 9px}
   th{font-size:10px}
   input,select,textarea{font-size:16px} /* prevent iOS auto-zoom on focus */
+}
+/* 320px class phones: the four view buttons need 322px at their normal padding but the row has 294px. Tighter padding, spread evenly, so none is clipped. Below about 300px the row still scrolls so every view stays reachable. */
+@media(max-width:360px){
+  .subnav .seg{width:100%}
+  .subnav .seg button{flex:1 1 auto;padding:6px 8px}
 }
 </style>
 </head>
@@ -498,7 +508,19 @@ th.sortable.desc::after{content:'\25BC'}
 <script src="lib/kjr-format.js?v=1.2"></script>
 <script src="lib/kjr-calendar.js?v=1.0"></script>
 <script src="config.js?v=1.0"></script>
-<script src="lib/supabase-2.117.2.umd.js?v=2.117.2" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+<!-- The 218 KB Supabase SDK is only needed for hosted Auth. This tag is inert (type text/plain, the browser neither fetches nor runs it) and keeps the path, version and
+     SRI hash in one place for sw.js SHELL, check-release.js and the tests. The script after it re-emits it as a real, in-order script only when the configuration the app resolves
+     says Auth is enabled, so a local-owner boot never downloads, parses or runs the SDK. document.write keeps it parser-blocking, so window.supabase exists before
+     auth-client.js and the app script, exactly as when the tag was static. -->
+<script id="supabase-sdk" type="text/plain" src="lib/supabase-2.117.2.umd.js?v=2.117.2" integrity="sha384-Rj26LVGvoeRVR6+mwQmFfcR3QOBEwT+ZmuCWpuiqeTzJpCs0ER4ITAWGb4Hiy3Ok" crossorigin="anonymous"></script>
+<script>
+(function(){
+  var tag=document.getElementById('supabase-sdk'), cfg=window.KjrForexConfig;
+  if(!tag||!cfg||typeof cfg.resolve!=='function') return;
+  var resolved; try{ resolved=cfg.resolve(window.__KJR_FOREX_CONFIG__||{},window.location); }catch(e){ return; }
+  if(resolved&&resolved.authEnabled) document.write('<scr'+'ipt src="'+tag.getAttribute('src')+'" integrity="'+tag.getAttribute('integrity')+'" crossorigin="anonymous"></scr'+'ipt>');
+}());
+</script>
 <script src="lib/auth-client.js?v=1.0"></script>
 
 <script>
@@ -1344,7 +1366,8 @@ function accountModalHtml(mode){
     +'</div><div class="modal-foot"><button class="btn" onclick="closeModal()">Close</button><button class="btn btn-danger" onclick="signOutAction()">Sign out</button></div>';
 }
 function openAccountSettings(mode){
-  const title=currentUser().id?'Account':mode==='signup'?'Create account':mode==='signin'?'Sign in':'Account';
+  // "Create account" and "Sign in" only when the dialog shows the form. Local device mode and a broken hosted setup show a message, so they stay "Account" (the #signup route included).
+  const title=currentUser().id?'Account':(isLocalOwner()||isHostedBroken())?'Account':mode==='signup'?'Create account':mode==='signin'?'Sign in':'Account';
   setBillingError('');
   document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><h3>'+title+'</h3><button class="icon-btn" aria-label="Close '+title.toLowerCase()+'" onclick="closeModal()">✕</button></div>'+accountModalHtml(mode)+'</div></div>';
   wireModal(title);
@@ -1670,6 +1693,16 @@ function wireModal(label){
   if(focusable&&typeof focusable.focus==='function') focusable.focus();
   else if(m){ m.setAttribute('tabindex','-1'); m.focus(); }
 }
+/* Escape and the Tab trap above are bound to #modal-root, so a key pressed while focus sits on <body> never reaches them. When a dialog action replaces the control that
+   holds focus (the chart button becomes loading text), the browser drops focus to <body> and Escape stops closing the dialog. Call this just before such a replacement:
+   it parks focus on the stable container (tabindex -1, so it stays out of the Tab order) unless focus is already on a control elsewhere in the dialog that will stay. */
+function holdModalFocus(region){
+  const root=document.getElementById('modal-root'); if(!root||!region||!root.contains(region)) return;
+  const active=document.activeElement;
+  if(active&&active!==document.body&&root.contains(active)&&!region.contains(active)) return;
+  if(region.getAttribute('tabindex')===null) region.setAttribute('tabindex','-1');
+  region.focus({preventScroll:true});
+}
 function closeModal(){ const root=document.getElementById('modal-root'), previous=_modalKeyTrap&&_modalKeyTrap.__previousFocus; if(_modalKeyTrap&&root){ root.removeEventListener('keydown',_modalKeyTrap); _modalKeyTrap=null; } if(root) root.innerHTML=''; if(previous&&typeof previous.focus==='function'&&previous.isConnected!==false) previous.focus(); }
 function openConflictManager(){
   const conflicts=readSyncConflicts(), body=conflicts.length
@@ -1766,9 +1799,33 @@ function confirmDeleteTrade(id){
    Loaded lazily from CDN on click only, never on modal open. Read-only over
    trade data, no candle data is persisted anywhere.
    ========================================================================== */
-const CHART_PROXY_DEFAULT = 'https://corsproxy.io/?url={url}';
-function getChartProxy(){ const v=(localStorage.getItem(CHART_PROXY_KEY)||'').trim(); return v||CHART_PROXY_DEFAULT; }
+/* Chart data proxy, set in Settings as "Chart data CORS proxy". Two shapes are accepted.
+   1. A Cloudflare Worker on workers.dev with no {url}: the Worker Trading uses (Trading/Worker/Yahoo Worker.js). It is called the way that Worker expects,
+      base?symbol=&interval=&range=&includePrePost=, and answers with Yahoo's own chart JSON.
+   2. Any other address, as a template: {url} becomes the encoded Yahoo URL, or the encoded URL is appended when there is no {url}. Its origin must also be in connect-src.
+   Nothing set means no request at all. The old default, corsproxy.io, now answers 401 to every keyless call. */
+function getChartProxy(){ return (localStorage.getItem(CHART_PROXY_KEY)||'').trim(); }
+function chartProxyKind(value){
+  const v=String(value==null?'':value).trim();
+  if(!v) return 'none';
+  if(!v.includes('{url}')){ try{ const u=new URL(v); if(u.protocol==='https:'&&/\.workers\.dev$/i.test(u.hostname)) return 'worker'; }catch(e){} }
+  return 'template';
+}
 function resolveProxyUrl(target){ const tmpl=getChartProxy(), enc=encodeURIComponent(target); return tmpl.includes('{url}') ? tmpl.replace('{url}',enc) : tmpl+enc; }
+/* The Worker takes a symbol, an interval and a range that ends now, not a from and to date. Pick the smallest range that still reaches back to fromSec,
+   the bars are cut to the wanted window afterwards. Day counts are a little under each range so a borderline trade takes the next range up. */
+const WORKER_RANGES = [['3mo',88],['6mo',175],['1y',360],['2y',725],['5y',1820]];
+function workerRangeFor(fromSec,nowSec){ const days=(nowSec-fromSec)/86400; for(const r of WORKER_RANGES){ if(days<=r[1]) return r[0]; } return 'max'; }
+function workerChartUrl(base,symbol,range){ return base+(base.includes('?')?'&':'?')+'symbol='+encodeURIComponent(symbol)+'&interval=1d&range='+range+'&includePrePost=false'; }
+/* Settings validation for the proxy field. Empty is fine (charts stay off). */
+function chartProxyProblem(value){
+  const v=String(value==null?'':value).trim(); if(!v) return '';
+  if(v.length>500) return 'That address is too long.';
+  let u; try{ u=new URL(v.replace('{url}','x')); }catch(e){ return 'Enter a full https:// address.'; }
+  if(u.protocol!=='https:') return 'The address must start with https://.';
+  if(u.username||u.password) return 'Remove the user name and password from the address.';
+  return '';
+}
 
 let _lcLoadPromise=null;
 function loadLightweightCharts(){
@@ -1788,17 +1845,29 @@ function loadLightweightCharts(){
   return _lcLoadPromise;
 }
 
+/* A failed proxy call, as an Error with a kind the dialog understands: 'auth' (401, 403), 'symbol' (Yahoo or the Worker says the symbol is wrong), else 'proxy'. */
+function chartHttpError(status,body,viaWorker){
+  const desc=body&&body.chart&&body.chart.error&&body.chart.error.description;
+  let kind='proxy', message='The proxy returned HTTP '+status+'.';
+  if(status===401||status===403){ kind='auth'; message='The proxy refused the request (HTTP '+status+').'; }
+  else if(status===429){ message='The proxy is rate limiting requests (HTTP 429). Wait a minute, then retry.'; }
+  else if(viaWorker&&status===400){ kind='symbol'; message='The Worker did not accept this symbol (it replied "'+(desc||'bad params')+'"). It currently allows letters, dots and dashes only.'; }
+  else if(desc){ kind='symbol'; message=desc; }
+  const err=new Error(message); err.kind=kind; return err;
+}
 async function fetchCandles(symbol,fromSec,toSec){
-  const target='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(symbol)+'?period1='+fromSec+'&period2='+toSec+'&interval=1d&includePrePost=false';
-  const url=resolveProxyUrl(target);
+  const proxy=getChartProxy(), kind=chartProxyKind(proxy), viaWorker=kind==='worker';
+  if(kind==='none'){ const err=new Error('No chart data proxy is set.'); err.kind='setup'; throw err; }
+  const url=viaWorker
+    ? workerChartUrl(proxy,symbol,workerRangeFor(fromSec,Math.floor(Date.now()/1000)))
+    : resolveProxyUrl('https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(symbol)+'?period1='+fromSec+'&period2='+toSec+'&interval=1d&includePrePost=false');
   let res;
   try{ res=await fetch(url); }
   catch(e){ const err=new Error('The proxy did not respond.'); err.kind='proxy'; throw err; }
   if(!res.ok){
     let body=null;
     try{ body=JSON.parse(await res.text()); }catch(e){ body=null; }
-    if(body&&body.chart&&body.chart.error){ const err=new Error(body.chart.error.description||'Symbol not found'); err.kind='symbol'; throw err; }
-    const err=new Error('The proxy returned HTTP '+res.status+'.'); err.kind='proxy'; throw err;
+    throw chartHttpError(res.status,body,viaWorker);
   }
   let json;
   try{ json=await res.json(); }
@@ -1810,6 +1879,7 @@ async function fetchCandles(symbol,fromSec,toSec){
   const ts=result.timestamp, q=(result.indicators&&result.indicators.quote&&result.indicators.quote[0])||{};
   const bars=[];
   for(let i=0;i<ts.length;i++){
+    if(viaWorker&&(ts[i]<fromSec||ts[i]>toSec)) continue;   // the Worker's range runs up to now, keep only the trade's window
     const o=q.open&&q.open[i], h=q.high&&q.high[i], l=q.low&&q.low[i], c=q.close&&q.close[i];
     if(![o,h,l,c].every(x=>typeof x==='number'&&isFinite(x))) continue;
     const d=new Date(ts[i]*1000);
@@ -1828,18 +1898,25 @@ function nearestBarTime(bars,iso){
   return best;
 }
 function tradeChartSectionHtml(t){
-  return '<div class="field"><div class="label">Price chart</div><div id="trade-chart-wrap"><button class="btn" id="trade-chart-load-btn">Load price chart</button></div></div>';
+  // tabindex -1 and a name: when the button is replaced by the loading text, loadTradeChart parks focus here (holdModalFocus) so Escape and Tab keep working.
+  return '<div class="field"><div class="label">Price chart</div><div id="trade-chart-wrap" role="group" aria-label="Price chart" aria-live="polite" tabindex="-1"><button class="btn" id="trade-chart-load-btn">Load price chart</button></div></div>';
 }
 function chartErrorHtml(t,err){
-  const kind=(err&&err.kind)==='symbol'?'symbol':'proxy';
-  const title=kind==='symbol'?'Symbol not found':'Could not reach the data proxy';
+  const k=err&&err.kind, kind=k==='symbol'||k==='setup'||k==='auth'?k:'proxy', msg=(err&&err.message)||'';
+  const SET_IT='Set the Chart data CORS proxy in Settings (⚙) to your Worker URL, the same one Trading uses.';
+  const title=kind==='symbol'?'Symbol not found':kind==='setup'?'Chart data proxy not set':kind==='auth'?'The chart data proxy refused the request':'Could not reach the data proxy';
   const detail=kind==='symbol'
-    ? ('No price data for "'+escapeHtml(t.symbol||'')+'". '+escapeHtml((err&&err.message)||''))
-    : escapeHtml((err&&err.message)||'The chart data proxy did not respond.');
+    ? ('No price data for "'+escapeHtml(t.symbol||'')+'". '+escapeHtml(msg))
+    : kind==='setup'
+      ? 'Charts load through a data proxy and none is set. '+SET_IT+' Then open this trade again.'
+      : kind==='auth'
+        ? escapeHtml(msg||'The proxy refused the request.')+' '+SET_IT
+        : escapeHtml(msg||'The chart data proxy did not respond.');
   return '<div class="state error" style="padding:20px 10px">'
     +'<div class="big">⚠</div><h3>'+title+'</h3><p>'+detail+'</p>'
-    +'<p class="muted">Check or change the proxy URL in Settings (⚙) if this keeps happening.</p>'
-    +'<button class="btn" id="trade-chart-load-btn">Retry</button></div>';
+    +(kind==='symbol'||kind==='proxy'?'<p class="muted">Check or change the Chart data CORS proxy in Settings (⚙) if this keeps happening.</p>':'')
+    +(kind==='setup'?'':'<button class="btn" id="trade-chart-load-btn">Retry</button>')
+    +'</div>';
 }
 function wireChartLoadButton(id){
   if(!isValidStoredId(id)) return;
@@ -1852,20 +1929,22 @@ async function loadTradeChart(id){
   if(!scopeIsCurrent(snap)) return;
   const t=DB.trades.find(x=>x.id===id), wrap=document.getElementById('trade-chart-wrap');
   if(!t||!wrap) return;
+  holdModalFocus(wrap);   // the clicked button is replaced just below, focus must not fall to <body> (Escape and the Tab trap live on #modal-root)
+  if(chartProxyKind(getChartProxy())==='none'){ wrap.innerHTML=chartErrorHtml(t,{kind:'setup'}); return; }   // nothing to call, say so before fetching the chart library
   wrap.innerHTML='<p class="muted">Loading chart…</p>';
   try{
     await loadLightweightCharts();
-    if(!scopeIsCurrent(snap)) return;
+    if(!scopeIsCurrent(snap)||!wrap.isConnected) return;   // the dialog may have been closed (Escape works while loading)
     const d=deriveTrade(t);
     const fromSec=Math.floor(new Date(t.entryAt).getTime()/1000)-45*86400;
     const nowSec=Math.floor(Date.now()/1000);
     const exitSec=t.exitAt?Math.floor(new Date(t.exitAt).getTime()/1000):nowSec;
     const toSec=Math.min(nowSec, exitSec+15*86400);
     const bars=await fetchCandles(t.symbol,fromSec,toSec);
-    if(!scopeIsCurrent(snap)) return;
+    if(!scopeIsCurrent(snap)||!wrap.isConnected) return;
     renderTradeChart(wrap,t,d,bars);
   }catch(err){
-    if(!scopeIsCurrent(snap)) return;
+    if(!scopeIsCurrent(snap)||!wrap.isConnected) return;
     if(_tradeChart){ try{ _tradeChart.remove(); }catch(e){} _tradeChart=null; }
     wrap.innerHTML=chartErrorHtml(t,err); wireChartLoadButton(t.id);
   }
@@ -1904,10 +1983,11 @@ function renderTradeChart(wrap,t,d,bars){
 function openTagManager(){
   _tagList=[]; let i=0;
   const sections=TAG_CATS.map(c=>{ const tags=allTags(c.key);
-    const rows=tags.length? tags.map(o=>{ const idx=i++; _tagList[idx]={cat:c.key,tag:o.tag}; return '<div class="tag-row"><span class="tag '+c.cls+'">'+escapeHtml(o.tag)+'</span><span class="muted" title="trades">'+o.count+'</span><input id="ren-'+idx+'" aria-label="Rename '+escapeHtml(o.tag)+' tag" value="'+escapeHtml(o.tag)+'" style="flex:1;min-width:70px"><button class="btn btn-sm" onclick="renameTagUI('+idx+')">Save</button><button class="btn btn-sm btn-danger" aria-label="Delete '+escapeHtml(o.tag)+' tag" onclick="deleteTagUI('+idx+')">✕</button></div>'; }).join('') : '<p class="muted">None yet.</p>';
+    const rows=tags.length? tags.map(o=>{ const idx=i++; _tagList[idx]={cat:c.key,tag:o.tag}; return '<div class="tag-row"><span class="tag '+c.cls+'" title="'+escapeHtml(o.tag)+'">'+escapeHtml(o.tag)+'</span><span class="muted" title="trades">'+o.count+'</span><input id="ren-'+idx+'" aria-label="Rename '+escapeHtml(o.tag)+' tag" value="'+escapeHtml(o.tag)+'" style="flex:1;min-width:70px"><button class="btn btn-sm" onclick="renameTagUI('+idx+')">Save</button><button class="btn btn-sm btn-danger" aria-label="Delete '+escapeHtml(o.tag)+' tag" onclick="deleteTagUI('+idx+')">✕</button></div>'; }).join('') : '<p class="muted">None yet.</p>';
     return '<div style="margin-bottom:14px"><div class="label" style="margin-bottom:6px">'+c.label+'</div>'+rows+'</div>'; }).join('');
   let undoSnap=null; try{ undoSnap=JSON.parse(localStorage.getItem(TAG_UNDO_KEY)||'null'); }catch(e){}
-  const undoBtn = undoSnap ? '<button class="btn btn-sm" onclick="undoDeleteTag()">Undo delete "'+escapeHtml(undoSnap.tag)+'"</button>' : '<span></span>';
+  const undoName = undoSnap ? escapeHtml(undoSnap.tag) : '';
+  const undoBtn = undoSnap ? '<button class="btn btn-sm undo-btn" title="Undo delete &quot;'+undoName+'&quot;" onclick="undoDeleteTag()"><span>Undo delete "'+undoName+'"</span></button>' : '<span></span>';
   document.getElementById('modal-root').innerHTML='<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" style="max-width:480px" role="dialog" aria-modal="true"><div class="modal-head"><h3>Manage tags</h3><button class="icon-btn" aria-label="Close tag manager" onclick="closeModal()">✕</button></div><div class="modal-body">'+sections+'<p class="muted">Renaming updates every trade. Rename to an existing tag to merge them. Deleting can be undone once, right after it happens.</p></div><div class="modal-foot">'+undoBtn+'<button class="btn" onclick="closeModal()">Close</button></div></div></div>';
   wireModal('Manage tags');
 }
@@ -2035,16 +2115,18 @@ function openSettings(){
     + conflictSettings
     + coachSettings
     + '<div class="field"><label for="f-csv">Import trades from CSV</label><input id="f-csv" type="file" accept=".csv,text/csv" aria-describedby="csv-help e-csv" aria-invalid="false"><div class="muted" id="csv-help">Auto-maps columns named like symbol, side, qty, entry date, entry price, exit date, exit price, fees, stop. Adds to existing trades.</div><div class="err" id="e-csv" aria-live="polite"></div></div>'
-    + '<div class="field"><label for="f-chartproxy">Chart data CORS proxy</label><input id="f-chartproxy" type="text" aria-describedby="chartproxy-help" value="'+escapeHtml(localStorage.getItem(CHART_PROXY_KEY)||'')+'" placeholder="'+escapeHtml(CHART_PROXY_DEFAULT)+'"><div class="muted" id="chartproxy-help">{url} is replaced with the encoded Yahoo URL. The default is a public proxy and can be flaky. A personal Cloudflare Worker URL can go here later.</div></div>'
+    + '<div class="field"><label for="f-chartproxy">Chart data CORS proxy</label><input id="f-chartproxy" type="text" aria-describedby="chartproxy-help e-chartproxy" aria-invalid="false" value="'+escapeHtml(localStorage.getItem(CHART_PROXY_KEY)||'')+'" placeholder="https://your-worker.workers.dev"><div class="muted" id="chartproxy-help">Paste your Cloudflare Worker URL, the same one Trading uses (it ends in .workers.dev). Charts load through it. Any other proxy needs {url} in its address, which is replaced with the encoded Yahoo URL, and its origin must also be allowed by the page security policy. Leave it empty and charts stay off.</div><div class="err" id="e-chartproxy" aria-live="polite"></div></div>'
     +'</div>'
     +'<div class="modal-foot"><button class="btn" onclick="importCSV()">Import CSV</button><button class="btn btn-primary" onclick="saveSettings()">Save</button></div>'
     +'</div></div>';
   wireModal('Settings');
 }
 function saveSettings(){
+  // Validate first, so a bad proxy address never leaves the dialog half saved.
+  const cpEl=document.getElementById('f-chartproxy'), cp=cpEl?cpEl.value.trim():'', cpProblem=cpEl?chartProxyProblem(cp):'';
+  if(cpEl){ const errEl=document.getElementById('e-chartproxy'); if(errEl) errEl.textContent=cpProblem; cpEl.classList.toggle('invalid',!!cpProblem); cpEl.setAttribute('aria-invalid',cpProblem?'true':'false'); if(cpProblem){ cpEl.focus(); return; } }
   const keyEl=document.getElementById('f-akey'), k=keyEl?keyEl.value.trim():''; if(isLocalOwner()){ if(k) localStorage.setItem(ANTHROPIC_KEY,k); else localStorage.removeItem(ANTHROPIC_KEY); }
-  const cpEl=document.getElementById('f-chartproxy');
-  if(cpEl){ const cp=cpEl.value.trim(); if(cp && cp!==CHART_PROXY_DEFAULT) localStorage.setItem(CHART_PROXY_KEY,cp); else localStorage.removeItem(CHART_PROXY_KEY); }
+  if(cpEl){ if(cp) localStorage.setItem(CHART_PROXY_KEY,cp); else localStorage.removeItem(CHART_PROXY_KEY); }
   closeModal(); toast('Settings saved'); if(_view==='coach') renderCoachIdle();
 }
 /* Explicit date parsing so CSV imports do not depend on the JS engine's

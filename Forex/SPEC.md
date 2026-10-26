@@ -30,7 +30,7 @@ Out of Phase 1 (deliberately):
 - Charts load TradingView Lightweight Charts v5.2.0 lazily when requested.
 - Dark and light themes are both implemented with a persisted toggle.
 - The topbar is the live three-way control, Trading | Forex | Portfolio.
-- Chart candles currently use a configurable CORS proxy whose default is `corsproxy.io`. They do not use the Trading Worker `/chart` route.
+- Chart candles load through the proxy set in Settings ("Chart data CORS proxy"). A `workers.dev` URL is treated as the Trading Worker and called the way that Worker expects (`?symbol=&interval=&range=&includePrePost=`), any other address is a `{url}` template. With nothing set no request is made, the old default `corsproxy.io` now answers 401 to every keyless call.
 
 ## 3. Data model
 

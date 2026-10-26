@@ -1280,9 +1280,464 @@ async function runSyncContractTests() {
   });
 }
 
+/* ====================== Shell contracts ======================
+   Dialog focus (F2), chart proxy (F1), Tag manager (F3), account dialog title (O1), view switch (O2) and the service worker (O5).
+   The real functions are extracted from index.html and sw.js and run in vm contexts against small fakes, nothing touches a
+   browser, storage or the network. */
+
+function jsonResponse(body, status = 200) {
+  return { ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body), json: async () => body };
+}
+const DAY = 86400;
+
+/* A tiny DOM that models the one browser behaviour F2 is about: when the element holding focus is destroyed by an
+   innerHTML replacement, focus falls to <body>. Only the dialog's own chart region is built. */
+function makeChartEnv({ proxy = '', fetchImpl = null, libLoad = null } = {}) {
+  const storage = new Map(proxy ? [['kjr_test_chartProxy', proxy]] : []);
+  const doc = { activeElement: null };
+  class El {
+    constructor(name, parent) { this.name = name; this.parent = parent || null; this.children = []; this.attrs = {}; this._html = ''; this.isConnected = true; if (parent) parent.children.push(this); }
+    contains(node) { for (let n = node; n; n = n.parent) if (n === this) return true; return false; }
+    getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; }
+    setAttribute(k, v) { this.attrs[k] = String(v); }
+    focus() { if (this.isConnected) doc.activeElement = this; }
+    get innerHTML() { return this._html; }
+    set innerHTML(value) {
+      const gone = this.children.splice(0);
+      gone.forEach((child) => { child.isConnected = false; });
+      if (doc.activeElement && gone.some((child) => child.contains(doc.activeElement))) doc.activeElement = doc.body;
+      this._html = String(value);
+    }
+  }
+  doc.body = new El('BODY');
+  doc.activeElement = doc.body;
+  const modalRoot = new El('modal-root', doc.body);
+  const modal = new El('modal', modalRoot);
+  const wrap = new El('trade-chart-wrap', modal);
+  const button = new El('trade-chart-load-btn', wrap);
+  const byId = { 'modal-root': modalRoot, 'trade-chart-wrap': wrap };
+  doc.getElementById = (id) => byId[id] || null;
+  const now = Math.floor(Date.now() / 1000);
+  const calls = { fetch: [], loadLib: 0, render: 0, wire: 0 };
+  const context = vm.createContext({
+    URL, Promise, JSON, Date, Math, Error, Number, String, Object, Array,
+    CHART_PROXY_KEY: 'kjr_test_chartProxy',
+    localStorage: { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => storage.set(k, String(v)), removeItem: (k) => storage.delete(k) },
+    document: doc,
+    escapeHtml: KjrFmt.esc,
+    DB: { trades: [{ id: 't1', symbol: 'DEMO-EURUSD', entryAt: new Date((now - 30 * DAY) * 1000).toISOString(), exitAt: new Date((now - 20 * DAY) * 1000).toISOString(), entryPrice: 1.1, exitPrice: 1.11 }] },
+    isValidStoredId: () => true,
+    scopeSnapshot: () => ({ n: 1 }),
+    scopeIsCurrent: () => true,
+    authoriseFeature: async () => true,
+    deriveTrade: () => ({ status: 'closed' }),
+    loadLightweightCharts: async () => { calls.loadLib++; if (libLoad) await libLoad({ wrap }); },
+    renderTradeChart: () => { calls.render++; },
+    wireChartLoadButton: () => { calls.wire++; },
+    fetch: async (url) => { calls.fetch.push(url); return fetchImpl ? fetchImpl(url) : jsonResponse({ chart: { result: null, error: { description: 'No data found' } } }, 404); },
+    _tradeChart: null,
+  });
+  let code = extractConst(indexSrc, 'WORKER_RANGES', INDEX_PATH) + '\n';
+  for (const name of ['holdModalFocus', 'getChartProxy', 'chartProxyKind', 'resolveProxyUrl', 'workerRangeFor', 'workerChartUrl',
+    'chartProxyProblem', 'chartHttpError', 'fetchCandles', 'chartErrorHtml', 'tradeChartSectionHtml', 'loadTradeChart']) {
+    code += extractFunction(indexSrc, name, INDEX_PATH) + '\n';
+  }
+  vm.runInContext(code, context, { filename: 'extracted-forex-chart.js' });
+  return { context, doc, modalRoot, wrap, button, calls, storage, now };
+}
+function yahooBody(stamps) {
+  const flat = (v) => stamps.map(() => v);
+  return { chart: { result: [{ timestamp: stamps, indicators: { quote: [{ open: flat(1.1), high: flat(1.2), low: flat(1.0), close: flat(1.15) }] } }], error: null } };
+}
+
+async function runShellContractTests() {
+  /* ---- F2: focus never falls to <body> while a dialog is open ---- */
+  await testAsync('F2 - loading the chart parks focus on the chart region, so Escape and the Tab trap still reach #modal-root', async () => {
+    const env = makeChartEnv({ proxy: 'https://forex-qa.workers.dev', fetchImpl: () => jsonResponse({ chart: { result: null, error: null } }, 401) });
+    env.button.focus();
+    assert.strictEqual(env.doc.activeElement, env.button, 'the user clicked the button');
+    await env.context.loadTradeChart('t1');
+    assert.ok(env.modalRoot.contains(env.doc.activeElement), 'focus must stay inside the dialog, the key handler is bound to #modal-root');
+    assert.strictEqual(env.doc.activeElement, env.wrap);
+    assert.strictEqual(env.wrap.getAttribute('tabindex'), '-1');
+    // Retry replaces the button the same way, and is covered by the same call.
+    const retry = new env.button.constructor('retry', env.wrap);
+    retry.focus();
+    await env.context.loadTradeChart('t1');
+    assert.strictEqual(env.doc.activeElement, env.wrap, 'Retry must not drop focus either');
+    assert.ok(env.calls.wire >= 2, 'the Retry button is re-wired after each failure');
+  });
+  await testAsync('F2 - control: without holdModalFocus the same click drops focus to <body> (the bug this test guards)', async () => {
+    const env = makeChartEnv({ proxy: 'https://forex-qa.workers.dev', fetchImpl: () => jsonResponse({}, 401) });
+    env.context.holdModalFocus = () => {};
+    env.button.focus();
+    await env.context.loadTradeChart('t1');
+    assert.strictEqual(env.doc.activeElement, env.doc.body);
+    assert.ok(!env.modalRoot.contains(env.doc.activeElement));
+  });
+  await testAsync('F2 - holdModalFocus also covers a browser that never focuses a clicked button, and leaves a control that stays alone', async () => {
+    const env = makeChartEnv({ proxy: 'https://forex-qa.workers.dev' });
+    env.doc.activeElement = env.doc.body;     // Safari and Firefox on macOS do not focus a clicked button
+    env.context.holdModalFocus(env.wrap);
+    assert.strictEqual(env.doc.activeElement, env.wrap);
+    const notes = new env.button.constructor('notes', env.modalRoot.children[0]);   // a field elsewhere in the dialog that stays
+    notes.focus();
+    env.context.holdModalFocus(env.wrap);
+    assert.strictEqual(env.doc.activeElement, notes, 'focus on a control that is not being replaced is left alone');
+    env.context.holdModalFocus(null);          // no region, no dialog: a no-op, never a throw
+    env.context.holdModalFocus({ contains: () => false });
+  });
+  await testAsync('F2 - a dialog closed while the chart loads is left alone (Escape now works during loading)', async () => {
+    const env = makeChartEnv({ proxy: 'https://forex-qa.workers.dev', libLoad: ({ wrap }) => { wrap.isConnected = false; } });
+    env.button.focus();
+    await env.context.loadTradeChart('t1');
+    assert.strictEqual(env.calls.render, 0, 'nothing is drawn into a detached region');
+    assert.strictEqual(env.calls.fetch.length, 0, 'no data request once the dialog is gone');
+    assert.match(env.wrap.innerHTML, /Loading chart/);
+  });
+  test('F2 - the chart region is a focusable, named group inside the dialog', () => {
+    const html = makeChartEnv().context.tradeChartSectionHtml({ symbol: 'X' });
+    assert.match(html, /<div id="trade-chart-wrap" role="group" aria-label="Price chart" aria-live="polite" tabindex="-1">/);
+    assert.match(html, /<button class="btn" id="trade-chart-load-btn">Load price chart<\/button>/);
+    assert.match(indexSrc, /holdModalFocus\(wrap\);/);
+    assert.match(indexSrc, /_modalKeyTrap=function\(e\)\{\s*if\(e\.key==='Escape'\)\{ e\.preventDefault\(\); closeModal\(\); return; \}/, 'the key handler stays on the dialog root');
+  });
+
+  /* ---- F1: chart data proxy ---- */
+  test('F1 - proxy kinds: none, template and the workers.dev Worker', () => {
+    const kind = makeChartEnv().context.chartProxyKind;
+    for (const empty of ['', '   ', null, undefined]) assert.strictEqual(kind(empty), 'none');
+    assert.strictEqual(kind('https://my-worker.acct.workers.dev'), 'worker');
+    assert.strictEqual(kind('  https://my-worker.acct.workers.dev/  '), 'worker');
+    assert.strictEqual(kind('https://my-worker.workers.dev?key=1'), 'worker');
+    assert.strictEqual(kind('https://corsproxy.io/?url={url}'), 'template');
+    assert.strictEqual(kind('https://my-worker.acct.workers.dev/?url={url}'), 'template', 'an explicit {url} wins, even on workers.dev');
+    assert.strictEqual(kind('https://p.example/raw?u='), 'template');
+    assert.strictEqual(kind('http://my-worker.workers.dev'), 'template', 'plain http is never taken for the Worker');
+    assert.strictEqual(kind('https://workers.dev'), 'template');
+    assert.strictEqual(kind('https://evilworkers.dev'), 'template');
+    assert.strictEqual(kind('https://workers.dev.evil.example'), 'template');
+    assert.strictEqual(kind('not a url'), 'template');
+  });
+  test('F1 - the Worker range is the smallest one that reaches back far enough', () => {
+    const range = makeChartEnv().context.workerRangeFor, now = 1800000000;
+    assert.strictEqual(range(now - 45 * DAY, now), '3mo');
+    assert.strictEqual(range(now - 88 * DAY, now), '3mo');
+    assert.strictEqual(range(now - 89 * DAY, now), '6mo');
+    assert.strictEqual(range(now - 175 * DAY, now), '6mo');
+    assert.strictEqual(range(now - 200 * DAY, now), '1y');
+    assert.strictEqual(range(now - 400 * DAY, now), '2y');
+    assert.strictEqual(range(now - 800 * DAY, now), '5y');
+    assert.strictEqual(range(now - 3000 * DAY, now), 'max');
+    assert.strictEqual(range(now + 5 * DAY, now), '3mo', 'a future entry date still gets a valid range');
+  });
+  test('F1 - the Worker URL is built the way Trading builds it', () => {
+    const url = makeChartEnv().context.workerChartUrl;
+    assert.strictEqual(url('https://w.workers.dev', 'EURUSD', '6mo'), 'https://w.workers.dev?symbol=EURUSD&interval=1d&range=6mo&includePrePost=false');
+    assert.strictEqual(url('https://w.workers.dev/', 'BRK.B', '1y'), 'https://w.workers.dev/?symbol=BRK.B&interval=1d&range=1y&includePrePost=false');
+    assert.strictEqual(url('https://w.workers.dev/?k=1', 'A B', '3mo'), 'https://w.workers.dev/?k=1&symbol=A%20B&interval=1d&range=3mo&includePrePost=false');
+  });
+  await testAsync('F1 - a workers.dev proxy is called the Worker way and its bars are cut to the trade window', async () => {
+    const now = Math.floor(Date.now() / 1000), from = now - 100 * DAY, to = now - 10 * DAY;
+    const stamps = [from - 5 * DAY, from + DAY, from + 20 * DAY, to - DAY, to + DAY, to + 30 * DAY];
+    const env = makeChartEnv({ proxy: 'https://forex-qa.workers.dev', fetchImpl: () => jsonResponse(yahooBody(stamps)) });
+    const bars = await env.context.fetchCandles('DEMO-EURUSD', from, to);
+    assert.deepStrictEqual(env.calls.fetch, ['https://forex-qa.workers.dev?symbol=DEMO-EURUSD&interval=1d&range=6mo&includePrePost=false']);
+    assert.strictEqual(bars.length, 3, 'only the bars inside [from, to] are kept');
+    assert.match(bars[0].time, /^\d{4}-\d{2}-\d{2}$/);
+    assert.deepStrictEqual(Object.keys(bars[0]).sort(), ['close', 'high', 'low', 'open', 'time']);
+  });
+  await testAsync('F1 - any other proxy keeps the existing template path, with no cutting', async () => {
+    const now = Math.floor(Date.now() / 1000), from = now - 100 * DAY, to = now - 10 * DAY;
+    const stamps = [from - 5 * DAY, from + DAY, to + 30 * DAY];
+    const yahoo = 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent('DEMO-EURUSD') + '?period1=' + from + '&period2=' + to + '&interval=1d&includePrePost=false';
+    let env = makeChartEnv({ proxy: 'https://p.example/get?url={url}&k=1', fetchImpl: () => jsonResponse(yahooBody(stamps)) });
+    const bars = await env.context.fetchCandles('DEMO-EURUSD', from, to);
+    assert.deepStrictEqual(env.calls.fetch, ['https://p.example/get?url=' + encodeURIComponent(yahoo) + '&k=1']);
+    assert.strictEqual(bars.length, 3, 'the proxy already honours period1 and period2, so nothing is cut here');
+    env = makeChartEnv({ proxy: 'https://p.example/raw?u=', fetchImpl: () => jsonResponse(yahooBody(stamps)) });
+    await env.context.fetchCandles('DEMO-EURUSD', from, to);
+    assert.deepStrictEqual(env.calls.fetch, ['https://p.example/raw?u=' + encodeURIComponent(yahoo)], 'with no {url} the encoded Yahoo URL is appended');
+  });
+  await testAsync('F1 - no proxy set means no request and a message that points at Settings', async () => {
+    const env = makeChartEnv({ proxy: '' });
+    env.button.focus();
+    await env.context.loadTradeChart('t1');
+    assert.strictEqual(env.calls.fetch.length, 0, 'nothing is sent to a third party');
+    assert.strictEqual(env.calls.loadLib, 0, 'the chart library is not fetched for nothing either');
+    assert.match(env.wrap.innerHTML, /Chart data proxy not set/);
+    assert.match(env.wrap.innerHTML, /Set the Chart data CORS proxy in Settings/);
+    assert.match(env.wrap.innerHTML, /Worker URL, the same one Trading uses/);
+    assert.doesNotMatch(env.wrap.innerHTML, /trade-chart-load-btn/, 'there is nothing to retry until a proxy is set');
+    assert.doesNotMatch(env.wrap.innerHTML, /HTTP 401/);
+    assert.strictEqual(env.doc.activeElement, env.wrap, 'focus is parked in the dialog here as well');
+    await assert.rejects(() => env.context.fetchCandles('X', 1, 2), (err) => err.kind === 'setup', 'fetchCandles refuses on its own too');
+  });
+  await testAsync('F1 - a proxy that answers 401 or 403 gets the Settings message, not the raw HTTP text alone', async () => {
+    for (const status of [401, 403]) {
+      const env = makeChartEnv({ proxy: 'https://corsproxy.io/?url={url}', fetchImpl: () => jsonResponse({ error: 'A valid API key is required.' }, status) });
+      await assert.rejects(() => env.context.fetchCandles('DEMO-EURUSD', 1, 2), (err) => err.kind === 'auth' && err.message === 'The proxy refused the request (HTTP ' + status + ').');
+      env.button.focus();
+      await env.context.loadTradeChart('t1');
+      assert.match(env.wrap.innerHTML, /The chart data proxy refused the request/);
+      assert.match(env.wrap.innerHTML, /HTTP 40[13]/);
+      assert.match(env.wrap.innerHTML, /Set the Chart data CORS proxy in Settings \(⚙\) to your Worker URL/);
+      assert.match(env.wrap.innerHTML, /trade-chart-load-btn">Retry</);
+      assert.doesNotMatch(env.wrap.innerHTML, /The proxy returned HTTP/);
+    }
+  });
+  await testAsync('F1 - other failures keep their kinds: symbol, Worker symbol rule, rate limit, server error, no answer', async () => {
+    const run = (proxy, response) => makeChartEnv({ proxy, fetchImpl: response }).context.fetchCandles('EURUSD=X', 1, 2);
+    const yahoo404 = () => jsonResponse({ chart: { result: null, error: { description: 'No data found, symbol may be delisted' } } }, 404);
+    await assert.rejects(() => run('https://p.example/?u={url}', yahoo404), (err) => err.kind === 'symbol' && /No data found/.test(err.message));
+    const workerBad = () => jsonResponse({ chart: { result: null, error: { description: 'bad params' } } }, 400);
+    await assert.rejects(() => run('https://w.workers.dev', workerBad), (err) => err.kind === 'symbol' && /bad params/.test(err.message) && /letters, dots and dashes/.test(err.message));
+    await assert.rejects(() => run('https://p.example/?u={url}', workerBad), (err) => err.kind === 'symbol' && err.message === 'bad params', 'the Worker wording is for the Worker only');
+    await assert.rejects(() => run('https://w.workers.dev', () => jsonResponse({ chart: { result: null, error: { description: 'rate limited' } } }, 429)), (err) => err.kind === 'proxy' && /rate limiting/.test(err.message));
+    await assert.rejects(() => run('https://w.workers.dev', () => jsonResponse('oops', 500)), (err) => err.kind === 'proxy' && err.message === 'The proxy returned HTTP 500.');
+    await assert.rejects(() => run('https://w.workers.dev', () => { throw new TypeError('Failed to fetch'); }), (err) => err.kind === 'proxy' && err.message === 'The proxy did not respond.');
+    await assert.rejects(() => run('https://w.workers.dev', () => jsonResponse({ chart: { result: [], error: null } })), (err) => err.kind === 'symbol' && /No price data/.test(err.message));
+  });
+  test('F1 - the chart error panel escapes its text and offers Retry only when a retry can help', () => {
+    const html = makeChartEnv().context.chartErrorHtml;
+    const evil = html({ symbol: '"><img src=x onerror=alert(1)>' }, { kind: 'symbol', message: '<b>boom</b>' });
+    assert.doesNotMatch(evil, /<img|<b>/);
+    assert.match(evil, /Symbol not found/);
+    assert.match(html({ symbol: 'X' }, { kind: 'proxy', message: 'The proxy did not respond.' }), /Could not reach the data proxy[\s\S]*Retry/);
+    assert.match(html({ symbol: 'X' }, null), /Could not reach the data proxy/);
+    assert.doesNotMatch(html({ symbol: 'X' }, { kind: 'setup' }), /Retry/);
+  });
+  test('F1 - proxy settings are validated before anything is saved', () => {
+    const problem = makeChartEnv().context.chartProxyProblem;
+    for (const fine of ['', '   ', 'https://my-worker.acct.workers.dev', 'https://p.example/get?url={url}&k=1', 'https://p.example/raw?u=']) assert.strictEqual(problem(fine), '', fine);
+    for (const bad of ['http://my-worker.workers.dev', 'ftp://p.example', 'my-worker.workers.dev', 'javascript:alert(1)', 'https://user:pw@p.example/', 'https://' + 'a'.repeat(501)]) assert.notStrictEqual(problem(bad), '', bad);
+  });
+  test('F1 - the Settings help text matches what now works', () => {
+    assert.match(indexSrc, /placeholder="https:\/\/your-worker\.workers\.dev"/);
+    assert.match(indexSrc, /Paste your Cloudflare Worker URL, the same one Trading uses \(it ends in \.workers\.dev\)\. Charts load through it\. Any other proxy needs \{url\} in its address/);
+    assert.match(indexSrc, /Leave it empty and charts stay off\./);
+    assert.doesNotMatch(indexSrc, /can be flaky|can go here later/);
+    assert.doesNotMatch(indexSrc, /CHART_PROXY_DEFAULT|corsproxy\.io\/\?url=\{url\}'/, 'no hidden default proxy is left');
+  });
+  await testAsync('F1 - saving Settings with a bad proxy keeps the dialog open and writes nothing, a good one saves both fields', async () => {
+    const store = new Map(), calls = { closed: 0, toasts: [] }, nodes = {};
+    const input = (value) => ({ value, classes: new Set(), attrs: {}, focused: false, classList: { toggle(name, on) { if (on) nodes.cp.classes.add(name); else nodes.cp.classes.delete(name); } }, setAttribute(k, v) { this.attrs[k] = v; }, focus() { this.focused = true; } });
+    nodes.cp = input(''); nodes.key = input('synthetic-test-key'); nodes.err = { textContent: '' };
+    const context = vm.createContext({
+      URL, Number, String, Object,
+      document: { getElementById: (id) => ({ 'f-chartproxy': nodes.cp, 'f-akey': nodes.key, 'e-chartproxy': nodes.err }[id] || null) },
+      localStorage: { setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k), getItem: (k) => (store.has(k) ? store.get(k) : null) },
+      CHART_PROXY_KEY: 'cp', ANTHROPIC_KEY: 'ak', isLocalOwner: () => true, _view: 'journal',
+      closeModal: () => { calls.closed++; }, toast: (m) => calls.toasts.push(m), renderCoachIdle: () => {},
+    });
+    vm.runInContext(extractFunction(indexSrc, 'chartProxyProblem', INDEX_PATH) + '\n' + extractFunction(indexSrc, 'saveSettings', INDEX_PATH), context);
+    nodes.cp.value = 'http://insecure.workers.dev';
+    context.saveSettings();
+    assert.strictEqual(calls.closed, 0);
+    assert.strictEqual(store.size, 0, 'neither the key nor the proxy is written on a failed save');
+    assert.ok(nodes.err.textContent.length > 0);
+    assert.strictEqual(nodes.cp.attrs['aria-invalid'], 'true');
+    assert.ok(nodes.cp.classes.has('invalid'));
+    assert.ok(nodes.cp.focused);
+    nodes.cp.value = ' https://forex-qa.workers.dev ';
+    context.saveSettings();
+    assert.strictEqual(calls.closed, 1);
+    assert.strictEqual(store.get('cp'), 'https://forex-qa.workers.dev');
+    assert.strictEqual(store.get('ak'), 'synthetic-test-key');
+    assert.strictEqual(nodes.err.textContent, '');
+    assert.strictEqual(nodes.cp.attrs['aria-invalid'], 'false');
+    nodes.cp.value = '';
+    context.saveSettings();
+    assert.ok(!store.has('cp'), 'an empty field turns charts off');
+  });
+
+  /* ---- F3: Tag manager with a very long tag ---- */
+  test('F3 - the Tag manager keeps a long tag inside its row (chip truncates, full name in the title) and escapes it', () => {
+    const LONG = 'LONGTAG' + 'abcdefghij'.repeat(10) + 'XY', EVIL = '"><img src=x onerror=alert(1)>';
+    const modalRoot = { innerHTML: '' }, state = { wired: null };
+    const context = vm.createContext({
+      TAG_CATS: vm.runInNewContext(extractConst(indexSrc, 'TAG_CATS', INDEX_PATH).replace(/^var TAG_CATS\s*=\s*/, '(').replace(/;$/, ')')),
+      allTags: (cat) => (cat === 'setupTags' ? [{ tag: LONG, count: 2 }, { tag: 'Calm', count: 1 }, { tag: EVIL, count: 1 }] : []),
+      escapeHtml: KjrFmt.esc, JSON, TAG_UNDO_KEY: 'undo',
+      localStorage: { getItem: () => JSON.stringify({ tag: LONG, rows: [{ id: 'a' }] }) },
+      document: { getElementById: (id) => (id === 'modal-root' ? modalRoot : null) },
+      wireModal: (label) => { state.wired = label; },
+    });
+    vm.runInContext('var _tagList=[];\n' + extractFunction(indexSrc, 'openTagManager', INDEX_PATH), context);
+    context.openTagManager();
+    const html = modalRoot.innerHTML;
+    assert.strictEqual(state.wired, 'Manage tags');
+    assert.ok(html.includes('<span class="tag setup" title="' + LONG + '">' + LONG + '</span>'), 'the chip carries the full name as its title');
+    assert.ok(html.includes('<span class="tag setup" title="Calm">Calm</span>'));
+    assert.ok(html.includes('<button class="btn btn-sm undo-btn" title="Undo delete &quot;' + LONG + '&quot;" onclick="undoDeleteTag()"><span>Undo delete "' + LONG + '"</span></button>'));
+    assert.doesNotMatch(html, /<img/, 'a hostile tag name never becomes markup');
+    assert.ok(html.includes('title="&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"'));
+    assert.strictEqual((html.match(/<div class="tag-row">/g) || []).length, 3);
+  });
+  test('F3 - CSS: the chip may shrink and truncate, the rename box keeps its minimum, the Undo label truncates', () => {
+    assert.match(indexSrc, /\.tag-row \.tag\{flex:0 1 auto;min-width:0;max-width:45%;overflow:hidden;text-overflow:ellipsis\}/);
+    assert.match(indexSrc, /\.modal-foot \.undo-btn\{min-width:0;max-width:100%\}/);
+    assert.match(indexSrc, /\.modal-foot \.undo-btn span\{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\}/);
+    assert.match(indexSrc, /id="ren-'\+idx\+'"[^>]*style="flex:1;min-width:70px"/, 'the 70px minimum the chip cap is sized against');
+    assert.match(indexSrc, /\.tag\{display:inline-block;[^}]*white-space:nowrap\}/, 'the base chip rule is unchanged, only the Tag manager row overrides it');
+    assert.doesNotMatch(indexSrc, /function parseTags\([^)]*\)\{[^}]*\.(slice|substring|substr)\(/, 'no length limit was added to parseTags');
+  });
+
+  /* ---- O1: the account dialog title matches what it shows ---- */
+  test('O1 - "Create account" and "Sign in" only title a dialog that shows the form', () => {
+    const run = ({ id = null, local = false, broken = false, mode }) => {
+      const modalRoot = { innerHTML: '' }, state = {};
+      const context = vm.createContext({
+        currentUser: () => ({ id }), isLocalOwner: () => local, isHostedBroken: () => broken, setBillingError: () => {},
+        accountModalHtml: () => '<div class="modal-body"></div>', wireModal: (label) => { state.label = label; },
+        document: { getElementById: () => modalRoot },
+      });
+      vm.runInContext(extractFunction(indexSrc, 'openAccountSettings', INDEX_PATH), context);
+      context.openAccountSettings(mode);
+      return { title: (/<h3>([^<]*)<\/h3>/.exec(modalRoot.innerHTML) || [])[1], label: state.label, close: (/aria-label="(Close [^"]*)"/.exec(modalRoot.innerHTML) || [])[1] };
+    };
+    assert.deepStrictEqual(run({ local: true, mode: 'signup' }), { title: 'Account', label: 'Account', close: 'Close account' }, 'local mode shows a message, no form');
+    assert.strictEqual(run({ local: true, mode: 'signin' }).title, 'Account');
+    assert.strictEqual(run({ local: true }).title, 'Account');
+    assert.strictEqual(run({ broken: true, mode: 'signup' }).title, 'Account', 'a broken hosted setup shows a message too');
+    assert.strictEqual(run({ id: 'user-a', mode: 'signup' }).title, 'Account');
+    assert.strictEqual(run({ mode: 'signup' }).title, 'Create account', 'the hosted signed-out form keeps its titles');
+    assert.strictEqual(run({ mode: 'signin' }).title, 'Sign in');
+    assert.strictEqual(run({}).title, 'Account');
+  });
+
+  /* ---- O2: the view switch fits a 320px phone ---- */
+  test('O2 - CSS: at 360px and below the four view buttons tighten and spread, after the base and 640px rules', () => {
+    const block = /@media\(max-width:360px\)\{\s*\.subnav \.seg\{width:100%\}\s*\.subnav \.seg button\{flex:1 1 auto;padding:6px 8px\}\s*\}/.exec(indexSrc);
+    assert.ok(block, 'the 360px view switch block');
+    assert.ok(block.index > indexSrc.indexOf('.subnav .seg button{padding:6px 14px'), 'later than the base padding rule, so it wins at equal specificity');
+    assert.ok(block.index > indexSrc.indexOf('@media(max-width:640px)'), 'later than the 640px rules');
+    assert.match(indexSrc, /\.subnav \.seg\{max-width:100%;overflow-x:auto\}/, 'the scroll fallback for narrower screens stays');
+  });
+
+  /* ---- O5: the service worker stores only exact shell URLs ---- */
+  const shellEntries = [...(/SHELL\s*=\s*\[([\s\S]*?)\];/.exec(swSrc)[1]).matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  const BASE = 'https://forex.synthetic.test/Forex/';
+  function makeSwEnv() {
+    const store = new Map(), listeners = {}, puts = [], state = { online: true, status: 200 };
+    const swUrl = BASE + 'sw.js';
+    class FakeResponse {
+      constructor(body, init = {}) { this.body = body; this.status = init.status === undefined ? 200 : init.status; this.ok = this.status >= 200 && this.status < 300; }
+      clone() { return this; }
+      static error() { const r = new FakeResponse('', { status: 0 }); r.networkError = true; return r; }
+    }
+    class FakeRequest {
+      constructor(input, init = {}) { const base = typeof input === 'string' ? { url: new URL(input, swUrl).href, method: 'GET', mode: 'cors' } : input; this.url = base.url; this.method = base.method || 'GET'; this.mode = init.mode || base.mode || 'cors'; this.cache = init.cache || base.cache || 'default'; }
+    }
+    // The real Cache API ignores URL fragments, so the fake does too.
+    const abs = (input) => (typeof input === 'string' ? new URL(input, swUrl).href : input.url).split('#')[0];
+    const bare = (href) => href.split('#')[0].split('?')[0];
+    const caches = {
+      async open() {
+        return {
+          async put(req, res) { puts.push(req.url); store.set(req.url.split('#')[0], res); },
+          async addAll(list) { list.forEach((p) => store.set(new URL(p, swUrl).href, new FakeResponse('precached:' + p))); },
+        };
+      },
+      async match(input, options = {}) {
+        const url = abs(input);
+        if (options.ignoreSearch) { for (const [key, value] of store) if (bare(key) === bare(url)) return value; return undefined; }
+        return store.get(url);
+      },
+      async keys() { return ['kjr-forex-v0.15']; },
+      async delete() { return true; },
+    };
+    const context = {
+      Promise, Set, Map, URL, Request: FakeRequest, Response: FakeResponse, caches,
+      location: { origin: 'https://forex.synthetic.test', href: swUrl },
+      fetch: async (request) => { if (!state.online) throw new TypeError('Failed to fetch'); return new FakeResponse('net:' + request.url, { status: state.status }); },
+      self: { location: { href: swUrl }, addEventListener(type, fn) { listeners[type] = fn; }, skipWaiting() {}, clients: { claim: async () => {} } },
+    };
+    vm.runInNewContext(swSrc, context, { filename: SW_PATH });
+    const visit = async (url, { navigate = false, method = 'GET' } = {}) => {
+      let answer;
+      listeners.fetch({ request: { url, method, mode: navigate ? 'navigate' : 'cors', cache: 'default' }, respondWith(p) { answer = p; } });
+      return answer;
+    };
+    const install = async () => { let p; listeners.install({ waitUntil(x) { p = x; } }); await p; };
+    return { store, puts, state, visit, install };
+  }
+  await testAsync('O5 - cache-busted visits are shown but never stored, so the cache stays at the shell entries', async () => {
+    const sw = makeSwEnv();
+    await sw.install();
+    assert.strictEqual(sw.store.size, shellEntries.length, 'the install precaches the shell');
+    for (let i = 1; i <= 6; i++) {
+      const page = await sw.visit(BASE + 'index.html?v=' + i, { navigate: true });
+      assert.strictEqual((await page).body, 'net:' + BASE + 'index.html?v=' + i, 'the visit is answered from the network');
+    }
+    for (const url of [BASE + '?v=99', BASE + 'pricing.html?v=1793000730', BASE + 'index.html?v=3#signup', BASE + 'lib/kjr-format.js?v=1.9', BASE + 'config.js?v=2.0']) {
+      await (await sw.visit(url, { navigate: !/\.js\?/.test(url) }));
+    }
+    assert.strictEqual(sw.puts.length, 0, 'nothing off the shell list is stored');
+    // A fragment is not part of the stored URL: index.html#signup is the shell entry index.html.
+    await (await sw.visit(BASE + 'index.html#signup', { navigate: true }));
+    assert.strictEqual(sw.puts.length, 1, 'a hashed visit of a shell page refreshes that page in place');
+    assert.strictEqual(sw.store.size, shellEntries.length, 'the entry count did not move');
+  });
+  await testAsync('O5 - exact shell URLs are refreshed in place, and the shared whale icon is stored once', async () => {
+    const sw = makeSwEnv();
+    await sw.install();
+    for (const [url, navigate] of [[BASE, true], [BASE + 'index.html', true], [BASE + 'lib/kjr-format.js?v=1.2', false], [BASE + 'config.js?v=1.0', false], [BASE + 'lib/supabase-2.117.2.umd.js?v=2.117.2', false]]) {
+      await sw.visit(url, { navigate });
+      assert.ok(sw.puts.includes(url), url + ' is a shell entry and is stored');
+      assert.strictEqual(sw.store.get(url).body, 'net:' + url, 'the stored copy is the fresh one');
+    }
+    assert.strictEqual(sw.store.size, shellEntries.length, 'refreshing replaces entries, it never adds');
+    const icon = 'https://forex.synthetic.test/Portfolio/Worker/whale-icon.png';
+    await sw.visit(icon);
+    await sw.visit(icon);
+    assert.strictEqual(sw.store.size, shellEntries.length + 1);
+    await sw.visit('https://forex.synthetic.test/Portfolio/Worker/other.png');
+    await sw.visit('https://forex.synthetic.test/Portfolio/Worker/whale-icon.png?v=2');
+    assert.strictEqual(sw.store.size, shellEntries.length + 1, 'only the listed shared file, at its exact URL');
+  });
+  await testAsync('O5 - a failed response is shown but never stored over a good entry', async () => {
+    const sw = makeSwEnv();
+    await sw.install();
+    sw.state.status = 404;
+    const answer = await (await sw.visit(BASE + 'pricing.html', { navigate: true }));
+    assert.strictEqual(answer.status, 404);
+    assert.strictEqual(sw.puts.length, 0);
+    assert.strictEqual(sw.store.get(BASE + 'pricing.html').body, 'precached:./pricing.html');
+  });
+  await testAsync('O5 - offline, a navigation is served from the shell and anything else that is missing is a network error', async () => {
+    const sw = makeSwEnv();
+    await sw.install();
+    sw.state.online = false;
+    assert.strictEqual((await (await sw.visit(BASE + 'index.html?v=555', { navigate: true }))).body, 'precached:./index.html');
+    assert.strictEqual((await (await sw.visit(BASE + 'pricing.html?v=5', { navigate: true }))).body, 'precached:./pricing.html', 'the stored page of the same path, not the app');
+    assert.strictEqual((await (await sw.visit(BASE + '?v=7', { navigate: true }))).body, 'precached:./');
+    assert.strictEqual((await (await sw.visit(BASE + 'nope.html', { navigate: true }))).body, 'precached:./index.html', 'an unknown page opens the app shell');
+    assert.strictEqual((await (await sw.visit(BASE + 'lib/kjr-format.js?v=1.2'))).body, 'precached:./lib/kjr-format.js?v=1.2', 'a stored script is served offline');
+    const missing = await (await sw.visit(BASE + 'lib/kjr-format.js?v=9.9'));
+    assert.strictEqual(missing.networkError, true, 'a missing script is an error, never index.html standing in for JavaScript');
+  });
+  await testAsync('O5 - cross-origin and non-GET requests are left to the browser', async () => {
+    const sw = makeSwEnv();
+    await sw.install();
+    assert.strictEqual(await sw.visit('https://api.anthropic.com/v1/messages'), undefined);
+    assert.strictEqual(await sw.visit('https://abc.supabase.co/rest/v1/trades'), undefined);
+    assert.strictEqual(await sw.visit(BASE + 'index.html', { method: 'POST' }), undefined);
+  });
+  test('O5 - the worker keeps the pieces the other checks rely on', () => {
+    assert.match(swSrc, /if \(res\.ok && isStorable\(req\.url\)\)/);
+    assert.match(swSrc, /const SHARED = \['\.\.\/Portfolio\/Worker\/whale-icon\.png'\];/);
+    assert.match(swSrc, /ignoreSearch: true/);
+    assert.match(swSrc, /c\.addAll\(SHELL\)/, 'the install still precaches the whole shell');
+    assert.ok(shellEntries.includes('./') && shellEntries.includes('./index.html'));
+    assert.doesNotMatch(swSrc, /c\.put\(req, copy\)\)\.catch\(\(\)=>\{\}\);\s*return res;\s*\}\)\.catch\(\(\) => caches\.match\(req\)\.then\(r => r \|\| caches\.match\('\.\/index\.html'\)\)\)/, 'the unconditional put is gone');
+  });
+}
+
 (async () => {
   await runWorkerContractTests();
   await runSyncContractTests();
+  await runShellContractTests();
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
   if (failed > 0) process.exit(1);
 })().catch((e) => { console.error(e); process.exit(1); });

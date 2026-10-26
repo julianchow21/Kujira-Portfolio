@@ -223,5 +223,100 @@ try {
   }
 })();
 
+/* ─── 4. Links between the Forex pages must be exact sw.js SHELL URLs.
+   A link such as ./index.html?v=0.14 goes stale at every release, and the
+   service worker now stores only exact SHELL URLs, so a query string would
+   also make the visit an uncached one. Links to the pages carry no query
+   string, so they cannot drift. Covers the page markup and the two public
+   scripts that write links at runtime. ──────────────────────────────────── */
+(function checkInternalLinks() {
+  const shellMatch = swJs.match(/SHELL\s*=\s*\[([\s\S]*?)\];/);
+  if (!shellMatch) {
+    fail('could not find SHELL array in sw.js');
+    return;
+  }
+  const normalise = (p) => p.replace(/^\.\//, '');
+  const shell = new Set([...shellMatch[1].matchAll(/['"]([^'"]+)['"]/g)].map((m) => normalise(m[1])));
+  const sources = RUNTIME_PAGES.map((page) => ({
+    label: page,
+    links: [...pageHtml[page].matchAll(/\bhref\s*=\s*["'](\.\/[^"']*)["']/gi)].map((m) => m[1])
+  }));
+  ['public-config.js', 'lib/public.js'].forEach((file) => {
+    const text = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    sources.push({ label: file, links: [...text.matchAll(/['"](\.\/[^'"\s]*)['"]/g)].map((m) => m[1]) });
+  });
+  sources.forEach(({ label, links }) => {
+    let bad = 0;
+    links.forEach((link) => {
+      const target = link.split('#')[0];
+      if (target.includes('?')) {
+        fail(label + ' links to "' + link + '" with a query string. Link to the plain page so the URL matches its sw.js SHELL entry and cannot go stale.');
+        bad++;
+      } else if (!shell.has(normalise(target))) {
+        fail(label + ' links to "' + link + '" which is not an sw.js SHELL entry.');
+        bad++;
+      }
+    });
+    if (!bad) pass(label + ': ' + links.length + ' internal link(s), all plain SHELL URLs');
+  });
+})();
+
+/* ─── 5. Shared files the worker stores on first use (sw.js SHARED) must exist
+   and must be the files the app page actually shows. ────────────────────── */
+(function checkSharedAssets() {
+  const sharedMatch = swJs.match(/SHARED\s*=\s*\[([\s\S]*?)\];/);
+  if (!sharedMatch) {
+    fail('could not find SHARED array in sw.js');
+    return;
+  }
+  const entries = [...sharedMatch[1].matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  if (!entries.length) {
+    fail('sw.js SHARED is empty, remove the array or list the shared files');
+    return;
+  }
+  entries.forEach((entry) => {
+    if (!fs.existsSync(path.join(ROOT, entry))) fail('sw.js SHARED entry "' + entry + '" does not exist relative to Forex/.');
+    else if (!indexHtml.includes('src="' + entry + '"')) fail('sw.js SHARED entry "' + entry + '" is not used by index.html, remove it or fix the path.');
+    else pass('sw.js SHARED entry "' + entry + '" exists and is used by index.html');
+  });
+})();
+
+/* ─── 6. The Supabase SDK loads only behind the Auth gate. index.html keeps
+   one inert tag (type="text/plain", so the browser never fetches it) that
+   holds the path, version and SRI hash for the checks above. The inline
+   script after it re-emits the tag, in order and before auth-client.js, only
+   when the resolved config says Auth is enabled. No other page loads it. ── */
+(function checkSdkGate() {
+  const sdkTags = indexHtml.match(/<script\b[^>]*\bsrc=["']lib\/supabase-[^"']*["'][^>]*>/gi) || [];
+  if (sdkTags.length !== 1) {
+    fail('index.html must reference the Supabase SDK in exactly one script tag, found ' + sdkTags.length);
+    return;
+  }
+  if (!/\btype\s*=\s*["']text\/plain["']/i.test(sdkTags[0])) {
+    fail('the Supabase SDK tag in index.html must be inert (type="text/plain"), a live tag loads 218 KB on every boot even with Auth off.');
+    return;
+  }
+  if (!/\bintegrity\s*=\s*["']sha384-/i.test(sdkTags[0]) || !/\bcrossorigin\s*=\s*["']anonymous["']/i.test(sdkTags[0])) {
+    fail('the Supabase SDK tag in index.html must keep its sha384 integrity hash and crossorigin="anonymous".');
+    return;
+  }
+  const gate = /id="supabase-sdk"[^>]*><\/script>\s*<script>([\s\S]*?)<\/script>\s*<script src="lib\/auth-client\.js/.exec(indexHtml);
+  if (!gate) {
+    fail('index.html must hold the Auth-gated SDK loader between the inert SDK tag and lib/auth-client.js.');
+    return;
+  }
+  const loader = gate[1];
+  if (!/KjrForexConfig/.test(loader) || !/\.resolve\(/.test(loader) || !/\.authEnabled/.test(loader) || !/document\.write\(/.test(loader)) {
+    fail('the SDK loader must resolve KjrForexConfig, test authEnabled and document.write the tag so the SDK stays parser-blocking.');
+    return;
+  }
+  const others = RUNTIME_PAGES.filter((page) => page !== 'index.html' && /lib\/supabase-/.test(pageHtml[page]));
+  if (others.length) {
+    fail('only index.html may load the Supabase SDK, found it in ' + others.join(', '));
+    return;
+  }
+  pass('the Supabase SDK is an inert tag plus an Auth-gated loader before lib/auth-client.js, and no other page loads it');
+})();
+
 console.log('\nRelease check: ' + (failures === 0 ? 'all checks passed.' : failures + ' check(s) failed.'));
 if (failures > 0) process.exit(1);

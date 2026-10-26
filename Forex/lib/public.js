@@ -7,8 +7,8 @@
 }(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
-  const DEFAULT_SIGNUP = './index.html?v=0.14#signup';
-  const DEFAULT_SIGNIN = './index.html?v=0.14#account';
+  const DEFAULT_SIGNUP = './index.html#signup';
+  const DEFAULT_SIGNIN = './index.html#account';
   const DEFAULT_FEATURES = Object.freeze([
     'Unlimited trades',
     'Advanced review',
@@ -235,7 +235,6 @@
     setText(page, '[data-pro-copy]', config.pricingApproved
       ? 'The published Pro plan is available through the account entry point.'
       : 'Pro is planned. Checkout is unavailable in this preview.');
-    setText(page, '[data-checkout-state]', config.pricingApproved ? 'View account options' : 'Checkout unavailable');
     setText(page, '[data-free-cta]', config.pricingApproved ? 'Create free account' : 'View account options');
     setText(page, '[data-entry-title]', config.pricingApproved ? 'Online accounts' : 'Online accounts are planned');
     setText(page, '[data-entry-copy]', config.pricingApproved
@@ -250,14 +249,12 @@
     setText(page, '[data-local-cta]', config.pricingApproved ? 'Sign in' : 'Open local journal');
     setHref(page, '[data-signup-link]', config.signUpHref);
     setHref(page, '[data-signin-link]', config.signInHref);
-    setHref(page, '[data-local-cta]', config.pricingApproved ? config.signInHref : './index.html?v=0.14');
-    const checkout = page.querySelector('[data-checkout-link]');
-    if (checkout) {
-      checkout.setAttribute('href', config.signUpHref);
-      checkout.setAttribute('aria-disabled', config.pricingApproved ? 'false' : 'true');
-      checkout.classList.toggle('button-primary', config.pricingApproved);
-      checkout.classList.toggle('button-muted', !config.pricingApproved);
-    }
+    setHref(page, '[data-local-cta]', config.pricingApproved ? config.signInHref : './index.html');
+    // Checkout is closed until the review flags and the hosted runtime are ready. Closed is a real disabled button, so it cannot be
+    // focused, pressed or followed. Ready swaps in the account link. The page ships in the closed state, so a failed script fails closed.
+    setHidden(page, '[data-checkout-unavailable]', config.pricingApproved);
+    setHidden(page, '[data-checkout-link]', !config.pricingApproved);
+    setHref(page, '[data-checkout-link]', config.signUpHref);
     renderFeatureList(page, config, documentRef);
     return config;
   }
