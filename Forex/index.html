@@ -179,9 +179,12 @@ th.sortable.desc::after{content:'\25BC'}
 .modal-foot .undo-btn{min-width:0;max-width:100%}
 .modal-foot .undo-btn span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* TOAST */
+/* TOAST. A message can carry a long tag name, which has no space to wrap at, so a toast may break a word anywhere. The text sits in an inner span that stops at six lines, so a runaway
+   message cannot grow past the screen. The cap is on the span and not on the padded pill, because a clamp on a padded box lets the top of the next line show in the padding.
+   The element keeps the whole text (the live region reads all of it) and toast() also sets it as the title. */
 #toasts{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:300;width:max-content;max-width:90vw}
-.toast{background:var(--bg4);border:1px solid var(--border2);color:var(--text);padding:10px 16px;border-radius:var(--radius);font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.4);animation:pop .2s}
+.toast{background:var(--bg4);border:1px solid var(--border2);color:var(--text);padding:10px 16px;border-radius:var(--radius);font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.4);animation:pop .2s;overflow-wrap:anywhere;word-break:break-word}
+.toast>span{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;overflow:hidden}
 .toast.err{background:var(--red-soft);border-color:var(--red);color:var(--red)}
 @keyframes pop{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
@@ -527,7 +530,7 @@ th.sortable.desc::after{content:'\25BC'}
 /* ============================================================================
    APP CONFIG
    ========================================================================== */
-const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.16 (26 Oct)' };
+const APP = { name:'Kujira Forex', storageKey:'kjr_journal_v1', version:'v0.17 (26 Oct)' };
 const CCY = '$';
 const TABLES = ['trades'];
 const PAGE_SIZE = 25;
@@ -1120,7 +1123,9 @@ function undoDeleteTag(){
   if(!snap || !Array.isArray(snap.rows) || !snap.rows.length){ toast('Nothing to undo',true); return; }
   snap.rows.forEach(orig=>{ const i=DB.trades.findIndex(t=>t.id===orig.id); if(i>=0) DB.trades[i]=orig; else DB.trades.push(orig); markDirty('trades',orig.id); });
   try{ localStorage.removeItem(TAG_UNDO_KEY); }catch(e){}
-  saveData(); renderApp(); if(_view==='journal') openTagManager();
+  // The Tag manager opens from the sidebar in every view, so refresh it whenever it is the dialog on screen (wireModal names it), not only from the journal. The page behind is re-rendered as before.
+  const tagManagerOpen=!!document.querySelector('#modal-root .modal[aria-label="Manage tags"]');
+  saveData(); renderApp(); if(tagManagerOpen) openTagManager();
   toast('Restored "'+snap.tag+'" on '+snap.rows.length+' trade'+(snap.rows.length===1?'':'s'));
 }
 
@@ -1676,7 +1681,10 @@ let _modalKeyTrap=null;
 function wireModal(label){
   const root=document.getElementById('modal-root'), m=root&&root.querySelector('.modal');
   if(m&&label) m.setAttribute('aria-label',label);
-  const previousFocus=document.activeElement;
+  /* The opener is the control that had focus when the first dialog opened, and it is captured once. A dialog that re-renders in place (the Tag manager after a rename) or replaces
+     another one in place (the delete confirm over the trade form, the conflict manager over Settings) has already destroyed the focused control by the time this runs, so
+     activeElement is <body> there. Such a call joins the dialog that is still open and keeps its opener. */
+  const previousFocus=_modalKeyTrap?_modalKeyTrap.__previousFocus:document.activeElement;
   if(_modalKeyTrap&&root) root.removeEventListener('keydown',_modalKeyTrap);
   _modalKeyTrap=function(e){
     if(e.key==='Escape'){ e.preventDefault(); closeModal(); return; }
@@ -1703,7 +1711,26 @@ function holdModalFocus(region){
   if(region.getAttribute('tabindex')===null) region.setAttribute('tabindex','-1');
   region.focus({preventScroll:true});
 }
-function closeModal(){ const root=document.getElementById('modal-root'), previous=_modalKeyTrap&&_modalKeyTrap.__previousFocus; if(_modalKeyTrap&&root){ root.removeEventListener('keydown',_modalKeyTrap); _modalKeyTrap=null; } if(root) root.innerHTML=''; if(previous&&typeof previous.focus==='function'&&previous.isConnected!==false) previous.focus(); }
+/* Closing returns focus to the opener. When the opener is gone (its trade row was re-rendered or deleted), was never focused (Safari and Firefox on macOS do not focus a clicked button)
+   or is not shown (the sidebar once the window narrows to a phone), focus goes to the current view's nav item, then the phone view switch, then the page heading, so it never drops to
+   <body>. Each candidate must really take focus, so a hidden one is skipped. Only the opener may scroll the page, a fallback must not make it jump. */
+function restoreModalFocus(opener){
+  const heading=document.querySelector('h1');
+  const candidates=[opener,document.querySelector('#side-nav [data-v].active'),document.querySelector('#subnav .seg button.active'),heading];
+  for(const el of candidates){
+    if(!el||el===document.body||el===document.documentElement||typeof el.focus!=='function'||el.isConnected===false) continue;
+    if(el===heading&&el.getAttribute('tabindex')===null) el.setAttribute('tabindex','-1');   // not a control, so only script can focus it and it stays out of the Tab order
+    el.focus(el===opener?undefined:{preventScroll:true});
+    if(document.activeElement===el) return el;
+  }
+  return null;
+}
+function closeModal(){
+  const root=document.getElementById('modal-root'), wasOpen=!!_modalKeyTrap, previous=_modalKeyTrap&&_modalKeyTrap.__previousFocus;
+  if(_modalKeyTrap&&root){ root.removeEventListener('keydown',_modalKeyTrap); _modalKeyTrap=null; }
+  if(root) root.innerHTML='';
+  if(wasOpen) restoreModalFocus(previous);   // resetRuntimeState() also calls this with no dialog open, that must not move focus
+}
 function openConflictManager(){
   const conflicts=readSyncConflicts(), body=conflicts.length
     ? conflicts.map((c,i)=>{
@@ -2242,7 +2269,7 @@ async function importCSV(){
 function applyTheme(t){ document.documentElement.classList.toggle('light',t==='light'); document.querySelector('meta[name=theme-color]').setAttribute('content',t==='light'?'#ffffff':'#0f0f0f'); }
 function toggleTheme(){ const next=document.documentElement.classList.contains('light')?'dark':'light'; localStorage.setItem(THEME_KEY,next); applyTheme(next); }
 (function initTheme(){ /* single source of truth is lib/theme-init.js (head, pre-paint FOUC guard), just sync the meta theme-color to whatever class it already applied */ applyTheme(document.documentElement.classList.contains('light')?'light':'dark'); })();
-function toast(msg,isErr){ const el=document.createElement('div'); el.className='toast'+(isErr?' err':''); el.textContent=msg; document.getElementById('toasts').appendChild(el); setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),300); },isErr?5000:2500); }
+function toast(msg,isErr){ const el=document.createElement('div'), txt=document.createElement('span'); el.className='toast'+(isErr?' err':''); txt.textContent=msg; el.appendChild(txt); el.title=msg; document.getElementById('toasts').appendChild(el); setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(),300); },isErr?5000:2500); }
 async function boot(){
   document.getElementById('error').classList.add('hidden'); document.getElementById('loading').classList.remove('hidden');
   try{

@@ -162,6 +162,23 @@ test('pricing ships checkout as a real disabled button and no navigating anchor'
   assert.match(readForex('lib/public.css'), /\[hidden\]\s*\{[^}]*display:\s*none\s*!important/);
 });
 
+// S5. The welcome page ships the same closed checkout as pricing, a real disabled button. A span that borrows the button
+// classes and carries aria-disabled is not a control, and aria-disabled is not valid on a plain span.
+test('welcome ships checkout as the same real disabled button pricing uses, not an aria-disabled span', () => {
+  const welcome = readForex('welcome.html'), pricing = readForex('pricing.html');
+  const button = /<button type="button" class="(button button-muted)" disabled>Checkout unavailable<\/button>/.exec(welcome);
+  assert.ok(button, 'welcome.html has the disabled Checkout unavailable button');
+  assert.equal(button[1], /<button type="button" class="([^"]+)" data-checkout-unavailable disabled>/.exec(pricing)[1], 'the same classes as pricing, so it looks the same');
+  assert.doesNotMatch(welcome, /<(?:span|a|div|p)\b[^>]*>\s*Checkout unavailable\s*<\/(?:span|a|div|p)>/, 'no non-control element imitates the button');
+  assert.equal((welcome.match(/Checkout unavailable/g) || []).length, 1, 'one closed checkout on the page');
+});
+
+test('no shipped public page carries aria-disabled, a disabled control is a real disabled control', () => {
+  for (const file of ['welcome.html', 'pricing.html', 'terms.html', 'privacy.html', 'refunds.html']) {
+    assert.doesNotMatch(readForex(file), /aria-disabled/, file + ' must not use aria-disabled');
+  }
+});
+
 function fakeNode() {
   const node = {
     textContent: '',

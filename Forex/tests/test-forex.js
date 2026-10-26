@@ -1351,6 +1351,74 @@ function yahooBody(stamps) {
   return { chart: { result: [{ timestamp: stamps, indicators: { quote: [{ open: flat(1.1), high: flat(1.2), low: flat(1.0), close: flat(1.15) }] } }], error: null } };
 }
 
+/* A tiny DOM for the shared modal helper (wireModal, closeModal, restoreModalFocus) and the real dialog builders that sit on it. It models the two browser behaviours
+   S1 is about: an innerHTML replacement destroys the focused control so focus falls to <body>, and a control that is not rendered (the sidebar on a phone) cannot take
+   focus. The helper block is sliced out of index.html whole, so the test runs whatever helper is shipped, not a hand copy. */
+function modalHelperSource() {
+  const start = indexSrc.indexOf('let _modalKeyTrap=null;'), end = indexSrc.indexOf('function openConflictManager(');
+  assert.ok(start > 0 && end > start, 'the shared modal helper block is in index.html');
+  return indexSrc.slice(start, end).replace(/^let /, 'var ');
+}
+const focusName = (env) => (env.doc.activeElement ? env.doc.activeElement.name : null);   // compare by name, a failure then prints a word instead of the element graph
+function makeDialogEnv({ conflicts = 2 } = {}) {
+  const doc = { activeElement: null, selectors: {} };
+  const detach = (el) => { el.isConnected = false; el.children.forEach(detach); };
+  class El {
+    constructor(name, parent, opts = {}) {
+      this.name = name; this.parent = parent || null; this.children = []; this.attrs = {}; this.listeners = {};
+      this.rendered = opts.rendered !== false; this.control = !!opts.control; this.isConnected = true;
+      if (parent) parent.children.push(this);
+    }
+    get offsetParent() { return this.rendered ? (this.parent || {}) : null; }
+    contains(node) { for (let n = node; n; n = n.parent) if (n === this) return true; return false; }
+    getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; }
+    setAttribute(k, v) { this.attrs[k] = String(v); }
+    focus(options) { if (this.isConnected && this.rendered) { doc.activeElement = this; this.focusOptions = options; } }
+    addEventListener(type, fn) { this.listeners[type] = fn; }
+    removeEventListener(type, fn) { if (this.listeners[type] === fn) delete this.listeners[type]; }
+    querySelectorAll() { const out = []; const walk = (el) => el.children.forEach((c) => { if (c.control) out.push(c); walk(c); }); walk(this); return out; }
+    querySelector(sel) { return /\.modal\b/.test(sel) ? (this.children.find((c) => c.name === 'modal') || null) : null; }
+  }
+  const control = (name, parent, opts) => new El(name, parent, { ...opts, control: true });
+  const body = new El('BODY'); doc.body = body; doc.activeElement = body;
+  const root = new El('modal-root', body); root._html = '';
+  Object.defineProperty(root, 'innerHTML', {
+    get() { return this._html; },
+    set(value) {
+      const gone = this.children.splice(0); gone.forEach(detach);
+      if (doc.activeElement && gone.some((child) => child.contains(doc.activeElement))) doc.activeElement = body;
+      this._html = String(value);
+      if (this._html) { const modal = new El('modal', this); control('close', modal); control('action', modal); }   // a dialog: its first control is the close button
+    },
+  });
+  const controls = {
+    tagsBtn: control('tags-btn', body), settingsBtn: control('settings-btn', body), row: control('trade-row', body),
+    nav: control('nav-journal', body), phoneNav: control('phone-nav-journal', body), heading: new El('h1', body),
+  };
+  doc.selectors['#side-nav [data-v].active'] = controls.nav; doc.selectors['#subnav .seg button.active'] = controls.phoneNav; doc.selectors.h1 = controls.heading;
+  doc.querySelector = (sel) => doc.selectors[sel] || null;
+  doc.getElementById = (id) => (id === 'modal-root' ? root : (/^ren-\d+$/.test(id) ? { value: 'Renamed' } : null));
+  const context = vm.createContext({
+    JSON, document: doc, escapeHtml: KjrFmt.esc,
+    TAG_CATS: vm.runInNewContext(extractConst(indexSrc, 'TAG_CATS', INDEX_PATH).replace(/^var TAG_CATS\s*=\s*/, '(').replace(/;$/, ')')),
+    allTags: (cat) => (cat === 'setupTags' ? [{ tag: 'Breakout', count: 3 }, { tag: 'Pullback', count: 2 }] : []),
+    TAG_UNDO_KEY: 'undo', localStorage: { getItem: () => null },
+    renameTag() {}, deleteTag() {}, renderApp() {}, toast() {},
+    isValidStoredId: () => true, DB: { trades: [{ id: 'syn-1', symbol: 'EURUSD' }] }, deleteTrade() {},
+    readSyncConflicts: () => Array.from({ length: conflicts }, (_, i) => ({ id: 'syn-' + i, operation: 'upsert', local: { symbol: 'LOCAL' }, server: { symbol: 'CLOUD' }, message: 'A newer cloud version exists.' })),
+  });
+  vm.runInContext('var _tagList=[];\n' + modalHelperSource() + '\n'
+    + ['openTagManager', 'renameTagUI', 'deleteTagUI', 'confirmDeleteTrade', 'openConflictManager'].map((n) => extractFunction(indexSrc, n, INDEX_PATH)).join('\n'),
+  context, { filename: 'extracted-forex-dialogs.js' });
+  return {
+    doc, root, context, controls, control,
+    // What every dialog builder does: replace the markup in place, then wire it.
+    show(label) { root.innerHTML = '<div class="modal">' + label + '</div>'; context.wireModal(label); },
+    dialog() { return root.children.find((c) => c.name === 'modal') || null; },
+    escape() { const handler = root.listeners.keydown; assert.ok(handler, 'a dialog is wired'); handler({ key: 'Escape', preventDefault() {} }); },
+  };
+}
+
 async function runShellContractTests() {
   /* ---- F2: focus never falls to <body> while a dialog is open ---- */
   await testAsync('F2 - loading the chart parks focus on the chart region, so Escape and the Tab trap still reach #modal-root', async () => {
@@ -1402,6 +1470,140 @@ async function runShellContractTests() {
     assert.match(html, /<button class="btn" id="trade-chart-load-btn">Load price chart<\/button>/);
     assert.match(indexSrc, /holdModalFocus\(wrap\);/);
     assert.match(indexSrc, /_modalKeyTrap=function\(e\)\{\s*if\(e\.key==='Escape'\)\{ e\.preventDefault\(\); closeModal\(\); return; \}/, 'the key handler stays on the dialog root');
+  });
+
+  /* ---- S1: closing a dialog returns focus to the control that opened it, also after the dialog re-rendered in place ---- */
+  test('S1 - control: replacing a dialog in place drops focus to <body>, the mechanism the bug rests on', () => {
+    const env = makeDialogEnv();
+    env.controls.tagsBtn.focus();
+    env.show('Manage tags');
+    env.control('save', env.dialog()).focus();
+    env.show('Manage tags');
+    assert.ok(env.dialog().children.every((c) => c.name !== 'save'), 'the old controls are gone');
+    // wireModal then moves focus into the new dialog, but at the moment it runs, document.activeElement was <body>.
+    assert.strictEqual(env.doc.activeElement.name, 'close');
+  });
+  test('S1 - the opener is captured once: a re-render keeps it, Escape returns to it, the next dialog starts a new session', () => {
+    const env = makeDialogEnv(), { tagsBtn, row } = env.controls;
+    tagsBtn.focus();
+    env.show('Manage tags');                                  // first open, activeElement is still the opener
+    assert.ok(env.root.contains(env.doc.activeElement), 'focus moves into the dialog');
+    env.control('save', env.dialog()).focus();
+    env.show('Manage tags');                                  // re-render in place, the focused control is destroyed
+    env.show('Manage tags');                                  // and again, the opener must survive any number of re-renders
+    env.escape();
+    assert.strictEqual(focusName(env), tagsBtn.name, 'Escape lands on the opener, not <body>');
+    assert.strictEqual(env.root.listeners.keydown, undefined, 'the key handler is removed on close');
+    row.focus();
+    env.show('Edit trade');
+    env.context.closeModal();
+    assert.strictEqual(focusName(env), row.name, 'a later dialog does not inherit the old opener');
+  });
+  test('S1 - Tag manager: a rename or delete re-renders it in place and Escape and Close still return to the control that opened it', () => {
+    const env = makeDialogEnv(), { tagsBtn } = env.controls;
+    tagsBtn.focus();
+    env.context.openTagManager();
+    assert.strictEqual(env.dialog().getAttribute('aria-label'), 'Manage tags');
+    for (const action of ['renameTagUI', 'deleteTagUI', 'renameTagUI']) {
+      env.control('clicked-' + action, env.dialog()).focus();   // the Save or delete button that was clicked
+      env.context[action](0);                                   // renderApp(), then openTagManager() again in place
+      assert.strictEqual(env.dialog().getAttribute('aria-label'), 'Manage tags');
+    }
+    env.escape();
+    assert.strictEqual(focusName(env), tagsBtn.name, 'Escape');
+    tagsBtn.focus();
+    env.context.openTagManager();
+    env.control('clicked', env.dialog()).focus();
+    env.context.renameTagUI(0);
+    env.context.closeModal();                                   // the footer Close and the header cross call this
+    assert.strictEqual(focusName(env), tagsBtn.name, 'Close');
+  });
+  test('S1 - delete confirm: opened over the trade form it returns to the trade row, whether cancelled or dismissed', () => {
+    const env = makeDialogEnv(), { row } = env.controls;
+    for (const leave of [() => env.escape(), () => env.context.closeModal()]) {
+      row.focus();
+      env.show('Edit trade');
+      env.control('trade-delete-btn', env.dialog()).focus();
+      env.context.confirmDeleteTrade('syn-1');                  // replaces the trade form in place, the focused Delete button is destroyed
+      assert.strictEqual(env.dialog().getAttribute('aria-label'), 'Delete trade');
+      leave();
+      assert.strictEqual(focusName(env), row.name);
+    }
+  });
+  test('S1 - delete confirm: once the trade is deleted its row is gone, focus falls back to the nav item instead of <body>', () => {
+    const env = makeDialogEnv(), { nav } = env.controls;
+    const row = env.control('row-to-delete', env.doc.body);
+    row.focus();
+    env.show('Edit trade');
+    env.control('trade-delete-btn', env.dialog()).focus();
+    env.context.confirmDeleteTrade('syn-1');
+    row.isConnected = false;                                    // deleteTrade() re-renders the table
+    env.context.closeModal();
+    assert.strictEqual(focusName(env), nav.name);
+  });
+  test('S1 - conflict manager: opened from Settings, and re-rendered after a choice, it returns to the control that opened Settings', () => {
+    const env = makeDialogEnv(), { settingsBtn } = env.controls;
+    settingsBtn.focus();
+    env.show('Settings');
+    env.control('review-conflicts', env.dialog()).focus();
+    env.context.openConflictManager();                          // Settings -> conflict manager, in place
+    assert.strictEqual(env.dialog().getAttribute('aria-label'), 'Sync conflicts');
+    env.control('keep-cloud', env.dialog()).focus();
+    env.context.openConflictManager();                          // resolveSyncConflict() ends with this call, after the choice
+    env.context.closeModal();                                   // the footer Close
+    assert.strictEqual(focusName(env), settingsBtn.name, 'Close');
+    settingsBtn.focus();
+    env.show('Settings');
+    env.control('review-conflicts', env.dialog()).focus();
+    env.context.openConflictManager();
+    env.escape();
+    assert.strictEqual(focusName(env), settingsBtn.name, 'Escape');
+  });
+  test('S1 - when the opener is gone or cannot take focus, focus falls back to the nav item, then the phone view switch, then the page heading, never <body>', () => {
+    const closeFrom = (env, hide) => {
+      const opener = env.control('opener', env.doc.body);
+      opener.focus();
+      env.show('Edit trade');
+      hide(opener);
+      env.context.closeModal();
+      return focusName(env);
+    };
+    const gone = (o) => { o.isConnected = false; }, notRendered = (o) => { o.rendered = false; };
+    let env = makeDialogEnv();
+    assert.strictEqual(closeFrom(env, gone), env.controls.nav.name, 'the current view nav item');
+    assert.strictEqual(env.controls.nav.focusOptions && env.controls.nav.focusOptions.preventScroll, true, 'a fallback never scrolls the page');
+    env = makeDialogEnv();
+    assert.strictEqual(closeFrom(env, notRendered), env.controls.nav.name, 'a connected opener that is not shown (sidebar after a resize) is skipped the same way');
+    env = makeDialogEnv(); env.controls.nav.rendered = false;
+    assert.strictEqual(closeFrom(env, gone), env.controls.phoneNav.name, 'on a phone the sidebar is hidden, so the view switch takes it');
+    env = makeDialogEnv(); env.controls.nav.rendered = false; env.controls.phoneNav.rendered = false;
+    assert.strictEqual(closeFrom(env, gone), env.controls.heading.name, 'with no nav shown (signed out on a phone) the page heading takes it');
+    assert.strictEqual(env.controls.heading.getAttribute('tabindex'), '-1', 'the heading is made focusable without joining the Tab order');
+    assert.strictEqual(env.controls.heading.focusOptions.preventScroll, true);
+    env = makeDialogEnv(); env.doc.selectors = {};
+    assert.strictEqual(closeFrom(env, gone), env.doc.body.name, 'nothing to return to is a quiet no-op, never a throw');
+  });
+  test('S1 - an opener that was never focused (a clicked button in Safari or Firefox on macOS) falls back to the nav item too', () => {
+    const env = makeDialogEnv();
+    assert.strictEqual(focusName(env), env.doc.body.name);
+    env.show('Manage tags');
+    env.context.closeModal();
+    assert.strictEqual(focusName(env), env.controls.nav.name);
+  });
+  test('S1 - closing with no dialog open never moves focus (resetRuntimeState calls closeModal on every account switch)', () => {
+    const env = makeDialogEnv();
+    env.controls.row.focus();
+    env.context.closeModal();
+    assert.strictEqual(focusName(env), env.controls.row.name);
+    env.doc.activeElement = env.doc.body;
+    env.context.closeModal();
+    assert.strictEqual(focusName(env), env.doc.body.name);
+  });
+  test('S1 - source: wireModal carries the open dialog opener over instead of reading activeElement after the render', () => {
+    assert.match(indexSrc, /const previousFocus=_modalKeyTrap\?_modalKeyTrap\.__previousFocus:document\.activeElement;/);
+    assert.match(indexSrc, /_modalKeyTrap\.__previousFocus=previousFocus;/);
+    assert.match(indexSrc, /function restoreModalFocus\(opener\)\{/);
+    assert.match(indexSrc, /if\(wasOpen\) restoreModalFocus\(previous\);/);
   });
 
   /* ---- F1: chart data proxy ---- */
@@ -1584,6 +1786,90 @@ async function runShellContractTests() {
     assert.doesNotMatch(indexSrc, /function parseTags\([^)]*\)\{[^}]*\.(slice|substring|substr)\(/, 'no length limit was added to parseTags');
   });
 
+  /* ---- S3: Undo refreshes the Tag manager whenever it is open, whatever the current view ---- */
+  const runUndo = ({ view, dialog, snapshot }) => {
+    const calls = { render: 0, reopen: 0, saved: 0, toasts: [] };
+    const store = new Map(snapshot === null ? [] : [['undo', JSON.stringify(snapshot || { ts: 1, cat: 'setupTags', tag: 'Breakout', rows: [{ id: 'a', setupTags: ['Breakout'] }, { id: 'b', setupTags: ['Breakout'] }] })]]);
+    const modal = dialog ? { getAttribute: (k) => (k === 'aria-label' ? dialog : null) } : null;
+    // Answers any way the code asks for the dialog on screen: the root's .modal, or one selector naming the label.
+    const find = (sel) => { const m = /aria-label="([^"]*)"/.exec(sel); return modal && (!m || m[1] === dialog) ? modal : null; };
+    const context = vm.createContext({
+      JSON, Array, Date, TAG_UNDO_KEY: 'undo', _view: view,
+      DB: { trades: [{ id: 'a', setupTags: [] }] },
+      localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), removeItem: (k) => store.delete(k) },
+      markDirty: () => {}, saveData: () => { calls.saved++; }, renderApp: () => { calls.render++; },
+      openTagManager: () => { calls.reopen++; }, toast: (m, err) => calls.toasts.push([m, !!err]),
+      document: { querySelector: find, getElementById: (id) => (id === 'modal-root' ? { querySelector: find } : null) },
+    });
+    vm.runInContext(extractFunction(indexSrc, 'undoDeleteTag', INDEX_PATH), context);
+    context.undoDeleteTag();
+    return { calls, store, DB: context.DB };
+  };
+  test('S3 - Undo refreshes an open Tag manager in every view, not only the journal (the journal re-render stays)', () => {
+    for (const view of ['journal', 'reports', 'simulator', 'coach']) {
+      const r = runUndo({ view, dialog: 'Manage tags' });
+      assert.strictEqual(r.calls.reopen, 1, view + ': the open Tag manager is rebuilt so the restored tag and the Undo button are current');
+      assert.strictEqual(r.calls.render, 1, view + ': the page behind is re-rendered as before');
+      assert.strictEqual(r.calls.saved, 1);
+      assert.deepStrictEqual(r.calls.toasts, [['Restored "Breakout" on 2 trades', false]]);
+      assert.strictEqual(r.store.has('undo'), false, 'the one-shot snapshot is consumed');
+      assert.deepStrictEqual(r.DB.trades.map((t) => t.id).sort(), ['a', 'b']);
+      assert.deepStrictEqual(r.DB.trades.find((t) => t.id === 'a').setupTags, ['Breakout']);
+    }
+  });
+  test('S3 - Undo never opens the Tag manager over another dialog or on its own, and a missing snapshot changes nothing', () => {
+    for (const dialog of [null, 'Settings', 'Edit trade']) {
+      const r = runUndo({ view: 'journal', dialog });
+      assert.strictEqual(r.calls.reopen, 0, String(dialog) + ': not the Tag manager, so it is left alone');
+      assert.strictEqual(r.calls.render, 1);
+    }
+    const none = runUndo({ view: 'reports', dialog: 'Manage tags', snapshot: null });
+    assert.deepStrictEqual([none.calls.render, none.calls.reopen, none.calls.saved], [0, 0, 0]);
+    assert.deepStrictEqual(none.calls.toasts, [['Nothing to undo', true]]);
+  });
+  test('S3 - source: the refresh asks for the dialog by the label openTagManager gives it, not by the current view', () => {
+    const undo = extractFunction(indexSrc, 'undoDeleteTag', INDEX_PATH), label = /wireModal\('([^']+)'\)/.exec(extractFunction(indexSrc, 'openTagManager', INDEX_PATH))[1];
+    assert.doesNotMatch(undo, /_view\s*===/, 'no view test is left in undoDeleteTag');
+    assert.ok(undo.includes('aria-label="' + label + '"'), 'the check and the dialog agree on the name ' + label);
+  });
+
+  /* ---- S2: a long message wraps inside the viewport instead of running off it ---- */
+  test('S2 - CSS: a toast breaks long unbroken text, its text span stops at six lines, and it stays inside its 90vw container', () => {
+    const rule = /\n\.toast\{([^}]*)\}/.exec(indexSrc)[1], span = /\n\.toast>span\{([^}]*)\}/.exec(indexSrc);
+    assert.match(rule, /overflow-wrap:anywhere/, 'a long tag name has no space to wrap at');
+    assert.match(rule, /word-break:break-word/, 'the fallback for engines without overflow-wrap:anywhere, as .account-email does');
+    assert.match(rule, /padding:10px 16px/, 'the padded pill is unchanged');
+    assert.doesNotMatch(rule, /line-clamp|overflow:hidden/, 'the cap is not on the padded pill, a clamp there shows the top of the next line in the padding');
+    assert.ok(span, 'the inner text span has its own rule');
+    assert.strictEqual(span[1], 'display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;overflow:hidden', 'a runaway message stops at six lines');
+    assert.doesNotMatch(rule + span[1], /(^|;)\s*--[\w-]+\s*:/, 'existing tokens only: no custom property is defined');
+    assert.match(indexSrc, /#toasts\{[^}]*width:max-content;max-width:90vw\}/, 'the container still caps a toast at 90vw');
+    assert.match(indexSrc, /#toasts\{left:calc\(224px \+ \(100% - 224px\) \/ 2\);max-width:calc\(100vw - 224px - 32px\)\}/, 'and beside the sidebar at 769px and up');
+    assert.ok(indexSrc.indexOf('.toast.err{') > indexSrc.indexOf('\n.toast{'), 'the error variant still follows the base rule');
+  });
+  test('S2 - toast() keeps the whole message, in a span inside the pill and as the pill title, and keeps its timing', () => {
+    const LONG = 'Restored "LONGTAG' + 'abcdefghij'.repeat(60) + 'XY" on 2 trades', timers = [], appended = [];
+    const context = vm.createContext({
+      document: {
+        createElement: (tag) => ({ tag, className: '', textContent: '', title: '', style: {}, children: [], appendChild(child) { this.children.push(child); }, remove() {} }),
+        getElementById: (id) => (id === 'toasts' ? { appendChild: (el) => appended.push(el) } : null),
+      },
+      setTimeout: (fn, ms) => { timers.push(ms); },
+    });
+    vm.runInContext(extractFunction(indexSrc, 'toast', INDEX_PATH), context);
+    context.toast(LONG);
+    context.toast('Could not save', true);
+    assert.strictEqual(appended[0].tag, 'div');
+    assert.deepStrictEqual(appended[0].children.map((c) => c.tag), ['span'], 'the text is in one span, the element the six-line cap applies to');
+    assert.strictEqual(appended[0].children[0].textContent, LONG, 'the text is never shortened in script, the screen reader gets all of it');
+    assert.strictEqual(appended[0].title, LONG, 'the full text is also the title, for the part the line cap hides');
+    assert.strictEqual(appended[0].className, 'toast');
+    assert.strictEqual(appended[1].className, 'toast err');
+    assert.strictEqual(appended[1].children[0].textContent, 'Could not save');
+    assert.strictEqual(appended[1].title, 'Could not save');
+    assert.deepStrictEqual(timers, [2500, 5000], 'a message stays 2.5 s, an error 5 s, as before');
+  });
+
   /* ---- O1: the account dialog title matches what it shows ---- */
   test('O1 - "Create account" and "Sign in" only title a dialog that shows the form', () => {
     const run = ({ id = null, local = false, broken = false, mode }) => {
@@ -1618,6 +1904,7 @@ async function runShellContractTests() {
 
   /* ---- O5: the service worker stores only exact shell URLs ---- */
   const shellEntries = [...(/SHELL\s*=\s*\[([\s\S]*?)\];/.exec(swSrc)[1]).matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  const firstUseEntries = [...((/FIRST_USE\s*=\s*\[([\s\S]*?)\];/.exec(swSrc) || [])[1] || '').matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]);
   const BASE = 'https://forex.synthetic.test/Forex/';
   function makeSwEnv() {
     const store = new Map(), listeners = {}, puts = [], state = { online: true, status: 200 };
@@ -1683,7 +1970,7 @@ async function runShellContractTests() {
   await testAsync('O5 - exact shell URLs are refreshed in place, and the shared whale icon is stored once', async () => {
     const sw = makeSwEnv();
     await sw.install();
-    for (const [url, navigate] of [[BASE, true], [BASE + 'index.html', true], [BASE + 'lib/kjr-format.js?v=1.2', false], [BASE + 'config.js?v=1.0', false], [BASE + 'lib/supabase-2.117.2.umd.js?v=2.117.2', false]]) {
+    for (const [url, navigate] of [[BASE, true], [BASE + 'index.html', true], [BASE + 'lib/kjr-format.js?v=1.2', false], [BASE + 'config.js?v=1.0', false], [BASE + 'lib/auth-client.js?v=1.0', false]]) {
       await sw.visit(url, { navigate });
       assert.ok(sw.puts.includes(url), url + ' is a shell entry and is stored');
       assert.strictEqual(sw.store.get(url).body, 'net:' + url, 'the stored copy is the fresh one');
@@ -1696,6 +1983,56 @@ async function runShellContractTests() {
     await sw.visit('https://forex.synthetic.test/Portfolio/Worker/other.png');
     await sw.visit('https://forex.synthetic.test/Portfolio/Worker/whale-icon.png?v=2');
     assert.strictEqual(sw.store.size, shellEntries.length + 1, 'only the listed shared file, at its exact URL');
+  });
+  /* ---- S4: the Supabase SDK (218 KB) is stored the first time Auth loads it, never by the install ---- */
+  const SDK = BASE + (firstUseEntries[0] || '').replace(/^\.\//, '');
+  await testAsync('S4 - a local-owner install never downloads the SDK: the install stores the shell and nothing from supabase', async () => {
+    const sw = makeSwEnv();
+    await sw.install();
+    assert.strictEqual(sw.store.size, shellEntries.length, 'the install precaches the shell only');
+    assert.ok(![...sw.store.keys()].some((url) => /supabase/i.test(url)), 'no SDK entry after an install');
+    assert.ok(!shellEntries.some((entry) => /supabase/i.test(entry)), 'the SDK is not listed in SHELL');
+    assert.strictEqual(firstUseEntries.length, 1, 'one first-use entry');
+    assert.match(SDK, /\/lib\/supabase-[\d.]+\.umd\.js\?v=[\d.]+$/, 'it is the SDK, at its exact URL with its ?v= string');
+  });
+  await testAsync('S4 - the first Auth-on load stores the SDK at its exact URL, later loads refresh it in place, other URLs are never stored', async () => {
+    assert.strictEqual(firstUseEntries.length, 1, 'sw.js has a FIRST_USE list holding the SDK');
+    const sw = makeSwEnv();
+    await sw.install();
+    const before = sw.store.size;
+    assert.strictEqual((await (await sw.visit(SDK))).body, 'net:' + SDK, 'the page gets the fresh network copy');
+    assert.ok(sw.puts.includes(SDK), 'and the worker keeps a copy for offline');
+    assert.strictEqual(sw.store.size, before + 1);
+    await sw.visit(SDK);
+    assert.strictEqual(sw.store.size, before + 1, 'a second load replaces the entry, it never adds one');
+    for (const other of [SDK.split('?')[0], SDK.replace(/\?v=.*/, '?v=0.0.1'), SDK + '&x=1', BASE + 'lib/supabase-9.9.9.umd.js?v=9.9.9', BASE + 'lib/supabase-2.117.2.LICENSE']) {
+      await sw.visit(other);
+    }
+    assert.strictEqual(sw.store.size, before + 1, 'only the listed URL is stored, a cache-busted or renamed copy is not');
+  });
+  await testAsync('S4 - a failed SDK response is never stored, and offline a stored SDK is served while a never-loaded one is a network error', async () => {
+    assert.strictEqual(firstUseEntries.length, 1, 'sw.js has a FIRST_USE list holding the SDK');
+    const failing = makeSwEnv();
+    await failing.install();
+    failing.state.status = 404;
+    assert.strictEqual((await (await failing.visit(SDK))).status, 404);
+    assert.ok(!failing.store.has(SDK), 'a 404 is shown, never kept');
+    const sw = makeSwEnv();
+    await sw.install();
+    sw.state.online = false;
+    const never = await (await sw.visit(SDK));
+    assert.strictEqual(never.networkError, true, 'never loaded and offline: an error, never index.html standing in for a script');
+    sw.state.online = true;
+    await sw.visit(SDK);
+    sw.state.online = false;
+    assert.strictEqual((await (await sw.visit(SDK))).body, 'net:' + SDK, 'loaded once, then served offline');
+  });
+  test('S4 - source: sw.js lists the SDK as first-use with the URL index.html references, and storage honours the list', () => {
+    const tag = /<script id="supabase-sdk"[^>]*\bsrc="([^"]+)"/.exec(indexSrc)[1];
+    assert.deepStrictEqual(firstUseEntries, ['./' + tag], 'FIRST_USE is the inert tag src, path and ?v= string');
+    assert.match(swSrc, /new Set\(SHELL\.concat\(SHARED, FIRST_USE\)\.map/, 'isStorable accepts the first-use list');
+    assert.match(swSrc, /c\.addAll\(SHELL\)/, 'and the install still takes the shell alone');
+    assert.doesNotMatch(swSrc, /addAll\([^)]*FIRST_USE/, 'the install never reads the first-use list');
   });
   await testAsync('O5 - a failed response is shown but never stored over a good entry', async () => {
     const sw = makeSwEnv();

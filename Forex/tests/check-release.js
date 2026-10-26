@@ -11,6 +11,12 @@
    APP.version therefore forces a matching CACHE bump, exactly like
    Portfolio's CACHE_NAME = 'kjr-portfolio-' + APP_VERSION rule.
 
+   sw.js stores two kinds of entry. SHELL is precached at install. SHARED and
+   FIRST_USE are stored only when a page first loads them through the worker.
+   The 218 KB Supabase SDK belongs to FIRST_USE alone (check 7), so installing
+   for a local-owner journal never downloads it and an Auth-on visit still
+   gets it cached for offline.
+
    Path-resolved via __dirname so it runs from any cwd (repo root, Forex/,
    CI). Exits non-zero with a clear message naming the mismatched values. */
 
@@ -48,11 +54,17 @@ try {
   console.error('HARNESS ERROR: could not read ' + SW_JS_PATH + ': ' + e.message);
   process.exit(1);
 }
+// The quoted entries of a top-level array in sw.js (SHELL, SHARED, FIRST_USE), or null when the array is not there.
+function swList(name) {
+  const match = swJs.match(new RegExp('\\b' + name + '\\s*=\\s*\\[([\\s\\S]*?)\\];'));
+  return match ? [...match[1].matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]) : null;
+}
 
 /* ─── 1. Every local runtime script and stylesheet referenced by the six
-   public Forex pages must appear in sw.js SHELL with the identical path AND
-   identical query string. The reverse check applies to every versioned SHELL
-   runtime asset, so a stale or arbitrary versioned cache entry fails. ────── */
+   public Forex pages must appear in sw.js SHELL, or in the store-on-first-use
+   list FIRST_USE, with the identical path AND identical query string. The
+   reverse check applies to every versioned SHELL entry and every FIRST_USE
+   entry, so a stale or arbitrary versioned cache entry fails. ────────────── */
 (function checkRuntimeAssetsVsShell() {
   const runtimeAssets = [];
   const tagRe = /<(script|link)\b[^>]*>/gi;
@@ -112,16 +124,35 @@ try {
     shellByPath.get(sourcePath).push(normal);
   });
 
-  // Forward: every local runtime reference must appear in SHELL with the
-  // identical path and query string. A path with a different query is a
-  // mismatch, even if another SHELL entry has the same path.
+  // Store-on-first-use entries are not precached, a file that only some visits load (the Supabase SDK, behind the Auth gate) is listed there instead of SHELL.
+  const firstUseEntries = swList('FIRST_USE');
+  if (!firstUseEntries) {
+    fail('could not find FIRST_USE array in sw.js');
+    return;
+  }
+  const firstUseByPath = new Map();
+  firstUseEntries.forEach((entry) => {
+    const normal = normalise(entry);
+    const sourcePath = normal.split('?')[0];
+    if (!firstUseByPath.has(sourcePath)) firstUseByPath.set(sourcePath, []);
+    firstUseByPath.get(sourcePath).push(normal);
+  });
+
+  // Forward: every local runtime reference must appear in SHELL, or in
+  // FIRST_USE, with the identical path and query string. A path with a
+  // different query is a mismatch, even if another entry has the same path.
   runtimeRefs.forEach((asset) => {
     const normal = asset.source.startsWith('./') ? asset.source.slice(2) : asset.source;
     const sourcePath = normal.split('?')[0];
     const matches = shellByPath.get(sourcePath) || [];
+    const firstUseMatches = firstUseByPath.get(sourcePath) || [];
     if (!matches.includes(normal)) {
-      if (!matches.length) {
-        fail(asset.page + ' ' + asset.kind + ' "' + asset.source + '" has no matching sw.js SHELL path. Add "./' + normal + '" to SHELL.');
+      if (firstUseMatches.includes(normal)) {
+        pass(asset.page + ' ' + asset.kind + ' "' + asset.source + '" matches sw.js FIRST_USE entry "./' + normal + '" (stored on first use, not precached)');
+      } else if (firstUseMatches.length) {
+        fail('query mismatch for ' + asset.page + ' ' + asset.kind + ' "' + sourcePath + '": page has "' + (normal.split('?')[1] || '(none)') + '" but sw.js FIRST_USE has "' + firstUseMatches.join(', ') + '". Every query string must match exactly.');
+      } else if (!matches.length) {
+        fail(asset.page + ' ' + asset.kind + ' "' + asset.source + '" has no matching sw.js SHELL path. Add "./' + normal + '" to SHELL (or to FIRST_USE if only some visits load it).');
       } else {
         fail('query mismatch for ' + asset.page + ' ' + asset.kind + ' "' + sourcePath + '": page has "' + (normal.split('?')[1] || '(none)') + '" but sw.js SHELL has "' + matches.join(', ') + '". Every query string must match exactly.');
       }
@@ -148,6 +179,17 @@ try {
       );
     } else {
       pass('sw.js SHELL entry "' + entry + '" matches a Forex runtime script or stylesheet reference');
+    }
+  });
+  // The same for every FIRST_USE entry: it must still be a file a page references, at the identical query string.
+  firstUseEntries.forEach((entry) => {
+    if (!runtimeSet.has(normalise(entry))) {
+      fail(
+        'sw.js FIRST_USE has "' + entry + '" but the Forex runtime pages have no matching script or stylesheet reference with the identical query string. ' +
+        'Remove the stale FIRST_USE entry or add/update the matching page asset.'
+      );
+    } else {
+      pass('sw.js FIRST_USE entry "' + entry + '" matches a Forex runtime script or stylesheet reference');
     }
   });
 })();
@@ -316,6 +358,49 @@ try {
     return;
   }
   pass('the Supabase SDK is an inert tag plus an Auth-gated loader before lib/auth-client.js, and no other page loads it');
+})();
+
+/* ─── 7. The SDK is stored on first use and never precached. Installing the
+   app must not download its 218 KB, only a visit that actually loads it
+   (Auth on) does. So sw.js lists it in FIRST_USE, at the exact path and ?v=
+   string the inert tag in index.html carries, keeps it out of SHELL, and the
+   worker's storage rule reads FIRST_USE. The file must exist. ────────────── */
+(function checkSdkFirstUse() {
+  const tag = (indexHtml.match(/<script\b[^>]*\bsrc=["']lib\/supabase-[^"']*["'][^>]*>/i) || [])[0];
+  if (!tag) {
+    fail('index.html has no Supabase SDK script tag to compare with sw.js.');
+    return;
+  }
+  const src = /\bsrc=["']([^"']+)["']/i.exec(tag)[1];
+  const shell = swList('SHELL'), firstUse = swList('FIRST_USE');
+  if (!shell || !firstUse) {
+    fail('could not find the SHELL and FIRST_USE arrays in sw.js.');
+    return;
+  }
+  const normalise = (p) => p.replace(/^\.\//, '');
+  const precached = shell.filter((entry) => /(^|\/)supabase-/.test(normalise(entry)));
+  if (precached.length) {
+    fail('sw.js SHELL precaches the Supabase SDK ("' + precached.join('", "') + '"), so every install downloads 218 KB even with Auth off. List it in FIRST_USE instead.');
+    return;
+  }
+  const listed = firstUse.filter((entry) => normalise(entry) === src);
+  if (listed.length !== 1) {
+    fail('sw.js FIRST_USE must list the Supabase SDK exactly once, as "./' + src + '" (the path and ?v= string index.html references), found ' + (firstUse.length ? '"' + firstUse.join('", "') + '"' : 'an empty list') + '.');
+    return;
+  }
+  if (!fs.existsSync(path.join(ROOT, src.split('?')[0]))) {
+    fail('the Supabase SDK file "' + src.split('?')[0] + '" does not exist relative to Forex/.');
+    return;
+  }
+  if (!/storable\s*=\s*new Set\([^;]*\bFIRST_USE\b/.test(swJs)) {
+    fail('sw.js isStorable() must build its set from FIRST_USE, or the SDK is listed but never stored.');
+    return;
+  }
+  if (/addAll\([^)]*\bFIRST_USE\b/.test(swJs)) {
+    fail('sw.js must not precache FIRST_USE, the install takes SHELL alone.');
+    return;
+  }
+  pass('the Supabase SDK "./' + src + '" is stored on first use (sw.js FIRST_USE) and is not in the install SHELL');
 })();
 
 console.log('\nRelease check: ' + (failures === 0 ? 'all checks passed.' : failures + ' check(s) failed.'));

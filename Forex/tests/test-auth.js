@@ -307,9 +307,10 @@ test('unconfigured account and billing controls stay disabled', () => {
   assert.match(indexSrc, /checkout\.stripe\.com/);
   assert.match(indexSrc, /billing\.stripe\.com/);
   assert.match(indexSrc, /function safeBillingUrl\(value,kind\)/);
-  assert.match(indexSrc, /const previousFocus=document\.activeElement/);
+  // The opener is read from the dialog already open (kept across an in-place re-render) and only from activeElement when none is, see S1 in test-forex.js.
+  assert.match(indexSrc, /const previousFocus=_modalKeyTrap\?_modalKeyTrap\.__previousFocus:document\.activeElement/);
   assert.match(indexSrc, /_modalKeyTrap\.__previousFocus=previousFocus/);
-  assert.match(indexSrc, /previous\.focus\(\)/);
+  assert.match(indexSrc, /restoreModalFocus\(previous\)/);
   assert.match(indexSrc, /const plan=v\.plan==='pro'\?'pro':'free'/);
   assert.match(indexSrc, /Number\.isSafeInteger\(v\.trade_count\)/);
   assert.match(indexSrc, /source\[feature\]===true/);
