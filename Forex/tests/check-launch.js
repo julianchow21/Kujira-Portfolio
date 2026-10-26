@@ -138,9 +138,9 @@ function checkSourceShape(publicConfig, sourceRoot = DEFAULT_SOURCE_ROOT) {
   const pricing = read('pricing.html', sourceRoot);
   assert.match(pricing, /data-public-pricing/);
   assert.match(pricing, /config\.js\?v=1\.0/);
-  assert.match(pricing, /public-config\.js\?v=0\.14/);
-  assert.match(pricing, /lib\/public\.js\?v=0\.14/);
-  assert.ok(pricing.indexOf('config.js?v=1.0') < pricing.indexOf('lib/public.js?v=0.14'), 'runtime config must load before public renderer');
+  assert.match(pricing, /public-config\.js\?v=0\.16/);
+  assert.match(pricing, /lib\/public\.js\?v=0\.16/);
+  assert.ok(pricing.indexOf('config.js?v=1.0') < pricing.indexOf('lib/public.js?v=0.16'), 'runtime config must load before public renderer');
   const indexCsp = cspFrom(read('index.html', sourceRoot));
   const pricingCsp = cspFrom(pricing);
   assert.ok(connectDirective(indexCsp), 'index CSP must declare connect-src');
@@ -151,7 +151,7 @@ function checkSourceShape(publicConfig, sourceRoot = DEFAULT_SOURCE_ROOT) {
     'pricing connect-src must match index contract'
   );
   for (const page of ['welcome.html', 'pricing.html']) {
-    assert.match(read(page, sourceRoot), /href="lib\/public\.css\?v=0\.14"/);
+    assert.match(read(page, sourceRoot), /href="lib\/public\.css\?v=0\.16"/);
   }
   for (const page of LEGAL_PAGES) {
     assert.ok(fs.statSync(path.join(sourceRoot, page)).isFile(), page + ' must exist');

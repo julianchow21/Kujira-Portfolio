@@ -1127,6 +1127,7 @@ async function runSyncContractTests() {
   await testAsync('Forex service worker activate preserves sibling caches', async () => {
     const deleted = [];
     let activation;
+    const currentCache = /const CACHE = '([^']+)';/.exec(swSrc)[1];
     const swSandbox = {
       Promise,
       self: {
@@ -1136,7 +1137,7 @@ async function runSyncContractTests() {
         clients: { claim: () => Promise.resolve() },
       },
       caches: {
-        keys: async () => ['kjr-forex-v0.14', 'kjr-forex-v0.15', 'kjr-portfolio-v0.9', 'other-cache'],
+        keys: async () => ['kjr-forex-v0.14', currentCache, 'kjr-portfolio-v0.9', 'other-cache'],   // the current cache is read from sw.js, so a release needs no edit here
         delete: async (key) => { deleted.push(key); return true; },
       },
     };

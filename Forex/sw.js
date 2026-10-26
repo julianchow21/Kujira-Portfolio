@@ -1,7 +1,7 @@
 /* Offline app shell. Bump CACHE on every ship so clients pull the new build. */
-const CACHE = 'kjr-forex-v0.15';
+const CACHE = 'kjr-forex-v0.16';
 const CACHE_PREFIX = 'kjr-forex-';
-const SHELL = ['./', './index.html', './welcome.html', './pricing.html', './terms.html', './privacy.html', './refunds.html', './icon.svg', './manifest.webmanifest', './config.js?v=1.0', './public-config.js?v=0.14', './lib/theme-init.js?v=1.0', './lib/kjr-format.js?v=1.2', './lib/kjr-calendar.js?v=1.0', './lib/supabase-2.117.2.umd.js?v=2.117.2', './lib/auth-client.js?v=1.0', './lib/public.js?v=0.14', './lib/public.css?v=0.14'];
+const SHELL = ['./', './index.html', './welcome.html', './pricing.html', './terms.html', './privacy.html', './refunds.html', './icon.svg', './manifest.webmanifest', './config.js?v=1.0', './public-config.js?v=0.16', './lib/theme-init.js?v=1.0', './lib/kjr-format.js?v=1.2', './lib/kjr-calendar.js?v=1.0', './lib/supabase-2.117.2.umd.js?v=2.117.2', './lib/auth-client.js?v=1.0', './lib/public.js?v=0.16', './lib/public.css?v=0.16'];
 // Shared files outside Forex/, stored on first use only (best effort), so a missing file can never fail the install above.
 const SHARED = ['../Portfolio/Worker/whale-icon.png'];
 

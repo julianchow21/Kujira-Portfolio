@@ -103,7 +103,7 @@ test('welcome keeps a visible pricing route in page content', () => {
 test('public pages use the versioned stylesheet asset', () => {
   for (const file of ['welcome.html', 'pricing.html', 'terms.html', 'privacy.html', 'refunds.html']) {
     const source = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
-    assert.match(source, /href="lib\/public\.css\?v=0\.14"/);
+    assert.match(source, /href="lib\/public\.css\?v=0\.16"/);
   }
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'lib', 'public.css'), 'utf8'), /\[hidden\]\s*\{[^}]*display:\s*none\s*!important/);
 });
