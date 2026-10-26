@@ -9453,15 +9453,6 @@ async function runTests(){
     assert.ok(fn.includes("warn.textContent = 'Warning: CPF, tax and holiday constants last verified for ' + CONSTANTS_VERIFIED_FOR + '. Verify against CPF Board, IRAS and MOM before trusting '"));
   });
 
-  test('p281 item 5 - the constants, the cache name and the QA runbook line agree on one version (the release number itself is pinned in the newest block, p283 item 5, and p280 item 3 holds every other place to APP_VERSION)', () => {
-    const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-    const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    const version = /const APP_VERSION = 'v(\d+\.\d+)';/.exec(appSrc)[1];
-    assert.ok(appSrc.includes("const APP_DISPLAY_VERSION = 'v" + version + " ("));
-    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v" + version + "';"));
-    assert.ok(sop.includes('(app v' + version + ').'));
-  });
-
   /* ═══════════════════════════════════════════════════════════════════════
      p282, v2.82 no emoji outside Settings: both Columns buttons lead with the sidebar's gear, the warning, play and grip glyphs are drawings in the sidebar's style, the
      decision notes pilot script holds no hand-kept version, and the blocked NAS gate stops offering a sign-in. The markup, the sources and the stylesheet are read as text
@@ -9578,15 +9569,6 @@ async function runTests(){
     assert.strictEqual(body('#nas-auth-gate [hidden]'), 'display:none');
     assert.deepStrictEqual(specificity('#nas-auth-gate [hidden]'), [1, 1, 0]);
     ['id="nas-auth-signout" data-click="signOutNas" hidden', 'id="nas-readonly-escape" data-click="openLegacyReadonlyEscape" hidden'].forEach(frag => assert.ok(indexSrc.includes(frag), frag));
-  });
-
-  test('p282 item 6 - the constants, the cache name and the QA runbook line agree on one version (the release number itself is pinned in the newest block, p283 item 5, and p280 item 3 holds every other place to APP_VERSION)', () => {
-    const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
-    const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    const version = /const APP_VERSION = 'v(\d+\.\d+)';/.exec(appSrc)[1];
-    assert.ok(appSrc.includes("const APP_DISPLAY_VERSION = 'v" + version + " ("));
-    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v" + version + "';"));
-    assert.ok(sop.includes('(app v' + version + ').'));
   });
 
   /* ═══════════════════════════════════════════════════════════════════════

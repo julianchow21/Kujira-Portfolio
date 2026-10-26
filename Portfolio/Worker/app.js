@@ -5135,7 +5135,7 @@ async function _copyText(text){
     area.setSelectionRange(0, value.length);
     copied = !!document.execCommand('copy');
   } catch (e2) {
-    copied = false;
+    // the selection copy threw, copied stays false
   } finally {
     if (area.parentNode) area.parentNode.removeChild(area);
     if (previous && typeof previous.focus === 'function'){
