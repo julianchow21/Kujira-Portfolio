@@ -92,5 +92,3 @@ The allocation denominator is calculated after applying the CPF setting. With CP
 | U-03 | The allocation denominator is calculated after the CPF setting is applied. With CPF off, CPF is excluded before weights are calculated. Active insurance remains included | Accepted in v2.63. Manual browser QA confirmed 100% rounded visible weights with CPF both on and off |
 | U-04 | No dedicated disposable Apps Script endpoint or scripted two-client CAS fixture is supplied | Leave remote sync and conflict evidence unverified until one exists |
 | U-05 | The supplied price fixture is deliberately small and does not establish pagination, extreme-length or many-record performance | Use a separately generated local-only stress dataset for that acceptance criterion |
-
-*Disposable point-in-time doc. Delete once fully actioned (see AGENTS.md, Folder cleanliness).*
