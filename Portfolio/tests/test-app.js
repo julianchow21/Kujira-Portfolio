@@ -9545,7 +9545,7 @@ async function runTests(){
     assert.ok(p280.pilot.includes('<script src="./Worker/decision-notes-pilot.js?v=' + version + '"></script>'));
   });
 
-  test('p282 item 5 - the blocked NAS gate stops offering a sign-in: one helper sets the gate wording and both openers call it, the sign-in words are the ones index.html ships, the dead Sign in button is hidden while still disabled, and the gate\'s own [hidden] rule makes its .btn footer buttons actually hide', () => {
+  test('p282 item 5 - the blocked NAS gate stops offering a sign-in: one helper sets the gate wording and both openers call it, the sign-in words are the ones index.html ships, the dead Sign in button is hidden while still disabled, and the general .btn[hidden] rule (the gate has none of its own) makes its .btn footer buttons actually hide', () => {
     const { body, specificity } = p282;
     const text = extractFunction('_nasSetGateText');
     assert.ok(text, '_nasSetGateText moved');
@@ -9564,11 +9564,24 @@ async function runTests(){
     // the auth path itself reads none of it: the step renderer is as it was
     assert.ok(extractFunction('renderNasAuthStep').includes("submit.textContent = step === 'signin' ? 'Sign in' : 'Verify and open portfolio';"));
     assert.strictEqual(/_nasSetGateText/.test(extractFunction('submitNasAuth') + extractFunction('signOutNas') + extractFunction('loadNasFinance')), false);
-    // [hidden] on a .btn: .btn sets display (0,1,0) and beats the browser's own [hidden] rule, so the gate has its own, an id and an attribute (1,1,0) that sets no display of its own
+    // [hidden] on a .btn: .btn sets display (0,1,0) and beats the browser's own [hidden] rule, so the general .btn[hidden] (0,2,0), later in the sheet, is what hides the gate's footer buttons.
+    // The gate once had a rule of its own for this ('#nas-auth-gate [hidden]', 1,1,0). It is gone: .btn[hidden] covers every hidden .btn, and the gate's other hidden elements are plain divs that nothing gives a display.
+    const { rules } = p278;
+    const sels = rules.map(r => r.sel);
     assert.ok(/(^|;)display:inline-flex(;|$)/.test(body('.btn')));
-    assert.strictEqual(body('#nas-auth-gate [hidden]'), 'display:none');
-    assert.deepStrictEqual(specificity('#nas-auth-gate [hidden]'), [1, 1, 0]);
-    ['id="nas-auth-signout" data-click="signOutNas" hidden', 'id="nas-readonly-escape" data-click="openLegacyReadonlyEscape" hidden'].forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+    assert.strictEqual(body('.btn[hidden]'), 'display:none');
+    assert.deepStrictEqual(specificity('.btn'), [0, 1, 0]);
+    assert.deepStrictEqual(specificity('.btn[hidden]'), [0, 2, 0]);
+    assert.ok(sels.indexOf('.btn[hidden]') > sels.lastIndexOf('.btn'));
+    assert.strictEqual(sels.some(s => s.includes('#nas-auth-gate') && s.includes('[hidden]')), false);
+    assert.strictEqual(indexSrc.includes('#nas-auth-gate [hidden]'), false);
+    // the gate's hidden buttons are .btn: Sign out and the read-only escape ship hidden, and the Sign in submit is hidden and shown again by the two openers
+    ['<button type="button" class="btn" id="nas-auth-signout" data-click="signOutNas" hidden>', '<button type="button" class="btn" id="nas-readonly-escape" data-click="openLegacyReadonlyEscape" hidden>', '<button type="submit" class="btn btn-primary" id="nas-auth-submit">']
+      .forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+    // its other hidden elements are class-less divs with no inline display (the replacement key block's inline style is spacing and a border only), and the code toggles the hidden property alone, never a display
+    ['<div id="nas-signin-panel">', '<div id="nas-factor-panel" hidden>', '<div id="nas-blocked-config" hidden style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">']
+      .forEach(frag => assert.ok(indexSrc.includes(frag), frag));
+    assert.strictEqual(/style\.display/.test(blocked + opener + extractFunction('renderNasAuthStep')), false);
   });
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -9688,8 +9701,8 @@ async function runTests(){
     assert.ok(sels.indexOf('.btn[hidden]') > sels.lastIndexOf('.btn'));
     // nothing else gives a .btn a display (.btn-sm and the other variants are other classes), so no later or stronger rule can show a hidden one again
     assert.deepStrictEqual(rules.filter(r => /\.btn(?![\w-])/.test(r.sel) && /(^|;)display:/.test(r.body)).map(r => r.sel), ['.btn', '.btn[hidden]']);
-    // the gate's own rule stays, p282 item 5 holds its body and specificity
-    assert.ok(sels.indexOf('#nas-auth-gate [hidden]') > -1);
+    // the NAS gate has no rule of its own for this: its hidden footer buttons are .btn and this rule hides them, p282 item 5 holds that and that the old gate rule is gone
+    assert.strictEqual(sels.indexOf('#nas-auth-gate [hidden]'), -1);
     // the buttons it fixes: the panel ships Retry hidden, and setNasConflictActions toggles hidden on all four of its .btn
     assert.ok(indexSrc.includes('<button type="button" class="btn btn-primary" id="nas-retry-conflict" data-click="retryNasConflict" hidden>Retry queued sync</button>'));
     const fn = extractFunction('setNasConflictActions');
@@ -9735,20 +9748,42 @@ async function runTests(){
     assert.ok(chips.x.innerHTML.includes('(?) &quot;&gt;&lt;b&gt;k&lt;/b&gt;<button'));
   });
 
-  test('p283 item 3 - the IBKR import preview table drops the holdings grid\'s 760px floor (min-width:0), so its Status column with the dup tick box is not cut off in the 666px wrapper, and the wrapper keeps its vertical cap and its sideways scroll', () => {
+  /* p283 items 3 and 4: both import previews sit in a modal whose table wrapper is narrower than the holdings grid's 760px floor. One shared rule, .modal table.holdings, lifts the
+     floor there (it replaced an inline min-width:0 on each table). It follows the base rule and is more specific, so it wins whatever the order, as the inline style did. Nothing else
+     sets a min-width on a holdings table itself (the 640px media rule on td.name-clamp is a cell), so no media rule or later rule can put the floor back. Each preview's table is
+     inside its .modal, before the footer, and keeps only its font size inline. */
+  function p283ModalFloor(fn){
+    const { rules, body, specificity } = p278;
+    const sels = rules.map(r => r.sel);
+    assert.strictEqual(body('.modal table.holdings'), 'min-width:0');
+    assert.ok(sels.indexOf('.modal table.holdings') > sels.indexOf('table.holdings'));
+    assert.deepStrictEqual(specificity('table.holdings'), [0, 1, 1]);
+    assert.deepStrictEqual(specificity('.modal table.holdings'), [0, 2, 1]);
+    assert.deepStrictEqual(rules.filter(r => /holdings/.test(r.sel) && !/\b(td|th)\b/.test(r.sel) && /(^|;)min-width:/.test(r.body)).map(r => r.sel + ' ' + /min-width:[^;]+/.exec(r.body)[0]),
+      ['table.holdings min-width:760px', '.modal table.holdings min-width:0']);
+    // the table is inside the modal (after its opening tag, before its footer), is the only one, and carries no inline min-width
+    const modalAt = fn.indexOf('<div class="modal"'), tableAt = fn.indexOf('<table class="holdings"'), footAt = fn.indexOf('<div class="modal-foot"');
+    assert.ok(modalAt > -1 && modalAt < tableAt && tableAt < footAt);
+    assert.strictEqual((fn.match(/<table /g) || []).length, 1);
+    assert.strictEqual(fn.includes('min-width'), false);
+    assert.ok(fn.includes('<table class="holdings" style="font-size:.8rem">'));
+    // the sideways scroll that remains for a phone comes from .tbl-wrap
+    assert.ok(/(^|;)overflow-x:auto(;|$)/.test(body('.tbl-wrap')));
+  }
+
+  test('p283 item 3 - the IBKR import preview table sits in a modal, so the shared .modal table.holdings rule lifts the holdings grid\'s 760px floor (no inline min-width), its Status column with the dup tick box is not cut off, and the wrapper keeps its vertical cap and its sideways scroll', () => {
     const fn = extractFunction('ibkrShowPreview');
-    assert.ok(fn.includes('<div class="tbl-wrap" style="max-height:340px;overflow-y:auto">\n          <table class="holdings" style="font-size:.8rem;min-width:0">'));
-    // the sideways scroll that remains for a phone comes from .tbl-wrap, which the inline style leaves alone
-    assert.ok(/(^|;)overflow-x:auto(;|$)/.test(p278.body('.tbl-wrap')));
+    p283ModalFloor(fn);
+    assert.ok(fn.includes('<div class="tbl-wrap" style="max-height:340px;overflow-y:auto">\n          <table class="holdings" style="font-size:.8rem">'));
     // the column that was cut off is the last of seven, and it carries the dup tick box
     assert.ok(fn.includes('<th>Shares</th><th>Price</th><th>Fees</th><th>Status</th>'));
     assert.ok(fn.includes('data-ibkr-dup="${idx}"'));
   });
 
-  test('p283 item 4 - the insurance import preview table drops the 760px floor too (min-width:0), so its Premium column is not cut off in the 606px wrapper, and its wrapper keeps its vertical cap and its sideways scroll', () => {
+  test('p283 item 4 - the insurance import preview table sits in a modal too, so the same shared rule lifts the 760px floor (no inline min-width), its Premium column is not cut off, and its wrapper keeps its vertical cap and its sideways scroll', () => {
     const fn = extractFunction('insuranceImportShowPreview');
-    assert.ok(fn.includes('<div class="tbl-wrap" style="max-height:320px;overflow-y:auto"><table class="holdings" style="font-size:.8rem;min-width:0">'));
-    assert.ok(/(^|;)overflow-x:auto(;|$)/.test(p278.body('.tbl-wrap')));
+    p283ModalFloor(fn);
+    assert.ok(fn.includes('<div class="tbl-wrap" style="max-height:320px;overflow-y:auto"><table class="holdings" style="font-size:.8rem">'));
     // the column that was cut off is the last of five
     assert.ok(fn.includes('<th>Death cover</th><th>Premium</th></tr></thead>'));
   });

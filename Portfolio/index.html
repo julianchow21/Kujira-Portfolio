@@ -428,8 +428,6 @@ input::placeholder,textarea::placeholder{color:var(--text3);opacity:1}
 .backend-banner-readonly{border-color:var(--red-border);background:var(--red-soft);color:var(--red);font-weight:600}
 .backend-banner-nas{border-color:var(--accent-border);background:var(--accent-soft);color:var(--accent)}
 .nas-secret{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;user-select:text}
-/* The gate's footer buttons carry the hidden attribute, and .btn sets display, which beats the browser's own [hidden] rule, so the blocked gate showed Sign out and a dead Sign in. Scoped to the gate, and since v2.83 the general .btn[hidden] rule after .btn hides every other hidden button too. */
-#nas-auth-gate [hidden]{display:none}
 .modal{background:var(--glass-strong);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border:1px solid var(--glass-border);border-radius:var(--radius-lg);width:100%;max-width:560px;max-height:90vh;max-height:calc(90vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));max-height:90dvh;max-height:calc(90dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,0.5),inset 0 1px 0 var(--glass-hi);display:flex;flex-direction:column}
 .modal-head{padding:16px 20px;border-bottom:1px solid var(--glass-border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .modal-head h3{font-size:15px;font-weight:600}
@@ -800,6 +798,8 @@ html:not(.dark) .modal .tag.pos{color:color-mix(in srgb,var(--gain) 65%,var(--te
 
 /* TABLE TWEAKS */
 table.holdings{font-size:13px;min-width:760px}
+/* A holdings table in a modal drops the 760px floor above. A modal's table wrapper is narrower than that, and the floor cut off the last column of the two import previews (the IBKR dup tick box, the insurance Premium). The wrapper (.tbl-wrap) still scrolls sideways when the columns are wider than it, as on a phone. This is more specific than the base rule, so it wins whatever the order, as the inline style it replaces did. */
+.modal table.holdings{min-width:0}
 table.holdings th{text-align:right}
 table.holdings th:first-child,table.holdings td:first-child,table.holdings th.tl,table.holdings td.tl{text-align:left}
 table.holdings td{font-variant-numeric:tabular-nums}

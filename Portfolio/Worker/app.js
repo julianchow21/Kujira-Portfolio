@@ -8359,7 +8359,7 @@ function ibkrShowPreview(matched, skippedCount){
     ? `<div class="alert alert-warn" style="margin:.5rem 1rem">Large ledgers may exceed the cloud sync size cap (~300 trades).</div>`
     : '';
 
-  // The table drops the holdings grid's 760px floor (min-width:0), so the Status column, which holds the dup tick box, is not cut off inside the 666px wrapper. The wrapper still scrolls sideways when the columns are wider than it, as on a phone.
+  // The shared .modal table.holdings rule in index.html lifts the holdings grid's 760px floor for a table in a modal, so the Status column, which holds the dup tick box, is not cut off. The wrapper still scrolls sideways when the columns are wider than it, as on a phone.
   const overlay = document.getElementById('ibkr-preview-overlay');
   const html = `
     <div class="modal" style="max-width:700px;width:95vw">
@@ -8373,7 +8373,7 @@ function ibkrShowPreview(matched, skippedCount){
         </p>
         ${warnHtml}
         <div class="tbl-wrap" style="max-height:340px;overflow-y:auto">
-          <table class="holdings" style="font-size:.8rem;min-width:0">
+          <table class="holdings" style="font-size:.8rem">
             <thead><tr>
               <th class="tl">Date</th><th class="tl">Symbol</th><th class="tl">Side</th>
               <th>Shares</th><th>Price</th><th>Fees</th><th>Status</th>
@@ -8686,14 +8686,14 @@ function insuranceImportShowPreview(){
     <td class="num">${p.premium!=null?fmt(Number(p.premium),{dp:0}):'—'}</td>
   </tr>`).join('');
 
-  // The table drops the holdings grid's 760px floor (min-width:0), so the Premium column is not cut off inside the 606px wrapper. The wrapper still scrolls sideways when the columns are wider than it, as on a phone.
+  // The shared .modal table.holdings rule in index.html lifts the holdings grid's 760px floor for a table in a modal, so the Premium column is not cut off. The wrapper still scrolls sideways when the columns are wider than it, as on a phone.
   const overlay = document.getElementById('ins-import-overlay');
   overlay.innerHTML = `
     <div class="modal" style="max-width:640px;width:95vw">
       <div class="modal-head"><h3>Import preview</h3></div>
       <div class="modal-body" style="padding:1rem">
         <p style="margin:0 0 .75rem"><strong>${ready.length}</strong> row${ready.length !== 1 ? 's' : ''} ready to import${skipped ? ` <span class="tag muted">${skipped} skipped (no insurer)</span>` : ''}</p>
-        ${ready.length ? `<div class="tbl-wrap" style="max-height:320px;overflow-y:auto"><table class="holdings" style="font-size:.8rem;min-width:0">
+        ${ready.length ? `<div class="tbl-wrap" style="max-height:320px;overflow-y:auto"><table class="holdings" style="font-size:.8rem">
           <thead><tr><th class="tl">Insurer</th><th class="tl">Plan</th><th class="tl">Type</th><th>Death cover</th><th>Premium</th></tr></thead>
           <tbody>${previewRows}</tbody>
         </table></div>

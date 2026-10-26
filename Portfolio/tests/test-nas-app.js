@@ -501,7 +501,7 @@ async function run() {
     assert.strictEqual(n['nas-auth-copy'].textContent, 'NAS finance data stays closed until this is resolved.');
     assert.strictEqual(n['nas-auth-status'].textContent, reason);
     assert.strictEqual(n['nas-auth-status'].style.color, 'var(--red)');
-    // visibility: the form, the factor panel, the dead Sign in and Sign out are hidden (the gate's [hidden] rule hides them), the read-only escape is the one action left
+    // visibility: the form, the factor panel, the dead Sign in and Sign out are hidden (the general .btn[hidden] rule hides the two buttons, the browser's own [hidden] the panels), the read-only escape is the one action left
     assert.deepStrictEqual(['nas-signin-panel', 'nas-factor-panel', 'nas-auth-submit', 'nas-auth-signout'].map(id => n[id].hidden), [true, true, true, true]);
     assert.strictEqual(n['nas-auth-submit'].disabled, true);                                          // still disabled, so Enter in the replacement key field submits nothing
     assert.strictEqual(n['nas-readonly-escape'].hidden, false);

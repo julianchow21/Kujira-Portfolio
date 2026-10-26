@@ -424,14 +424,17 @@ function kjrBuildJournalGlance(input){
     else if (v && typeof v.getTime === 'function') t = Number(v.getTime());
     return t > 0 && t <= 253402300799999 ? t : NaN;
   };
+  // Every result is built here, the empty state included, so the schema, the provider and the key order have one source.
+  const glance = (status, asOf, currency, summary) => ({
+    schema: 'journal-home-glance/v1', provider: 'portfolio', status,
+    sourceUpdatedAt: asOf, asOf, currency, summary
+  });
   const nowMs = toMs(i.now);
-  const empty = {
-    schema: 'journal-home-glance/v1', provider: 'portfolio', status: 'empty',
-    sourceUpdatedAt: null, asOf: null, currency: null,
-    summary: { netWorth: null, exCpf: null, incomplete: null }
-  };
   const netWorth = Number(i.netWorth);
-  if (i.netWorth === null || i.netWorth === undefined || !isFinite(netWorth) || !isFinite(nowMs)) return empty;
+  // `== null` is null or undefined. It stays apart from the finite test because Number(null) is 0, which would pass it.
+  if (i.netWorth == null || !isFinite(netWorth) || !isFinite(nowMs)){
+    return glance('empty', null, null, { netWorth: null, exCpf: null, incomplete: null });
+  }
   const dated = [];   // stocks a live quote with a known fetch time stands behind
   let undated = 0;    // open stocks without one: valued at cost, or a quote of unknown age
   (Array.isArray(i.holdings) ? i.holdings : []).forEach(h => {
@@ -444,7 +447,7 @@ function kjrBuildJournalGlance(input){
   const stamp = new Date(dated.length ? Math.min.apply(null, dated.map(d => d.at)) : nowMs).toISOString();
   const summary = { netWorth: roundMoney(netWorth), exCpf: true, incomplete };
   const moves = dated.map(d => d.h)
-    .filter(h => h.daySgd !== null && h.daySgd !== undefined && isFinite(Number(h.daySgd)));
+    .filter(h => h.daySgd != null && isFinite(Number(h.daySgd)));
   if (moves.length){
     summary.dayPnl = roundMoney(moves.reduce((sum, h) => sum + Number(h.daySgd), 0));
     let best = null;
@@ -453,15 +456,18 @@ function kjrBuildJournalGlance(input){
       if (!/^[A-Z0-9]/.test(symbol)) return;
       const day = roundMoney(Number(h.daySgd));
       if (Math.abs(day) < 0.005) return;
-      if (!best || Math.abs(day) > Math.abs(best.dayPnl)) best = { symbol, dayPnl: day, dayPct: h.dayPct != null && isFinite(Number(h.dayPct)) && Math.abs(Number(h.dayPct)) <= 1000 ? roundMoney(Number(h.dayPct)) : null };
+      if (!best || Math.abs(day) > Math.abs(best.dayPnl)){
+        const pct = Number(h.dayPct);
+        best = {
+          symbol, dayPnl: day,
+          dayPct: h.dayPct != null && isFinite(pct) && Math.abs(pct) <= 1000 ? roundMoney(pct) : null
+        };
+      }
     });
     if (best) summary.topMover = best;
   }
   const stale = !incomplete && dated.some(d => !!d.h.stale);
-  return {
-    schema: 'journal-home-glance/v1', provider: 'portfolio', status: incomplete ? 'incomplete' : (stale ? 'stale' : 'ready'),
-    sourceUpdatedAt: stamp, asOf: stamp, currency: 'SGD', summary
-  };
+  return glance(incomplete ? 'incomplete' : (stale ? 'stale' : 'ready'), stamp, 'SGD', summary);
 }
 
 /* Take-home for an income entry: the typed net if it's a real finite value
