@@ -165,6 +165,10 @@ test('SYMBOL_RE - accepts sane tickers', () => {
   assert.strictEqual(sandbox.SYMBOL_RE.test('BRK-B'), true);
   assert.strictEqual(sandbox.SYMBOL_RE.test('AAPL'), true);
   assert.strictEqual(sandbox.SYMBOL_RE.test('BRK.A'), true);
+  assert.strictEqual(sandbox.SYMBOL_RE.test('EURUSD=X'), true);   // FX pair, Forex charts
+  assert.strictEqual(sandbox.SYMBOL_RE.test('ES=F'), true);       // future
+  assert.strictEqual(sandbox.SYMBOL_RE.test('^GSPC'), true);      // index
+  assert.strictEqual(sandbox.SYMBOL_RE.test('9988.HK'), true);    // numeric ticker
 });
 test('SYMBOL_RE - rejects injection-y strings, lowercase, empty, over-long input', () => {
   assert.strictEqual(sandbox.SYMBOL_RE.test(''), false);
@@ -172,7 +176,10 @@ test('SYMBOL_RE - rejects injection-y strings, lowercase, empty, over-long input
   assert.strictEqual(sandbox.SYMBOL_RE.test('MU; DROP TABLE'), false);
   assert.strictEqual(sandbox.SYMBOL_RE.test('MU OR 1=1'), false);
   assert.strictEqual(sandbox.SYMBOL_RE.test('<script>'), false);
-  assert.strictEqual(sandbox.SYMBOL_RE.test('AAAAAAAAAAAAA'), false); // 13 chars, cap is 12
+  assert.strictEqual(sandbox.SYMBOL_RE.test('AAAAAAAAAAAAAAAA'), false); // 16 chars, cap is 15 (16 with a leading ^)
+  assert.strictEqual(sandbox.SYMBOL_RE.test('=X'), false);        // must start with a letter or digit
+  assert.strictEqual(sandbox.SYMBOL_RE.test('^^GSPC'), false);
+  assert.strictEqual(sandbox.SYMBOL_RE.test('EUR/USD'), false);
 });
 
 /* ====================== INTERVALS / RANGES whitelists ====================== */

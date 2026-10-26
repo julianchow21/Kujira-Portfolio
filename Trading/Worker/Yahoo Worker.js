@@ -11,15 +11,18 @@
 //   2. curl "<worker-url>/quote?symbol=MU" (should return {ok:true,...})
 
 // Origin allowlist (Julian's GitHub Pages origin, from repo remote julianchow21/Kujira-Portfolio).
-// If you host elsewhere too (e.g. a custom domain or local preview), add it here.
+// Plus the local preview on port 3807. If you host elsewhere too (e.g. a custom domain), add it here.
 import { NYSE_HOLIDAYS, NYSE_HALF_DAYS } from "./nyse-holidays.js";
 
 const ALLOWED_ORIGINS = new Set([
   "https://julianchow21.github.io",
+  "http://localhost:3807",   // the repo's local preview (npx serve -l 3807), so Forex and Trading can chart locally
 ]);
 const INTERVALS = new Set(["1m","2m","5m","15m","30m","60m","90m","1h","1d","1wk","1mo"]);
 const RANGES    = new Set(["1d","5d","1mo","3mo","6mo","1y","2y","5y","max"]);
-const SYMBOL_RE = /^[A-Z.\-]{1,12}$/;
+// Yahoo symbols: stocks (MU, BRK-B, BRK.A, 9988.HK), FX pairs (EURUSD=X), futures (ES=F) and indices (^GSPC).
+// An optional leading ^, then a letter or digit, then up to 14 of letters, digits, dot, dash or =. No spaces or other punctuation.
+const SYMBOL_RE = /^\^?[A-Z0-9][A-Z0-9.\-=]{0,14}$/;
 const CROSS_TYPES = new Set(["rsi_above","rsi_below","price_vwap_above","price_vwap_below","ema_bull","ema_bear"]);
 const DESKTOP_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
