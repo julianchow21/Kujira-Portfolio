@@ -370,7 +370,7 @@ tbody tr:first-child td{border-top:none}
 
 /* BUTTONS */
 .btn{padding:7px 14px;border-radius:var(--radius);border:1px solid var(--glass-border);background:var(--glass);cursor:pointer;font-size:13px;color:var(--text);transition:background 0.15s ease,border-color 0.15s ease,color 0.15s ease,box-shadow 0.15s ease;display:inline-flex;align-items:center;gap:6px;font-family:inherit;white-space:nowrap}
-/* .btn sets display, which beats the browser's own [hidden] rule, so a .btn with the hidden attribute stayed on screen (the NAS conflict panel showed Retry queued sync beside its three choices, and kept the choices once a retry was ready). This rule follows .btn and is the more specific, so every hidden .btn hides. */
+/* .btn sets display, which beats the browser's own [hidden] rule, so a .btn with the hidden attribute stayed on screen (the NAS conflict panel showed Retry queued sync beside its three choices, and kept the choices once a retry was ready, and the blocked NAS gate showed Sign out and a dead Sign in). This rule follows .btn and is the more specific, so every hidden .btn hides, the NAS gate's footer buttons included (its own scoped rule was removed in v2.87). */
 .btn[hidden]{display:none}
 @media (hover:hover){.btn:hover{background:var(--glass-strong)}}
 .btn:focus{outline:none}
@@ -2308,12 +2308,12 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.87"></script>
-<script src="Worker/kjr-sortable.js?v=2.87"></script>
-<script src="Worker/kjr-vault.js?v=2.87"></script>
-<script src="Worker/kjr-migration.js?v=2.87"></script>
-<script src="Worker/supabase.js?v=2.87"></script>
-<script src="Worker/kjr-nas.js?v=2.87"></script>
-<script src="Worker/app.js?v=2.87"></script>
+<script src="Worker/kjr-core.js?v=2.88"></script>
+<script src="Worker/kjr-sortable.js?v=2.88"></script>
+<script src="Worker/kjr-vault.js?v=2.88"></script>
+<script src="Worker/kjr-migration.js?v=2.88"></script>
+<script src="Worker/supabase.js?v=2.88"></script>
+<script src="Worker/kjr-nas.js?v=2.88"></script>
+<script src="Worker/app.js?v=2.88"></script>
 </body>
 </html>
