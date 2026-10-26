@@ -10097,12 +10097,12 @@ async function runTests(){
     assert.ok(section.includes('stale 1 day after its `sourceUpdatedAt`'));
   });
 
-  test('p286 release - this release is v2.86 (26 Oct): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
+  test('p287 release - this release is v2.87 (26 Oct): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
     const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    assert.ok(appSrc.includes("const APP_VERSION = 'v2.86';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.86 (26 Oct)';"));
-    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.86';"));
-    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 26/10/2026 (app v2.86).'));
+    assert.ok(appSrc.includes("const APP_VERSION = 'v2.87';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.87 (26 Oct)';"));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.87';"));
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 26/10/2026 (app v2.87).'));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);
