@@ -417,7 +417,7 @@ input::placeholder,textarea::placeholder{color:var(--text3);opacity:1}
 .empty-sub{font-size:12px;max-width:340px;line-height:1.6}
 
 /* MODAL */
-.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
 .overlay.open{display:flex}
 #vault-gate{z-index:300}
 /* The backend banner shows exactly when renderBackendBanner() clears its hidden attribute, so the base rule is a block and the [hidden] rule below hides it. From v2.64 to v2.78 the base rule was display:none, which kept the read-only and NAS notices out of sight whatever the script did. */
@@ -2308,12 +2308,12 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.88"></script>
-<script src="Worker/kjr-sortable.js?v=2.88"></script>
-<script src="Worker/kjr-vault.js?v=2.88"></script>
-<script src="Worker/kjr-migration.js?v=2.88"></script>
-<script src="Worker/supabase.js?v=2.88"></script>
-<script src="Worker/kjr-nas.js?v=2.88"></script>
-<script src="Worker/app.js?v=2.88"></script>
+<script src="Worker/kjr-core.js?v=2.89"></script>
+<script src="Worker/kjr-sortable.js?v=2.89"></script>
+<script src="Worker/kjr-vault.js?v=2.89"></script>
+<script src="Worker/kjr-migration.js?v=2.89"></script>
+<script src="Worker/supabase.js?v=2.89"></script>
+<script src="Worker/kjr-nas.js?v=2.89"></script>
+<script src="Worker/app.js?v=2.89"></script>
 </body>
 </html>

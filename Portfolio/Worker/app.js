@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.88';
-const APP_DISPLAY_VERSION = 'v2.88 (26 Oct)';
+const APP_VERSION = 'v2.89';
+const APP_DISPLAY_VERSION = 'v2.89 (03 Nov)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -3355,13 +3355,13 @@ function renderSyncDetails(){
   if (settingsSummary) settingsSummary.textContent = stateText + ' · ' + model.pending;
 }
 
-function openSyncDetails(){
+function openSyncDetails(opener){
   const overlay = document.getElementById('sync-details-modal');
   if (!overlay) return;
   renderSyncDetails();
   overlay.classList.add('open');
   _setSyncExpanded(true);
-  openModalFocus(overlay, closeSyncDetails);
+  openModalFocus(overlay, closeSyncDetails, opener);
 }
 
 /* The sync row in the sidebar and the dot in the phone header both open the details modal. */
@@ -3544,13 +3544,13 @@ function saveSyncUrlFromForm(){
 const LK_WIZARD_DISMISSED = 'kjr-pf-wizard-dismissed-v1';
 let _swStep = 1;
 
-function openSetupWizard(){
+function openSetupWizard(opener){
   _swStep = 1;
   const overlay = document.getElementById('setup-wizard');
   if (!overlay) return;
   overlay.classList.add('open');
   renderSetupWizardStep();
-  openModalFocus(overlay, closeSetupWizard);
+  openModalFocus(overlay, closeSetupWizard, opener);
 }
 
 function closeSetupWizard(){
@@ -5590,13 +5590,18 @@ function renderAddMenu(){
   }).join('');
 }
 
-/* Only a flow the menu offers can open, and the modal opens after focus is back on + Add, so closing it returns there. */
-function addMenuPick(table){
-  const item = _addMenuModel().find(x => x.table === table);
-  if (!item) return;
+/* Only a flow the menu offers can open, and the modal opens after focus is back on + Add, so closing it returns there. A pick from the menu passes its
+   menu item, and the opener is that menu's button, never the item (it is hidden once the menu closes). The palette passes nothing, and its own opener
+   already holds focus by then. */
+function addMenuPick(table, item){
+  const pick = _addMenuModel().find(x => x.table === table);
+  if (!pick) return;
+  const menu = item && item.closest ? item.closest('.shell-menu') : null;
+  const ids = menu ? Object.values(SHELL_MENUS).find(pair => pair[1] === menu.id) : null;
+  const opener = ids ? document.getElementById(ids[0]) : null;
   closeShellMenus(true);
-  if (item.disabled){ showToast('Add a stock first, a trade belongs to a position', 'error'); return; }
-  openEntityModal(table);
+  if (pick.disabled){ showToast('Add a stock first, a trade belongs to a position', 'error'); return; }
+  openEntityModal(table, undefined, undefined, opener);
 }
 
 /* ─── Phone sheets ─────────────────────────────────────────────────────
@@ -5637,13 +5642,13 @@ function renderMoreSheet(groupKey){
   if (group.key === 'more') updateThemeUI();
 }
 
-function openMoreSheet(groupKey){
+function openMoreSheet(groupKey, opener){
   const ov = document.getElementById('more-sheet');
   if (!ov) return;
   closeShellMenus(false);
   renderMoreSheet(groupKey);
   ov.classList.add('open');
-  openModalFocus(ov);
+  openModalFocus(ov, undefined, opener);
   // The sheet starts translated off-screen (CSS default) and slides in via
   // .sheet-in, added a frame after .open so display:none -> flex doesn't eat
   // the transition (no transition fires across a display change in the same frame).
@@ -6992,12 +6997,21 @@ function _modalFocusElement(el){
   catch (_) { try { el.focus(); } catch (_) {} }
 }
 
-function openModalFocus(overlay, closeOnEscape){
+/* The control a dialog returns focus to. Callers pass the control that was clicked or pressed, because Safari and Firefox on macOS do not focus a
+   button on a mouse click, so document.activeElement is the page body there. activeElement is only the fallback when no usable opener is given
+   (a keyboard shortcut, the boot wizard, or a flow that has just put focus back on its own opener). Same rule as Forex v0.17. */
+function _dialogOpener(opener){
+  if (opener && opener.nodeType === 1 && opener !== document.body && opener !== document.documentElement && opener.isConnected !== false) return opener;
+  return document.activeElement;
+}
+
+function openModalFocus(overlay, closeOnEscape, opener){
   if (!overlay) return;
   const previous = _modalFocusStates.get(overlay);
   if (previous && previous.trap) overlay.removeEventListener('keydown', previous.trap);
+  // A second open of a dialog that is still open keeps the first opener.
   const state = {
-    opener: previous && previous.opener ? previous.opener : document.activeElement,
+    opener: previous && previous.opener ? previous.opener : _dialogOpener(opener),
     trap: null
   };
   state.trap = function(e){
@@ -7036,6 +7050,7 @@ function openModalFocus(overlay, closeOnEscape){
   });
 }
 
+/* Focus goes back to the opener when it is still in the document and shown. */
 function closeModalFocus(overlay){
   if (!overlay) return;
   const state = _modalFocusStates.get(overlay);
@@ -7375,7 +7390,7 @@ function normaliseEntityRow(table, source){
    the "＋ Add rider" action under an expanded policy to preselect that policy
    in the Policy dropdown, so a chevron-expanded row doesn't make the user
    re-find it in a select. */
-function openEntityModal(table, existingId, defaultsOverride){
+function openEntityModal(table, existingId, defaultsOverride, opener){
   const schema = ENTITY_SCHEMAS[table];
   if (!schema) return;
   const list = DB[table] || [];
@@ -7480,7 +7495,7 @@ function openEntityModal(table, existingId, defaultsOverride){
   const _overlay = document.getElementById('entity-modal');
   if (!_overlay) return;
   _overlay.classList.add('open');
-  openModalFocus(_overlay, closeEntityModal);
+  openModalFocus(_overlay, closeEntityModal, opener);
 }
 
 function renderField(f, value){
@@ -7887,10 +7902,10 @@ function _holdingLabel(m){
 
 /* A holding row opens the holding in the side panel (Step 8a, openHoldingPanel), so every row of every page and the command palette route through here.
    Edit holding lives inside the panel. False for anything that is not a stock or a coin, for an unsafe id (it says so) and for a holding that is gone. */
-function openHoldingDetail(table, id){
+function openHoldingDetail(table, id, opener){
   if (table !== 'stocks' && table !== 'crypto') return false;
   if (!kjrSafeId(id)){ showToast('Invalid entry id', 'error'); return false; }
-  return openHoldingPanel(table, id);
+  return openHoldingPanel(table, id, opener);
 }
 
 /* loading (Step 8b, a first load with a price fetch in flight): a figure that is only a dash for now is a shimmering bar instead. data-px is the price-cache key
@@ -10884,13 +10899,13 @@ function renderColsPanel(setKey){
 /* Same focus-trap pattern as openEntityModal: keydown scoped to the overlay
    (not document), Tab wraps, Escape closes, focus returns to the opener. */
 let _colsOpener = null, _colsKeyTrap = null;
-function openColumns(setKey){
+function openColumns(setKey, opener){
   const cs = COLSETS[setKey];
   DB.settings[cs.key] = reconcileCols(DB.settings[cs.key], cs.reg);
   renderColsPanel(setKey);
   const ov = document.getElementById(cs.modal);
   if (!ov) return;
-  _colsOpener = document.activeElement;
+  _colsOpener = _dialogOpener(opener);   // the clicked Columns button, Safari does not focus it on a click
   if (_colsKeyTrap) ov.removeEventListener('keydown', _colsKeyTrap);
   _colsKeyTrap = function(e){
     if (e.key === 'Escape'){ e.preventDefault(); closeColumns(setKey); return; }
@@ -10911,7 +10926,7 @@ function closeColumns(setKey){
   if (!ov) return;
   if (_colsKeyTrap){ ov.removeEventListener('keydown', _colsKeyTrap); _colsKeyTrap = null; }
   ov.classList.remove('open');
-  if (_colsOpener && typeof _colsOpener.focus === 'function'){ try { _colsOpener.focus(); } catch (_){} }
+  if (_modalFocusVisible(_colsOpener)) _modalFocusElement(_colsOpener);
   _colsOpener = null;
 }
 function _persistCols(setKey){ saveData(); COLSETS[setKey].rerender(); renderColsPanel(setKey); }
@@ -10934,7 +10949,7 @@ function resetColumns(setKey){
   DB.settings[cs.key] = defaultCols(cs.reg); _persistCols(setKey);
 }
 /* Holdings modal wrappers — keep the existing #stock-cols-modal markup working. */
-function openStockColumns(){ openColumns('stocks'); }
+function openStockColumns(opener){ openColumns('stocks', opener); }
 function closeStockColumns(){ closeColumns('stocks'); }
 function resetStockColumns(){ resetColumns('stocks'); }
 
@@ -11471,9 +11486,9 @@ function toggleRiderRow(policyId){
 /* Opens the Add-rider modal with the triggering policy preselected in the
    Policy dropdown, so expanding a policy's riders and adding one doesn't
    force the user to re-find it in the select. */
-function openRiderForPolicy(policyId){
+function openRiderForPolicy(policyId, opener){
   if (!kjrSafeId(policyId)) { showToast('Invalid entry id', 'error'); return; }
-  openEntityModal('insuranceRiders', undefined, { policyId });
+  openEntityModal('insuranceRiders', undefined, { policyId }, opener);
 }
 
 /* Active policies whose next premium falls between two ISO dates (inclusive),
@@ -14537,7 +14552,7 @@ function _hpStartHistory(){
 }
 
 /* Opens the panel for a stock or a coin. False when the holding is not on the books (it says so) or the markup is missing. */
-function openHoldingPanel(table, id){
+function openHoldingPanel(table, id, opener){
   const overlay = document.getElementById('holding-panel');
   if (!overlay || (table !== 'stocks' && table !== 'crypto') || !kjrSafeId(id)) return false;
   const model = _holdingPanelModel(table, id, _hpNetWorth());
@@ -14550,7 +14565,7 @@ function openHoldingPanel(table, id){
   if (table === 'stocks') _hpStartHistory();
   _hpRender(model);
   overlay.classList.add('open', 'hp-in');
-  openModalFocus(overlay, closeHoldingPanel);
+  openModalFocus(overlay, closeHoldingPanel, opener);
   return true;
 }
 
@@ -14814,7 +14829,7 @@ function _commandPaletteBlocked(){
   return !!document.querySelector('.overlay.open');
 }
 
-function openCommandPalette(){
+function openCommandPalette(opener){
   const overlay = document.getElementById('cmd-palette'), input = document.getElementById('cp-input');
   if (!overlay || !input || _cp || _commandPaletteBlocked()) return false;
   closeShellMenus(false);
@@ -14822,7 +14837,7 @@ function openCommandPalette(){
   input.value = '';
   _paletteRender();
   overlay.classList.add('open');
-  openModalFocus(overlay, closeCommandPalette);
+  openModalFocus(overlay, closeCommandPalette, opener);
   _modalFocusElement(input);   // now, not a frame later, so a fast typist loses no character
   return true;
 }
@@ -15028,7 +15043,7 @@ function installEventDelegation(){
     const id    = btn.getAttribute('data-edit-id');
     if (!ENTITY_SCHEMAS[table]) return;
     if (!kjrSafeId(id)) { showToast('Invalid entry id', 'error'); return; }
-    openEntityModal(table, id);
+    openEntityModal(table, id, undefined, btn);
   });
   // Info tips: Escape hides a shown tip without moving focus; it can show
   // again once the pointer or focus leaves. A tap elsewhere closes a tapped-open tip.
@@ -15136,16 +15151,16 @@ function installEventDelegation(){
     // navigation / theme / currency
     navigate:            (el) => navigate(A(el)[0]),
     navLink:             (el, ev) => navLink(el, ev),
-    openMoreSheet:       (el) => openMoreSheet(A(el)[0]),
+    openMoreSheet:       (el) => openMoreSheet(A(el)[0], el),
     closeMoreSheet:      () => closeMoreSheet(),
     toggleShellMenu:     (el) => toggleShellMenu(A(el)[0]),
-    addMenuPick:         (el) => addMenuPick(A(el)[0]),
+    addMenuPick:         (el) => addMenuPick(A(el)[0], el),
     toggleTheme:         () => toggleTheme(),
     togglePrivacy:       () => togglePrivacy(),
     setThemeChoice:      (el) => setThemeChoice(A(el)[0]),
     setDisplayCcy:       (el) => setDisplayCcy(A(el)[0]),
     // entity modals
-    openEntity:          (el) => { const [a0, a1] = A(el); if (a1 != null && !kjrSafeId(a1)) { showToast('Invalid entry id', 'error'); return; } openEntityModal(a0, a1 == null ? undefined : a1); },
+    openEntity:          (el) => { const [a0, a1] = A(el); if (a1 != null && !kjrSafeId(a1)) { showToast('Invalid entry id', 'error'); return; } openEntityModal(a0, a1 == null ? undefined : a1, undefined, el); },
     closeEntityModal:    () => closeEntityModal(),
     entityModalSave:     () => entityModalSave(),
     entityModalDelete:   () => entityModalDelete(),
@@ -15158,7 +15173,7 @@ function installEventDelegation(){
     manualSync:          () => manualSync(),
     manualPush:          () => manualPush(),
     manualPull:          () => manualPull(),
-    openSyncDetails:     () => openSyncDetails(),
+    openSyncDetails:     (el) => openSyncDetails(el),
     closeSyncDetails:    () => closeSyncDetails(),
     openSyncSettings:     () => openSyncSettings(),
     refreshFx:           () => refreshFx(),
@@ -15185,7 +15200,7 @@ function installEventDelegation(){
     lockVaultNow:           () => lockVaultNow(),
     // insurance riders (register expand/collapse + add)
     toggleRiderRow:      (el) => { const id = A(el)[0]; if (!kjrSafeId(id)) { showToast('Invalid entry id', 'error'); return; } toggleRiderRow(id); },
-    openRiderForPolicy:  (el) => openRiderForPolicy(A(el)[0]),
+    openRiderForPolicy:  (el) => openRiderForPolicy(A(el)[0], el),
     // insurance coverage targets (Settings)
     setCovDeathMult:     (el) => setCoverageTarget('deathMult', kjrSafeNumber(el.value)),
     setCovTpdMult:       (el) => setCoverageTarget('tpdMult', kjrSafeNumber(el.value)),
@@ -15204,11 +15219,11 @@ function installEventDelegation(){
     stocksFilterSector:  (el) => { _stocksFilter.sector = el.value; _stocksPage = 0; renderStocks(); },
     stocksFilterMarket:  (el) => { _stocksFilter.market = el.value; _stocksPage = 0; renderStocks(); },
     // phone list rows, chips and More menus (v2.73)
-    openHolding:         (el) => { const [a0, a1] = A(el); openHoldingDetail(a0, a1); },
+    openHolding:         (el) => { const [a0, a1] = A(el); openHoldingDetail(a0, a1, el); },
     // holding side panel and command palette (Step 8a)
     closeHoldingPanel:   () => closeHoldingPanel(),
     holdingPanelAction:  (el) => holdingPanelAction(A(el)[0]),
-    openCommandPalette:  () => openCommandPalette(),
+    openCommandPalette:  (el) => openCommandPalette(el),
     closeCommandPalette: () => closeCommandPalette(),
     paletteRun:          (el) => runPaletteItem(A(el)[0]),
     paletteInput:        (el) => paletteQuery(el.value),
@@ -15227,16 +15242,16 @@ function installEventDelegation(){
     toggleArrange:       () => toggleArrange(),
     moveDashWidget:     (el) => { const [id, direction] = A(el); moveDashWidget(id, Number(direction)); },
     // columns manager
-    openStockColumns:    () => openStockColumns(),
+    openStockColumns:    (el) => openStockColumns(el),
     closeStockColumns:   () => closeStockColumns(),
     resetStockColumns:   () => resetStockColumns(),
-    openColumns:         (el) => openColumns(A(el)[0]),
+    openColumns:         (el) => openColumns(A(el)[0], el),
     closeColumns:        (el) => closeColumns(A(el)[0]),
     resetColumns:        (el) => resetColumns(A(el)[0]),
     toggleCol:           (el) => { const [a0, a1] = A(el); toggleCol(a0, a1); },
     moveCol:             (el) => { const [a0, a1, a2] = A(el); moveCol(a0, a1, Number(a2)); },
     // setup wizard
-    openSetupWizard:     () => openSetupWizard(),
+    openSetupWizard:     (el) => openSetupWizard(el),
     closeSetupWizard:    () => closeSetupWizard(),
     setupWizardNext:     () => setupWizardNext(),
     setupWizardBack:     () => setupWizardBack(),

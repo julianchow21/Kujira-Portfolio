@@ -3165,7 +3165,7 @@ async function runTests(){
     ['_layoutDesktopNav', 'toggleNavMore', 'openNavMore', 'closeNavMore', '_updateNavMoreActive', 'nav-more', 'nav-host', 'MOBILE_BOTTOM_TABS', '_phase2LabelFor'].forEach(name => assert.strictEqual(appSrc.includes(name), false, name + ' in app.js'));
     // the delegated actions
     const actions = extractFunction('installEventDelegation');
-    ['navLink:', 'toggleShellMenu:', 'addMenuPick:', 'openMoreSheet:       (el) => openMoreSheet(A(el)[0])'].forEach(frag => assert.ok(actions.includes(frag), frag));
+    ['navLink:', 'toggleShellMenu:', 'addMenuPick:', 'openMoreSheet:       (el) => openMoreSheet(A(el)[0], el)'].forEach(frag => assert.ok(actions.includes(frag), frag));
     assert.strictEqual(actions.includes('toggleNavMore'), false);
     assert.ok(actions.includes("document.addEventListener('keydown', shellMenuKeydown);"));
     assert.ok(actions.includes("if (!e.target.closest('.menu-wrap')) closeShellMenus(false);"));
@@ -4157,9 +4157,9 @@ async function runTests(){
     ['openModalFocus', 'closeModalFocus', '_modalFocusable', '_modalFocusVisible'].forEach(name => {
       assert.ok(extractFunction(name), name + ' must remain an app helper');
     });
-    assert.ok(appSrc.includes("openModalFocus(overlay, closeSetupWizard)"));
-    assert.ok(appSrc.includes("openModalFocus(ov);"));
-    assert.ok(appSrc.includes("openModalFocus(_overlay, closeEntityModal)"));
+    assert.ok(appSrc.includes("openModalFocus(overlay, closeSetupWizard, opener)"));
+    assert.ok(appSrc.includes("openModalFocus(ov, undefined, opener);"));
+    assert.ok(appSrc.includes("openModalFocus(_overlay, closeEntityModal, opener)"));
     assert.strictEqual(appSrc.includes('_modalKeyTrap'), false);
     assert.strictEqual(appSrc.includes('_modalOpener'), false);
     assert.ok(appSrc.includes('for="sw-url-input"'));
@@ -4167,6 +4167,108 @@ async function runTests(){
     assert.ok(appSrc.includes('id="pb-palette-search" class="fi fi-sm" placeholder="Search fields..." data-input="pbFilterPalette" aria-label="Search available fields"'));
     assert.ok(appSrc.includes('id="pb-kw" class="cb-drop-zone"'));
     assert.ok(appSrc.includes('aria-label="Filter holdings by symbol or sector"'));
+  });
+
+  /* F1 (Browser QA, v2.89). Safari and Firefox on macOS do not focus a button on a mouse click, so focus sits on the body when a dialog opens.
+     The helpers run here on a small fake DOM: the opener the caller passes is where focus returns, activeElement is only the fallback. */
+  function modalFocusSandbox(){
+    const doc = { activeElement:null };
+    const el = (name, extra) => Object.assign({
+      name, nodeType:1, isConnected:true, hidden:false,
+      getClientRects(){ return this.isConnected ? [{}] : []; },
+      focus(){ doc.activeElement = this; },
+      blur(){ if (doc.activeElement === this) doc.activeElement = doc.body; },
+      matches(){ return false; }, closest(){ return null; }
+    }, extra || {});
+    doc.body = el('body');
+    doc.documentElement = el('html');
+    doc.activeElement = doc.body;
+    const field = el('field');
+    const listeners = [];
+    const overlay = el('overlay', {
+      classList:{ contains: c => c === 'open' },
+      querySelectorAll: () => [field],
+      contains: x => x === field || x === overlay,
+      addEventListener: (type, fn) => listeners.push(fn),
+      removeEventListener: (type, fn) => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); }
+    });
+    const src = ['_dialogOpener', '_modalFocusable', '_modalFocusVisible', '_modalFocusElement', 'openModalFocus', 'closeModalFocus'].map(n => {
+      const f = extractFunction(n); assert.ok(f, n + ' must exist'); return f;
+    }).join('\n') + '\nconst _modalFocusStates = new WeakMap();';
+    const sb = { document:doc, getComputedStyle: () => ({ display:'block', visibility:'visible' }), requestAnimationFrame: fn => fn() };
+    vm.createContext(sb);
+    vm.runInContext(src, sb, { filename:'app.js (modal focus)' });
+    let closes = 0;
+    const close = () => { closes++; sb.closeModalFocus(overlay); };
+    const escape = () => listeners.slice().forEach(fn => fn({ key:'Escape', preventDefault(){}, stopPropagation(){} }));
+    return { sb, doc, el, overlay, field, close, escape, listeners, closes: () => closes };
+  }
+
+  test('openModalFocus - a mouse open in Safari (focus on the body) returns focus to the opener the caller passed, not the body', () => {
+    const { sb, doc, el, overlay, field, close, escape, listeners, closes } = modalFocusSandbox();
+    const opener = el('+ Add stock');
+    assert.strictEqual(doc.activeElement, doc.body);          // Safari left focus on the body at the click
+    sb.openModalFocus(overlay, close, opener);
+    assert.strictEqual(doc.activeElement, field);              // focus moved inside
+    escape();
+    assert.strictEqual(closes(), 1);
+    assert.strictEqual(doc.activeElement, opener);
+    assert.strictEqual(listeners.length, 0);                   // the trap is released
+  });
+
+  test('openModalFocus - with no opener given, or only the body, the focused control is the opener (keyboard opens and the shortcut)', () => {
+    const { sb, doc, el, overlay, close, escape } = modalFocusSandbox();
+    const btn = el('focused button'); btn.focus();
+    sb.openModalFocus(overlay, close);
+    escape();
+    assert.strictEqual(doc.activeElement, btn);
+    btn.focus();
+    sb.openModalFocus(overlay, close, doc.body);
+    escape();
+    assert.strictEqual(doc.activeElement, btn);
+    // an opener that is no longer in the document is not usable either
+    const gone = el('gone', { isConnected:false });
+    btn.focus();
+    sb.openModalFocus(overlay, close, gone);
+    escape();
+    assert.strictEqual(doc.activeElement, btn);
+  });
+
+  test('openModalFocus - a second open while the dialog is open keeps the first opener, and an opener removed before close is not focused', () => {
+    const { sb, doc, el, overlay, field, close, escape } = modalFocusSandbox();
+    const first = el('first'), second = el('second');
+    sb.openModalFocus(overlay, close, first);
+    sb.openModalFocus(overlay, close, second);
+    escape();
+    assert.strictEqual(doc.activeElement, first);
+    sb.openModalFocus(overlay, close, second);
+    second.isConnected = false;                                // a repaint replaced it
+    escape();
+    assert.strictEqual(doc.activeElement, field);              // left where it was, never the removed node
+  });
+
+  test('openModalFocus - every caller passes its opener, and every click action hands it the clicked control', () => {
+    const calls = appSrc.match(/openModalFocus\([^)]*\)/g).filter(c => !c.startsWith('openModalFocus(overlay, closeOnEscape'));
+    assert.strictEqual(calls.length, 6, calls.join(' | '));
+    calls.forEach(c => assert.ok(/, opener\)$/.test(c), c + ' must pass the opener'));
+    const wiring = extractFunction('installEventDelegation');
+    [
+      "openMoreSheet:       (el) => openMoreSheet(A(el)[0], el),",
+      "addMenuPick:         (el) => addMenuPick(A(el)[0], el),",
+      "openEntityModal(a0, a1 == null ? undefined : a1, undefined, el); },",
+      "openSyncDetails:     (el) => openSyncDetails(el),",
+      "openRiderForPolicy:  (el) => openRiderForPolicy(A(el)[0], el),",
+      "openHolding:         (el) => { const [a0, a1] = A(el); openHoldingDetail(a0, a1, el); },",
+      "openCommandPalette:  (el) => openCommandPalette(el),",
+      "openStockColumns:    (el) => openStockColumns(el),",
+      "openColumns:         (el) => openColumns(A(el)[0], el),",
+      "openSetupWizard:     (el) => openSetupWizard(el),",
+      "openEntityModal(table, id, undefined, btn);"
+    ].forEach(line => assert.ok(wiring.includes(line), line));
+    // the + Add menu hands over its own button, never the menu item that hides as the menu closes
+    assert.ok(extractFunction('addMenuPick').includes('openEntityModal(table, undefined, undefined, opener);'));
+    assert.ok(extractFunction('openColumns').includes('_colsOpener = _dialogOpener(opener);'));
+    assert.ok(extractFunction('closeColumns').includes('if (_modalFocusVisible(_colsOpener)) _modalFocusElement(_colsOpener);'));
   });
 
   test('Portfolio sortable headers use native buttons once and restore keyboard focus after render', () => {
@@ -4894,9 +4996,9 @@ async function runTests(){
     assert.deepStrictEqual(calls.map(c => c[0] + ':' + c[1]), Array(7).fill('toast:error'));
     // the rows and the delegated action go through it, nothing else opens a holding
     const actions = extractFunction('installEventDelegation');
-    assert.ok(actions.includes('openHolding:         (el) => { const [a0, a1] = A(el); openHoldingDetail(a0, a1); },'));
+    assert.ok(actions.includes('openHolding:         (el) => { const [a0, a1] = A(el); openHoldingDetail(a0, a1, el); },'));
     assert.ok(extractFunction('_holdingRowHtml').includes('data-click="openHolding"'));
-    assert.ok(extractFunction('openHoldingDetail').includes('openHoldingPanel(table, id)'));   // was openEntityModal(table, id)
+    assert.ok(extractFunction('openHoldingDetail').includes('openHoldingPanel(table, id, opener)'));   // was openEntityModal(table, id)
     assert.strictEqual(extractFunction('openHoldingDetail').includes('openEntityModal'), false);
   });
 
@@ -6883,7 +6985,7 @@ async function runTests(){
     assert.deepStrictEqual(calls, []);
     // the field and the phone icon both reach it through the one delegated action
     const wiring = extractFunction('installEventDelegation');
-    assert.ok(wiring.includes('openCommandPalette:  () => openCommandPalette(),') && wiring.includes('closeCommandPalette: () => closeCommandPalette(),'));
+    assert.ok(wiring.includes('openCommandPalette:  (el) => openCommandPalette(el),') && wiring.includes('closeCommandPalette: () => closeCommandPalette(),'));
   });
 
   test('closeCommandPalette - closes, releases the trap (focus returns to the opener), and a second close does nothing', () => {
@@ -10097,12 +10199,25 @@ async function runTests(){
     assert.ok(section.includes('stale 1 day after its `sourceUpdatedAt`'));
   });
 
-  test('p288 release - this release is v2.88 (26 Oct): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
+  test('F2 (Browser QA, v2.89) - every unprefixed backdrop-filter in index.html has a -webkit- twin with the same value, so Safari 17 and earlier blur too', () => {
+    const rules = indexSrc.match(/[^{}]*\{[^{}]*\}/g) || [];
+    let checked = 0;
+    rules.forEach(rule => {
+      const body = rule.slice(rule.indexOf('{') + 1, -1);
+      const plain = [...body.matchAll(/(?:^|;)\s*backdrop-filter:([^;]+)/g)].map(m => m[1].trim());
+      const webkit = [...body.matchAll(/-webkit-backdrop-filter:([^;]+)/g)].map(m => m[1].trim());
+      plain.forEach(v => { checked++; assert.ok(webkit.includes(v), 'no -webkit- twin for backdrop-filter:' + v + ' in ' + rule.trim().slice(0, 60)); });
+    });
+    assert.ok(checked >= 6, 'expected at least 6 backdrop-filter declarations, saw ' + checked);
+    assert.ok(indexSrc.includes('backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}'), '.overlay carries both');
+  });
+
+  test('p289 release - this release is v2.89 (03 Nov): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
     const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    assert.ok(appSrc.includes("const APP_VERSION = 'v2.88';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.88 (26 Oct)';"));
-    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.88';"));
-    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 26/10/2026 (app v2.88).'));
+    assert.ok(appSrc.includes("const APP_VERSION = 'v2.89';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.89 (03 Nov)';"));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.89';"));
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 03/11/2026 (app v2.89).'));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

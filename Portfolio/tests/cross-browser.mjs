@@ -24,6 +24,7 @@
  *   --out=<dir>                         report and screenshots (default <tmp>/kjr-browser-qa)
  *   --chromium-path=<file>              Chromium binary override (env KJR_CHROMIUM_PATH)
  *   --headed                            show the browser windows
+ *   --self-test                         check the expected-error filter against known engine wording, no browser
  * Env KJR_PLAYWRIGHT=<path to the playwright package> if it is not resolvable.
  *
  * Safety:
@@ -91,7 +92,7 @@ function loadPlaywright() {
   console.error('Playwright not found. Run: npm i -g playwright@1.64.0 (or set KJR_PLAYWRIGHT).');
   process.exit(1);
 }
-const pw = loadPlaywright();
+const pw = args['self-test'] ? null : loadPlaywright();
 
 /* ── seed ──────────────────────────────────────────────────────────────── */
 const seed = JSON.parse(fs.readFileSync(SEED_FILE, 'utf8'));
@@ -134,21 +135,45 @@ async function step(engine, area, pageName, check, fn) {
 function isExternalUrl(u) {
   try { return !!u && /^https?:/.test(u) && !LOCAL_HOSTS.has(new URL(u).hostname); } catch (_) { return false; }
 }
-function attachConsole(page, sink) {
+/* A blocked external load is expected under the network guard, and every engine words it differently:
+   - Chromium: "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT" with the external URL as the location
+   - WebKit: "Failed to preconnect to https://fonts.gstatic.com/" for a preconnect hint, and "Failed to load resource" or
+     "... due to access control checks" for a load
+   - WebKit page errors (F5, the service worker's cache-first fetch fails): "TypeError: Load failed" and a bare
+     external URL, both with no stack
+   A page error counts as expected only when this engine has had a request blocked already, so a real
+   "Load failed" from a localhost fetch with no block behind it still fails the check. */
+const EXTERNAL_IN_TEXT = /https?:\/\/(?!localhost[:/]|127\.0\.0\.1[:/])[^\s'"]+/i;
+const BLOCKED_WORDING = /chart\.js|fonts\.googleapis|fonts\.gstatic|cdn\.jsdelivr|integrity|blocked|preconnect|failed to load|load failed|access control|net::ERR_/i;
+function isExpectedConsoleError(text, locUrl) {
+  return isExternalUrl(locUrl) || (EXTERNAL_IN_TEXT.test(text) && BLOCKED_WORDING.test(text));
+}
+function isExpectedPageError(message, hadBlockedLoad) {
+  const m = String(message || '').trim();
+  if (!hadBlockedLoad) return false;
+  return m === 'TypeError: Load failed' || m === 'Load failed' || (isExternalUrl(m) && !/\s/.test(m));
+}
+function attachConsole(page, sink, engine) {
   page.on('console', msg => {
     if (msg.type() !== 'error') return;
     const loc = msg.location() || {};
     const text = msg.text();
-    // A blocked external load is expected under the network guard. Every engine words it differently.
-    const expected = isExternalUrl(loc.url) || /chart\.js|fonts\.googleapis|cdn\.jsdelivr|integrity|blocked/i.test(text) && /https?:\/\/(?!localhost|127\.0\.0\.1)/.test(text);
-    sink.push({ text: text.slice(0, 300), url: loc.url || '', expected });
+    sink.push({ text: text.slice(0, 300), url: loc.url || '', expected: isExpectedConsoleError(text, loc.url) });
   });
-  page.on('pageerror', err => sink.push({ text: 'pageerror: ' + String(err && err.message || err).slice(0, 300), url: '', expected: false }));
+  page.on('pageerror', err => {
+    const message = String(err && err.message || err);
+    const expected = isExpectedPageError(message, blocked.some(b => b.engine === engine));
+    sink.push({ text: 'pageerror: ' + message.slice(0, 300), url: '', expected });
+  });
 }
 
 /* ── helpers that run in the page ──────────────────────────────────────── */
+/* Always a real load. Going to the app URL with only a new hash is a same-document navigation in Chromium, so the page
+   would keep its old theme and state. A marker on the old document shows when that happened, and a reload follows. */
 async function gotoApp(page, hash) {
+  await page.evaluate(() => { window.__kjrQaOldDocument = true; }).catch(() => {});
   await page.goto(APP_URL + (hash ? '#' + hash : ''), { waitUntil: 'load' });
+  if (await page.evaluate(() => window.__kjrQaOldDocument === true).catch(() => false)) await page.reload({ waitUntil: 'load' });
   await page.waitForSelector('#page-dashboard', { state: 'attached', timeout: 15000 });
   await page.waitForTimeout(600); // whenIdle engines and the first renderAll
 }
@@ -215,6 +240,18 @@ async function markOpener(page, sel) {
   }, sel);
 }
 
+/* Safari's mouse click, simulated in any engine: blur whatever holds focus, then dispatch the click without
+   moving focus, so the opener is not focused when its handler runs. macOS WebKit and Firefox do exactly this
+   on a real click of a button. */
+async function safariClick(page, sel) {
+  await page.evaluate(s => {
+    const o = document.querySelector(s);
+    if (!o) throw new Error('missing ' + s);
+    if (document.activeElement && document.activeElement !== document.body && typeof document.activeElement.blur === 'function') document.activeElement.blur();
+    o.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+  }, sel);
+}
+
 /* ── the pass for one engine ───────────────────────────────────────────── */
 async function runEngine(name, proxyPort) {
   const state = engineState[name] = { launched: false };
@@ -260,7 +297,7 @@ async function runEngine(name, proxyPort) {
 
   const page = await context.newPage();
   const consoleSink = [];
-  attachConsole(page, consoleSink);
+  attachConsole(page, consoleSink, name);
   const takeErrors = () => consoleSink.splice(0, consoleSink.length);
 
   /* 1. Boot, and what renders with no backend */
@@ -344,18 +381,40 @@ async function runEngine(name, proxyPort) {
     { id: 'holding panel (mouse)', tab: 'stocks', opener: '#page-stocks table.holdings .sym-btn[data-click="openHolding"]', dialog: '#holding-panel', how: 'mouse',
       isOpen: () => document.getElementById('holding-panel').classList.contains('open') },
     { id: 'command palette (Ctrl+K)', tab: 'dashboard', opener: '#add-btn', dialog: '#cmd-palette', how: 'shortcut',
-      isOpen: () => document.getElementById('cmd-palette').classList.contains('open') }
+      isOpen: () => document.getElementById('cmd-palette').classList.contains('open') },
+    // F1: Safari-style clicks, the opener never holds focus at the click
+    { id: 'entity modal (Safari click)', tab: 'stocks', opener: '#page-stocks button[data-click="openEntity"][data-a0="stocks"]', dialog: '#entity-modal', how: 'safari',
+      isOpen: () => document.getElementById('entity-modal').classList.contains('open') },
+    { id: '+ Add menu, Stock (Safari click)', tab: 'stocks', opener: '#add-btn', dialog: '#entity-modal', how: 'safari',
+      then: '#add-menu [data-click="addMenuPick"][data-a0="stocks"]',
+      isOpen: () => document.getElementById('entity-modal').classList.contains('open') },
+    { id: 'sync details (Safari click)', tab: 'dashboard', opener: '.sidebar [data-click="openSyncDetails"]', dialog: '#sync-details-modal', how: 'safari',
+      isOpen: () => document.getElementById('sync-details-modal').classList.contains('open') },
+    { id: 'holding panel (Safari click)', tab: 'stocks', opener: '#page-stocks table.holdings .sym-btn[data-click="openHolding"]', dialog: '#holding-panel', how: 'safari',
+      isOpen: () => document.getElementById('holding-panel').classList.contains('open') },
+    { id: 'command palette (Safari click)', tab: 'dashboard', opener: '#cp-trigger', dialog: '#cmd-palette', how: 'safari',
+      isOpen: () => document.getElementById('cmd-palette').classList.contains('open') },
+    { id: 'stock columns (Safari click)', tab: 'stocks', opener: '#btn-stock-cols', dialog: '#stock-cols-modal', how: 'safari',
+      isOpen: () => document.getElementById('stock-cols-modal').classList.contains('open') },
+    { id: 'setup wizard (Safari click)', tab: 'settings', opener: '#page-settings [data-click="openSetupWizard"]', dialog: '#setup-wizard', how: 'safari',
+      isOpen: () => document.getElementById('setup-wizard').classList.contains('open') }
   ];
   for (const d of dialogs) {
+    takeErrors(); // errors from an earlier check never land in this one
     await step(name, 'dialogs', d.tab, d.id, async () => {
       await gotoApp(page, d.tab);
       await page.waitForSelector(d.opener, { state: 'visible', timeout: 5000 });
+      takeErrors(); // load-time errors belong to the tabs checks, this check counts only what the dialog does
       await markOpener(page, d.opener);
       const r = await dialogRoundTrip(page, {
         opener: d.opener, dialog: d.dialog, isOpen: d.isOpen,
         open: async () => {
           if (d.how === 'keyboard') { await page.focus(d.opener); await page.keyboard.press('Enter'); }
           else if (d.how === 'shortcut') { await page.focus(d.opener); await page.keyboard.press('Control+KeyK'); }
+          else if (d.how === 'safari') {
+            await safariClick(page, d.opener);
+            if (d.then) { await page.waitForSelector(d.then, { state: 'visible', timeout: 5000 }); await safariClick(page, d.then); }
+          }
           else await page.click(d.opener);
         }
       });
@@ -368,25 +427,33 @@ async function runEngine(name, proxyPort) {
         record(name, 'dialogs', d.tab, d.id + ': focus returns to the opener', r.focusReturned, r, r.focusReturned ? '' : shot);
       }
       if (d.how === 'mouse') results.push({ engine: name, area: 'dialogs-info', page: d.tab, check: d.id + ': opener held focus at click', ok: true, detail: r.openerFocusedBeforeOpen });
+      // The simulation only proves F1 is fixed when the opener really was unfocused at the click
+      if (d.how === 'safari') record(name, 'dialogs', d.tab, d.id + ': opener was not focused at the click', !r.openerFocusedBeforeOpen, r);
       const errs = takeErrors().filter(e => !e.expected);
       record(name, 'dialogs', d.tab, d.id + ': no console errors', errs.length === 0, errs);
     });
   }
-  // Phone More sheet from the bottom bar
-  await step(name, 'dialogs', 'phone', 'More sheet', async () => {
-    await page.setViewportSize(VIEWPORTS.phone);
-    await gotoApp(page, 'dashboard');
-    const opener = '.bottom-tab-bar [data-click="openMoreSheet"]';
-    const sel = (await page.$(opener)) ? opener : '.bottom-tab-bar button:last-of-type';
-    await markOpener(page, sel);
-    const r = await dialogRoundTrip(page, { opener: sel, dialog: '#more-sheet', isOpen: () => document.getElementById('more-sheet').classList.contains('open'), open: () => page.click(sel) });
-    record(name, 'dialogs', 'phone', 'More sheet: opens', r.opened, r);
-    if (r.opened) {
-      record(name, 'dialogs', 'phone', 'More sheet: Escape closes', r.closedByEscape, r);
-      record(name, 'dialogs', 'phone', 'More sheet: focus returns to the opener', r.focusReturned, r);
-    }
-    await page.setViewportSize(VIEWPORTS.desktop);
-  });
+  // Phone More sheet from the bottom bar, by a real click and by a Safari-style click
+  for (const how of ['mouse', 'safari']) {
+    const label = how === 'safari' ? 'More sheet (Safari click)' : 'More sheet';
+    takeErrors();
+    await step(name, 'dialogs', 'phone', label, async () => {
+      await page.setViewportSize(VIEWPORTS.phone);
+      await gotoApp(page, 'dashboard');
+      takeErrors();
+      const opener = '.bottom-tab-bar [data-click="openMoreSheet"]';
+      const sel = (await page.$(opener)) ? opener : '.bottom-tab-bar button:last-of-type';
+      await markOpener(page, sel);
+      const r = await dialogRoundTrip(page, { opener: sel, dialog: '#more-sheet', isOpen: () => document.getElementById('more-sheet').classList.contains('open'), open: () => how === 'safari' ? safariClick(page, sel) : page.click(sel) });
+      record(name, 'dialogs', 'phone', label + ': opens', r.opened, r);
+      if (r.opened) {
+        record(name, 'dialogs', 'phone', label + ': Escape closes', r.closedByEscape, r);
+        record(name, 'dialogs', 'phone', label + ': focus returns to the opener', r.focusReturned, r);
+      }
+      if (how === 'safari') record(name, 'dialogs', 'phone', label + ': opener was not focused at the click', !r.openerFocusedBeforeOpen, r);
+    });
+  }
+  await page.setViewportSize(VIEWPORTS.desktop);
 
   /* 5. Form validation in the Add stock modal */
   await step(name, 'forms', 'stocks', 'Add stock validation', async () => {
@@ -460,11 +527,13 @@ async function runEngine(name, proxyPort) {
 
   /* 7. CSS features that differ between engines */
   await step(name, 'css', 'all', 'feature probe', async () => {
+    await setTheme(page, 'dark');
     await gotoApp(page, 'stocks');
     state.css = await page.evaluate(() => {
       const sup = s => { try { return CSS.supports(s); } catch (_) { return false; } };
       const cs = (sel, prop) => { const e = document.querySelector(sel); return e ? getComputedStyle(e).getPropertyValue(prop) : 'missing'; };
       return {
+        'theme is dark': document.documentElement.classList.contains('dark'),
         'supports :has()': sup('selector(:has(a))'),
         'supports backdrop-filter': sup('backdrop-filter: blur(1px)'),
         'supports -webkit-backdrop-filter': sup('-webkit-backdrop-filter: blur(1px)'),
@@ -580,8 +649,34 @@ function compare() {
   return diffs;
 }
 
+/* ── self-test: the expected-error filter, against the wording each engine really used ── */
+function selfTest() {
+  const cases = [
+    ['console', 'Failed to preconnect to https://fonts.gstatic.com/', '', true],                       // WebKit, Mac run
+    ['console', 'Failed to preconnect to https://cdn.jsdelivr.net/', '', true],
+    ['console', 'Failed to load resource: net::ERR_BLOCKED_BY_CLIENT', 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js', true],
+    ['console', 'Failed to load resource: The network connection was lost.', 'https://fonts.googleapis.com/css2?family=Manrope', true],
+    ['console', 'Failed to preconnect to http://localhost:3807/', '', false],
+    ['console', 'Failed to load resource: the server responded with a status of 404 (Not Found)', 'http://localhost:3807/Portfolio/Worker/app.js', false],
+    ['console', 'TypeError: undefined is not an object (evaluating \'DB.stocks\')', 'http://localhost:3807/Portfolio/Worker/app.js', false],
+    ['pageerror', 'TypeError: Load failed', true, true],                                                 // F5, WebKit
+    ['pageerror', 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js', true, true],      // F5, WebKit
+    ['pageerror', 'TypeError: Load failed', false, false],                                               // nothing was blocked, so it is real
+    ['pageerror', 'http://localhost:3807/Portfolio/Worker/app.js', true, false],
+    ['pageerror', 'ReferenceError: Chart is not defined', true, false]
+  ];
+  let bad = 0;
+  for (const [kind, text, extra, want] of cases) {
+    const got = kind === 'console' ? isExpectedConsoleError(text, extra) : isExpectedPageError(text, extra);
+    if (got !== want) { bad++; console.log(`  FAIL ${kind} ${JSON.stringify(text)}: expected=${got}, want ${want}`); }
+  }
+  console.log(`Filter self-test: ${cases.length - bad} of ${cases.length} passed.`);
+  process.exit(bad ? 1 : 0);
+}
+
 /* ── main ──────────────────────────────────────────────────────────────── */
 (async () => {
+  if (args['self-test']) return selfTest();
   try {
     const res = await fetch(APP_URL);
     if (!res.ok) throw new Error('HTTP ' + res.status);
