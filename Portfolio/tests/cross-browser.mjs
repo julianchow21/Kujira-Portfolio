@@ -139,19 +139,26 @@ function isExternalUrl(u) {
    - Chromium: "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT" with the external URL as the location
    - WebKit: "Failed to preconnect to https://fonts.gstatic.com/" for a preconnect hint, and "Failed to load resource" or
      "... due to access control checks" for a load
-   - WebKit page errors (F5, the service worker's cache-first fetch fails): "TypeError: Load failed" and a bare
-     external URL, both with no stack
+   - WebKit page errors (F5, the service worker's cache-first fetch fails): "TypeError: Load failed" and the external
+     URL on its own, both with no stack. Playwright builds a WebKit page error from a console error by splitting the
+     text at its first colon and keeping what follows the next two characters (splitErrorMessage in playwright-core,
+     checked in 1.64.0), so "https://cdn.jsdelivr.net/x.js." reaches the script as "/cdn.jsdelivr.net/x.js." with the
+     scheme and one slash gone. Mac run, WebKit 27.2, 03/11/2026:
+     "/cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js."
    A page error counts as expected only when this engine has had a request blocked already, so a real
-   "Load failed" from a localhost fetch with no block behind it still fails the check. */
+   "Load failed" from a localhost fetch with no block behind it still fails the check. The scheme-less form must also
+   be a dotted host with a path, so an app-origin form ("/localhost:3807/..." or a bare "/sw.js") never matches. */
 const EXTERNAL_IN_TEXT = /https?:\/\/(?!localhost[:/]|127\.0\.0\.1[:/])[^\s'"]+/i;
 const BLOCKED_WORDING = /chart\.js|fonts\.googleapis|fonts\.gstatic|cdn\.jsdelivr|integrity|blocked|preconnect|failed to load|load failed|access control|net::ERR_/i;
+const SCHEMELESS_URL = /^\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?::\d+)?\/\S*$/i;
+function restoreScheme(m) { return SCHEMELESS_URL.test(m) ? 'https:/' + m : ''; }
 function isExpectedConsoleError(text, locUrl) {
   return isExternalUrl(locUrl) || (EXTERNAL_IN_TEXT.test(text) && BLOCKED_WORDING.test(text));
 }
 function isExpectedPageError(message, hadBlockedLoad) {
   const m = String(message || '').trim();
   if (!hadBlockedLoad) return false;
-  return m === 'TypeError: Load failed' || m === 'Load failed' || (isExternalUrl(m) && !/\s/.test(m));
+  return m === 'TypeError: Load failed' || m === 'Load failed' || (isExternalUrl(m) && !/\s/.test(m)) || isExternalUrl(restoreScheme(m));
 }
 function attachConsole(page, sink, engine) {
   page.on('console', msg => {
@@ -661,8 +668,13 @@ function selfTest() {
     ['console', 'TypeError: undefined is not an object (evaluating \'DB.stocks\')', 'http://localhost:3807/Portfolio/Worker/app.js', false],
     ['pageerror', 'TypeError: Load failed', true, true],                                                 // F5, WebKit
     ['pageerror', 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js', true, true],      // F5, WebKit
+    ['pageerror', '/cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js.', true, true],            // F5, WebKit 27.2 on the Mac, as Playwright 1.64.0 delivers it
+    ['pageerror', '/cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js.', false, false],          // nothing was blocked, so it is real
     ['pageerror', 'TypeError: Load failed', false, false],                                               // nothing was blocked, so it is real
     ['pageerror', 'http://localhost:3807/Portfolio/Worker/app.js', true, false],
+    ['pageerror', '/localhost:3807/Portfolio/Worker/app.js.', true, false],                              // app origin in the same scheme-less shape
+    ['pageerror', '/127.0.0.1:3807/Portfolio/Worker/app.js.', true, false],
+    ['pageerror', '/sw.js', true, false],                                                                // a file name is not a host
     ['pageerror', 'ReferenceError: Chart is not defined', true, false]
   ];
   let bad = 0;
