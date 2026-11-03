@@ -20,12 +20,32 @@
  *
  * Options:
  *   --engines=chromium,webkit,firefox   engines to run, in order (default all three)
- *   --base=http://localhost:3807        dev server origin, must be localhost or 127.0.0.1
+ *   --base=http://localhost:3807        dev server origin for the main checks, must be localhost or 127.0.0.1
  *   --out=<dir>                         report and screenshots (default <tmp>/kjr-browser-qa)
  *   --chromium-path=<file>              Chromium binary override (env KJR_CHROMIUM_PATH)
  *   --headed                            show the browser windows
- *   --self-test                         check the expected-error filter against known engine wording, no browser
+ *   --self-test                         no browser: check the expected-error filter against known engine wording,
+ *                                       the throwaway server's path guard and the Firefox home rule
  * Env KJR_PLAYWRIGHT=<path to the playwright package> if it is not resolvable.
+ *
+ * Offline check (service worker), the server really goes away:
+ * - The service worker checks do not use --base. The script starts its own static server (Node http, 127.0.0.1
+ *   only, a free port, the repo root, read-only). The worker installs from that origin, then the script closes
+ *   the server, destroys its open connections and reloads, so the worker is the only thing left that can answer.
+ *   The check fails if the server still answers after the close.
+ * - context.setOffline(true) is not used. In Firefox it makes the reload throw NS_ERROR_OFFLINE before the
+ *   worker is asked (F6 in Docs/Browser QA.md). The real shutdown works the same way in all three engines, so
+ *   there is one code path.
+ * - The server answers GET and HEAD only. It refuses path traversal, dot paths (.git, .env), symlinks that
+ *   leave the root and files that are not web types (the tree can hold a git-ignored .xlsx). It is closed on
+ *   every way out of the script.
+ *
+ * Firefox on macOS:
+ * - Firefox only starts there when CFFIXED_USER_HOME names an empty writable folder. With the real home it
+ *   prints "Could not find profile folder." and exits. When the engine is Firefox, the platform is darwin and
+ *   CFFIXED_USER_HOME is unset, the script makes an empty temp folder, passes it in the launch env (merged with
+ *   process.env) and removes it at the end. A plain rerun needs no setup. A CFFIXED_USER_HOME you set yourself
+ *   is used as it is and never removed.
  *
  * Safety:
  * - Every request to a host other than localhost or 127.0.0.1 is aborted by a
@@ -37,13 +57,14 @@
  *   the app, and they are refused all the same.
  * - Each engine gets a fresh context seeded only from the QA seed fixture
  *   through localStorage. No sync URL, no credentials, no NAS mode, ever.
- *   The run aborts if either appears in storage.
+ *   The run aborts if either appears in storage, on the --base origin or on
+ *   the throwaway server's origin.
  * - Exit code 0 when every engine that launched passed every check, 1 when a
  *   check failed or an engine could not launch, 2 on a safety violation.
  */
 
 import { createRequire } from 'node:module';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -51,6 +72,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(HERE, '..', '..'); // the folder the throwaway server serves
 const SEED_FILE = path.join(HERE, 'fixtures', 'QA Seed v1 (05 Sep).json');
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
 const ALL_ENGINES = ['chromium', 'webkit', 'firefox'];
@@ -97,6 +119,149 @@ const pw = args['self-test'] ? null : loadPlaywright();
 /* ── seed ──────────────────────────────────────────────────────────────── */
 const seed = JSON.parse(fs.readFileSync(SEED_FILE, 'utf8'));
 const { _priceCache: seedPrices, ...seedDb } = seed;
+
+/* ── exit paths ────────────────────────────────────────────────────────── */
+/* The throwaway server and the Firefox temp home put themselves away through this set. Each function is
+   synchronous and runs once, on every way out of the script: the end of main, process.exit (the safety abort too),
+   an uncaught error, Ctrl-C and kill. Only SIGKILL cannot be caught. */
+const cleanups = new Set();
+function runCleanups() {
+  for (const fn of [...cleanups]) { cleanups.delete(fn); try { fn(); } catch (_) {} }
+}
+process.on('exit', runCleanups);
+for (const [sig, code] of [['SIGINT', 130], ['SIGHUP', 129], ['SIGTERM', 143]]) process.on(sig, () => process.exit(code));
+
+/* ── throwaway static server, for the service worker checks ───────────── */
+/* Serves the repo root read-only on 127.0.0.1 and a free port, so the offline check can take the server away for
+   real. GET and HEAD only. A target is refused when it is malformed (400), leaves the root, names a dot path such
+   as .git or .env, or follows a symlink out of the root (403), or is not there or not a web file type (404). The
+   type list matters because the tree can hold personal files that git ignores (an .xlsx sits in Portfolio/Docs). */
+const STATIC_TYPES = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+  '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2'
+};
+function isInside(root, p) { return p === root || p.startsWith(root + path.sep); }
+/* `root` must already be a real path. The decoded path is split on "/" (so an encoded slash is a separator, not part
+   of a name), and a segment that starts with a dot is refused outright. The resolved path and its real path are
+   then checked against the root with a separator on the end, so a sibling folder that shares the root's name as a
+   prefix never matches. */
+function resolveStaticTarget(root, target) {
+  const no = (status, why) => ({ status, why });
+  if (typeof target !== 'string' || target[0] !== '/') return no(400, 'not an absolute path');
+  let decoded;
+  try { decoded = decodeURIComponent(target.split(/[?#]/, 1)[0]); } catch (_) { return no(400, 'bad percent-encoding'); }
+  if (/[\0\\]/.test(decoded)) return no(400, 'NUL or backslash in the path');
+  const parts = decoded.split('/').filter(Boolean);
+  if (parts.some(p => p[0] === '.')) return no(403, 'dot path');
+  try {
+    const wanted = path.resolve(root, ...parts);
+    if (!isInside(root, wanted)) return no(403, 'outside the root');
+    let real = fs.realpathSync(wanted);
+    if (!isInside(root, real)) return no(403, 'symlink leaves the root');
+    if (fs.statSync(real).isDirectory()) {
+      if (parts.length && !decoded.endsWith('/')) return no(404, 'a folder needs a trailing slash');
+      real = fs.realpathSync(path.join(real, 'index.html'));
+      if (!isInside(root, real)) return no(403, 'symlink leaves the root');
+    }
+    const st = fs.statSync(real);
+    const type = STATIC_TYPES[path.extname(real).toLowerCase()];
+    if (!st.isFile() || !type) return no(404, 'not a served file');
+    return { status: 200, file: real, size: st.size, type };
+  } catch (_) { return no(404, 'not found'); }
+}
+/* Resolves to { port, origin, close }. close() is idempotent: it stops listening, destroys every open connection (a
+   kept-alive socket must not answer for a server that is meant to be gone) and resolves once the server has closed.
+   The server also registers with the exit paths, so it is closed however the script ends. */
+function startStaticServer(root) {
+  const realRoot = fs.realpathSync(root);
+  const sockets = new Set();
+  const server = http.createServer((req, res) => {
+    const head = { 'Cache-Control': 'public, max-age=0', 'X-Content-Type-Options': 'nosniff' };
+    if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...head, Allow: 'GET, HEAD' }); return res.end(); }
+    const r = resolveStaticTarget(realRoot, req.url);
+    if (r.status !== 200) {
+      const body = r.why + '\n';
+      res.writeHead(r.status, { ...head, 'Content-Type': 'text/plain; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
+      return res.end(body);
+    }
+    res.writeHead(200, { ...head, 'Content-Type': r.type, 'Content-Length': r.size });
+    if (req.method === 'HEAD') return res.end();
+    const stream = fs.createReadStream(r.file);
+    stream.on('error', () => res.destroy());
+    res.on('close', () => stream.destroy());
+    stream.pipe(res);
+  });
+  server.on('connection', s => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
+  const closeNow = () => {
+    try { server.close(); } catch (_) {}
+    if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+    for (const s of sockets) s.destroy();
+  };
+  let closing = null;
+  const close = () => {
+    cleanups.delete(closeNow);
+    if (!closing) closing = new Promise(resolve => {
+      const timer = setTimeout(resolve, 3000); // a close that never finishes must not hang the run
+      timer.unref();
+      server.once('close', () => { clearTimeout(timer); resolve(); });
+      closeNow();
+    });
+    return closing;
+  };
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      server.on('error', e => console.log(`  throwaway server error: ${e.message}`));
+      cleanups.add(closeNow);
+      const { port } = server.address();
+      resolve({ port, origin: 'http://127.0.0.1:' + port, close });
+    });
+  });
+}
+/* One plain GET on a connection of its own, so a closed server shows up as a refused connection and not as a reused
+   socket. Resolves to 'HTTP 200' and the like, or 'down (ECONNREFUSED)'. It never rejects. */
+function probeUrl(url, timeoutMs = 3000) {
+  return new Promise(resolve => {
+    const req = http.get(url, { agent: false }, res => { res.resume(); res.on('end', () => resolve('HTTP ' + res.statusCode)); });
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('timeout')));
+    req.on('error', e => resolve('down (' + (e.code || e.message) + ')'));
+  });
+}
+
+/* ── Firefox home on macOS ─────────────────────────────────────────────── */
+/* Firefox on macOS starts only when CFFIXED_USER_HOME names an empty writable folder (with the real home it prints
+   "Could not find profile folder." and exits). When the caller has not set the variable (an empty value counts as
+   unset), the Firefox pass gets a fresh empty folder through the launch env, merged with the environment so PATH
+   and the rest still reach the browser. A value the caller set is used as it is and never touched.
+   remove() needs one extra step on macOS. Firefox makes Library, Downloads and Documents in the pretend home, and
+   macOS gives those standard folders a "deny delete" ACL, so a plain rm stops with "Permission denied" (rmSync:
+   ENOTEMPTY) and leaves the folders behind. Stripping the ACLs first fixes it. remove() returns true when the folder
+   is gone. On false it stays registered, so the exit paths try once more. */
+function needsFirefoxHome(engine, platform = process.platform, env = process.env) {
+  return engine === 'firefox' && platform === 'darwin' && !env.CFFIXED_USER_HOME;
+}
+function makeFirefoxHome(engine, platform = process.platform, env = process.env) {
+  if (!needsFirefoxHome(engine, platform, env)) return null;
+  let dir;
+  try { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kjr-firefox-home-')); } catch (e) {
+    console.log(`[${engine}] could not make a temp home (${e.message}), launching without one`);
+    return null;
+  }
+  const remove = () => {
+    try {
+      if (platform === 'darwin') { try { execFileSync('chmod', ['-R', '-N', dir], { stdio: 'ignore' }); } catch (_) {} }
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    } catch (_) { return false; }
+    cleanups.delete(remove);
+    return true;
+  };
+  cleanups.add(remove);
+  return { dir, env: { ...env, CFFIXED_USER_HOME: dir }, remove };
+}
 
 /* ── network guard: black-hole proxy plus a route abort ────────────────── */
 const blocked = []; // { engine, via, url }
@@ -176,10 +341,11 @@ function attachConsole(page, sink, engine) {
 
 /* ── helpers that run in the page ──────────────────────────────────────── */
 /* Always a real load. Going to the app URL with only a new hash is a same-document navigation in Chromium, so the page
-   would keep its old theme and state. A marker on the old document shows when that happened, and a reload follows. */
-async function gotoApp(page, hash) {
+   would keep its old theme and state. A marker on the old document shows when that happened, and a reload follows.
+   `url` is the app URL, --base unless the caller (the service worker checks) brings its own origin. */
+async function gotoApp(page, hash, url = APP_URL) {
   await page.evaluate(() => { window.__kjrQaOldDocument = true; }).catch(() => {});
-  await page.goto(APP_URL + (hash ? '#' + hash : ''), { waitUntil: 'load' });
+  await page.goto(url + (hash ? '#' + hash : ''), { waitUntil: 'load' });
   if (await page.evaluate(() => window.__kjrQaOldDocument === true).catch(() => false)) await page.reload({ waitUntil: 'load' });
   await page.waitForSelector('#page-dashboard', { state: 'attached', timeout: 15000 });
   await page.waitForTimeout(600); // whenIdle engines and the first renderAll
@@ -187,6 +353,11 @@ async function gotoApp(page, hash) {
 async function setTheme(page, theme) {
   await page.evaluate(([k, t]) => localStorage.setItem(k, t), [LK.theme, theme]);
 }
+/* The safety read is per origin, so it runs once on the --base origin and once on the service worker origin. */
+function storageSafety(page) {
+  return page.evaluate(lk => ({ syncUrl: localStorage.getItem(lk.syncUrl), backend: localStorage.getItem(lk.backend) }), LK).catch(() => ({}));
+}
+const unsafeStorage = s => !!(s && (s.syncUrl || s.backend === 'nas'));
 async function activeTab(page) {
   return page.evaluate(() => { const a = document.querySelector('.page.active'); return a ? a.id.replace(/^page-/, '') : null; });
 }
@@ -260,7 +431,7 @@ async function safariClick(page, sel) {
 }
 
 /* ── the pass for one engine ───────────────────────────────────────────── */
-async function runEngine(name, proxyPort) {
+async function runEngine(name, proxyPort, ffHome) {
   const state = engineState[name] = { launched: false };
   proxyEngine = name;
   const launchOpts = {
@@ -268,6 +439,7 @@ async function runEngine(name, proxyPort) {
     proxy: { server: 'http://127.0.0.1:' + proxyPort, bypass: 'localhost,127.0.0.1' }
   };
   if (name === 'chromium' && CHROMIUM_PATH) launchOpts.executablePath = CHROMIUM_PATH;
+  if (ffHome) { launchOpts.env = ffHome.env; state.tempHome = true; } // Firefox on macOS, see makeFirefoxHome
   let browser;
   try { browser = await pw[name].launch(launchOpts); } catch (e) {
     state.error = String(e && e.message || e).split('\n').slice(0, 3).join(' ');
@@ -588,9 +760,18 @@ async function runEngine(name, proxyPort) {
     takeErrors();
   });
 
-  /* 8. Service worker registration and an offline reload */
-  await step(name, 'sw', 'dashboard', 'service worker and offline reload', async () => {
-    await gotoApp(page, 'dashboard');
+  /* 8. Service worker, then an offline reload with the server really gone. The worker installs from a throwaway
+        server of the script's own, the script closes that server and the page reloads, so only the worker can
+        answer. context.setOffline(true) is not used, because Firefox throws NS_ERROR_OFFLINE on the reload before
+        the worker is asked (F6). The same path runs in all three engines. The page leaves the --base origin here,
+        so that origin's storage is read for the safety check first. */
+  const baseSafety = await storageSafety(page);
+  let swSafety = {};
+  const swChecks = async site => {
+    const swUrl = site.origin + '/Portfolio/';
+    const served = await probeUrl(swUrl);
+    if (served !== 'HTTP 200') throw new Error(`the throwaway server gave ${served} for ${swUrl}`);
+    await gotoApp(page, 'dashboard', swUrl);
     const reg = await page.evaluate(() => Promise.race([
       navigator.serviceWorker ? navigator.serviceWorker.ready.then(r => ({ active: !!r.active, scope: r.scope })) : Promise.resolve({ active: false, scope: 'no serviceWorker API' }),
       new Promise(r => setTimeout(() => r({ active: false, scope: 'timeout' }), 10000))
@@ -606,7 +787,11 @@ async function runEngine(name, proxyPort) {
     record(name, 'sw', 'dashboard', 'page is controlled after reload', ctl.controlled, { caches: ctl.caches, entries: ctl.entries.length });
     const online = await page.evaluate(() => (document.querySelector('#page-dashboard .dash-hero') || {}).innerText || '');
     takeErrors();
-    await context.setOffline(true);
+    // The server goes away for real, open connections included. The probe then proves nothing answers, and the
+    // three offline checks below cannot pass unless it did.
+    await site.close();
+    const gone = await probeUrl(swUrl);
+    const serverDown = gone.startsWith('down');
     let offline = { ok: false };
     try {
       await page.reload({ waitUntil: 'load', timeout: 15000 });
@@ -620,17 +805,21 @@ async function runEngine(name, proxyPort) {
     } catch (e) { offline.error = String(e.message || e).split('\n')[0]; }
     const shot = path.join(shotDir, 'offline-reload.png');
     await page.screenshot({ path: shot }).catch(() => {});
-    record(name, 'sw', 'dashboard', 'offline reload renders the dashboard from cache', offline.ok && offline.navCount === TABS.length, offline, offline.ok ? '' : shot);
-    record(name, 'sw', 'dashboard', 'offline figures match online', offline.ok && offline.hero.split('\n').slice(0, 4).join() === online.split('\n').slice(0, 4).join(), { online: online.slice(0, 120), offline: (offline.hero || '').slice(0, 120) });
+    const rendered = serverDown && offline.ok && offline.navCount === TABS.length;
+    record(name, 'sw', 'dashboard', 'offline reload renders the dashboard from cache', rendered, { ...offline, server: gone }, rendered ? '' : shot);
+    record(name, 'sw', 'dashboard', 'offline figures match online', serverDown && offline.ok && offline.hero.split('\n').slice(0, 4).join() === online.split('\n').slice(0, 4).join(), { online: online.slice(0, 120), offline: (offline.hero || '').slice(0, 120), server: gone });
     const errs = takeErrors().filter(e => !e.expected);
-    record(name, 'sw', 'dashboard', 'no console errors offline', errs.length === 0, errs);
-    await context.setOffline(false);
+    record(name, 'sw', 'dashboard', 'no console errors offline', serverDown && errs.length === 0, serverDown ? errs : { server: gone, errs });
+  };
+  await step(name, 'sw', 'dashboard', 'service worker and offline reload', async () => {
+    const site = await startStaticServer(REPO_ROOT);
+    // finally: the server is closed and the worker origin's storage is read even when a check threw
+    try { await swChecks(site); } finally { await site.close(); swSafety = await storageSafety(page); }
   });
 
-  /* 9. Safety: nothing switched the backend or stored a sync URL */
-  const safety = await page.evaluate(lk => ({ syncUrl: localStorage.getItem(lk.syncUrl), backend: localStorage.getItem(lk.backend) }), LK).catch(() => ({}));
-  if (safety.syncUrl || safety.backend === 'nas') {
-    console.error(`[${name}] SAFETY: a sync URL or NAS mode appeared in storage, aborting.`, safety);
+  /* 9. Safety: nothing switched the backend or stored a sync URL, on the --base origin or on the worker's */
+  if (unsafeStorage(baseSafety) || unsafeStorage(swSafety)) {
+    console.error(`[${name}] SAFETY: a sync URL or NAS mode appeared in storage, aborting.`, { base: baseSafety, serviceWorkerOrigin: swSafety });
     await browser.close();
     process.exit(2);
   }
@@ -656,8 +845,9 @@ function compare() {
   return diffs;
 }
 
-/* ── self-test: the expected-error filter, against the wording each engine really used ── */
-function selfTest() {
+/* ── self-test, no browser ─────────────────────────────────────────────── */
+/* 1. The expected-error filter, against the wording each engine really used. */
+function filterCases(check) {
   const cases = [
     ['console', 'Failed to preconnect to https://fonts.gstatic.com/', '', true],                       // WebKit, Mac run
     ['console', 'Failed to preconnect to https://cdn.jsdelivr.net/', '', true],
@@ -677,12 +867,155 @@ function selfTest() {
     ['pageerror', '/sw.js', true, false],                                                                // a file name is not a host
     ['pageerror', 'ReferenceError: Chart is not defined', true, false]
   ];
-  let bad = 0;
   for (const [kind, text, extra, want] of cases) {
     const got = kind === 'console' ? isExpectedConsoleError(text, extra) : isExpectedPageError(text, extra);
-    if (got !== want) { bad++; console.log(`  FAIL ${kind} ${JSON.stringify(text)}: expected=${got}, want ${want}`); }
+    check('Filter', kind + ' ' + JSON.stringify(text), got, want);
   }
-  console.log(`Filter self-test: ${cases.length - bad} of ${cases.length} passed.`);
+}
+
+/* 2. The throwaway server's path guard, then real requests to a server on a fixture tree, then its shutdown. The
+      tree has a file outside the root, a sibling folder that shares the root's name as a prefix, dot paths, symlinks
+      in and out, and a git-ignored file type. */
+async function serverGuardCases(check) {
+  const G = 'Server guard';
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kjr-static-selftest-'));
+  let site = null;
+  try {
+    const root = path.join(tmp, 'root');
+    const put = (rel, text = 'ok') => { const f = path.join(tmp, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+    put('root/index.html', '<title>root</title>');
+    put('root/Portfolio/index.html', '<title>app</title>');
+    put('root/Portfolio/app.js');
+    put('root/Portfolio/Docs/Exposure.xlsx');
+    put('root/.git/config.json', '{}');
+    put('root/.env.json', '{}');
+    put('outside.json', '{}');
+    put('root-evil/secret.json', '{}');
+    let links = true;
+    try {
+      fs.symlinkSync(path.join(tmp, 'outside.json'), path.join(root, 'Portfolio', 'link-out.json'));
+      fs.symlinkSync(path.join(tmp, 'root-evil'), path.join(root, 'link-dir'));
+      fs.symlinkSync(path.join(root, 'Portfolio', 'app.js'), path.join(root, 'Portfolio', 'link-in.js'));
+      fs.symlinkSync(path.join(root, 'Portfolio', 'Docs', 'Exposure.xlsx'), path.join(root, 'Portfolio', 'link-xlsx.js'));
+    } catch (e) { links = false; console.log(`  note: symlinks cannot be made here (${e.code}), the symlink cases are skipped`); }
+    const real = fs.realpathSync(root);
+    const answer = t => { const r = resolveStaticTarget(real, t); return r.status === 200 ? path.relative(real, r.file).split(path.sep).join('/') : r.status; };
+    const cases = [
+      // served
+      ['/', 'index.html'], ['/index.html', 'index.html'], ['/Portfolio/', 'Portfolio/index.html'],
+      ['/Portfolio/app.js?v=2.89', 'Portfolio/app.js'], ['/Portfolio/app.js#top', 'Portfolio/app.js'], ['/Portfolio/%61pp.js', 'Portfolio/app.js'],
+      // not there, or not a served type
+      ['/Portfolio', 404], ['/Portfolio/missing.js', 404], ['/Portfolio/Docs/', 404], ['/Portfolio/Docs/Exposure.xlsx', 404],
+      // traversal, plain and encoded, and the sibling that shares the root's name as a prefix
+      ['/../outside.json', 403], ['/%2e%2e/outside.json', 403], ['/%2E%2E/outside.json', 403],
+      ['/Portfolio/../../outside.json', 403], ['/Portfolio/%2e%2e/%2e%2e/outside.json', 403],
+      ['/..%2foutside.json', 403], ['/Portfolio/..%2f..%2foutside.json', 403], ['/%2e%2e%2foutside.json', 403],
+      ['/../root-evil/secret.json', 403], ['/..%2froot-evil/secret.json', 403], ['/Portfolio/./app.js', 403],
+      // dot paths
+      ['/.git/config.json', 403], ['/.env.json', 403],
+      // malformed
+      ['/%00', 400], ['/Portfolio/app.js%00.html', 400], ['/..%5coutside.json', 400], ['/%E0%A4%A', 400],
+      ['http://evil.test/Portfolio/', 400], ['', 400], ['*', 400]
+    ];
+    if (links) cases.push(
+      ['/Portfolio/link-in.js', 'Portfolio/app.js'], // a symlink that stays inside the root is fine
+      ['/Portfolio/link-out.json', 403], ['/link-dir/secret.json', 403], // a symlink that leaves the root is not
+      ['/Portfolio/link-xlsx.js', 404]); // and a symlink cannot smuggle in a type that is not served
+    for (const [t, want] of cases) check(G, JSON.stringify(t), answer(t), want);
+
+    site = await startStaticServer(root);
+    const call = (method, target) => new Promise((resolve, reject) => {
+      const r = http.request({ host: '127.0.0.1', port: site.port, method, path: target, agent: false }, res => {
+        const chunks = [];
+        res.on('data', c => chunks.push(c));
+        res.on('end', () => resolve({ status: res.statusCode, h: res.headers, body: Buffer.concat(chunks).toString() }));
+      });
+      r.on('error', reject);
+      r.end();
+    });
+    const page = await call('GET', '/Portfolio/');
+    check(G, 'GET a folder serves its index.html', [page.status, page.body, page.h['content-type'], page.h['x-content-type-options']], [200, '<title>app</title>', 'text/html; charset=utf-8', 'nosniff']);
+    const js = await call('GET', '/Portfolio/app.js?v=1');
+    check(G, 'GET a script', [js.status, js.h['content-type'], js.body], [200, 'text/javascript; charset=utf-8', 'ok']);
+    const head = await call('HEAD', '/Portfolio/app.js');
+    check(G, 'HEAD sends the headers and no body', [head.status, head.h['content-length'], head.body], [200, '2', '']);
+    for (const m of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      const r = await call(m, '/Portfolio/app.js');
+      check(G, m + ' is refused', [r.status, r.h.allow], [405, 'GET, HEAD']);
+    }
+    for (const t of ['/../outside.json', '/%2e%2e/outside.json', '/Portfolio/..%2f..%2foutside.json', '/.git/config.json']) {
+      const r = await call('GET', t); // raw targets: http.request sends them as written
+      check(G, 'over HTTP ' + JSON.stringify(t), [r.status, r.body.includes('{}')], [403, false]);
+    }
+    // close() drops an idle kept-alive connection, can be called twice, and leaves nothing listening or registered
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    const sock = await new Promise((resolve, reject) => { // res.socket is detached by the time 'end' fires, so take it first
+      http.get({ host: '127.0.0.1', port: site.port, path: '/Portfolio/app.js', agent }, res => { const s = res.socket; res.resume(); res.on('end', () => resolve(s)); }).on('error', reject);
+    });
+    const dropped = new Promise(resolve => sock.once('close', () => resolve(true)));
+    const url = site.origin + '/Portfolio/';
+    check(G, 'the server is registered for the exit paths while it runs', cleanups.size, 1);
+    await site.close();
+    await site.close();
+    check(G, 'close() drops a kept-alive connection', await Promise.race([dropped, sleep(2000).then(() => false)]), true);
+    agent.destroy();
+    check(G, 'nothing listens after close()', await probeUrl(url), 'down (ECONNREFUSED)');
+    check(G, 'a closed server leaves nothing registered', cleanups.size, 0);
+  } finally {
+    if (site) await site.close();
+    fs.rmSync(tmp, { recursive: true, force: true }); // removes symlinks themselves, never what they point at
+  }
+}
+
+/* 3. The Firefox home rule. */
+function firefoxHomeCases(check) {
+  const G = 'Firefox home';
+  const envBefore = process.env.CFFIXED_USER_HOME;
+  check(G, 'Firefox on macOS, variable unset', needsFirefoxHome('firefox', 'darwin', {}), true);
+  check(G, 'an empty value counts as unset', needsFirefoxHome('firefox', 'darwin', { CFFIXED_USER_HOME: '' }), true);
+  check(G, 'a value the caller set is left alone', needsFirefoxHome('firefox', 'darwin', { CFFIXED_USER_HOME: '/tmp/mine' }), false);
+  check(G, 'Linux is left alone', needsFirefoxHome('firefox', 'linux', {}), false);
+  check(G, 'Windows is left alone', needsFirefoxHome('firefox', 'win32', {}), false);
+  check(G, 'WebKit is left alone', needsFirefoxHome('webkit', 'darwin', {}), false);
+  check(G, 'Chromium is left alone', needsFirefoxHome('chromium', 'darwin', {}), false);
+  check(G, 'no folder is made when none is needed', [makeFirefoxHome('webkit', 'darwin', {}), makeFirefoxHome('firefox', 'darwin', { CFFIXED_USER_HOME: '/tmp/mine' })], [null, null]);
+  const home = makeFirefoxHome('firefox', 'darwin', { PATH: '/usr/bin', KEEP: 'yes' });
+  let writable = false;
+  try { fs.accessSync(home.dir, fs.constants.W_OK); writable = true; } catch (_) {}
+  check(G, 'the folder is empty and writable', [fs.readdirSync(home.dir), writable], [[], true]);
+  check(G, 'the launch env keeps the rest and adds the variable', [home.env.PATH, home.env.KEEP, home.env.CFFIXED_USER_HOME === home.dir], ['/usr/bin', 'yes', true]);
+  check(G, 'the folder is registered for the exit paths', cleanups.size, 1);
+  check(G, 'remove() deletes it, and twice is harmless', [home.remove(), home.remove(), fs.existsSync(home.dir)], [true, true, false]);
+  check(G, 'a removed folder leaves nothing registered', cleanups.size, 0);
+  // The real failure: macOS marks Library and the folders under it "deny delete", and a plain rm leaves them behind
+  if (process.platform === 'darwin') {
+    const h = makeFirefoxHome('firefox', 'darwin', {});
+    const lib = path.join(h.dir, 'Library'), sup = path.join(lib, 'Application Support');
+    fs.mkdirSync(sup, { recursive: true });
+    let acl = true;
+    try { execFileSync('chmod', ['+a', 'group:everyone deny delete', sup, lib], { stdio: 'ignore' }); } catch (_) { acl = false; }
+    if (acl) check(G, 'remove() clears folders that macOS protects with a deny-delete ACL', [h.remove(), fs.existsSync(h.dir)], [true, false]);
+    else { console.log('  note: could not set a deny-delete ACL here, that case is skipped'); h.remove(); }
+  }
+  check(G, 'process.env is not changed', process.env.CFFIXED_USER_HOME, envBefore);
+}
+
+async function selfTest() {
+  const groups = {};
+  const check = (group, label, got, want) => {
+    const g = groups[group] = groups[group] || { total: 0, bad: 0 };
+    g.total++;
+    if (JSON.stringify(got) !== JSON.stringify(want)) { g.bad++; console.log(`  FAIL ${group}, ${label}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`); }
+  };
+  filterCases(check);
+  await serverGuardCases(check);
+  firefoxHomeCases(check);
+  let total = 0, bad = 0;
+  for (const [group, g] of Object.entries(groups)) {
+    console.log(`${group} self-test: ${g.total - g.bad} of ${g.total} passed.`);
+    total += g.total; bad += g.bad;
+  }
+  console.log(`Self-test: ${total - bad} of ${total} passed.`);
   process.exit(bad ? 1 : 0);
 }
 
@@ -700,10 +1033,12 @@ function selfTest() {
   const proxy = await startBlackHole();
   const port = proxy.address().port;
   for (const name of ENGINES) {
-    try { await runEngine(name, port); } catch (e) {
+    const ffHome = makeFirefoxHome(name); // null unless this is Firefox on macOS with CFFIXED_USER_HOME unset
+    if (ffHome) console.log(`[${name}] CFFIXED_USER_HOME is unset, launching with an empty temp home (removed at the end)`);
+    try { await runEngine(name, port, ffHome); } catch (e) {
       engineState[name] = Object.assign(engineState[name] || {}, { crashed: String(e && e.stack || e).slice(0, 500) });
       record(name, 'run', '-', 'engine pass completed', false, String(e && e.message || e));
-    }
+    } finally { if (ffHome && !ffHome.remove()) console.log(`[${name}] could not remove ${ffHome.dir}, one more try runs at exit`); }
   }
   proxy.close();
   const diffs = compare();

@@ -1,10 +1,10 @@
 # Portfolio Browser QA
 
-Cross-browser smoke pass of the Portfolio app on 03/11/2026. v2.88 ran twice (Linux and Mac) with Playwright 1.64.0. v2.89 ran on Linux with 1.64.0 and on the Mac with 1.64.0 and 1.64.1.
+Cross-browser smoke pass of the Portfolio app on 03/11/2026. v2.88 ran twice (Linux and Mac) with Playwright 1.64.0. v2.89 ran on Linux with 1.64.0 and on the Mac with 1.64.0 and 1.64.1. After the F6 fix to `cross-browser.mjs` the Mac ran all three engines again with 1.64.0.
 
 - Linux run (cloud session): Chromium 153 only, because the network policy blocked the WebKit and Firefox downloads
 - Mac run (macOS 27.0.1, Apple silicon): Chromium 156.0.8078.4, WebKit 27.2 and Firefox 157.0 (build 1555)
-- Firefox launched on the v2.89 Mac run only, with the `CFFIXED_USER_HOME` workaround (see Firefox launch failure)
+- Firefox launched on the v2.89 Mac runs only. It needs `CFFIXED_USER_HOME` set to an empty folder, which the script now supplies itself (see Firefox launch failure)
 
 ## v2.89 update (03/11/2026)
 
@@ -18,14 +18,17 @@ Cross-browser smoke pass of the Portfolio app on 03/11/2026. v2.88 ran twice (Li
 - After the filter fix, WebKit passes 283 of 283 (Playwright 1.64.0, no workaround variable)
 - One pass of all three engines on Playwright 1.64.1: Chromium 283 of 283, WebKit 283 of 283, Firefox 157.0 281 of 283
 - Playwright 1.64.1 is the newest release (`npm view playwright version`). It pins the same Chromium, WebKit and Firefox builds as 1.64.0 (1248, 2370 and 1555), so nothing new was downloaded
-- Firefox launches when `CFFIXED_USER_HOME` points at an empty folder. Its two misses are the offline reload under Playwright's `setOffline`, a harness limit (F6)
+- Firefox launches when `CFFIXED_USER_HOME` points at an empty folder. Its two misses were the offline reload under Playwright's `setOffline`, a harness limit (F6, fixed in the next three bullets)
+- F6 is fixed in `cross-browser.mjs`. The service worker checks install the worker from a throwaway static server of the script's own, then close that server for real and reload. `setOffline` is gone. See Harness notes
+- The script now makes the `CFFIXED_USER_HOME` folder for Firefox on macOS itself, so a plain rerun needs no setup
+- Mac rerun on Playwright 1.64.0 after both changes, with `CFFIXED_USER_HOME` unset: Chromium 156 283 of 283, WebKit 27.2 283 of 283, Firefox 157.0 283 of 283. Every offline reload ran with the throwaway server confirmed down (`ECONNREFUSED`). The blocked URL list is unchanged at 11 entries
 
 ## Bottom line
 
-v2.89 Mac run, Playwright 1.64.1, all three engines in one pass:
+v2.89 Mac run after the F6 fix, Playwright 1.64.0, all three engines in one pass with `CFFIXED_USER_HOME` unset:
 
-- Chromium 156 passed 283 of 283 and WebKit 27.2 passed 283 of 283, both with zero unexpected console errors
-- Firefox 157.0 passed 281 of 283. Both misses are the offline reload, where Playwright's `setOffline` makes Firefox refuse the navigation before the service worker answers (F6). With the server shut down for real, Firefox serves the dashboard from the cache with the same figures
+- Chromium 156, WebKit 27.2 and Firefox 157.0 each passed 283 of 283, with zero unexpected console errors
+- Firefox read 281 of 283 before the F6 fix (Playwright 1.64.1). Both misses were the offline reload, where Playwright's `setOffline` made Firefox refuse the navigation before the service worker answered (F6). With the server shut down for real, which the script now does, Firefox serves the dashboard from the cache with the same figures
 - No Firefox-only app defect turned up. Firefox matched Chromium on every value the script compares, apart from how it writes the font stack
 - F1 is confirmed fixed in WebKit. Firefox cannot show it through Playwright, because Playwright's click focuses the button, where a native macOS click is predicted not to. The Safari-style checks pass in Firefox
 - F2 is neither confirmed nor cleared. WebKit 27.2 and Firefox 157 compute the blur, but neither paints any backdrop blur in Playwright's headless screenshots, not even on a one-overlay test page (F7)
@@ -43,14 +46,14 @@ Status key: Confirmed means seen in a browser. Predicted means read from the cod
 | F3 | Firefox before 121 (ESR 115) | Pages whose head holds only a title | Open any such page in Firefox ESR 115 | The page head drops its bottom margin | The extra margin stays. The rules at `index.html:309` and `index.html:915` use `:has()`, which Firefox only supports from 121, so the whole rule is skipped | Info | Predicted for Firefox before 121. WebKit 27.2 and Firefox 157 both support `:has()` and the rule applied (measured) |
 | F4 | WebKit, Safari before 18.2 | Sidebar nav on desktop | Scroll the sidebar nav in Safari 17 | Thin scrollbar | Full-width scrollbar. `scrollbar-width:thin` (`index.html:159`) is ignored before Safari 18.2 | Info | Predicted. WebKit 27.2 and Firefox 157 support `scrollbar-width` |
 | F5 | WebKit (Safari) | Any page, when the service worker controls it, Chart.js is not in its cache and `cdn.jsdelivr.net` cannot be reached | 1. Let the service worker install while the CDN is unreachable. 2. Reload. | Charts are missing and nothing else is reported (Chromium logs one resource error) | The cache-first branch (`sw.js:65`) awaits `fetch()` with no catch, so `respondWith` rejects. WebKit reports two page errors with no stack, `TypeError: Load failed` and the Chart.js URL, plus a console error. In the v2.89 Mac run the URL arrived as `/cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js.` (see Harness notes). Charts are missing in both engines | Info | Confirmed in WebKit 27.2 with a probe that blocks every external request, and again with the dev server shut down for real. Seen only when Chart.js is not cached. A normal install pre-caches it (`sw.js:27`). Chromium and Firefox logged no page error in the same offline reload |
-| F6 | Firefox 157 under Playwright (harness limit) | Service worker offline reload, dashboard | 1. Run `cross-browser.mjs --engines=firefox`. 2. The script sets the context offline with `setOffline(true)` and reloads the dashboard | The dashboard renders from the service worker cache, as in Chromium and WebKit | `page.reload: NS_ERROR_OFFLINE`, so "offline reload renders the dashboard from cache" and "offline figures match online" fail. With a throwaway server shut down instead (ECONNREFUSED), Firefox 157 reloads from the service worker, shows 12 nav links and the same figures, and logs no page error. Chromium and WebKit pass the same check both ways | None for the app | Confirmed as a harness limit, not an app defect. Not fixed in this pass, because the packet limited script edits to the error filter. Suggested fix: for Firefox, take the server away instead of calling `setOffline` |
+| F6 | Firefox 157 under Playwright (harness limit) | Service worker offline reload, dashboard | 1. Run `cross-browser.mjs --engines=firefox` from before the F6 fix. 2. The script set the context offline with `setOffline(true)` and reloaded the dashboard | The dashboard renders from the service worker cache, as in Chromium and WebKit | `page.reload: NS_ERROR_OFFLINE`, so "offline reload renders the dashboard from cache" and "offline figures match online" failed. With a throwaway server shut down instead (ECONNREFUSED), Firefox 157 reloads from the service worker, shows 12 nav links and the same figures, and logs no page error. Chromium and WebKit pass the same check both ways | None for the app | Fixed in `cross-browser.mjs` (03/11/2026). It was a harness limit, not an app defect. The service worker checks now install the worker from a throwaway server of the script's own and close it for real before the offline reload, so `setOffline` is no longer used. Mac rerun on Playwright 1.64.0: Chromium, WebKit and Firefox pass all five service worker checks, each with a probe showing the server down (`ECONNREFUSED`) before the reload. A deliberate run that left the server up failed the three offline checks in Chromium, so they cannot pass without a real shutdown |
 | F7 | WebKit 27.2 and Firefox 157, Playwright headless on macOS | Any modal, such as Add stock | 1. Open Add stock with `--engines=firefox` or `--engines=webkit`. 2. Wait 1.2 s and take a screenshot. 3. Compare with Chromium | The page behind the dim layer is blurred, as in Chromium | The page behind is dim and sharp, and its figures show through the modal card (the card is 7% white). Computed styles match Chromium: overlay `blur(4px)`, card `blur(14px)`, opacity 1, no transition. A test page with one `backdrop-filter:blur(6px)` overlay also paints no blur in either engine, so these builds paint no backdrop blur in this setup, whatever the page does | Info | Confirmed as a test limit, not an app defect. Real Safari and Firefox are not measured, and a headed run was not tried. Inferred: if a user's browser supports the property but paints none, the card is hard to read, and the `@supports not (backdrop-filter)` fallback cannot catch that |
 
 Screenshots for F1 (WebKit and Chromium, after a mouse open, Escape and Tab) were taken on the Mac and stay out of the repo, because they hold the seed figures. The WebKit shot shows no focus ring anywhere. The Chromium shot shows focus on Export CSV, the button after + Add stock.
 
 ## Mac run per engine
 
-Counts are from the v2.89 run on Playwright 1.64.1, all three engines in one pass. The v2.88 counts are in the Bottom line.
+Counts are from the Mac run after the F6 fix, Playwright 1.64.0, all three engines in one pass. Firefox read 281 of 283 before the fix (3 of 5 in the service worker row, on Playwright 1.64.1). The v2.88 counts are in the Bottom line.
 
 | Area | What was checked | Chromium 156 | WebKit 27.2 | Firefox 157 |
 |---|---|---|---|---|
@@ -60,8 +63,8 @@ Counts are from the v2.89 run on Playwright 1.64.1, all three engines in one pas
 | Dialogs | + Add menu (keyboard), Add stock modal (keyboard, mouse and Safari-style click), + Add menu then Stock, sync details, holding panel, command palette (Ctrl+K and Safari-style click), stock Columns, setup wizard, More sheet at 390 px. Opens, focus moves inside, Escape closes, focus returns to the opener, no console errors, and for Safari-style clicks the opener was unfocused at the click | 79 of 79 | 79 of 79 | 79 of 79 |
 | Forms | Add stock. A blank save shows "Required: Symbol". A bad symbol shows the symbol rule. The modal stays open. Nothing is written | 4 of 4 | 4 of 4, same messages as Chromium | 4 of 4, same messages as Chromium |
 | CSS | Top bar and sidebar stay pinned after an 800 px scroll | 1 of 1 | 1 of 1 | 1 of 1 |
-| Service worker | Registers and activates, page controlled after reload, offline reload shows the dashboard with the same figures and no console errors | 5 of 5 | 5 of 5 | 3 of 5. The offline reload fails on Playwright's `setOffline` (F6), and the figures check fails with it |
-| Total | | 283 of 283 | 283 of 283 | 281 of 283 |
+| Service worker | Registers and activates on the throwaway server's origin, page controlled after reload, and with that server shut down for real the offline reload shows the dashboard with the same figures and no console errors | 5 of 5 | 5 of 5 | 5 of 5 |
+| Total | | 283 of 283 | 283 of 283 | 283 of 283 |
 
 ## WebKit differences from Chromium
 
@@ -86,14 +89,18 @@ Matched in Firefox and Chromium: every `Intl` and app helper value, the form val
 
 ## Harness notes
 
-These are fixes to `tests/cross-browser.mjs`, separate from any app fix. All four are fixed.
+These are fixes to `tests/cross-browser.mjs`, separate from any app fix. All five are fixed.
 
 - The expected-error filter missed WebKit's wording for blocked loads: `Failed to preconnect to https://fonts.gstatic.com/` and the F5 page errors. That caused four of the seven WebKit failures on v2.88. Fixed: a console error that names an external URL with blocked-load wording is expected. A page error of `TypeError: Load failed` or a bare external URL is expected only once the engine has had a request blocked. The F5 console error did not fail any check, and its text was not recorded
 - The F5 page error did not arrive as a bare URL. WebKit's reads `/cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js.`, with the scheme and one slash gone. Playwright builds a WebKit page error from a console error by splitting the text at its first colon and keeping the text from two characters on (`splitErrorMessage` in `playwright-core`, read in 1.64.0). It cost the last WebKit check on the v2.89 Mac run (282 of 283). Fixed: the filter puts `https:/` back when the message is a slash, a dotted host and a path, then applies the same rule as for a bare external URL, so it counts as expected only after that engine has had a request blocked
-- An app-origin page error still counts as unexpected, in the scheme-less shape too (`/localhost:3807/...`, `/127.0.0.1:3807/...`) and as a bare file name (`/sw.js`). `node Portfolio/tests/cross-browser.mjs --self-test` checks 17 cases (12 before) and passes, with no browser
+- An app-origin page error still counts as unexpected, in the scheme-less shape too (`/localhost:3807/...`, `/127.0.0.1:3807/...`) and as a bare file name (`/sw.js`). `node Portfolio/tests/cross-browser.mjs --self-test` checks 17 filter cases (12 before) and passes, with no browser. It has 64 more cases for the throwaway server and the Firefox home (see below), 81 in all
 - The dialog checks called `gotoApp` without clearing the console sink, so load-time errors landed in whichever dialog check followed a reload. Fixed: the sink is cleared before each check and again after its reload
 - `gotoApp` with a hash did not reload Chromium, so the CSS probe compared light Chromium with dark WebKit. Fixed: `gotoApp` marks the old document and reloads when a hash-only `goto` kept it. The CSS probe sets dark first and records `theme is dark`. Chromium now reads the dark `--c-stocks-soft` (`#7398FF`)
-- Open, not fixed: `context.setOffline(true)` makes Firefox refuse the offline reload (F6)
+- `context.setOffline(true)` made Firefox refuse the offline reload (F6). Fixed: the service worker checks now install the worker from a throwaway static server of the script's own (Node `http`, 127.0.0.1, a free port, the repo root, read-only). The script closes that server, destroys its open connections and reloads, so only the worker can answer. A probe has to see the connection refused first, or the three offline checks fail. One code path serves all three engines, and the main checks still use `--base`
+- The throwaway server answers GET and HEAD only. It refuses path traversal (plain and encoded), dot paths such as `.git`, symlinks that leave the root and any file type a web app does not serve, which keeps the git-ignored `Portfolio/Docs/Investment Exposure.xlsx` out of reach. It is closed on every way out of the script: the end of the run, a failed check, the safety abort, an uncaught error, Ctrl-C and a kill signal (SIGKILL cannot be caught). The self-test covers it with 49 cases, real requests, a kept-alive connection and the shutdown included. Nine deliberate breaks of the guard, the shutdown and the Firefox rule were each caught by the self-test
+- Firefox on macOS needs `CFFIXED_USER_HOME` set to an empty folder. When the engine is Firefox, the platform is darwin and the variable is unset, the script makes an empty temp folder, passes it in the launch `env` (merged with `process.env`) and removes it at the end, on the same exit paths. A value set by the caller is used as it is. 15 self-test cases cover the rule
+- The first full pass with this code left that temp folder behind (`ENOTEMPTY`). Firefox makes `Library`, `Downloads` and `Documents` in it, and macOS marks those standard folders with a deny-delete ACL, so a plain `rm` fails with "Permission denied". Fixed: removal strips the ACLs first (`chmod -R -N`). One self-test case builds such a folder and checks it is removed. Ctrl-C and `kill` on a live Firefox pass also left nothing behind
+- The storage safety read used to run last, on whatever origin the page was on, and the page now ends on the throwaway origin. The script reads the `--base` origin before the service worker step and the throwaway origin after it, and aborts if either holds a sync URL or NAS mode
 
 ## Firefox launch failure
 
@@ -115,6 +122,8 @@ Retry on 03/11/2026, what was tried and what came out:
 - Not tried: Playwright's `next` channel (1.65.0-alpha-2026-11-02). `browsers.json` on Playwright's `main` branch lists Firefox 159.0 (build 1572), read through a web fetch and not checked against the alpha package
 
 Workaround: run Firefox with `CFFIXED_USER_HOME` set to an empty writable folder, for example `CFFIXED_USER_HOME="$(mktemp -d)"`. Leave `HOME` alone.
+
+`cross-browser.mjs` now does this itself. On macOS, when the engine is Firefox and `CFFIXED_USER_HOME` is unset, it makes an empty temp folder, passes it in the launch `env` and removes it at the end. The rerun after that change launched Firefox 157.0 with no variable set. A folder made by hand needs `chmod -R -N <folder>` before `rm -rf` works, because macOS marks the `Library`, `Downloads` and `Documents` folders Firefox creates there as undeletable (deny-delete ACL).
 
 The cause is not isolated. This session cannot list `~/Downloads`, `~/Documents` or `~/Desktop` (Operation not permitted), and Firefox creates `Downloads/.localized` in a scratch home. Inferred, not verified: Firefox's start-up touches the real home's protected folders and macOS refuses it for processes started from this session. A plain Terminal run without the variable was not tried, so it is unknown whether Julian's own Terminal needs the workaround.
 
@@ -140,7 +149,7 @@ Chromium gave these on the Linux run. On the Mac, WebKit matched Mac Chromium on
 
 Every request outside localhost was refused. Nothing reached a live service. No request went to Apps Script, Yahoo, the Trading Worker, the NAS or Supabase, and storage held no sync URL and no `nas` backend mode.
 
-Mac v2.89 run, all three engines, 11 entries:
+Mac v2.89 run, all three engines, 11 entries (the rerun after the F6 fix gave the same 11):
 
 - Chromium, WebKit and Firefox, context route: `https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap` and `https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js`
 - WebKit, black-hole proxy: `https://fonts.googleapis.com:443`, `https://fonts.gstatic.com:443` and `https://cdn.jsdelivr.net:443` (preconnects and the service worker fetch)
@@ -150,10 +159,11 @@ Linux run: the same two app URLs from the context route, plus six of Chromium's 
 
 ## Not tested
 
-- Firefox from a plain Terminal without `CFFIXED_USER_HOME`. The cause of the launch failure is not isolated
+- Whether Julian's own Terminal needs `CFFIXED_USER_HOME` at all, so a run from there was not tried. The cause of the launch failure is not isolated. The script now supplies the folder itself, so a rerun needs no setup
 - Firefox ESR 115 and other versions before 157, so F3 stays predicted for them
 - Backdrop blur painting in WebKit and Firefox. Playwright's headless builds paint none on this Mac (F7), and a headed run (`--headed`) was not tried
 - Playwright's `next` channel and the Firefox 159.0 build it is expected to pin
+- Playwright 1.64.1 after the F6 fix. The pass after the fix ran on 1.64.0 only
 - Real Safari. Playwright WebKit is not Safari. It lacks Safari's own features (autofill, Keychain, content blockers, Intelligent Tracking Prevention storage limits) and is a newer engine than Safari 17, so F2 and F4 stay predicted
 - A real iPhone: the iOS layout engine, the bottom bar and safe areas
 - The PWA install (Add to Home Screen)
@@ -175,12 +185,12 @@ Linux run: the same two app URLs from the context route, plus six of Chromium's 
 On the Mac, Playwright 1.64.0 already sits in the npx cache and Chromium, WebKit and Firefox are installed under `~/Library/Caches/ms-playwright`. Serve the repo root on port 3807 (`.claude/launch.json` entry, or `npx serve -l 3807 .`), then from the repo root:
 
 ```bash
-CFFIXED_USER_HOME="$(mktemp -d)" KJR_PLAYWRIGHT="$HOME/.npm/_npx/e41f203b7505f1fb/node_modules/playwright" node Portfolio/tests/cross-browser.mjs --out="$TMPDIR/kjr-browser-qa"
+KJR_PLAYWRIGHT="$HOME/.npm/_npx/e41f203b7505f1fb/node_modules/playwright" node Portfolio/tests/cross-browser.mjs --out="$TMPDIR/kjr-browser-qa"
 ```
 
-`CFFIXED_USER_HOME` is only there for Firefox. Without it Firefox does not launch from the session that ran this pass, and the other two engines still run. Until the script takes the server away for Firefox, expect the two F6 failures in the service worker offline reload. Playwright 1.64.1 gives the same results on the same browser builds. The command above was run as written, with `--out` pointed at a scratch folder, and gave Chromium 283 of 283, WebKit 283 of 283 and Firefox 281 of 283.
+Nothing else to set. On macOS the script makes the empty `CFFIXED_USER_HOME` folder Firefox needs and removes it at the end, unless you set the variable yourself. The dev server on port 3807 serves the main checks only. The service worker checks start their own throwaway server on 127.0.0.1 and shut it down for the offline reload. The same command, with `--engines=chromium,webkit,firefox --base=http://localhost:3807` written out and `--out` pointed at a scratch folder, gave Chromium 283 of 283, WebKit 283 of 283 and Firefox 283 of 283 on Playwright 1.64.0 (03/11/2026, `CFFIXED_USER_HOME` unset). Before the F6 fix the same pass gave Firefox 281 of 283 on Playwright 1.64.1, which pins the same browser builds. 1.64.1 was not rerun after the fix.
 
-The filter self-test needs no server and no browser:
+The self-test needs no server and no browser. It checks the expected-error filter, the throwaway server's path guard and shutdown, and the Firefox home rule (81 cases):
 
 ```bash
 node Portfolio/tests/cross-browser.mjs --self-test
