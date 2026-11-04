@@ -10212,12 +10212,20 @@ async function runTests(){
     assert.ok(indexSrc.includes('backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}'), '.overlay carries both');
   });
 
-  test('p289 release - this release is v2.89 (03 Nov): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
+  test('p290 release - this release is v2.90 (04 Nov): the constants, the cache name and the QA runbook line say so (p280 item 3 holds every other place to APP_VERSION)', () => {
     const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8');
     const sop = fs.readFileSync(path.join(__dirname, '..', 'Docs', 'QA SOP.md'), 'utf8');
-    assert.ok(appSrc.includes("const APP_VERSION = 'v2.89';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.89 (03 Nov)';"));
-    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.89';"));
-    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 03/11/2026 (app v2.89).'));
+    assert.ok(appSrc.includes("const APP_VERSION = 'v2.90';") && appSrc.includes("const APP_DISPLAY_VERSION = 'v2.90 (04 Nov)';"));
+    assert.ok(sw.includes("const CACHE_NAME = 'kjr-portfolio-v2.90';"));
+    assert.ok(sop.includes('Supersedes `QA SOP v1 (4 Jun)`. Last updated: 04/11/2026 (app v2.90).'));
+  });
+
+  test('p290 Backend card - while NAS_RELEASE_ENABLED is false the intro says NAS sync is held, and the live-NAS wording is only swapped in when the flag is on', () => {
+    const intro = /<p class="hint" id="nas-intro"[^>]*>([^<]*)<\/p>/.exec(indexSrc);
+    assert.ok(intro, 'Backend card intro carries id="nas-intro"');
+    assert.ok(intro[1].includes('is held pending local release review'));
+    assert.ok(!/NAS uses the private/.test(intro[1]));
+    assert.ok(appSrc.includes("if (intro && NAS_RELEASE_ENABLED) intro.textContent = 'Choose where this browser stores and syncs portfolio data. NAS uses the private"));
   });
 
   console.log(`\nTests completed: ${passed} passed, ${failed} failed.`);

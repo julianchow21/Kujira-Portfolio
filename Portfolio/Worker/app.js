@@ -11,8 +11,8 @@
 
 // Keep APP_VERSION's major in step with APP_DISPLAY_VERSION: the first stamps
 // backups/diagnostics/_meta, the second is the friendly topbar badge.
-const APP_VERSION = 'v2.89';
-const APP_DISPLAY_VERSION = 'v2.89 (03 Nov)';
+const APP_VERSION = 'v2.90';
+const APP_DISPLAY_VERSION = 'v2.90 (04 Nov)';
 const SCHEMA = 'kujira-portfolio';
 /* Payload schema version. Increment when a breaking field rename or removal
    lands; add the migration fn to _MIGRATIONS in the DB section below. */
@@ -3859,6 +3859,7 @@ function loadBackendSettingsUI(){
   const returnBtn = document.getElementById('btn-return-to-nas');
   const settingsSignout = document.getElementById('btn-nas-settings-signout');
   const marketWarning = document.getElementById('nas-market-warning');
+  const intro = document.getElementById('nas-intro');
   const status = document.getElementById('nas-config-status');
   const legacyControls = document.querySelectorAll('#legacy-sync-card [data-click="saveSyncUrl"], #legacy-sync-card [data-click="manualPull"], #legacy-sync-card [data-click="manualPush"], #legacy-sync-card [data-click="manualSync"]');
   if (modeLabel) {
@@ -3877,6 +3878,7 @@ function loadBackendSettingsUI(){
   if (returnBtn) returnBtn.style.display = mode === 'legacy-readonly' ? '' : 'none';
   if (settingsSignout) settingsSignout.style.display = mode === 'nas' && _nasReady ? '' : 'none';
   if (marketWarning) marketWarning.hidden = mode !== 'nas';
+  if (intro && NAS_RELEASE_ENABLED) intro.textContent = 'Choose where this browser stores and syncs portfolio data. NAS uses the private same-origin Supabase gateway with account sign-in and verified TOTP. Device encryption must be enabled before activation.';
   legacyControls.forEach(control => {
     control.disabled = mode !== 'legacy';
     control.setAttribute('aria-disabled', mode !== 'legacy' ? 'true' : 'false');

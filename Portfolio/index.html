@@ -1631,7 +1631,7 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
     <div class="card full" id="backend-card">
       <div class="card-head"><h3>Backend</h3><span class="hint" id="backend-mode-label">Legacy Apps Script</span></div>
       <div class="card-body">
-        <p class="hint" style="margin-bottom:12px">Choose where this browser stores and syncs portfolio data. NAS uses the private same-origin Supabase gateway with account sign-in and verified TOTP. Device encryption must be enabled before activation.</p>
+        <p class="hint" id="nas-intro" style="margin-bottom:12px">Legacy Apps Script stores and syncs this browser's portfolio data. NAS sync, with account sign-in and verified TOTP, is held pending local release review.</p>
         <p class="hint" id="nas-market-warning" hidden style="margin-bottom:12px;color:var(--amber-ink)">NAS mode currently keeps any cached prices visible, but live quotes, FX, fundamentals, crypto prices and history are unavailable until a private same-origin market proxy is added.</p>
         <div class="form-grid">
           <div class="form-group">
@@ -2308,12 +2308,12 @@ tr.flash-up > td.sticky-col,tr.flash-down > td.sticky-col{position:sticky}
 <!-- Pure, unit-tested core (seed-safety now; money/CPF next). Loads before the
      app so its helpers are global. Fails SAFE: if it 404s, seedDecision is
      undefined and the app refuses to auto-seed rather than risk a remote wipe. -->
-<script src="Worker/kjr-core.js?v=2.89"></script>
-<script src="Worker/kjr-sortable.js?v=2.89"></script>
-<script src="Worker/kjr-vault.js?v=2.89"></script>
-<script src="Worker/kjr-migration.js?v=2.89"></script>
-<script src="Worker/supabase.js?v=2.89"></script>
-<script src="Worker/kjr-nas.js?v=2.89"></script>
-<script src="Worker/app.js?v=2.89"></script>
+<script src="Worker/kjr-core.js?v=2.90"></script>
+<script src="Worker/kjr-sortable.js?v=2.90"></script>
+<script src="Worker/kjr-vault.js?v=2.90"></script>
+<script src="Worker/kjr-migration.js?v=2.90"></script>
+<script src="Worker/supabase.js?v=2.90"></script>
+<script src="Worker/kjr-nas.js?v=2.90"></script>
+<script src="Worker/app.js?v=2.90"></script>
 </body>
 </html>
