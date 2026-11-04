@@ -1077,6 +1077,40 @@ check(!/console\.(?:log|info|warn|error)|process\.env|authorization|api[_-]?key|
 check(has(marketService, "method: 'GET'") && has(marketService, 'Request body is not accepted'), 'market service GET-only boundary is missing');
 check(has(marketService, 'Content-Type') && has(marketService, 'application/json'), 'market service JSON response boundary is missing');
 
+// mode_is_600 must read the env file mode under BSD stat (macOS) and GNU stat
+// (Linux NAS). Fake shims stand in for each, so the probe runs the same on any host.
+{
+  const shimRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kjr-stat-'));
+  const modeOf = `"${process.execPath}" -e 'process.stdout.write((require("fs").statSync(process.argv[1]).mode & 0o777).toString(8) + "\\n")' "$3"`;
+  const shims = {
+    gnu: `#!/bin/bash\nif [[ "$1" == "-f" ]]; then printf '  File: "%s"\\n    ID: 0 Namelen: 255 Type: ext2/ext3\\n' "$3"; exit 1; fi\nif [[ "$1" == "-c" && "$2" == "%a" ]]; then ${modeOf}; exit 0; fi\nexit 1\n`,
+    bsd: `#!/bin/bash\nif [[ "$1" == "-f" && "$2" == "%Lp" ]]; then ${modeOf}; exit 0; fi\necho "stat: illegal option -- \${1#-}" >&2\nexit 1\n`
+  };
+  const private600 = path.join(shimRoot, 'private.env');
+  const open644 = path.join(shimRoot, 'open.env');
+  fs.writeFileSync(private600, 'X=1\n', { mode: 0o600 });
+  fs.writeFileSync(open644, 'X=1\n', { mode: 0o644 });
+  fs.chmodSync(private600, 0o600);
+  fs.chmodSync(open644, 0o644);
+  for (const [flavour, body] of Object.entries(shims)) {
+    const bin = path.join(shimRoot, flavour);
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'stat'), body, { mode: 0o755 });
+  }
+  for (const [name, file] of Object.entries({ backup: files.backup, restore: files.restore })) {
+    const fn = /^mode_is_600\(\) \{[\s\S]*?^\}/m.exec(fs.readFileSync(file, 'utf8'));
+    check(Boolean(fn), `${name}.sh has no mode_is_600 function`);
+    if (!fn) continue;
+    for (const flavour of [...Object.keys(shims), 'host']) {
+      const env = { ...process.env, PATH: flavour === 'host' ? process.env.PATH : `${path.join(shimRoot, flavour)}:${process.env.PATH}` };
+      const run = target => spawnSync('bash', ['-c', `${fn[0]}\nmode_is_600 "$1"`, 'probe', target], { encoding: 'utf8', env }).status;
+      check(run(private600) === 0, `${name}.sh mode_is_600 rejects a mode 600 file under ${flavour} stat`);
+      check(run(open644) !== 0, `${name}.sh mode_is_600 accepts a mode 644 file under ${flavour} stat`);
+    }
+  }
+  fs.rmSync(shimRoot, { recursive: true, force: true });
+}
+
 for (const [name, file] of Object.entries({ backup: files.backup, restore: files.restore, runbook: files.runbook })) {
   const syntax = spawnSync('bash', ['-n', file], { encoding: 'utf8' });
   check(syntax.status === 0, `${name}.sh failed bash -n: ${syntax.stderr || 'unknown syntax error'}`);

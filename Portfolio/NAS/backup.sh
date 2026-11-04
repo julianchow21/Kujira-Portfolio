@@ -116,7 +116,9 @@ inside_repo() {
 
 mode_is_600() {
   local mode
-  mode="$(stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null)" || return 1
+  # Separate substitutions: GNU stat prints a filesystem block for -f before it
+  # fails, which must not prefix the -c result.
+  mode="$(stat -f '%Lp' "$1" 2>/dev/null)" || mode="$(stat -c '%a' "$1" 2>/dev/null)" || return 1
   [[ "$mode" == "600" ]]
 }
 
